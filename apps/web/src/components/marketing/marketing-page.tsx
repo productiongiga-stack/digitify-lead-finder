@@ -815,6 +815,127 @@ function SolutionsPage() {
         </div>
       </section>
 
+      {/* Literal module mockups */}
+      <section className="bg-[#f7f8f6] py-24">
+        <div className="mx-auto max-w-7xl px-5 sm:px-8">
+          <div className="reveal mx-auto max-w-3xl text-center">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">Letterlijke UI mockups</p>
+            <h2 className="mt-3 text-3xl font-extrabold leading-tight text-[#0d1520] sm:text-4xl">
+              Exacte preview van de flows die je live inzet.
+            </h2>
+            <p className="mt-4 text-base leading-7 text-[#5a6878]">
+              Hieronder zie je een visuele copy van de vier meest gebruikte modules: offerte configurator, booking agenda, chatbot en reviewsysteem.
+            </p>
+          </div>
+
+          <div className="mt-12 space-y-5">
+            <article className="reveal grid gap-7 rounded-2xl border border-[#e2e8e3] bg-white p-5 shadow-sm sm:p-7 lg:grid-cols-[1fr_1.25fr] lg:items-center">
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-[#e85d3a]/25 bg-[#e85d3a]/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-[#b94d2f]">
+                  <FileText className="h-3 w-3" />
+                  Offerte configurator
+                </div>
+                <h3 className="mt-4 text-2xl font-extrabold text-[#0d1520]">Configureer, bereken en verstuur in één flow.</h3>
+                <p className="mt-3 text-sm leading-7 text-[#5a6878]">
+                  De configurator begeleidt bezoekers stap voor stap van dienstkeuze tot aanvraag. Prijzen, opties en totalen worden live opgebouwd zodat je team meteen een volledige draft-offerte heeft.
+                </p>
+                <ul className="mt-4 space-y-2.5 text-sm text-[#344052]">
+                  {[
+                    "Duidelijke stappen: dienst, product, specificaties en gegevens.",
+                    "Live prijsopbouw met subtotalen, btw en totaal.",
+                    "Aanvraag komt direct per account in je eigen offerteflow.",
+                  ].map((item) => (
+                    <li key={item} className="flex items-start gap-2">
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#12a66a]" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <SolutionsQuoteMockup />
+            </article>
+
+            <article className="reveal grid gap-7 rounded-2xl border border-[#e2e8e3] bg-white p-5 shadow-sm sm:p-7 lg:grid-cols-[1.25fr_1fr] lg:items-center">
+              <SolutionsBookingMockup />
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-[#f59e0b]/25 bg-[#f59e0b]/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-[#b66d1e]">
+                  <CalendarCheck className="h-3 w-3" />
+                  Booking agenda
+                </div>
+                <h3 className="mt-4 text-2xl font-extrabold text-[#0d1520]">Planning die meteen werkt op je website.</h3>
+                <p className="mt-3 text-sm leading-7 text-[#5a6878]">
+                  Bezoekers kiezen rechtstreeks een beschikbaar slot. De agenda respecteert je ingestelde uren, blokkeert overlap en kan synchroniseren met Google Calendar voor realtime beschikbaarheid.
+                </p>
+                <ul className="mt-4 space-y-2.5 text-sm text-[#344052]">
+                  {[
+                    "Week- en dagbeschikbaarheid met configureerbare slotduur.",
+                    "Conflictcheck tegen bestaande afspraken en kalenderblokkeringen.",
+                    "Automatische bevestiging voor klant en team.",
+                  ].map((item) => (
+                    <li key={item} className="flex items-start gap-2">
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#12a66a]" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </article>
+
+            <article className="reveal grid gap-7 rounded-2xl border border-[#e2e8e3] bg-white p-5 shadow-sm sm:p-7 lg:grid-cols-[1fr_1.25fr] lg:items-center">
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-[#06b6d4]/25 bg-[#06b6d4]/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-[#0f7b8f]">
+                  <Bot className="h-3 w-3" />
+                  Chatbot widget
+                </div>
+                <h3 className="mt-4 text-2xl font-extrabold text-[#0d1520]">AI-gesprekken die leads meteen kwalificeren.</h3>
+                <p className="mt-3 text-sm leading-7 text-[#5a6878]">
+                  De chatbot draait in je branding, geeft directe antwoorden en stuurt elk gesprek door naar je inbox. Zo blijft support snel en worden commerciële kansen automatisch vastgelegd.
+                </p>
+                <ul className="mt-4 space-y-2.5 text-sm text-[#344052]">
+                  {[
+                    "Gebaseerd op account-specifieke settings en kenniscontext.",
+                    "Slimme intentdetectie voor afspraak, offerte of support.",
+                    "Gesprekken direct bruikbaar in opvolging en pipeline.",
+                  ].map((item) => (
+                    <li key={item} className="flex items-start gap-2">
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#12a66a]" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <SolutionsChatbotMockup />
+            </article>
+
+            <article className="reveal grid gap-7 rounded-2xl border border-[#e2e8e3] bg-white p-5 shadow-sm sm:p-7 lg:grid-cols-[1.25fr_1fr] lg:items-center">
+              <SolutionsReviewMockup />
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-[#ec4899]/25 bg-[#ec4899]/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-[#b93c79]">
+                  <Star className="h-3 w-3" />
+                  Reviewsysteem
+                </div>
+                <h3 className="mt-4 text-2xl font-extrabold text-[#0d1520]">Van interne feedback naar publieke reviewgroei.</h3>
+                <p className="mt-3 text-sm leading-7 text-[#5a6878]">
+                  Het systeem splitst automatisch op basis van score: lagere scores gaan naar interne feedback, hogere scores sturen klanten door naar jouw reviewplatforms om reputatie actief te versterken.
+                </p>
+                <ul className="mt-4 space-y-2.5 text-sm text-[#344052]">
+                  {[
+                    "Tweeledige flow voor kwaliteitsopvolging en reputatie-opbouw.",
+                    "Platformkeuze per account: Google, Trustpilot of Facebook.",
+                    "Heldere statusopvolging van ingestuurde reviews.",
+                  ].map((item) => (
+                    <li key={item} className="flex items-start gap-2">
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#12a66a]" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
       {/* CTA */}
       <section className="bg-[#0d1520] py-18 text-white">
         <div className="reveal mx-auto max-w-2xl px-5 py-16 text-center sm:px-8">
@@ -826,6 +947,214 @@ function SolutionsPage() {
         </div>
       </section>
     </>
+  );
+}
+
+function SolutionsQuoteMockup() {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[#dde5df] bg-[#f9fbfa] shadow-[0_16px_40px_rgba(13,21,32,0.08)]">
+      <div className="flex items-center justify-between border-b border-[#e4ebe6] bg-[#fff8ee] px-4 py-3">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-[#b66d1e]">Offerte Configurator</p>
+          <p className="text-sm font-extrabold text-[#0d1520]">Stel uw pakket samen</p>
+        </div>
+        <span className="rounded-md bg-[#0d1520] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white">Live</span>
+      </div>
+      <div className="grid gap-3 p-4 sm:grid-cols-[0.9fr_1.1fr]">
+        <div className="space-y-2.5">
+          {["DIENST", "PRODUCT", "SPECIFICATIES", "GEGEVENS"].map((step, index) => (
+            <div key={step} className={`rounded-lg border px-3 py-2 text-[11px] font-bold ${index === 1 ? "border-[#f9ae5a]/50 bg-[#fff8ee] text-[#b66d1e]" : "border-[#e4ebe6] bg-white text-[#667381]"}`}>
+              Stap {index + 1} · {step}
+            </div>
+          ))}
+          <div className="rounded-lg border border-[#e4ebe6] bg-white p-3">
+            <p className="text-[11px] font-bold text-[#0d1520]">Geselecteerd pakket</p>
+            <p className="mt-1 text-[11px] text-[#5a6878]">Website Pro + SEO Basis</p>
+            <p className="mt-2 text-xs font-extrabold text-[#e85d3a]">€ 2.950 excl. btw</p>
+          </div>
+        </div>
+        <div className="rounded-xl border border-[#e4ebe6] bg-white p-3">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-[11px] font-bold text-[#0d1520]">Samenvatting</p>
+            <span className="text-[10px] font-semibold text-[#7a8898]">Draft #OFF-2026-0041</span>
+          </div>
+          <div className="space-y-2 text-[11px]">
+            {[
+              ["Website Pro", "€ 2.150"],
+              ["SEO Basis", "€ 650"],
+              ["Support", "€ 150"],
+            ].map(([label, value]) => (
+              <div key={label} className="flex items-center justify-between text-[#5a6878]">
+                <span>{label}</span>
+                <span className="font-semibold text-[#0d1520]">{value}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 space-y-1.5 border-t border-[#eef3ef] pt-2.5 text-[11px]">
+            <div className="flex items-center justify-between text-[#5a6878]">
+              <span>Subtotaal</span>
+              <span className="font-semibold text-[#0d1520]">€ 2.950</span>
+            </div>
+            <div className="flex items-center justify-between text-[#5a6878]">
+              <span>BTW 21%</span>
+              <span className="font-semibold text-[#0d1520]">€ 619,50</span>
+            </div>
+            <div className="flex items-center justify-between text-[#0d1520]">
+              <span className="font-bold">Totaal</span>
+              <span className="font-extrabold text-[#e85d3a]">€ 3.569,50</span>
+            </div>
+          </div>
+          <button className="mt-3 h-8 w-full rounded-lg bg-[#f9ae5a] text-[11px] font-bold text-[#14100b]">
+            Vraag offerte aan
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SolutionsBookingMockup() {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[#dde5df] bg-[#f9fbfa] shadow-[0_16px_40px_rgba(13,21,32,0.08)]">
+      <div className="flex items-center justify-between border-b border-[#e4ebe6] bg-white px-4 py-3">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-[#b66d1e]">Booking Agenda</p>
+          <p className="text-sm font-extrabold text-[#0d1520]">Plan een afspraak</p>
+        </div>
+        <div className="flex items-center gap-1 rounded-md border border-[#e4ebe6] bg-[#f9fbfa] px-2 py-1 text-[10px] font-semibold text-[#5a6878]">
+          <Clock className="h-3 w-3 text-[#f59e0b]" />
+          30 min slots
+        </div>
+      </div>
+      <div className="grid gap-3 p-4 sm:grid-cols-[1fr_0.95fr]">
+        <div className="rounded-xl border border-[#e4ebe6] bg-white p-3">
+          <div className="mb-2 flex items-center justify-between text-[11px] font-bold text-[#0d1520]">
+            <span>April 2026</span>
+            <span className="text-[#7a8898]">Europe/Brussels</span>
+          </div>
+          <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-[#7a8898]">
+            {["MA", "DI", "WO", "DO", "VR", "ZA", "ZO"].map((day) => (
+              <div key={day} className="py-1 font-semibold">{day}</div>
+            ))}
+            {["21", "22", "23", "24", "25", "26", "27", "28", "29", "30"].map((date) => (
+              <div
+                key={date}
+                className={`rounded-md py-1.5 ${date === "24" ? "bg-[#f59e0b] font-bold text-white" : "bg-[#f6f9f7] text-[#435365]"}`}
+              >
+                {date}
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-1.5">
+            {["09:00", "09:30", "10:00", "10:30", "11:00", "11:30"].map((slot, index) => (
+              <button
+                key={slot}
+                className={`rounded-md border px-2 py-1 text-[10px] font-semibold ${index === 1 ? "border-[#f59e0b]/45 bg-[#fff8ee] text-[#b66d1e]" : "border-[#e4ebe6] bg-white text-[#5a6878]"}`}
+              >
+                {slot}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-xl border border-[#e4ebe6] bg-white p-3">
+          <p className="text-[11px] font-bold text-[#0d1520]">Afspraakdetails</p>
+          <div className="mt-2 space-y-2">
+            {[
+              "Naam: Sarah De Meulemeester",
+              "E-mail: sarah@lumadental.be",
+              "Datum: vrijdag 24 april",
+              "Uur: 09:30",
+            ].map((line) => (
+              <div key={line} className="rounded-md border border-[#edf2ee] bg-[#f9fbfa] px-2.5 py-2 text-[10px] text-[#4f5f70]">
+                {line}
+              </div>
+            ))}
+          </div>
+          <button className="mt-3 h-8 w-full rounded-lg bg-[#f59e0b] text-[11px] font-bold text-[#14100b]">
+            Afspraak bevestigen
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SolutionsChatbotMockup() {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[#dde5df] bg-white shadow-[0_16px_40px_rgba(13,21,32,0.08)]">
+      <div className="flex items-center gap-3 bg-[#0d1520] px-4 py-3 text-white">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#06b6d4]/30 text-xs font-bold">D</div>
+        <div className="min-w-0">
+          <p className="truncate text-xs font-bold uppercase tracking-widest text-[#8fe7f6]">Digitify Assistant</p>
+          <p className="truncate text-xs text-white/80">Online · antwoordt binnen enkele seconden</p>
+        </div>
+      </div>
+      <div className="space-y-2.5 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.98),_rgba(244,248,252,1)_55%)] p-4">
+        <div className="max-w-[80%] rounded-2xl rounded-bl-md border border-[#e4ebf1] bg-white px-3 py-2 text-[11px] leading-5 text-[#405162]">
+          Hallo! Wil je een offerte aanvragen of liever meteen een afspraak plannen?
+        </div>
+        <div className="ml-auto max-w-[80%] rounded-2xl rounded-br-md bg-[#06b6d4] px-3 py-2 text-[11px] leading-5 text-white">
+          Graag een offerte voor webdesign + SEO.
+        </div>
+        <div className="max-w-[80%] rounded-2xl rounded-bl-md border border-[#e4ebf1] bg-white px-3 py-2 text-[11px] leading-5 text-[#405162]">
+          Perfect. Dan stuur ik je direct naar de configurator en noteer ik alvast je contactgegevens.
+        </div>
+        <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-[#d8ecf1] bg-[#f2fbfd] px-3 py-2 text-[10px] text-[#0f7b8f]">
+          Intent gedetecteerd: quote_request · Leadscore: warm
+        </div>
+      </div>
+      <div className="border-t border-[#e8eef2] bg-white px-4 py-3">
+        <div className="flex items-center gap-2 rounded-xl border border-[#dce4ea] bg-[#f8fafc] px-2.5 py-2 text-[11px] text-[#7a8898]">
+          <MessageSquareText className="h-3.5 w-3.5 text-[#7aa8b5]" />
+          Type je bericht...
+          <ArrowRight className="ml-auto h-3.5 w-3.5 text-[#9eb4bf]" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SolutionsReviewMockup() {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[#dde5df] bg-[#fffaf5] shadow-[0_16px_40px_rgba(13,21,32,0.08)]">
+      <div className="border-b border-[#f2e4ef] bg-white px-4 py-3">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-[#b93c79]">Review Systeem</p>
+        <p className="text-sm font-extrabold text-[#0d1520]">Hoe was uw ervaring?</p>
+      </div>
+      <div className="space-y-3 p-4">
+        <div className="rounded-xl border border-[#f0d6e7] bg-white p-3">
+          <p className="text-[11px] font-semibold text-[#4f5f70]">Stap 1 · Kies een score</p>
+          <div className="mt-2 flex items-center gap-1.5 text-[#ec4899]">
+            {[1, 2, 3, 4, 5].map((star, index) => (
+              <Star key={star} className={`h-4 w-4 ${index < 4 ? "fill-current" : ""}`} />
+            ))}
+          </div>
+          <p className="mt-2 text-[10px] text-[#7a8898]">4 of 5 sterren: doorsturen naar publiek platform.</p>
+        </div>
+
+        <div className="grid gap-1.5 sm:grid-cols-3">
+          {["Google", "Trustpilot", "Facebook"].map((platform, index) => (
+            <button
+              key={platform}
+              className={`rounded-lg border px-2 py-2 text-[10px] font-bold ${index === 0 ? "border-[#ec4899]/40 bg-[#ffeef7] text-[#b93c79]" : "border-[#eadde7] bg-white text-[#5a6878]"}`}
+            >
+              {platform}
+            </button>
+          ))}
+        </div>
+
+        <div className="rounded-xl border border-[#eadde7] bg-white p-3">
+          <p className="text-[11px] font-semibold text-[#4f5f70]">Interne feedback bij lage score</p>
+          <div className="mt-2 rounded-md border border-[#f2edf1] bg-[#faf8fa] px-2.5 py-2 text-[10px] text-[#7a8898]">
+            "Levering mocht sneller, maar service was vriendelijk."
+          </div>
+          <div className="mt-2 flex items-center justify-between text-[10px]">
+            <span className="rounded-md bg-[#f3ecf1] px-2 py-1 font-semibold text-[#7c5d72]">Status: FEEDBACK</span>
+            <span className="font-bold text-[#b93c79]">Opslaan & opvolgen</span>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
