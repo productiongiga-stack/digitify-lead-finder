@@ -1,19 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { getPublicOwnerKeyFromUrl, resolvePublicOwner } from "@digitify/api/src/lib/tenant";
 
 export async function POST(request: Request) {
   try {
     const forwarded = request.headers.get("x-forwarded-for") || "";
     const ip = forwarded.split(",")[0]?.trim() || "unknown";
-    const body = await request.json();
-    const ownerKey = String(body.account || body.tenant || body.owner || "").trim() || getPublicOwnerKeyFromUrl(request.url);
-    const owner = await resolvePublicOwner(prisma, ownerKey);
-    if (!owner) {
-      return NextResponse.json({ error: "Account is verplicht." }, { status: 400 });
-    }
-    const limiter = checkRateLimit({ key: `public-quote:${owner.id}:${ip}`, limit: 5, windowMs: 60 * 60 * 1000 });
+    const limiter = checkRateLimit({ key: `public-quote:${ip}`, limit: 5, windowMs: 60 * 60 * 1000 });
     if (!limiter.allowed) {
       return NextResponse.json(
         { error: "Te veel aanvragen. Probeer het later opnieuw." },
@@ -21,6 +14,7 @@ export async function POST(request: Request) {
       );
     }
 
+    const body = await request.json();
     const clientName = String(body.clientName || "").trim().slice(0, 200);
     const clientAddress = String(body.clientAddress || "").trim().slice(0, 500);
     const clientVat = String(body.clientVat || "").trim().slice(0, 50);
@@ -43,12 +37,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Ongeldig e-mailadres." }, { status: 400 });
     }
 
+    const creator = await prisma.user.findFirst({
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+
+    if (!creator) {
+      return NextResponse.json(
+        { error: "Geen interne gebruiker beschikbaar." },
+        { status: 500 }
+      );
+    }
+
     const year = new Date().getFullYear();
     const count = await prisma.quote.count({
-      where: {
-        createdById: owner.id,
-        quoteNumber: { startsWith: `OFF-${year}-` },
-      },
+      where: { quoteNumber: { startsWith: `OFF-${year}-` } },
     });
     const quoteNumber = `OFF-${year}-${String(count + 1).padStart(4, "0")}`;
 
@@ -94,7 +97,7 @@ export async function POST(request: Request) {
         discount,
         vatAmount,
         total,
-        createdById: owner.id,
+        createdById: creator.id,
         items: {
           create: normalizedItems,
         },

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma, protectSettingValue, revealSettingValue } from "@digitify/db";
 import { getCurrentUser } from "@/lib/auth/session";
-import { tenantSettingWhere } from "@digitify/api/src/lib/tenant";
+import { userSettingKey } from "@digitify/api/src/lib/user-settings";
 
 function resolveAppUrl() {
   const candidates = [
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
   }
   const userId = (user as any).id as string | undefined;
   if (!userId) {
-    return NextResponse.redirect(new URL("/settings/bookings?google=error", request.url));
+    return NextResponse.redirect(new URL("/login", request.url));
   }
 
   const requestUrl = new URL(request.url);
@@ -85,7 +85,7 @@ export async function GET(request: Request) {
       fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList", {
         headers: { Authorization: `Bearer ${tokenData.access_token}` },
       }),
-      prisma.setting.findUnique({ where: tenantSettingWhere(userId, "bookings.google_oauth_refresh_token") }),
+      prisma.setting.findUnique({ where: { key: userSettingKey(userId, "bookings.google_oauth_refresh_token") } }),
     ]);
 
     const profile = profileResponse.ok
@@ -120,9 +120,9 @@ export async function GET(request: Request) {
     await prisma.$transaction(
       updates.map((entry) =>
         prisma.setting.upsert({
-          where: tenantSettingWhere(userId, entry.key),
+          where: { key: userSettingKey(userId, entry.key) },
           update: { value: protectSettingValue(entry.key, entry.value) as any },
-          create: { userId, key: entry.key, value: protectSettingValue(entry.key, entry.value) as any },
+          create: { key: userSettingKey(userId, entry.key), value: protectSettingValue(entry.key, entry.value) as any },
         })
       )
     );

@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { createHash } from "node:crypto";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { getPublicOwnerKeyFromUrl, resolvePublicOwner } from "@digitify/api/src/lib/tenant";
 
 const seenSubmissions = new Map<string, number>();
 
@@ -20,14 +19,8 @@ export async function POST(request: Request) {
   try {
     const forwarded = request.headers.get("x-forwarded-for") || "";
     const ip = forwarded.split(",")[0]?.trim() || "unknown";
-    const body = await request.json();
-    const ownerKey = String(body.account || body.tenant || body.owner || "").trim() || getPublicOwnerKeyFromUrl(request.url);
-    const owner = await resolvePublicOwner(prisma, ownerKey);
-    if (!owner) {
-      return NextResponse.json({ error: "Account is verplicht." }, { status: 400 });
-    }
     const limiter = checkRateLimit({
-      key: `public-review-embed:${owner.id}:${ip}`,
+      key: `public-review-embed:${ip}`,
       limit: 15,
       windowMs: 60 * 60 * 1000,
     });
@@ -35,13 +28,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Te veel aanvragen. Probeer later opnieuw." }, { status: 429 });
     }
 
+    const body = await request.json();
     const rating = Number(body.rating);
     const feedback = String(body.feedback || "").trim().slice(0, 2000);
     const platform = String(body.platform || "").trim();
     const company = String(body.company || "").trim();
     const pageUrl = String(body.pageUrl || request.headers.get("referer") || "").trim();
     const honeypot = String(body.website || "").trim();
-    const sessionScope = `${owner.id}|${company}|${pageUrl}`.trim() || ip;
+    const sessionScope = `${company}|${pageUrl}`.trim() || ip;
     const sessionKey = createHash("sha256").update(sessionScope).digest("hex").slice(0, 16);
     const lockCookieName = `review_embed_once_${sessionKey}`;
     const secureCookie = request.url.startsWith("https://");
@@ -69,7 +63,7 @@ export async function POST(request: Request) {
     }
 
     const fingerprint = createHash("sha256")
-      .update(`${owner.id}|${ip}|${rating}|${feedback}|${platform}|${company}|${pageUrl}`)
+      .update(`${ip}|${rating}|${feedback}|${platform}|${company}|${pageUrl}`)
       .digest("hex");
     const now = Date.now();
     for (const [key, ts] of seenSubmissions.entries()) {
@@ -85,7 +79,6 @@ export async function POST(request: Request) {
 
     await prisma.activity.create({
       data: {
-        userId: owner.id,
         type: "NOTE_ADDED",
         title:
           rating >= 4

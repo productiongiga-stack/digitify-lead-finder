@@ -43,6 +43,7 @@ function parseBooleanParam(value: string | null, fallback: boolean) {
 
 function ChatbotEmbedContent() {
   const params = useSearchParams();
+  const tenant = params.get("tenant") || "";
   const [settings, setSettings] = useState<RemoteSettings | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -51,15 +52,11 @@ function ChatbotEmbedContent() {
   const [visitorName, setVisitorName] = useState("");
   const [nameDraft, setNameDraft] = useState("");
   const [nameError, setNameError] = useState("");
-  const account = params.get("account") || params.get("tenant") || params.get("owner") || "";
 
   useEffect(() => {
     let mounted = true;
 
-    const settingsUrl = new URL("/api/public/chatbot/settings", window.location.origin);
-    if (account) settingsUrl.searchParams.set("account", account);
-
-    fetch(settingsUrl.toString())
+    fetch(`/api/public/chatbot/settings${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((remote: RemoteSettings | null) => {
         if (!mounted || !remote) return;
@@ -70,13 +67,13 @@ function ChatbotEmbedContent() {
     return () => {
       mounted = false;
     };
-  }, [account]);
+  }, [tenant]);
 
   useEffect(() => {
     if (!sessionId) return;
 
     const timer = window.setInterval(() => {
-      fetch(`/api/public/chatbot/session?sessionId=${encodeURIComponent(sessionId)}&account=${encodeURIComponent(account)}`)
+      fetch(`/api/public/chatbot/session?sessionId=${encodeURIComponent(sessionId)}${tenant ? `&tenant=${encodeURIComponent(tenant)}` : ""}`)
         .then((res) => (res.ok ? res.json() : null))
         .then((payload) => {
           if (!payload?.messages) return;
@@ -86,7 +83,7 @@ function ChatbotEmbedContent() {
     }, 4000);
 
     return () => window.clearInterval(timer);
-  }, [sessionId, account]);
+  }, [sessionId, tenant]);
 
   const companyName = params.get("company") || settings?.companyName || "Digitify";
   const companySlogan = settings?.companySlogan || "";
@@ -132,10 +129,10 @@ function ChatbotEmbedContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: sessionId || undefined,
-          account: account || undefined,
           visitorName: visitorName || undefined,
           message,
           pageUrl: typeof document !== "undefined" ? document.referrer : undefined,
+          tenant: tenant || undefined,
         }),
       });
 

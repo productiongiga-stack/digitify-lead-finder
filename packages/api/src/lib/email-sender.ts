@@ -154,11 +154,8 @@ export async function sendBrandedEmail(
 
   let leadContext = {};
   if (params.leadId) {
-    const lead = await db.lead.findFirst({
-      where: {
-        id: params.leadId,
-        ...(params.userId ? { createdById: params.userId } : {}),
-      },
+    const lead = await db.lead.findUnique({
+      where: { id: params.leadId },
       include: {
         contacts: {
           orderBy: [{ isPrimary: "desc" }, { name: "asc" }, { id: "asc" }],
