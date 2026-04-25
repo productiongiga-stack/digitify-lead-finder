@@ -245,8 +245,11 @@ export const contactRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const draft = await ctx.db.emailDraft.findUnique({ where: { id: input.id } });
+      const draft = await ctx.db.emailDraft.findUnique({ where: { id: input.id }, select: { id: true, status: true, authorId: true } });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
+      if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang om dit concept te bewerken." });
+      }
       if (draft.status !== "DRAFT" && draft.status !== "REJECTED") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Can only edit drafts or rejected emails" });
       }
@@ -258,8 +261,11 @@ export const contactRouter = router({
   submitForApproval: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const draft = await ctx.db.emailDraft.findUnique({ where: { id: input.id } });
+      const draft = await ctx.db.emailDraft.findUnique({ where: { id: input.id }, select: { id: true, status: true, authorId: true } });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
+      if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang om dit concept in te dienen." });
+      }
       if (draft.status !== "DRAFT") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Only drafts can be submitted for approval" });
       }

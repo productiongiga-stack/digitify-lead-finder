@@ -643,7 +643,9 @@ export async function renderQuotePdfBuffer(html: string): Promise<Buffer> {
 }
 
 function getTokenSecret() {
-  return process.env.QUOTE_PDF_TOKEN_SECRET || process.env.NEXTAUTH_SECRET || "digitify-quote-pdf-secret";
+  const secret = process.env.QUOTE_PDF_TOKEN_SECRET || process.env.NEXTAUTH_SECRET;
+  if (!secret) throw new Error("QUOTE_PDF_TOKEN_SECRET or NEXTAUTH_SECRET must be set");
+  return secret;
 }
 
 function signPayload(payload: string) {

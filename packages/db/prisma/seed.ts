@@ -12,14 +12,19 @@ function hashPassword(password: string): string {
 async function main() {
   console.log("Seeding database...");
 
-  // Create admin user
+  // Create admin user — override via SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD env vars
+  const adminEmail = process.env.SEED_ADMIN_EMAIL || "admin@example.com";
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
+  if (!adminPassword && process.env.NODE_ENV === "production") {
+    throw new Error("SEED_ADMIN_PASSWORD must be set in production. Set the env var and re-run.");
+  }
   const admin = await prisma.user.upsert({
-    where: { email: "admin@example.com" },
+    where: { email: adminEmail },
     update: {},
     create: {
-      email: "admin@example.com",
+      email: adminEmail,
       name: "Admin",
-      passwordHash: hashPassword("admin123"),
+      passwordHash: hashPassword(adminPassword || "changeme-" + Math.random().toString(36).slice(2)),
       role: UserRole.OWNER,
     },
   });
