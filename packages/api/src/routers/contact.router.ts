@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { getSettingString } from "../lib/settings";
 import { loadUserSettingRows } from "../lib/user-settings";
+import { assertLeadAccess } from "../lib/tenant";
 
 const DEFAULT_TEMPLATE_PACK: Array<{
   name: string;
@@ -128,9 +129,14 @@ export const contactRouter = router({
       })
     )
     .query(async ({ ctx, input }) => {
-      const where: Record<string, unknown> = {};
+      const where: Record<string, unknown> = {
+        lead: { createdById: ctx.user.id },
+      };
       if (input.status) where.status = input.status;
-      if (input.leadId) where.leadId = input.leadId;
+      if (input.leadId) {
+        await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+        where.leadId = input.leadId;
+      }
 
       const [items, total] = await Promise.all([
         ctx.db.emailDraft.findMany({
@@ -163,6 +169,7 @@ export const contactRouter = router({
         status: "SENT",
         sentAt: { lte: reminderThreshold },
         lead: {
+          createdById: ctx.user.id,
           status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
         },
       },
@@ -214,6 +221,7 @@ export const contactRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
       const draft = await ctx.db.emailDraft.create({
         data: {
           ...input,
@@ -244,7 +252,13 @@ export const contactRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const draft = await ctx.db.emailDraft.findUnique({ where: { id: input.id }, select: { id: true, status: true, authorId: true } });
+      const draft = await ctx.db.emailDraft.findFirst({
+        where: {
+          id: input.id,
+          lead: { createdById: ctx.user.id },
+        },
+        select: { id: true, status: true, authorId: true },
+      });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
       if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang om dit concept te bewerken." });
@@ -260,7 +274,13 @@ export const contactRouter = router({
   submitForApproval: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const draft = await ctx.db.emailDraft.findUnique({ where: { id: input.id }, select: { id: true, status: true, authorId: true } });
+      const draft = await ctx.db.emailDraft.findFirst({
+        where: {
+          id: input.id,
+          lead: { createdById: ctx.user.id },
+        },
+        select: { id: true, status: true, authorId: true },
+      });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
       if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang om dit concept in te dienen." });
@@ -278,7 +298,9 @@ export const contactRouter = router({
   approve: adminProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const draft = await ctx.db.emailDraft.findUnique({ where: { id: input.id } });
+      const draft = await ctx.db.emailDraft.findFirst({
+        where: { id: input.id, lead: { createdById: ctx.user.id } },
+      });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
       if (draft.status !== "PENDING_APPROVAL") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Only pending emails can be approved" });
@@ -308,7 +330,9 @@ export const contactRouter = router({
   reject: adminProcedure
     .input(z.object({ id: z.string(), note: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
-      const draft = await ctx.db.emailDraft.findUnique({ where: { id: input.id } });
+      const draft = await ctx.db.emailDraft.findFirst({
+        where: { id: input.id, lead: { createdById: ctx.user.id } },
+      });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
       if (draft.status !== "PENDING_APPROVAL") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Only pending emails can be rejected" });
@@ -328,8 +352,11 @@ export const contactRouter = router({
   sendEmail: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const draft = await ctx.db.emailDraft.findUnique({
-        where: { id: input.id },
+      const draft = await ctx.db.emailDraft.findFirst({
+        where: {
+          id: input.id,
+          lead: { createdById: ctx.user.id },
+        },
         include: { lead: { select: { id: true, companyName: true } } },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
@@ -498,8 +525,11 @@ export const contactRouter = router({
   getDraftById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const draft = await ctx.db.emailDraft.findUnique({
-        where: { id: input.id },
+      const draft = await ctx.db.emailDraft.findFirst({
+        where: {
+          id: input.id,
+          lead: { createdById: ctx.user.id },
+        },
         include: {
           lead: { select: { id: true, companyName: true, email: true, city: true, industry: true } },
           author: { select: { id: true, name: true } },

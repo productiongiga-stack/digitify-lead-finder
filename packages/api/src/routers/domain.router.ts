@@ -2,6 +2,7 @@ import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { analyzeWebsite } from "@digitify/connectors";
+import { assertLeadAccess } from "../lib/tenant";
 
 export const domainRouter = router({
   list: protectedProcedure
@@ -14,7 +15,7 @@ export const domainRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const { status, page = 1, pageSize = 25 } = input ?? {};
-      const where: Record<string, unknown> = {};
+      const where: Record<string, unknown> = { createdById: ctx.user.id };
       if (status) where.status = status;
 
       const [domains, total] = await Promise.all([
@@ -51,8 +52,8 @@ export const domainRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const domain = await ctx.db.domain.findUnique({
-        where: { id: input.id },
+      const domain = await ctx.db.domain.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
         include: {
           lead: {
             select: {
@@ -93,6 +94,7 @@ export const domainRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (input.leadId) await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
       return ctx.db.domain.create({
         data: {
           domainName: input.domainName,
@@ -122,6 +124,12 @@ export const domainRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
+      const existing = await ctx.db.domain.findFirst({
+        where: { id, createdById: ctx.user.id },
+        select: { id: true },
+      });
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Domein niet gevonden" });
+      if (data.leadId) await assertLeadAccess(ctx.db, ctx.user.id, data.leadId);
       const updateData: Record<string, unknown> = {};
       if (data.domainName !== undefined) updateData.domainName = data.domainName;
       if (data.registrar !== undefined) updateData.registrar = data.registrar || null;
@@ -138,6 +146,11 @@ export const domainRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.db.domain.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
+        select: { id: true },
+      });
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Domein niet gevonden" });
       return ctx.db.domain.delete({ where: { id: input.id } });
     }),
 
@@ -149,13 +162,13 @@ export const domainRouter = router({
       // Update domain SSL status based on analysis
       const sslStatus = analysis.hasSSL ? "VALID" : "NONE";
       await ctx.db.domain.updateMany({
-        where: { domainName: input.domainName },
+        where: { domainName: input.domainName, createdById: ctx.user.id },
         data: { sslStatus },
       });
 
       // Find the domain to get its leadId
-      const domain = await ctx.db.domain.findUnique({
-        where: { domainName: input.domainName },
+      const domain = await ctx.db.domain.findFirst({
+        where: { domainName: input.domainName, createdById: ctx.user.id },
         select: { leadId: true },
       });
 
@@ -186,8 +199,8 @@ export const domainRouter = router({
   getAnalysis: protectedProcedure
     .input(z.object({ domainName: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      const domain = await ctx.db.domain.findUnique({
-        where: { domainName: input.domainName },
+      const domain = await ctx.db.domain.findFirst({
+        where: { domainName: input.domainName, createdById: ctx.user.id },
         select: { leadId: true },
       });
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { loadUserSettingRows } from "../lib/user-settings";
+import { ownedChatSessionWhere } from "../lib/tenant";
 
 function getSettingString(
   settings: Array<{ key: string; value: unknown }>,
@@ -15,7 +16,6 @@ function getSettingString(
 
 export const dashboardRouter = router({
   getKpis: protectedProcedure.query(async ({ ctx }) => {
-    const now = new Date();
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
 
@@ -39,41 +39,46 @@ export const dashboardRouter = router({
       contactedAndBeyondLeads,
       respondedLeads,
     ] = await Promise.all([
-      ctx.db.lead.count(),
-      ctx.db.lead.count({ where: { createdAt: { gte: weekAgo } } }),
-      ctx.db.lead.count({ where: { scorePriority: "Hot" } }),
-      ctx.db.lead.count({ where: { status: "CONTACTED" } }),
-      ctx.db.campaign.count(),
-      ctx.db.emailDraft.count({ where: { status: "PENDING_APPROVAL" } }),
-      ctx.db.emailDraft.count({ where: { status: "SENT" } }),
-      ctx.db.lead.count({ where: { status: "WON" } }),
+      ctx.db.lead.count({ where: { createdById: ctx.user.id } }),
+      ctx.db.lead.count({ where: { createdById: ctx.user.id, createdAt: { gte: weekAgo } } }),
+      ctx.db.lead.count({ where: { createdById: ctx.user.id, scorePriority: "Hot" } }),
+      ctx.db.lead.count({ where: { createdById: ctx.user.id, status: "CONTACTED" } }),
+      ctx.db.campaign.count({ where: { createdById: ctx.user.id } }),
+      ctx.db.emailDraft.count({
+        where: { status: "PENDING_APPROVAL", lead: { createdById: ctx.user.id } },
+      }),
+      ctx.db.emailDraft.count({ where: { status: "SENT", lead: { createdById: ctx.user.id } } }),
+      ctx.db.lead.count({ where: { createdById: ctx.user.id, status: "WON" } }),
       ctx.db.lead.aggregate({
         _avg: { overallScore: true },
-        where: { overallScore: { not: null } },
+        where: { createdById: ctx.user.id, overallScore: { not: null } },
       }),
-      ctx.db.quote.count({ where: { status: { in: ["DRAFT", "SENT", "VIEWED"] } } }),
+      ctx.db.quote.count({ where: { createdById: ctx.user.id, status: { in: ["DRAFT", "SENT", "VIEWED"] } } }),
       ctx.db.quote.aggregate({
         _sum: { total: true },
-        where: { status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] } },
+        where: { createdById: ctx.user.id, status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] } },
       }),
-      ctx.db.chatSession.count({ where: { isRead: false } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), isRead: false } }),
       ctx.db.campaignLead.count({
         where: {
           campaign: {
             status: "ACTIVE",
+            createdById: ctx.user.id,
           },
         },
       }),
-      ctx.db.emailDraft.count({ where: { status: "SCHEDULED" } }),
-      ctx.db.emailDraft.count({ where: { status: "FAILED" } }),
-      ctx.db.reviewRequest.count({ where: { status: "PENDING" } }),
+      ctx.db.emailDraft.count({ where: { status: "SCHEDULED", lead: { createdById: ctx.user.id } } }),
+      ctx.db.emailDraft.count({ where: { status: "FAILED", lead: { createdById: ctx.user.id } } }),
+      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.id } }),
       ctx.db.lead.count({
         where: {
+          createdById: ctx.user.id,
           status: { in: ["CONTACTED", "RESPONDED", "QUALIFIED", "PROPOSAL_SENT", "WON"] },
         },
       }),
       ctx.db.lead.count({
         where: {
+          createdById: ctx.user.id,
           status: { in: ["RESPONDED", "QUALIFIED", "PROPOSAL_SENT", "WON"] },
         },
       }),
@@ -109,6 +114,12 @@ export const dashboardRouter = router({
 
   getRecentActivity: protectedProcedure.query(async ({ ctx }) => {
     return ctx.db.activity.findMany({
+      where: {
+        OR: [
+          { userId: ctx.user.id },
+          { lead: { createdById: ctx.user.id } },
+        ],
+      },
       take: 20,
       orderBy: { createdAt: "desc" },
       include: {
@@ -134,6 +145,7 @@ export const dashboardRouter = router({
           status: "SENT",
           sentAt: { lte: emailThreshold },
           lead: {
+            createdById: ctx.user.id,
             status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
           },
         },
@@ -152,6 +164,7 @@ export const dashboardRouter = router({
       }),
       ctx.db.booking.findMany({
         where: {
+          createdById: ctx.user.id,
           OR: [
             { status: "PENDING" },
             {
@@ -171,6 +184,7 @@ export const dashboardRouter = router({
       }),
       ctx.db.quote.findMany({
         where: {
+          createdById: ctx.user.id,
           status: { in: ["SENT", "VIEWED"] },
           OR: [
             { sentAt: { lte: quoteThreshold } },
@@ -190,6 +204,7 @@ export const dashboardRouter = router({
       }),
       ctx.db.lead.findMany({
         where: {
+          createdById: ctx.user.id,
           status: { in: ["CONTACTED", "RESPONDED", "QUALIFIED"] },
           activities: {
             none: {
@@ -264,17 +279,27 @@ export const dashboardRouter = router({
   }),
 
   getPipelineOverview: protectedProcedure.query(async ({ ctx }) => {
-    const stages = await ctx.db.pipelineStage.findMany({
-      orderBy: { sortOrder: "asc" },
-      include: {
-        _count: { select: { leads: true } },
-      },
-    });
+    const [stages, leadCounts] = await Promise.all([
+      ctx.db.pipelineStage.findMany({
+        orderBy: { sortOrder: "asc" },
+        select: { id: true, name: true, color: true },
+      }),
+      ctx.db.lead.groupBy({
+        by: ["pipelineStageId"],
+        _count: { id: true },
+        where: { createdById: ctx.user.id, pipelineStageId: { not: null } },
+      }),
+    ]);
+    const countMap = new Map(
+      leadCounts
+        .filter((entry) => entry.pipelineStageId)
+        .map((entry) => [entry.pipelineStageId as string, entry._count.id]),
+    );
     return stages.map((s) => ({
       id: s.id,
       name: s.name,
       color: s.color,
-      count: s._count.leads,
+      count: countMap.get(s.id) ?? 0,
     }));
   }),
 
@@ -289,7 +314,7 @@ export const dashboardRouter = router({
 
     const counts = await Promise.all(
       ranges.map((b) =>
-        ctx.db.lead.count({ where: { overallScore: { gte: b.min, lte: b.max } } })
+        ctx.db.lead.count({ where: { createdById: ctx.user.id, overallScore: { gte: b.min, lte: b.max } } })
       )
     );
 
@@ -300,7 +325,7 @@ export const dashboardRouter = router({
     const leads = await ctx.db.lead.groupBy({
       by: ["industry"],
       _count: { id: true },
-      where: { industry: { not: null } },
+      where: { industry: { not: null }, createdById: ctx.user.id },
       orderBy: { _count: { id: "desc" } },
       take: 10,
     });
@@ -315,7 +340,7 @@ export const dashboardRouter = router({
     const leads = await ctx.db.lead.groupBy({
       by: ["city"],
       _count: { id: true },
-      where: { city: { not: null } },
+      where: { city: { not: null }, createdById: ctx.user.id },
       orderBy: { _count: { id: "desc" } },
       take: 10,
     });
@@ -332,6 +357,7 @@ export const dashboardRouter = router({
 
     const leads = await ctx.db.lead.findMany({
       where: {
+        createdById: ctx.user.id,
         status: { in: ["CONTACTED", "RESPONDED", "QUALIFIED"] },
         activities: {
           none: {
@@ -376,14 +402,14 @@ export const dashboardRouter = router({
 
   getSavedSearchCount: protectedProcedure.query(async ({ ctx }) => {
     const count = await ctx.db.lead.count({
-      where: { source: { not: null } },
+      where: { source: { not: null }, createdById: ctx.user.id },
     });
     return count;
   }),
 
   getTopLeads: protectedProcedure.query(async ({ ctx }) => {
     return ctx.db.lead.findMany({
-      where: { overallScore: { not: null } },
+      where: { overallScore: { not: null }, createdById: ctx.user.id },
       orderBy: { overallScore: "desc" },
       take: 5,
       select: {
@@ -399,12 +425,12 @@ export const dashboardRouter = router({
 
   getQuoteStats: protectedProcedure.query(async ({ ctx }) => {
     const [draftCount, sentCount, acceptedCount, totalValue] = await Promise.all([
-      ctx.db.quote.count({ where: { status: "DRAFT" } }),
-      ctx.db.quote.count({ where: { status: "SENT" } }),
-      ctx.db.quote.count({ where: { status: "ACCEPTED" } }),
+      ctx.db.quote.count({ where: { status: "DRAFT", createdById: ctx.user.id } }),
+      ctx.db.quote.count({ where: { status: "SENT", createdById: ctx.user.id } }),
+      ctx.db.quote.count({ where: { status: "ACCEPTED", createdById: ctx.user.id } }),
       ctx.db.quote.aggregate({
         _sum: { total: true },
-        where: { status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] } },
+        where: { status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] }, createdById: ctx.user.id },
       }),
     ]);
 
@@ -418,9 +444,9 @@ export const dashboardRouter = router({
 
   getChatStats: protectedProcedure.query(async ({ ctx }) => {
     const [openCount, waitingCount, unreadCount] = await Promise.all([
-      ctx.db.chatSession.count({ where: { status: "OPEN" } }),
-      ctx.db.chatSession.count({ where: { status: "WAITING" } }),
-      ctx.db.chatSession.count({ where: { isRead: false } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), status: "OPEN" } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), status: "WAITING" } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), isRead: false } }),
     ]);
 
     return { openCount, waitingCount, unreadCount };
@@ -430,6 +456,7 @@ export const dashboardRouter = router({
     const now = new Date();
     return ctx.db.booking.findMany({
       where: {
+        createdById: ctx.user.id,
         date: { gte: now },
         status: { in: ["PENDING", "SCHEDULED", "CONFIRMED"] },
       },
@@ -454,6 +481,7 @@ export const dashboardRouter = router({
 
     return ctx.db.domain.findMany({
       where: {
+        createdById: ctx.user.id,
         expiresAt: {
           gte: now,
           lte: thirtyDaysFromNow,
@@ -474,6 +502,7 @@ export const dashboardRouter = router({
 
   getDomainMonitor: protectedProcedure.query(async ({ ctx }) => {
     const domains = await ctx.db.domain.findMany({
+      where: { createdById: ctx.user.id },
       orderBy: { updatedAt: "desc" },
       take: 6,
       include: {
@@ -530,9 +559,9 @@ export const dashboardRouter = router({
 
   getReviewStats: protectedProcedure.query(async ({ ctx }) => {
     const [pendingCount, sentCount, reviewedCount] = await Promise.all([
-      ctx.db.reviewRequest.count({ where: { status: "PENDING" } }),
-      ctx.db.reviewRequest.count({ where: { status: "SENT" } }),
-      ctx.db.reviewRequest.count({ where: { status: "REVIEWED" } }),
+      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.id } }),
+      ctx.db.reviewRequest.count({ where: { status: "SENT", createdById: ctx.user.id } }),
+      ctx.db.reviewRequest.count({ where: { status: "REVIEWED", createdById: ctx.user.id } }),
     ]);
 
     return { pendingCount, sentCount, reviewedCount };
@@ -541,6 +570,7 @@ export const dashboardRouter = router({
   getOpenChats: protectedProcedure.query(async ({ ctx }) => {
     const sessions = await ctx.db.chatSession.findMany({
       where: {
+        ...ownedChatSessionWhere(ctx.user.id),
         status: { in: ["OPEN", "WAITING"] },
       },
       orderBy: { updatedAt: "desc" },

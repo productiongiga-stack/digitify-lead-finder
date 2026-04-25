@@ -5,6 +5,7 @@ import { normalizeAiPlaceholderSyntax } from "../lib/email-utils";
 import { type PrismaClient } from "@digitify/db";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadUserSettingRows } from "../lib/user-settings";
+import { assertLeadAccess } from "../lib/tenant";
 
 async function getClient(db: PrismaClient, userId: string): Promise<{ client: OpenClawClient | null; model: string }> {
   const rows = await loadUserSettingRows(db, userId, ["api.ai_provider", "openclaw.model", "api.anthropic_key", "api.openai_key"]);
@@ -117,8 +118,8 @@ export const openclawRouter = router({
       openclawContext.businessContext = businessContextData.businessContext;
 
       if (input.context.leadId) {
-        const lead = await ctx.db.lead.findUnique({
-          where: { id: input.context.leadId },
+        const lead = await ctx.db.lead.findFirst({
+          where: { id: input.context.leadId, createdById: ctx.user.id },
           include: { scoringFactors: { include: { scoringWeight: true } } },
         });
         if (lead) {
@@ -146,8 +147,8 @@ export const openclawRouter = router({
       }
 
       if (input.context.campaignId) {
-        const campaign = await ctx.db.campaign.findUnique({
-          where: { id: input.context.campaignId },
+        const campaign = await ctx.db.campaign.findFirst({
+          where: { id: input.context.campaignId, createdById: ctx.user.id },
         });
         if (campaign) {
           openclawContext.campaignData = {
@@ -198,8 +199,9 @@ export const openclawRouter = router({
         return { draft: null, error: "API key niet geconfigureerd. Ga naar Instellingen → Integraties." };
       }
 
-      const lead = await ctx.db.lead.findUniqueOrThrow({
-        where: { id: input.leadId },
+      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      const lead = await ctx.db.lead.findFirstOrThrow({
+        where: { id: input.leadId, createdById: ctx.user.id },
         include: { scoringFactors: { include: { scoringWeight: true } } },
       });
 
@@ -235,7 +237,9 @@ export const openclawRouter = router({
       };
 
       if (input.campaignId) {
-        const campaign = await ctx.db.campaign.findUnique({ where: { id: input.campaignId } });
+        const campaign = await ctx.db.campaign.findFirst({
+          where: { id: input.campaignId, createdById: ctx.user.id },
+        });
         if (campaign) {
           openclawContext.campaignData = {
             name: campaign.name,
@@ -300,8 +304,8 @@ export const openclawRouter = router({
         return { rewritten: null, error: "API key niet geconfigureerd." };
       }
 
-      const draft = await ctx.db.emailDraft.findUniqueOrThrow({
-        where: { id: input.draftId },
+      const draft = await ctx.db.emailDraft.findFirstOrThrow({
+        where: { id: input.draftId, lead: { createdById: ctx.user.id } },
         include: { lead: { select: { companyName: true, city: true, industry: true } } },
       });
 
@@ -362,8 +366,9 @@ ONDERWERP: [nieuwe onderwerpregel]
         return { analysis: null, error: "API key niet geconfigureerd. Ga naar Instellingen → Integraties." };
       }
 
-      const lead = await ctx.db.lead.findUniqueOrThrow({
-        where: { id: input.leadId },
+      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      const lead = await ctx.db.lead.findFirstOrThrow({
+        where: { id: input.leadId, createdById: ctx.user.id },
         include: {
           scoringFactors: { include: { scoringWeight: true } },
           enrichmentData: true,

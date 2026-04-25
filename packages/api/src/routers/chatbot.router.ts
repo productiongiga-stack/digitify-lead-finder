@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
+import { assertLeadAccess, ownedChatSessionWhere } from "../lib/tenant";
 
 export const chatbotRouter = router({
   // List all chat sessions with filtering
@@ -14,17 +15,23 @@ export const chatbotRouter = router({
     }).default({}))
     .query(async ({ ctx, input }) => {
       const { page, perPage, status, isRead, search } = input;
-      const where: any = {};
-      if (status) where.status = status;
-      if (isRead !== undefined) where.isRead = isRead;
+      const filters: any = {};
+      if (status) filters.status = status;
+      if (isRead !== undefined) filters.isRead = isRead;
       if (search) {
-        where.OR = [
+        filters.OR = [
           { visitorName: { contains: search, mode: "insensitive" } },
           { visitorEmail: { contains: search, mode: "insensitive" } },
           { visitorCompany: { contains: search, mode: "insensitive" } },
           { summary: { contains: search, mode: "insensitive" } },
         ];
       }
+      const where = {
+        AND: [
+          ownedChatSessionWhere(ctx.user.id),
+          filters,
+        ],
+      };
       const [sessions, total, unreadCount] = await Promise.all([
         ctx.db.chatSession.findMany({
           where,
@@ -39,7 +46,7 @@ export const chatbotRouter = router({
           },
         }),
         ctx.db.chatSession.count({ where }),
-        ctx.db.chatSession.count({ where: { isRead: false } }),
+        ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), isRead: false } }),
       ]);
       return { sessions, total, unreadCount, page, perPage, totalPages: Math.ceil(total / perPage) };
     }),
@@ -48,8 +55,8 @@ export const chatbotRouter = router({
   getSession: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const session = await ctx.db.chatSession.findUnique({
-        where: { id: input.id },
+      const session = await ctx.db.chatSession.findFirst({
+        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.id }] },
         include: {
           assignedTo: { select: { id: true, name: true } },
           lead: { select: { id: true, companyName: true, website: true, city: true } },
@@ -71,7 +78,9 @@ export const chatbotRouter = router({
       content: z.string().min(1),
     }))
     .mutation(async ({ ctx, input }) => {
-      const session = await ctx.db.chatSession.findUnique({ where: { id: input.sessionId } });
+      const session = await ctx.db.chatSession.findFirst({
+        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
+      });
       if (!session) throw new TRPCError({ code: "NOT_FOUND" });
 
       const message = await ctx.db.chatMessage.create({
@@ -107,6 +116,11 @@ export const chatbotRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
+      const session = await ctx.db.chatSession.findFirst({
+        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id }] },
+        select: { id: true },
+      });
+      if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Sessie niet gevonden" });
       return ctx.db.chatSession.update({ where: { id }, data });
     }),
 
@@ -114,8 +128,8 @@ export const chatbotRouter = router({
   convertToLead: protectedProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const session = await ctx.db.chatSession.findUnique({
-        where: { id: input.sessionId },
+      const session = await ctx.db.chatSession.findFirst({
+        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
         include: { messages: { orderBy: { createdAt: "asc" } } },
       });
       if (!session) throw new TRPCError({ code: "NOT_FOUND" });
@@ -154,6 +168,12 @@ export const chatbotRouter = router({
   linkToLead: protectedProcedure
     .input(z.object({ sessionId: z.string(), leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      const session = await ctx.db.chatSession.findFirst({
+        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
+        select: { id: true },
+      });
+      if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Sessie niet gevonden" });
       await ctx.db.chatSession.update({
         where: { id: input.sessionId },
         data: { leadId: input.leadId },
@@ -165,8 +185,8 @@ export const chatbotRouter = router({
   generateSummary: protectedProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const session = await ctx.db.chatSession.findUnique({
-        where: { id: input.sessionId },
+      const session = await ctx.db.chatSession.findFirst({
+        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
         include: { messages: { orderBy: { createdAt: "asc" } } },
       });
       if (!session) throw new TRPCError({ code: "NOT_FOUND" });
@@ -257,8 +277,9 @@ export const chatbotRouter = router({
       perPage: z.number().min(1).max(50).default(20),
     }))
     .query(async ({ ctx, input }) => {
+      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
       const { leadId, page, perPage } = input;
-      const where = { leadId };
+      const where = { AND: [ownedChatSessionWhere(ctx.user.id), { leadId }] };
 
       const [sessions, total] = await Promise.all([
         ctx.db.chatSession.findMany({
@@ -281,11 +302,11 @@ export const chatbotRouter = router({
   // Stats for dashboard
   getStats: protectedProcedure.query(async ({ ctx }) => {
     const [total, open, waiting, unread, resolved] = await Promise.all([
-      ctx.db.chatSession.count(),
-      ctx.db.chatSession.count({ where: { status: "OPEN" } }),
-      ctx.db.chatSession.count({ where: { status: "WAITING" } }),
-      ctx.db.chatSession.count({ where: { isRead: false } }),
-      ctx.db.chatSession.count({ where: { status: "RESOLVED" } }),
+      ctx.db.chatSession.count({ where: ownedChatSessionWhere(ctx.user.id) }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), status: "OPEN" } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), status: "WAITING" } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), isRead: false } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), status: "RESOLVED" } }),
     ]);
     return { total, open, waiting, unread, resolved };
   }),
@@ -295,7 +316,7 @@ export const chatbotRouter = router({
     .input(z.object({ ids: z.array(z.string()) }))
     .mutation(async ({ ctx, input }) => {
       await ctx.db.chatSession.updateMany({
-        where: { id: { in: input.ids } },
+        where: { id: { in: input.ids }, ...ownedChatSessionWhere(ctx.user.id) },
         data: { isRead: true },
       });
       return { success: true };
@@ -305,6 +326,11 @@ export const chatbotRouter = router({
   deleteSession: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const session = await ctx.db.chatSession.findFirst({
+        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.id }] },
+        select: { id: true },
+      });
+      if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Sessie niet gevonden" });
       await ctx.db.chatSession.delete({ where: { id: input.id } });
       return { success: true };
     }),
@@ -322,11 +348,13 @@ export const chatbotRouter = router({
     .mutation(async ({ ctx, input }) => {
       const session = await ctx.db.chatSession.create({
         data: {
+          assignedToId: ctx.user.id,
           visitorName: input.visitorName,
           visitorEmail: input.visitorEmail,
           visitorPhone: input.visitorPhone,
           visitorCompany: input.visitorCompany,
           pageUrl: input.pageUrl,
+          tags: [`tenant:${ctx.user.id}`],
         },
       });
 

@@ -5,6 +5,7 @@ import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { ensureLeadLink } from "../lib/lead-link";
+import { assertLeadAccess } from "../lib/tenant";
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat("nl-BE", {
@@ -64,7 +65,7 @@ type QuoteLeadResolution =
   | { mode: "will_create"; leadId: null; leadName: string | null }
   | { mode: "missing"; leadId: null; leadName: null };
 
-async function resolveQuoteLeadForEmail(db: PrismaClient, quote: QuoteForEmail): Promise<QuoteLeadResolution> {
+async function resolveQuoteLeadForEmail(db: PrismaClient, quote: QuoteForEmail, userId: string): Promise<QuoteLeadResolution> {
   if (quote.leadId && quote.lead?.id) {
     return {
       mode: "linked",
@@ -75,7 +76,7 @@ async function resolveQuoteLeadForEmail(db: PrismaClient, quote: QuoteForEmail):
 
   const byEmail = quote.clientEmail
     ? await db.lead.findFirst({
-        where: { email: quote.clientEmail.trim().toLowerCase() },
+        where: { email: quote.clientEmail.trim().toLowerCase(), createdById: userId },
         select: { id: true, companyName: true },
         orderBy: { updatedAt: "desc" },
       })
@@ -91,7 +92,7 @@ async function resolveQuoteLeadForEmail(db: PrismaClient, quote: QuoteForEmail):
   const companyCandidate = (quote.clientCompany || quote.clientName || "").trim();
   const byCompany = companyCandidate
     ? await db.lead.findFirst({
-        where: { companyName: companyCandidate },
+        where: { companyName: companyCandidate, createdById: userId },
         select: { id: true, companyName: true },
         orderBy: { updatedAt: "desc" },
       })
@@ -195,7 +196,7 @@ export const quoteRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const { page, perPage, status } = input;
-      const where = status ? { status } : {};
+      const where = status ? { status, createdById: ctx.user.id } : { createdById: ctx.user.id };
       const [quotes, total] = await Promise.all([
         ctx.db.quote.findMany({
           where,
@@ -222,8 +223,8 @@ export const quoteRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const quote = await ctx.db.quote.findUnique({
-        where: { id: input.id },
+      const quote = await ctx.db.quote.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
         include: {
           lead: {
             select: {
@@ -249,8 +250,8 @@ export const quoteRouter = router({
   emailPreflight: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const quote = await ctx.db.quote.findUnique({
-        where: { id: input.id },
+      const quote = await ctx.db.quote.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
         include: {
           lead: { select: { id: true, companyName: true } },
           items: { select: { id: true } },
@@ -264,7 +265,7 @@ export const quoteRouter = router({
         });
       }
 
-      const leadResolution = await resolveQuoteLeadForEmail(ctx.db, quote);
+      const leadResolution = await resolveQuoteLeadForEmail(ctx.db, quote, ctx.user.id);
       return buildQuoteEmailPreflight(quote, leadResolution);
     }),
 
@@ -299,9 +300,10 @@ export const quoteRouter = router({
       // Generate quote number: OFF-YYYY-XXXX
       const year = new Date().getFullYear();
       const count = await ctx.db.quote.count({
-        where: { quoteNumber: { startsWith: `OFF-${year}-` } },
+        where: { createdById: ctx.user.id },
       });
-      const quoteNumber = `OFF-${year}-${String(count + 1).padStart(4, "0")}`;
+      const quoteNumber = `OFF-${year}-${ctx.user.id.slice(-4).toUpperCase()}-${String(count + 1).padStart(4, "0")}`;
+      if (input.leadId) await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
 
       // Calculate totals
       const items = input.items.map((item, i) => ({
@@ -389,8 +391,8 @@ export const quoteRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const existing = await ctx.db.quote.findUnique({
-        where: { id: input.id },
+      const existing = await ctx.db.quote.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
       });
       if (!existing)
         throw new TRPCError({
@@ -493,8 +495,8 @@ export const quoteRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const quote = await ctx.db.quote.findUnique({
-        where: { id: input.id },
+      const quote = await ctx.db.quote.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
       });
       if (!quote)
         throw new TRPCError({
@@ -540,8 +542,8 @@ export const quoteRouter = router({
   sendEmail: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const quote = await ctx.db.quote.findUnique({
-        where: { id: input.id },
+      const quote = await ctx.db.quote.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
         include: {
           lead: { select: { id: true, companyName: true } },
           items: { orderBy: { sortOrder: "asc" } },
@@ -557,7 +559,7 @@ export const quoteRouter = router({
 
       const preflight = buildQuoteEmailPreflight(
         quote,
-        await resolveQuoteLeadForEmail(ctx.db, quote),
+        await resolveQuoteLeadForEmail(ctx.db, quote, ctx.user.id),
       );
       if (!preflight.canSend) {
         throw new TRPCError({
@@ -681,7 +683,7 @@ export const quoteRouter = router({
   addNote: protectedProcedure
     .input(z.object({ id: z.string(), note: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const quote = await ctx.db.quote.findUnique({ where: { id: input.id } });
+      const quote = await ctx.db.quote.findFirst({ where: { id: input.id, createdById: ctx.user.id } });
       if (!quote)
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -715,8 +717,8 @@ export const quoteRouter = router({
   getTimeline: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const quote = await ctx.db.quote.findUnique({
-        where: { id: input.id },
+      const quote = await ctx.db.quote.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
         include: {
           lead: { select: { id: true, companyName: true } },
           createdBy: { select: { id: true, name: true } },
@@ -805,6 +807,11 @@ export const quoteRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.db.quote.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
+        select: { id: true },
+      });
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Offerte niet gevonden" });
       await ctx.db.quote.delete({ where: { id: input.id } });
       return { success: true };
     }),
@@ -850,15 +857,15 @@ export const quoteRouter = router({
   // Stats for dashboard
   getStats: protectedProcedure.query(async ({ ctx }) => {
     const [total, draft, sent, accepted, rejected] = await Promise.all([
-      ctx.db.quote.count(),
-      ctx.db.quote.count({ where: { status: "DRAFT" } }),
-      ctx.db.quote.count({ where: { status: "SENT" } }),
-      ctx.db.quote.count({ where: { status: "ACCEPTED" } }),
-      ctx.db.quote.count({ where: { status: "REJECTED" } }),
+      ctx.db.quote.count({ where: { createdById: ctx.user.id } }),
+      ctx.db.quote.count({ where: { status: "DRAFT", createdById: ctx.user.id } }),
+      ctx.db.quote.count({ where: { status: "SENT", createdById: ctx.user.id } }),
+      ctx.db.quote.count({ where: { status: "ACCEPTED", createdById: ctx.user.id } }),
+      ctx.db.quote.count({ where: { status: "REJECTED", createdById: ctx.user.id } }),
     ]);
 
     const acceptedQuotes = await ctx.db.quote.findMany({
-      where: { status: "ACCEPTED" },
+      where: { status: "ACCEPTED", createdById: ctx.user.id },
       select: { total: true },
     });
     const totalValue = acceptedQuotes.reduce((sum, q) => sum + q.total, 0);
@@ -866,6 +873,7 @@ export const quoteRouter = router({
     const allSentOrLater = await ctx.db.quote.findMany({
       where: {
         status: { in: ["SENT", "VIEWED", "ACCEPTED", "REJECTED"] },
+        createdById: ctx.user.id,
       },
       select: { total: true },
     });
@@ -886,8 +894,8 @@ export const quoteRouter = router({
   createFromLead: protectedProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const lead = await ctx.db.lead.findUniqueOrThrow({
-        where: { id: input.leadId },
+      const lead = await ctx.db.lead.findFirstOrThrow({
+        where: { id: input.leadId, createdById: ctx.user.id },
         include: {
           scoringFactors: { include: { scoringWeight: true } },
         },
@@ -907,9 +915,9 @@ export const quoteRouter = router({
       // Generate quote number
       const year = new Date().getFullYear();
       const count = await ctx.db.quote.count({
-        where: { quoteNumber: { startsWith: `OFF-${year}-` } },
+        where: { createdById: ctx.user.id },
       });
-      const quoteNumber = `OFF-${year}-${String(count + 1).padStart(4, "0")}`;
+      const quoteNumber = `OFF-${year}-${ctx.user.id.slice(-4).toUpperCase()}-${String(count + 1).padStart(4, "0")}`;
 
       const quote = await ctx.db.quote.create({
         data: {

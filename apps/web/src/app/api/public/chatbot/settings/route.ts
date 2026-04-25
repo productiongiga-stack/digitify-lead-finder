@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 
-export async function GET() {
+function userSettingKey(userId: string, key: string) {
+  return `user:${userId}:${key.trim()}`;
+}
+
+export async function GET(request: Request) {
+  const tenant = new URL(request.url).searchParams.get("tenant")?.trim() || "";
   const keys = [
     "chatbot.enabled",
     "chatbot.company_name",
@@ -22,18 +27,21 @@ export async function GET() {
     "branding.logo_url",
   ];
 
+  const scopedKeys = tenant ? keys.map((key) => userSettingKey(tenant, key)) : keys;
+
   const settings = await prisma.setting.findMany({
-    where: { key: { in: keys } },
+    where: { key: { in: scopedKeys } },
   });
 
   const map = Object.fromEntries(
     settings.map((item) => {
+      const key = tenant ? item.key.replace(`user:${tenant}:`, "") : item.key;
       const raw = item.value;
-      if (typeof raw !== "string") return [item.key, raw];
+      if (typeof raw !== "string") return [key, raw];
       try {
-        return [item.key, JSON.parse(raw)];
+        return [key, JSON.parse(raw)];
       } catch {
-        return [item.key, raw.trim()];
+        return [key, raw.trim()];
       }
     })
   ) as Record<string, unknown>;

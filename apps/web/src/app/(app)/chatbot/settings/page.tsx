@@ -55,6 +55,9 @@ export default function ChatbotSettingsPage() {
     retry: 1,
     refetchOnWindowFocus: false,
   });
+  const { data: profile } = trpc.user.getProfile.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+  });
   const utils = trpc.useUtils();
   const { showToast } = useToast();
 
@@ -167,16 +170,18 @@ export default function ChatbotSettingsPage() {
   const appUrl = getAppUrl();
   const safePrimaryColor = normalizeHexColor(primaryColor);
   const safeAutoOpenDelay = normalizeAutoOpenDelay(autoOpenDelay);
+  const tenantAttribute = profile?.id ? `\n  data-tenant="${profile.id}"` : "";
+  const tenantQuery = profile?.id ? `&tenant=${encodeURIComponent(profile.id)}` : "";
   const embedCode = `<script src="${appUrl}/chatbot/widget.js"
   data-company="${companyName || "MijnBedrijf"}"
   data-color="${safePrimaryColor}"
   data-position="${position}"
   data-welcome="${welcomeMessage}"
-  data-ask-name="${askNameBeforeChat ? "1" : "0"}"
+  data-ask-name="${askNameBeforeChat ? "1" : "0"}"${tenantAttribute}
   data-auto-open="${safeAutoOpenDelay}">
 </script>`;
   const iframeCode = `<iframe
-  src="${appUrl}/embed/chatbot?company=${encodeURIComponent(companyName || "MijnBedrijf")}&color=${encodeURIComponent(safePrimaryColor)}&welcome=${encodeURIComponent(welcomeMessage)}&askName=${askNameBeforeChat ? "1" : "0"}"
+  src="${appUrl}/embed/chatbot?company=${encodeURIComponent(companyName || "MijnBedrijf")}&color=${encodeURIComponent(safePrimaryColor)}&welcome=${encodeURIComponent(welcomeMessage)}&askName=${askNameBeforeChat ? "1" : "0"}${tenantQuery}"
   width="100%"
   height="720"
   style="border:0;border-radius:24px;overflow:hidden"

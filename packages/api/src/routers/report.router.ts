@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
+import { assertLeadAccess } from "../lib/tenant";
 
 export const reportRouter = router({
   list: protectedProcedure
@@ -18,6 +19,7 @@ export const reportRouter = router({
 
       const [reports, total] = await Promise.all([
         ctx.db.report.findMany({
+          where: { generatedById: ctx.user.id },
           orderBy: { createdAt: "desc" },
           skip,
           take: perPage,
@@ -26,7 +28,7 @@ export const reportRouter = router({
             generatedBy: { select: { id: true, name: true } },
           },
         }),
-        ctx.db.report.count(),
+        ctx.db.report.count({ where: { generatedById: ctx.user.id } }),
       ]);
 
       return {
@@ -41,8 +43,8 @@ export const reportRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const report = await ctx.db.report.findUnique({
-        where: { id: input.id },
+      const report = await ctx.db.report.findFirst({
+        where: { id: input.id, generatedById: ctx.user.id },
         include: {
           campaign: { select: { id: true, name: true } },
           generatedBy: { select: { id: true, name: true } },
@@ -68,8 +70,8 @@ export const reportRouter = router({
       let campaignName = "Alle Leads";
 
       if (campaignId) {
-        const campaign = await ctx.db.campaign.findUnique({
-          where: { id: campaignId },
+        const campaign = await ctx.db.campaign.findFirst({
+          where: { id: campaignId, createdById: ctx.user.id },
           include: {
             campaignLeads: {
               include: {
@@ -91,6 +93,7 @@ export const reportRouter = router({
         leads = campaign.campaignLeads.map((cl) => cl.lead);
       } else {
         leads = await ctx.db.lead.findMany({
+          where: { createdById: ctx.user.id },
           include: {
             pipelineStage: true,
             tags: { include: { tag: true } },
@@ -221,8 +224,9 @@ export const reportRouter = router({
   generateLeadReport: protectedProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const lead = await ctx.db.lead.findUniqueOrThrow({
-        where: { id: input.leadId },
+      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      const lead = await ctx.db.lead.findFirstOrThrow({
+        where: { id: input.leadId, createdById: ctx.user.id },
         include: {
           scoringFactors: { include: { scoringWeight: true } },
           enrichmentData: true,
@@ -350,7 +354,7 @@ export const reportRouter = router({
       };
 
       const existing = await ctx.db.report.findFirst({
-        where: { leadId: lead.id, type: "lead_proposal" },
+        where: { leadId: lead.id, type: "lead_proposal", generatedById: ctx.user.id },
         orderBy: { createdAt: "desc" },
         select: { id: true },
       });
@@ -404,8 +408,8 @@ export const reportRouter = router({
 
       if (!report) throw new TRPCError({ code: "NOT_FOUND", message: "Rapport niet gevonden" });
 
-      if (report.generatedById !== ctx.user.id && !["OWNER", "ADMIN"].includes(ctx.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang om dit rapport te verwijderen." });
+      if (report.generatedById !== ctx.user.id) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Rapport niet gevonden" });
       }
 
       await ctx.db.report.delete({ where: { id: input.id } });

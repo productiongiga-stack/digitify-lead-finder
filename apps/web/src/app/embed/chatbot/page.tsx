@@ -43,6 +43,7 @@ function parseBooleanParam(value: string | null, fallback: boolean) {
 
 function ChatbotEmbedContent() {
   const params = useSearchParams();
+  const tenant = params.get("tenant") || "";
   const [settings, setSettings] = useState<RemoteSettings | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -55,7 +56,7 @@ function ChatbotEmbedContent() {
   useEffect(() => {
     let mounted = true;
 
-    fetch("/api/public/chatbot/settings")
+    fetch(`/api/public/chatbot/settings${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ""}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((remote: RemoteSettings | null) => {
         if (!mounted || !remote) return;
@@ -66,13 +67,13 @@ function ChatbotEmbedContent() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [tenant]);
 
   useEffect(() => {
     if (!sessionId) return;
 
     const timer = window.setInterval(() => {
-      fetch(`/api/public/chatbot/session?sessionId=${encodeURIComponent(sessionId)}`)
+      fetch(`/api/public/chatbot/session?sessionId=${encodeURIComponent(sessionId)}${tenant ? `&tenant=${encodeURIComponent(tenant)}` : ""}`)
         .then((res) => (res.ok ? res.json() : null))
         .then((payload) => {
           if (!payload?.messages) return;
@@ -82,7 +83,7 @@ function ChatbotEmbedContent() {
     }, 4000);
 
     return () => window.clearInterval(timer);
-  }, [sessionId]);
+  }, [sessionId, tenant]);
 
   const companyName = params.get("company") || settings?.companyName || "Digitify";
   const companySlogan = settings?.companySlogan || "";
@@ -131,6 +132,7 @@ function ChatbotEmbedContent() {
           visitorName: visitorName || undefined,
           message,
           pageUrl: typeof document !== "undefined" ? document.referrer : undefined,
+          tenant: tenant || undefined,
         }),
       });
 

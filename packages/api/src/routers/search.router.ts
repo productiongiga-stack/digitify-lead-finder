@@ -227,7 +227,7 @@ export const searchRouter = router({
     ];
 
     const recentSearches = await ctx.db.activity.findMany({
-      where: { type: "SEARCH_PERFORMED" },
+      where: { type: "SEARCH_PERFORMED", userId: ctx.user.id },
       orderBy: { createdAt: "desc" },
       take: 120,
       select: { metadata: true },
@@ -267,7 +267,7 @@ export const searchRouter = router({
     .input(z.object({ placeIds: z.array(z.string()) }))
     .query(async ({ ctx, input }) => {
       const existing = await ctx.db.lead.findMany({
-        where: { gmbPlaceId: { in: input.placeIds } },
+        where: { gmbPlaceId: { in: input.placeIds }, createdById: ctx.user.id },
         select: { id: true, gmbPlaceId: true, companyName: true, overallScore: true, scorePriority: true },
       });
       return existing;
@@ -302,6 +302,7 @@ export const searchRouter = router({
       // Check by placeId (exact) or company name (fuzzy duplicate prevention)
       const existing = await ctx.db.lead.findFirst({
         where: {
+          createdById: ctx.user.id,
           OR: [
             { gmbPlaceId: input.placeId },
             {

@@ -27,6 +27,24 @@ type ChatHistoryMessage = {
   content: string;
 };
 
+function userSettingKey(userId: string, key: string) {
+  return `user:${userId}:${key.trim()}`;
+}
+
+function tenantTag(userId: string) {
+  return `tenant:${userId}`;
+}
+
+async function resolveTenantUserId(rawTenant: string | null | undefined) {
+  const candidate = rawTenant?.trim();
+  if (!candidate) return null;
+  const user = await prisma.user.findUnique({
+    where: { id: candidate },
+    select: { id: true },
+  });
+  return user?.id ?? null;
+}
+
 function getSetting(settings: Array<{ key: string; value: unknown }>, key: string, fallback: string) {
   const row = settings.find((item) => item.key === key);
   if (!row) return fallback;
@@ -334,17 +352,36 @@ async function generateAiReply(args: {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const sessionId = url.searchParams.get("sessionId")?.trim();
+  const tenantUserId = await resolveTenantUserId(url.searchParams.get("tenant"));
 
   if (!sessionId) {
     return NextResponse.json({ error: "Sessie is verplicht." }, { status: 400 });
   }
 
-  const session = await prisma.chatSession.findUnique({
-    where: { id: sessionId },
-    include: {
-      messages: { orderBy: { createdAt: "asc" } },
-    },
-  });
+  const session = tenantUserId
+    ? await prisma.chatSession.findFirst({
+        where: {
+          AND: [
+            { id: sessionId },
+            {
+              OR: [
+                { assignedToId: tenantUserId },
+                { tags: { has: tenantTag(tenantUserId) } },
+                { lead: { createdById: tenantUserId } },
+              ],
+            },
+          ],
+        },
+        include: {
+          messages: { orderBy: { createdAt: "asc" } },
+        },
+      })
+    : await prisma.chatSession.findUnique({
+        where: { id: sessionId },
+        include: {
+          messages: { orderBy: { createdAt: "asc" } },
+        },
+      });
 
   if (!session) {
     return NextResponse.json({ error: "Sessie niet gevonden." }, { status: 404 });
@@ -384,6 +421,7 @@ export async function POST(request: Request) {
     const requestedSessionId = String(body.sessionId || "").trim();
     const requestedVisitorName = String(body.visitorName || "").trim();
     const pageUrl = String(body.pageUrl || "").trim();
+    const tenantUserId = await resolveTenantUserId(String(body.tenant || ""));
 
     if (!message) {
       return NextResponse.json({ error: "Bericht is verplicht." }, { status: 400 });
@@ -410,36 +448,44 @@ export async function POST(request: Request) {
     }
     recentMessages.set(dedupeKey, now);
 
-    const settings = await prisma.setting.findMany({
+    const settingsKeys = [
+      "chatbot.enabled",
+      "chatbot.company_name",
+      "chatbot.offline_message",
+      "chatbot.training_notes",
+      "chatbot.knowledge_pages",
+      "chatbot.response_style",
+      "chatbot.auto_messages_enabled",
+      "chatbot.ai_responses_enabled",
+      "chatbot.ask_name_before_chat",
+      "chatbot.language",
+      "api.ai_provider",
+      "api.openai_key",
+      "api.anthropic_key",
+      "openclaw.model",
+      "openclaw.max_tokens",
+      "branding.company_name",
+      "company.name",
+      "company.niche",
+      "company.website",
+      "company.email",
+      "company.phone",
+      "company.address",
+    ];
+
+    const settingsRows = await prisma.setting.findMany({
       where: {
         key: {
-          in: [
-            "chatbot.enabled",
-            "chatbot.company_name",
-            "chatbot.offline_message",
-            "chatbot.training_notes",
-            "chatbot.knowledge_pages",
-            "chatbot.response_style",
-            "chatbot.auto_messages_enabled",
-            "chatbot.ai_responses_enabled",
-            "chatbot.ask_name_before_chat",
-            "chatbot.language",
-            "api.ai_provider",
-            "api.openai_key",
-            "api.anthropic_key",
-            "openclaw.model",
-            "openclaw.max_tokens",
-            "branding.company_name",
-            "company.name",
-            "company.niche",
-            "company.website",
-            "company.email",
-            "company.phone",
-            "company.address",
-          ],
+          in: tenantUserId ? settingsKeys.map((key) => userSettingKey(tenantUserId, key)) : settingsKeys,
         },
       },
     });
+    const settings = tenantUserId
+      ? settingsRows.map((row) => ({
+          ...row,
+          key: row.key.replace(`user:${tenantUserId}:`, ""),
+        }))
+      : settingsRows;
 
     const companyName =
       getSetting(settings, "chatbot.company_name", "") ||
@@ -468,15 +514,36 @@ export async function POST(request: Request) {
     const extractedEmail = extractEmail(message);
     const extractedPhone = extractPhone(message);
     const existingSession = requestedSessionId
-      ? await prisma.chatSession.findUnique({
-          where: { id: requestedSessionId },
-          include: {
-            messages: {
-              orderBy: { createdAt: "desc" },
-              take: 12,
+      ? tenantUserId
+        ? await prisma.chatSession.findFirst({
+            where: {
+              AND: [
+                { id: requestedSessionId },
+                {
+                  OR: [
+                    { assignedToId: tenantUserId },
+                    { tags: { has: tenantTag(tenantUserId) } },
+                    { lead: { createdById: tenantUserId } },
+                  ],
+                },
+              ],
             },
-          },
-        })
+            include: {
+              messages: {
+                orderBy: { createdAt: "desc" },
+                take: 12,
+              },
+            },
+          })
+        : await prisma.chatSession.findUnique({
+            where: { id: requestedSessionId },
+            include: {
+              messages: {
+                orderBy: { createdAt: "desc" },
+                take: 12,
+              },
+            },
+          })
       : null;
 
     const visitorName = requestedVisitorName || existingSession?.visitorName || "";
@@ -549,6 +616,7 @@ export async function POST(request: Request) {
       ? await prisma.chatSession.update({
           where: { id: existingSession.id },
           data: {
+            assignedToId: existingSession.assignedToId || tenantUserId || null,
             updatedAt: new Date(),
             pageUrl: pageUrl || existingSession.pageUrl,
             isRead: false,
@@ -558,11 +626,18 @@ export async function POST(request: Request) {
             visitorPhone: existingSession.visitorPhone || extractedPhone,
             intent: intent.intent,
             summary,
-            tags: Array.from(new Set([...(existingSession.tags || []), ...intent.tags])),
+            tags: Array.from(
+              new Set([
+                ...(existingSession.tags || []),
+                ...intent.tags,
+                ...(tenantUserId ? [tenantTag(tenantUserId)] : []),
+              ]),
+            ),
           },
         })
       : await prisma.chatSession.create({
           data: {
+            assignedToId: tenantUserId || null,
             pageUrl: pageUrl || null,
             isRead: false,
             status: "OPEN",
@@ -571,7 +646,12 @@ export async function POST(request: Request) {
             visitorPhone: extractedPhone,
             intent: intent.intent,
             summary,
-            tags: intent.tags,
+            tags: Array.from(
+              new Set([
+                ...intent.tags,
+                ...(tenantUserId ? [tenantTag(tenantUserId)] : []),
+              ]),
+            ),
           },
         });
 

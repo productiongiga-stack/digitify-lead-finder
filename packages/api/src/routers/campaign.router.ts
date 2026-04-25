@@ -416,6 +416,7 @@ function buildOpenclawContext(lead: any, campaign: any): OpenClawContext {
 export const campaignRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
     return ctx.db.campaign.findMany({
+      where: { createdById: ctx.user.id },
       orderBy: { createdAt: "desc" },
       include: {
         _count: { select: { campaignLeads: true, templates: true } },
@@ -427,8 +428,8 @@ export const campaignRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const campaign = await ctx.db.campaign.findUnique({
-        where: { id: input.id },
+      const campaign = await ctx.db.campaign.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
         include: {
           createdBy: { select: { id: true, name: true } },
           templates: true,
@@ -535,12 +536,16 @@ export const campaignRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
+      const existing = await ctx.db.campaign.findFirst({ where: { id, createdById: ctx.user.id }, select: { id: true } });
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
       return ctx.db.campaign.update({ where: { id }, data: data as any });
     }),
 
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.db.campaign.findFirst({ where: { id: input.id, createdById: ctx.user.id }, select: { id: true } });
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
       await ctx.db.campaign.delete({ where: { id: input.id } });
       return { success: true };
     }),
@@ -548,8 +553,15 @@ export const campaignRouter = router({
   addLeads: protectedProcedure
     .input(z.object({ campaignId: z.string(), leadIds: z.array(z.string()) }))
     .mutation(async ({ ctx, input }) => {
+      const campaign = await ctx.db.campaign.findFirst({ where: { id: input.campaignId, createdById: ctx.user.id }, select: { id: true } });
+      if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });
+      const ownedLeads = await ctx.db.lead.findMany({
+        where: { id: { in: input.leadIds }, createdById: ctx.user.id },
+        select: { id: true },
+      });
+      const ownedLeadIds = ownedLeads.map((lead) => lead.id);
       const result = await ctx.db.campaignLead.createMany({
-        data: input.leadIds.map((leadId) => ({
+        data: ownedLeadIds.map((leadId) => ({
           campaignId: input.campaignId,
           leadId,
         })),
@@ -565,6 +577,7 @@ export const campaignRouter = router({
         where: {
           campaignId: input.campaignId,
           leadId: { in: input.leadIds },
+          campaign: { createdById: ctx.user.id },
         },
       });
       return { removed: deleted.count };
@@ -573,8 +586,8 @@ export const campaignRouter = router({
   getStats: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const campaign = await ctx.db.campaign.findUnique({
-        where: { id: input.id },
+      const campaign = await ctx.db.campaign.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
         include: {
           campaignLeads: {
             include: {
@@ -665,8 +678,8 @@ export const campaignRouter = router({
         });
       }
 
-      const campaign = await ctx.db.campaign.findUnique({
-        where: { id: input.campaignId },
+      const campaign = await ctx.db.campaign.findFirst({
+        where: { id: input.campaignId, createdById: ctx.user.id },
         include: {
           campaignLeads: {
             include: {
@@ -684,9 +697,6 @@ export const campaignRouter = router({
       });
 
       if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });
-      if (campaign.createdById !== ctx.user.id && !["OWNER", "ADMIN"].includes(ctx.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang tot deze campagne." });
-      }
       const sequence = await ensureCampaignSequence(ctx.db, {
         campaignId: campaign.id,
         campaignName: campaign.name,
@@ -773,8 +783,8 @@ export const campaignRouter = router({
       const mode = input.mode as DripMode;
       const { client } = await getOpenClawClient(ctx.db, ctx.user.id);
 
-      const campaign = await ctx.db.campaign.findUnique({
-        where: { id: input.campaignId },
+      const campaign = await ctx.db.campaign.findFirst({
+        where: { id: input.campaignId, createdById: ctx.user.id },
         include: {
           campaignLeads: {
             include: {
@@ -802,9 +812,6 @@ export const campaignRouter = router({
       });
 
       if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });
-      if (campaign.createdById !== ctx.user.id && !["OWNER", "ADMIN"].includes(ctx.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang tot deze campagne." });
-      }
       const sequence = await ensureCampaignSequence(ctx.db, {
         campaignId: campaign.id,
         campaignName: campaign.name,
@@ -1013,8 +1020,8 @@ export const campaignRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const mode = input.mode as DripMode;
-      const campaign = await ctx.db.campaign.findUnique({
-        where: { id: input.campaignId },
+      const campaign = await ctx.db.campaign.findFirst({
+        where: { id: input.campaignId, createdById: ctx.user.id },
         select: { id: true, name: true },
       });
       if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });
@@ -1051,6 +1058,7 @@ export const campaignRouter = router({
       const leads = await ctx.db.lead.findMany({
         where: {
           companyName: { contains: input.query, mode: "insensitive" },
+          createdById: ctx.user.id,
           ...(input.excludeCampaignId
             ? {
                 campaignLeads: {

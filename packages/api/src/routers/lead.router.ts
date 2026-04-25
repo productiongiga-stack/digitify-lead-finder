@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
+import { assertLeadAccess } from "../lib/tenant";
 
 const DEMO_LEAD_NAMES = [
   "Bakkerij Van Damme",
@@ -57,7 +58,7 @@ export const leadRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const { filters, sortBy, sortDir, page, pageSize } = input;
-      const where: Record<string, unknown> = {};
+      const where: Record<string, unknown> = { createdById: ctx.user.id };
 
       if (filters?.search) {
         where.OR = [
@@ -88,7 +89,7 @@ export const leadRouter = router({
         where.tags = { some: { tagId: { in: filters.tags } } };
       }
       if (filters?.campaignId) {
-        where.campaignLeads = { some: { campaignId: filters.campaignId } };
+        where.campaignLeads = { some: { campaignId: filters.campaignId, campaign: { createdById: ctx.user.id } } };
       }
       if (filters?.excludeDemo) {
         where.NOT = {
@@ -126,8 +127,8 @@ export const leadRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const lead = await ctx.db.lead.findUnique({
-        where: { id: input.id },
+      const lead = await ctx.db.lead.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
         include: {
           tags: { include: { tag: true } },
           pipelineStage: true,
@@ -231,6 +232,7 @@ export const leadRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, status, pipelineStageId, assignedToId, ...rest } = input;
+      await assertLeadAccess(ctx.db, ctx.user.id, id);
       const data: Record<string, unknown> = { ...rest };
       if (status !== undefined) data.status = status;
       if (pipelineStageId !== undefined) {
@@ -244,7 +246,7 @@ export const leadRouter = router({
           : { disconnect: true };
       }
       const lead = await ctx.db.lead.update({
-        where: { id },
+        where: { id, createdById: ctx.user.id },
         data: data as any,
       });
 
@@ -263,6 +265,7 @@ export const leadRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      await assertLeadAccess(ctx.db, ctx.user.id, input.id);
       await ctx.db.lead.delete({ where: { id: input.id } });
       return { success: true };
     }),
@@ -276,7 +279,7 @@ export const leadRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const result = await ctx.db.lead.updateMany({
-        where: { id: { in: input.ids } },
+        where: { id: { in: input.ids }, createdById: ctx.user.id },
         data: { status: input.status },
       });
       return { updated: result.count };
@@ -286,7 +289,7 @@ export const leadRouter = router({
     .input(z.object({ ids: z.array(z.string()).min(1).max(500) }))
     .mutation(async ({ ctx, input }) => {
       const result = await ctx.db.lead.deleteMany({
-        where: { id: { in: input.ids } },
+        where: { id: { in: input.ids }, createdById: ctx.user.id },
       });
       return { deleted: result.count };
     }),
@@ -295,11 +298,16 @@ export const leadRouter = router({
     .input(z.object({ leadIds: z.array(z.string()).min(1).max(500), tagId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.leadTag.findMany({
-        where: { leadId: { in: input.leadIds }, tagId: input.tagId },
+        where: { leadId: { in: input.leadIds }, tagId: input.tagId, lead: { createdById: ctx.user.id } },
         select: { leadId: true },
       });
       const existingSet = new Set(existing.map((e) => e.leadId));
-      const toCreate = input.leadIds.filter((id) => !existingSet.has(id));
+      const ownedLeads = await ctx.db.lead.findMany({
+        where: { id: { in: input.leadIds }, createdById: ctx.user.id },
+        select: { id: true },
+      });
+      const ownedSet = new Set(ownedLeads.map((lead) => lead.id));
+      const toCreate = input.leadIds.filter((id) => ownedSet.has(id) && !existingSet.has(id));
 
       if (toCreate.length > 0) {
         await ctx.db.leadTag.createMany({
@@ -312,6 +320,7 @@ export const leadRouter = router({
   addNote: protectedProcedure
     .input(z.object({ leadId: z.string(), content: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
+      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
       const note = await ctx.db.note.create({
         data: {
           leadId: input.leadId,
@@ -334,7 +343,7 @@ export const leadRouter = router({
 
   getIndustries: protectedProcedure.query(async ({ ctx }) => {
     const industries = await ctx.db.lead.findMany({
-      where: { industry: { not: null } },
+      where: { industry: { not: null }, createdById: ctx.user.id },
       distinct: ["industry"],
       select: { industry: true },
     });
@@ -343,7 +352,7 @@ export const leadRouter = router({
 
   getCities: protectedProcedure.query(async ({ ctx }) => {
     const cities = await ctx.db.lead.findMany({
-      where: { city: { not: null } },
+      where: { city: { not: null }, createdById: ctx.user.id },
       distinct: ["city"],
       select: { city: true },
     });

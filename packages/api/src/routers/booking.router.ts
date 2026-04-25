@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc";
 import { type PrismaClient } from "@digitify/db";
 import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
+import { assertLeadAccess } from "../lib/tenant";
 import {
   deleteGoogleBookingEvent,
   extractGoogleEventId,
@@ -173,7 +174,7 @@ export const bookingRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const { status, page = 1, pageSize = 25 } = input ?? {};
-      const where: Record<string, unknown> = {};
+      const where: Record<string, unknown> = { createdById: ctx.user.id };
       if (status) where.status = status;
 
       const [bookings, total] = await Promise.all([
@@ -195,8 +196,8 @@ export const bookingRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const booking = await ctx.db.booking.findUnique({
-        where: { id: input.id },
+      const booking = await ctx.db.booking.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
         include: {
           lead: { select: { id: true, companyName: true, email: true, phone: true } },
         },
@@ -207,14 +208,14 @@ export const bookingRouter = router({
 
   getStats: protectedProcedure.query(async ({ ctx }) => {
     const [total, pending, scheduled, confirmed, completed, cancelled, rejected, noShow] = await Promise.all([
-      ctx.db.booking.count(),
-      ctx.db.booking.count({ where: { status: "PENDING" } }),
-      ctx.db.booking.count({ where: { status: "SCHEDULED" } }),
-      ctx.db.booking.count({ where: { status: "CONFIRMED" } }),
-      ctx.db.booking.count({ where: { status: "COMPLETED" } }),
-      ctx.db.booking.count({ where: { status: "CANCELLED" } }),
-      ctx.db.booking.count({ where: { status: "REJECTED" } }),
-      ctx.db.booking.count({ where: { status: "NO_SHOW" } }),
+      ctx.db.booking.count({ where: { createdById: ctx.user.id } }),
+      ctx.db.booking.count({ where: { status: "PENDING", createdById: ctx.user.id } }),
+      ctx.db.booking.count({ where: { status: "SCHEDULED", createdById: ctx.user.id } }),
+      ctx.db.booking.count({ where: { status: "CONFIRMED", createdById: ctx.user.id } }),
+      ctx.db.booking.count({ where: { status: "COMPLETED", createdById: ctx.user.id } }),
+      ctx.db.booking.count({ where: { status: "CANCELLED", createdById: ctx.user.id } }),
+      ctx.db.booking.count({ where: { status: "REJECTED", createdById: ctx.user.id } }),
+      ctx.db.booking.count({ where: { status: "NO_SHOW", createdById: ctx.user.id } }),
     ]);
     return { total, pending, scheduled, confirmed, completed, cancelled, rejected, noShow };
   }),
@@ -232,6 +233,7 @@ export const bookingRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const bookingDate = new Date(input.date);
+      if (input.leadId) await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
       if (isNaN(bookingDate.getTime())) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Ongeldige datum" });
       }
@@ -346,7 +348,7 @@ export const bookingRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
-      const existing = await ctx.db.booking.findUnique({ where: { id } });
+      const existing = await ctx.db.booking.findFirst({ where: { id, createdById: ctx.user.id } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Boeking niet gevonden" });
       const updateData: Record<string, unknown> = {};
       if (data.clientName !== undefined) updateData.clientName = data.clientName;
@@ -419,7 +421,7 @@ export const bookingRouter = router({
   confirm: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const booking = await ctx.db.booking.findUnique({ where: { id: input.id } });
+      const booking = await ctx.db.booking.findFirst({ where: { id: input.id, createdById: ctx.user.id } });
       if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Boeking niet gevonden" });
       if (booking.status === "CANCELLED" || booking.status === "REJECTED") {
         throw new TRPCError({
@@ -465,7 +467,7 @@ export const bookingRouter = router({
       reason: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const booking = await ctx.db.booking.findUnique({ where: { id: input.id } });
+      const booking = await ctx.db.booking.findFirst({ where: { id: input.id, createdById: ctx.user.id } });
       if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Boeking niet gevonden" });
       if (booking.status === "COMPLETED") {
         throw new TRPCError({
@@ -513,8 +515,8 @@ export const bookingRouter = router({
   getTimeline: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const booking = await ctx.db.booking.findUnique({
-        where: { id: input.id },
+      const booking = await ctx.db.booking.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
         include: {
           lead: { select: { id: true, companyName: true } },
         },
@@ -579,7 +581,7 @@ export const bookingRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const existing = await ctx.db.booking.findUnique({ where: { id: input.id } });
+      const existing = await ctx.db.booking.findFirst({ where: { id: input.id, createdById: ctx.user.id } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Boeking niet gevonden" });
       const deleted = await ctx.db.booking.delete({ where: { id: input.id } });
       await logBookingActivity({

@@ -3,6 +3,7 @@ import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { replacePlaceholders } from "@digitify/email";
 import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
+import { assertLeadAccess } from "../lib/tenant";
 
 const REVIEW_STATUSES = ["PENDING", "SENT", "OPENED", "REVIEWED", "FEEDBACK"] as const;
 const reviewStatusEnum = z.enum(REVIEW_STATUSES);
@@ -38,7 +39,7 @@ export const reviewRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const { status, page = 1, pageSize = 25 } = input ?? {};
-      const where: Record<string, unknown> = {};
+      const where: Record<string, unknown> = { createdById: ctx.user.id };
       if (status) where.status = status;
 
       const [reviews, total] = await Promise.all([
@@ -59,15 +60,15 @@ export const reviewRouter = router({
 
   getStats: protectedProcedure.query(async ({ ctx }) => {
     const [total, pending, sent, opened, reviewed, feedback, ratingResult] = await Promise.all([
-      ctx.db.reviewRequest.count(),
-      ctx.db.reviewRequest.count({ where: { status: "PENDING" } }),
-      ctx.db.reviewRequest.count({ where: { status: "SENT" } }),
-      ctx.db.reviewRequest.count({ where: { status: "OPENED" } }),
-      ctx.db.reviewRequest.count({ where: { status: "REVIEWED" } }),
-      ctx.db.reviewRequest.count({ where: { status: "FEEDBACK" } }),
+      ctx.db.reviewRequest.count({ where: { createdById: ctx.user.id } }),
+      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.id } }),
+      ctx.db.reviewRequest.count({ where: { status: "SENT", createdById: ctx.user.id } }),
+      ctx.db.reviewRequest.count({ where: { status: "OPENED", createdById: ctx.user.id } }),
+      ctx.db.reviewRequest.count({ where: { status: "REVIEWED", createdById: ctx.user.id } }),
+      ctx.db.reviewRequest.count({ where: { status: "FEEDBACK", createdById: ctx.user.id } }),
       ctx.db.reviewRequest.aggregate({
         _avg: { rating: true },
-        where: { rating: { not: null } },
+        where: { rating: { not: null }, createdById: ctx.user.id },
       }),
     ]);
     return {
@@ -92,6 +93,7 @@ export const reviewRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (input.leadId) await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
       return ctx.db.reviewRequest.create({
         data: {
           clientName: input.clientName,
@@ -116,6 +118,11 @@ export const reviewRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
+      const existing = await ctx.db.reviewRequest.findFirst({
+        where: { id, createdById: ctx.user.id },
+        select: { id: true },
+      });
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Review request niet gevonden" });
       const updateData: Record<string, unknown> = {};
       if (data.status !== undefined) {
         updateData.status = data.status;
@@ -135,8 +142,8 @@ export const reviewRouter = router({
   send: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const review = await ctx.db.reviewRequest.findUnique({
-        where: { id: input.id },
+      const review = await ctx.db.reviewRequest.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
         include: { lead: { select: { id: true, companyName: true } } },
       });
       if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "Review request niet gevonden" });
@@ -205,7 +212,7 @@ export const reviewRouter = router({
     .input(z.object({ ids: z.array(z.string()).min(1).max(50) }))
     .mutation(async ({ ctx, input }) => {
       const reviews = await ctx.db.reviewRequest.findMany({
-        where: { id: { in: input.ids } },
+        where: { id: { in: input.ids }, createdById: ctx.user.id },
         include: { lead: { select: { id: true, companyName: true } } },
       });
 
@@ -296,6 +303,11 @@ export const reviewRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.db.reviewRequest.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
+        select: { id: true },
+      });
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Review request niet gevonden" });
       return ctx.db.reviewRequest.delete({ where: { id: input.id } });
     }),
 });
