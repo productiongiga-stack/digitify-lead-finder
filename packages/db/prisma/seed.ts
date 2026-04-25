@@ -43,7 +43,7 @@ async function main() {
 
   const createdStages: Record<string, string> = {};
   for (const stage of stages) {
-    const s = await prisma.pipelineStage.create({ data: stage });
+    const s = await prisma.pipelineStage.create({ data: { ...stage, userId: admin.id } });
     createdStages[stage.name] = s.id;
   }
 
@@ -63,9 +63,9 @@ async function main() {
 
   for (const w of weights) {
     await prisma.scoringWeight.upsert({
-      where: { factorKey: w.factorKey },
+      where: { userId_factorKey: { userId: admin.id, factorKey: w.factorKey } },
       update: w,
-      create: w,
+      create: { ...w, userId: admin.id },
     });
   }
 
@@ -88,13 +88,18 @@ async function main() {
   const createdTags: Record<string, string> = {};
   for (const t of tags) {
     const tag = await prisma.tag.upsert({
-      where: { name: t.name },
+      where: { userId_name: { userId: admin.id, name: t.name } },
       update: t,
-      create: t,
+      create: { ...t, userId: admin.id },
     });
     createdTags[t.name] = tag.id;
   }
 
+  const seedDemoData = process.env.SEED_DEMO_DATA === "true";
+  let seededCampaigns = 0;
+  let seededLeads = 0;
+
+  if (seedDemoData) {
   // Create campaigns
   const campaign1 = await prisma.campaign.create({
     data: {
@@ -521,6 +526,8 @@ async function main() {
     });
     createdLeads.push(lead);
   }
+  seededCampaigns = 3;
+  seededLeads = createdLeads.length;
 
   // Add leads to campaigns
   await prisma.campaignLead.createMany({
@@ -571,6 +578,7 @@ async function main() {
       subject: "Betere online zichtbaarheid voor {{companyName}}?",
       body: `Beste {{contactName}},\n\nIk kwam {{companyName}} tegen en merkte op dat er enkele kansen zijn om uw online aanwezigheid te versterken.\n\n{{painPoints}}\n\nBij {{senderCompany}} helpen we bedrijven zoals het uwe om meer klanten aan te trekken via een professionele website en sterke online zichtbaarheid.\n\nZou u openstaan voor een kort gesprek van 15 minuten om te bekijken hoe we u kunnen helpen?\n\nMet vriendelijke groeten,\n{{senderName}}\n{{senderCompany}}`,
       isGlobal: true,
+      userId: admin.id,
     },
   });
 
@@ -580,6 +588,7 @@ async function main() {
       subject: "{{companyName}} beter vindbaar in Google?",
       body: `Beste {{contactName}},\n\nIk deed wat onderzoek naar {{companyName}} en zag dat er mogelijkheden zijn om beter gevonden te worden in Google.\n\n{{painPoints}}\n\nBij {{senderCompany}} helpen we bedrijven in {{city}} om hoger te scoren in Google en meer relevante bezoekers aan te trekken.\n\nInteresse in een gratis SEO-analyse? Ik stuur ze graag door.\n\nGroeten,\n{{senderName}}\n{{senderCompany}}`,
       isGlobal: true,
+      userId: admin.id,
     },
   });
 
@@ -589,6 +598,7 @@ async function main() {
       subject: "Re: {{previousSubject}}",
       body: `Beste {{contactName}},\n\nIk wilde even opvolgen op mijn vorige mail. Ik begrijp dat het druk kan zijn.\n\nKort samengevat: ik zag enkele concrete verbeterpunten voor {{companyName}} online en zou die graag even toelichten.\n\nPast het om deze week even kort te bellen?\n\nMet vriendelijke groeten,\n{{senderName}}\n{{senderCompany}}`,
       isGlobal: true,
+      userId: admin.id,
     },
   });
 
@@ -610,6 +620,7 @@ async function main() {
       isPinned: true,
     },
   });
+  }
 
   // Create default settings
   const defaultSettings = [
@@ -630,9 +641,9 @@ async function main() {
 
   for (const setting of defaultSettings) {
     await prisma.setting.upsert({
-      where: { key: setting.key },
+      where: { userId_key: { userId: admin.id, key: setting.key } },
       update: { value: setting.value },
-      create: setting,
+      create: { ...setting, userId: admin.id },
     });
   }
 
@@ -641,9 +652,9 @@ async function main() {
   console.log(`  - ${stages.length} pipeline stages`);
   console.log(`  - ${weights.length} scoring weights`);
   console.log(`  - ${tags.length} tags`);
-  console.log(`  - 3 campaigns`);
-  console.log(`  - ${leads.length} leads`);
-  console.log(`  - 3 email templates`);
+  console.log(`  - ${seededCampaigns} demo campaigns`);
+  console.log(`  - ${seededLeads} demo leads`);
+  console.log(`  - ${seedDemoData ? 3 : 0} demo email templates`);
   console.log(`  - ${defaultSettings.length} settings`);
 }
 

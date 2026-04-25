@@ -20,6 +20,7 @@ export type GoogleCalendarSyncConfig = {
 };
 
 type GoogleEventWindow = {
+  userId?: string;
   start: Date;
   end: Date;
   summary: string;
@@ -27,7 +28,6 @@ type GoogleEventWindow = {
   attendeeEmail?: string;
   location?: string;
   existingEventId?: string | null;
-  userId?: string;
 };
 
 type GoogleEventItem = {
@@ -171,23 +171,24 @@ export function upsertGoogleEventIdInNotes(notes: string | null | undefined, eve
 }
 
 export async function loadGoogleCalendarSyncConfig(db: SettingsDb, userId?: string): Promise<GoogleCalendarSyncConfig> {
-  const keys = [
-    "bookings.google_sync_enabled",
-    "bookings.google_calendar_id",
-    "bookings.google_service_account_email",
-    "bookings.google_service_account_private_key",
-    "bookings.google_oauth_access_token",
-    "bookings.google_oauth_refresh_token",
-    "bookings.google_oauth_account_email",
-    "bookings.google_calendar_timezone",
-    "branding.company_name",
-  ];
-  const settingRows = userId
-    ? (await db.setting.findMany({ where: { key: { in: keys.map((key) => `user:${userId}:${key}`) } } } as any)).map((row) => ({
-        ...row,
-        key: row.key.replace(`user:${userId}:`, ""),
-      }))
-    : await db.setting.findMany({ where: { key: { in: keys } } } as any);
+  const settingRows = await db.setting.findMany({
+    where: {
+      ...(userId ? { userId } : {}),
+      key: {
+        in: [
+          "bookings.google_sync_enabled",
+          "bookings.google_calendar_id",
+          "bookings.google_service_account_email",
+          "bookings.google_service_account_private_key",
+          "bookings.google_oauth_access_token",
+          "bookings.google_oauth_refresh_token",
+          "bookings.google_oauth_account_email",
+          "bookings.google_calendar_timezone",
+          "branding.company_name",
+        ],
+      },
+    },
+  } as any);
   const map = settingsRowsToMap(settingRows);
 
   return {

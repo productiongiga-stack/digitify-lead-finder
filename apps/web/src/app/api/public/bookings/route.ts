@@ -7,6 +7,7 @@ import {
   upsertGoogleEventIdInNotes,
 } from "@digitify/api/src/lib/google-calendar";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { getPublicOwnerKeyFromUrl, resolvePublicOwner } from "@digitify/api/src/lib/tenant";
 
 function getSetting(settings: Array<{ key: string; value: unknown }>, key: string, fallback = "") {
   const row = settings.find((item) => item.key === key);
@@ -66,8 +67,14 @@ export async function POST(request: Request) {
   try {
     const forwarded = request.headers.get("x-forwarded-for") || "";
     const ip = forwarded.split(",")[0]?.trim() || "unknown";
+    const body = await request.json();
+    const ownerKey = String(body.account || body.tenant || body.owner || "").trim() || getPublicOwnerKeyFromUrl(request.url);
+    const owner = await resolvePublicOwner(prisma, ownerKey);
+    if (!owner) {
+      return NextResponse.json({ error: "Account is verplicht." }, { status: 400 });
+    }
     const limiter = checkRateLimit({
-      key: `public-booking:${ip}`,
+      key: `public-booking:${owner.id}:${ip}`,
       limit: 12,
       windowMs: 60 * 60 * 1000,
     });
@@ -78,7 +85,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = await request.json();
     const honeypot = String(body.website || "").trim();
     if (honeypot) {
       return NextResponse.json({ success: true });
@@ -92,6 +98,7 @@ export async function POST(request: Request) {
     const notes = String(body.notes || "").trim();
     const settings = await prisma.setting.findMany({
       where: {
+        userId: owner.id,
         key: {
           in: [
             "bookings.availability_start_time",
@@ -169,6 +176,7 @@ export async function POST(request: Request) {
     }
     const bookingEnd = new Date(bookingDate.getTime() + duration * 60 * 1000);
     const googleAvailability = await isGoogleSlotAvailable(prisma, {
+      userId: owner.id,
       start: bookingDate,
       end: bookingEnd,
     });
@@ -181,6 +189,7 @@ export async function POST(request: Request) {
 
     const existingBooking = await prisma.booking.findFirst({
       where: {
+        createdById: owner.id,
         date: bookingDate,
         status: { in: ["PENDING", "SCHEDULED", "CONFIRMED"] },
       },
@@ -194,6 +203,7 @@ export async function POST(request: Request) {
     const duplicateWindow = new Date(Date.now() - 15 * 60 * 1000);
     const recentDuplicate = await prisma.booking.findFirst({
       where: {
+        createdById: owner.id,
         createdAt: { gte: duplicateWindow },
         date: bookingDate,
         status: { in: ["PENDING", "SCHEDULED", "CONFIRMED"] },
@@ -213,18 +223,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const creator = await prisma.user.findFirst({
-      orderBy: { createdAt: "asc" },
-      select: { id: true },
-    });
-
-    if (!creator) {
-      return NextResponse.json(
-        { error: "Geen interne gebruiker beschikbaar voor boekingen." },
-        { status: 500 }
-      );
-    }
-
     const booking = await prisma.booking.create({
       data: {
         clientName,
@@ -233,11 +231,12 @@ export async function POST(request: Request) {
         duration,
         notes: notes || "Aangemaakt via booking embed",
         status: "PENDING",
-        createdById: creator.id,
+        createdById: owner.id,
       },
     });
     try {
       const event = await upsertGoogleBookingEvent(prisma, {
+        userId: owner.id,
         start: booking.date,
         end: bookingEnd,
         summary: `Afspraak met ${booking.clientName}`,
@@ -279,6 +278,7 @@ export async function POST(request: Request) {
 
     if (clientEmail) {
       await sendBrandedEmail(prisma, {
+        userId: owner.id,
         toEmail: clientEmail,
         subject: `Boeking ontvangen bij ${companyName}`,
         body: [
@@ -298,6 +298,7 @@ export async function POST(request: Request) {
 
     if (adminRecipient) {
       await sendBrandedEmail(prisma, {
+        userId: owner.id,
         toEmail: adminRecipient,
         subject: `Nieuwe booking aanvraag: ${clientName}`,
         body: [

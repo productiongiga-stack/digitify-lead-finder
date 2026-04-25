@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma, revealSettingValue } from "@digitify/db";
 import { createHash } from "node:crypto";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { getPublicOwnerKeyFromUrl, resolvePublicOwner } from "@digitify/api/src/lib/tenant";
 
 const recentMessages = new Map<string, number>();
 
@@ -26,24 +27,6 @@ type ChatHistoryMessage = {
   role: "BOT" | "VISITOR" | "AGENT";
   content: string;
 };
-
-function userSettingKey(userId: string, key: string) {
-  return `user:${userId}:${key.trim()}`;
-}
-
-function tenantTag(userId: string) {
-  return `tenant:${userId}`;
-}
-
-async function resolveTenantUserId(rawTenant: string | null | undefined) {
-  const candidate = rawTenant?.trim();
-  if (!candidate) return null;
-  const user = await prisma.user.findUnique({
-    where: { id: candidate },
-    select: { id: true },
-  });
-  return user?.id ?? null;
-}
 
 function getSetting(settings: Array<{ key: string; value: unknown }>, key: string, fallback: string) {
   const row = settings.find((item) => item.key === key);
@@ -352,36 +335,21 @@ async function generateAiReply(args: {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const sessionId = url.searchParams.get("sessionId")?.trim();
-  const tenantUserId = await resolveTenantUserId(url.searchParams.get("tenant"));
+  const owner = await resolvePublicOwner(prisma, getPublicOwnerKeyFromUrl(url));
 
   if (!sessionId) {
     return NextResponse.json({ error: "Sessie is verplicht." }, { status: 400 });
   }
+  if (!owner) {
+    return NextResponse.json({ error: "Account is verplicht." }, { status: 400 });
+  }
 
-  const session = tenantUserId
-    ? await prisma.chatSession.findFirst({
-        where: {
-          AND: [
-            { id: sessionId },
-            {
-              OR: [
-                { assignedToId: tenantUserId },
-                { tags: { has: tenantTag(tenantUserId) } },
-                { lead: { createdById: tenantUserId } },
-              ],
-            },
-          ],
-        },
-        include: {
-          messages: { orderBy: { createdAt: "asc" } },
-        },
-      })
-    : await prisma.chatSession.findUnique({
-        where: { id: sessionId },
-        include: {
-          messages: { orderBy: { createdAt: "asc" } },
-        },
-      });
+  const session = await prisma.chatSession.findFirst({
+    where: { id: sessionId, createdById: owner.id },
+    include: {
+      messages: { orderBy: { createdAt: "asc" } },
+    },
+  });
 
   if (!session) {
     return NextResponse.json({ error: "Sessie niet gevonden." }, { status: 404 });
@@ -404,8 +372,18 @@ export async function POST(request: Request) {
   try {
     const forwarded = request.headers.get("x-forwarded-for") || "";
     const ip = forwarded.split(",")[0]?.trim() || "unknown";
+    const body = await request.json();
+    const message = String(body.message || "").trim();
+    const requestedSessionId = String(body.sessionId || "").trim();
+    const requestedVisitorName = String(body.visitorName || "").trim();
+    const pageUrl = String(body.pageUrl || "").trim();
+    const ownerKey = String(body.account || body.tenant || body.owner || "").trim() || getPublicOwnerKeyFromUrl(request.url);
+    const owner = await resolvePublicOwner(prisma, ownerKey);
+    if (!owner) {
+      return NextResponse.json({ error: "Account is verplicht." }, { status: 400 });
+    }
     const limiter = checkRateLimit({
-      key: `public-chatbot:${ip}`,
+      key: `public-chatbot:${owner.id}:${ip}`,
       limit: 100,
       windowMs: 60 * 60 * 1000,
     });
@@ -415,13 +393,6 @@ export async function POST(request: Request) {
         { status: 429 },
       );
     }
-
-    const body = await request.json();
-    const message = String(body.message || "").trim();
-    const requestedSessionId = String(body.sessionId || "").trim();
-    const requestedVisitorName = String(body.visitorName || "").trim();
-    const pageUrl = String(body.pageUrl || "").trim();
-    const tenantUserId = await resolveTenantUserId(String(body.tenant || ""));
 
     if (!message) {
       return NextResponse.json({ error: "Bericht is verplicht." }, { status: 400 });
@@ -434,7 +405,7 @@ export async function POST(request: Request) {
     }
 
     const dedupeKey = createHash("sha256")
-      .update(`${ip}|${requestedSessionId}|${message.toLowerCase()}`)
+      .update(`${owner.id}|${ip}|${requestedSessionId}|${message.toLowerCase()}`)
       .digest("hex");
     const now = Date.now();
     for (const [key, ts] of recentMessages.entries()) {
@@ -448,44 +419,37 @@ export async function POST(request: Request) {
     }
     recentMessages.set(dedupeKey, now);
 
-    const settingsKeys = [
-      "chatbot.enabled",
-      "chatbot.company_name",
-      "chatbot.offline_message",
-      "chatbot.training_notes",
-      "chatbot.knowledge_pages",
-      "chatbot.response_style",
-      "chatbot.auto_messages_enabled",
-      "chatbot.ai_responses_enabled",
-      "chatbot.ask_name_before_chat",
-      "chatbot.language",
-      "api.ai_provider",
-      "api.openai_key",
-      "api.anthropic_key",
-      "openclaw.model",
-      "openclaw.max_tokens",
-      "branding.company_name",
-      "company.name",
-      "company.niche",
-      "company.website",
-      "company.email",
-      "company.phone",
-      "company.address",
-    ];
-
-    const settingsRows = await prisma.setting.findMany({
+    const settings = await prisma.setting.findMany({
       where: {
+        userId: owner.id,
         key: {
-          in: tenantUserId ? settingsKeys.map((key) => userSettingKey(tenantUserId, key)) : settingsKeys,
+          in: [
+            "chatbot.enabled",
+            "chatbot.company_name",
+            "chatbot.offline_message",
+            "chatbot.training_notes",
+            "chatbot.knowledge_pages",
+            "chatbot.response_style",
+            "chatbot.auto_messages_enabled",
+            "chatbot.ai_responses_enabled",
+            "chatbot.ask_name_before_chat",
+            "chatbot.language",
+            "api.ai_provider",
+            "api.openai_key",
+            "api.anthropic_key",
+            "openclaw.model",
+            "openclaw.max_tokens",
+            "branding.company_name",
+            "company.name",
+            "company.niche",
+            "company.website",
+            "company.email",
+            "company.phone",
+            "company.address",
+          ],
         },
       },
     });
-    const settings = tenantUserId
-      ? settingsRows.map((row) => ({
-          ...row,
-          key: row.key.replace(`user:${tenantUserId}:`, ""),
-        }))
-      : settingsRows;
 
     const companyName =
       getSetting(settings, "chatbot.company_name", "") ||
@@ -514,36 +478,15 @@ export async function POST(request: Request) {
     const extractedEmail = extractEmail(message);
     const extractedPhone = extractPhone(message);
     const existingSession = requestedSessionId
-      ? tenantUserId
-        ? await prisma.chatSession.findFirst({
-            where: {
-              AND: [
-                { id: requestedSessionId },
-                {
-                  OR: [
-                    { assignedToId: tenantUserId },
-                    { tags: { has: tenantTag(tenantUserId) } },
-                    { lead: { createdById: tenantUserId } },
-                  ],
-                },
-              ],
+      ? await prisma.chatSession.findFirst({
+          where: { id: requestedSessionId, createdById: owner.id },
+          include: {
+            messages: {
+              orderBy: { createdAt: "desc" },
+              take: 12,
             },
-            include: {
-              messages: {
-                orderBy: { createdAt: "desc" },
-                take: 12,
-              },
-            },
-          })
-        : await prisma.chatSession.findUnique({
-            where: { id: requestedSessionId },
-            include: {
-              messages: {
-                orderBy: { createdAt: "desc" },
-                take: 12,
-              },
-            },
-          })
+          },
+        })
       : null;
 
     const visitorName = requestedVisitorName || existingSession?.visitorName || "";
@@ -557,7 +500,7 @@ export async function POST(request: Request) {
       website,
       email,
       phone,
-      bookingUrl: `${getAppUrl()}/embed/bookings`,
+      bookingUrl: `${getAppUrl()}/embed/bookings?account=${encodeURIComponent(owner.publicId)}`,
       offlineMessage,
       trainingNotes,
       enabled,
@@ -581,7 +524,7 @@ export async function POST(request: Request) {
               phone,
               address,
               niche,
-              bookingUrl: `${getAppUrl()}/embed/bookings`,
+              bookingUrl: `${getAppUrl()}/embed/bookings?account=${encodeURIComponent(owner.publicId)}`,
               trainingNotes,
               knowledgePages,
               responseStyle,
@@ -616,7 +559,6 @@ export async function POST(request: Request) {
       ? await prisma.chatSession.update({
           where: { id: existingSession.id },
           data: {
-            assignedToId: existingSession.assignedToId || tenantUserId || null,
             updatedAt: new Date(),
             pageUrl: pageUrl || existingSession.pageUrl,
             isRead: false,
@@ -626,18 +568,12 @@ export async function POST(request: Request) {
             visitorPhone: existingSession.visitorPhone || extractedPhone,
             intent: intent.intent,
             summary,
-            tags: Array.from(
-              new Set([
-                ...(existingSession.tags || []),
-                ...intent.tags,
-                ...(tenantUserId ? [tenantTag(tenantUserId)] : []),
-              ]),
-            ),
+            tags: Array.from(new Set([...(existingSession.tags || []), ...intent.tags])),
           },
         })
       : await prisma.chatSession.create({
           data: {
-            assignedToId: tenantUserId || null,
+            createdById: owner.id,
             pageUrl: pageUrl || null,
             isRead: false,
             status: "OPEN",
@@ -646,12 +582,7 @@ export async function POST(request: Request) {
             visitorPhone: extractedPhone,
             intent: intent.intent,
             summary,
-            tags: Array.from(
-              new Set([
-                ...intent.tags,
-                ...(tenantUserId ? [tenantTag(tenantUserId)] : []),
-              ]),
-            ),
+            tags: intent.tags,
           },
         });
 

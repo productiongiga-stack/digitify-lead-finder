@@ -11,8 +11,8 @@ import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../t
 import { loadEmailSettings } from "../lib/email-sender";
 import { formatSmtpErrorMessage, normalizeTlsOptions } from "../lib/email-utils";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
-import { loadUserSettingRows, userSettingKey } from "../lib/user-settings";
 import { assertCanManageSettingKey, canReadSettingKey, filterReadableSettingsForRole } from "../lib/permissions";
+import { tenantSettingWhere } from "../lib/tenant";
 
 /* ---------- helpers ---------- */
 
@@ -145,7 +145,7 @@ export const settingsRouter = router({
   get: protectedProcedure
     .input(z.object({ key: z.string() }))
     .query(async ({ ctx, input }) => {
-      const setting = await ctx.db.setting.findUnique({ where: { key: userSettingKey(ctx.user.id, input.key) } });
+      const setting = await ctx.db.setting.findUnique({ where: tenantSettingWhere(ctx.user.id, input.key) });
       if (!canReadSettingKey(ctx.user.role, input.key)) return null;
       if (!setting) return null;
       const settingsMap = settingsRowsToMap([{ key: input.key, value: setting.value }]);
@@ -154,7 +154,7 @@ export const settingsRouter = router({
     }),
 
   getAll: protectedProcedure.query(async ({ ctx }) => {
-    const rows = await loadUserSettingRows(ctx.db, ctx.user.id);
+    const rows = await ctx.db.setting.findMany({ where: { userId: ctx.user.id } });
     const map = settingsRowsToMap(rows);
     return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
   }),
@@ -163,18 +163,17 @@ export const settingsRouter = router({
     .input(z.object({ key: z.string(), value: z.any() }))
     .mutation(async ({ ctx, input }) => {
       assertCanManageSettingKey(ctx.user.role, input.key);
-      const scopedKey = userSettingKey(ctx.user.id, input.key);
       if (isSecretNoopUpdate(input.key, input.value)) {
-        const current = await ctx.db.setting.findUnique({ where: { key: scopedKey } });
+        const current = await ctx.db.setting.findUnique({ where: tenantSettingWhere(ctx.user.id, input.key) });
         if (current) return current;
         return ctx.db.setting.create({
-          data: { key: scopedKey, value: "" },
+          data: { userId: ctx.user.id, key: input.key, value: "" },
         });
       }
       const result = await ctx.db.setting.upsert({
-        where: { key: scopedKey },
+        where: tenantSettingWhere(ctx.user.id, input.key),
         update: { value: sanitizeSettingValue(input.key, input.value) },
-        create: { key: scopedKey, value: sanitizeSettingValue(input.key, input.value) },
+        create: { userId: ctx.user.id, key: input.key, value: sanitizeSettingValue(input.key, input.value) },
       });
       await ctx.db.activity.create({
         data: {
@@ -208,8 +207,8 @@ export const settingsRouter = router({
       await ctx.db.$transaction([
         ...uniqueEntries.map((item) =>
           ctx.db.setting.upsert({
-            where: { key: userSettingKey(ctx.user.id, item.key) },
-            create: { key: userSettingKey(ctx.user.id, item.key), value: item.value },
+            where: tenantSettingWhere(ctx.user.id, item.key),
+            create: { userId: ctx.user.id, key: item.key, value: item.value },
             update: { value: item.value },
           }),
         ),
@@ -229,7 +228,7 @@ export const settingsRouter = router({
     }),
 
   getScoringWeights: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.db.scoringWeight.findMany({ orderBy: { sortOrder: "asc" } });
+    return ctx.db.scoringWeight.findMany({ where: { userId: ctx.user.id }, orderBy: { sortOrder: "asc" } });
   }),
 
   updateScoringWeight: adminProcedure
@@ -244,13 +243,20 @@ export const settingsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
-      return ctx.db.scoringWeight.update({ where: { id }, data });
+      const result = await ctx.db.scoringWeight.updateMany({
+        where: { id, userId: ctx.user.id },
+        data,
+      });
+      if (result.count === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Scoringgewicht niet gevonden." });
+      }
+      return ctx.db.scoringWeight.findUnique({ where: { id } });
     }),
 
   /* ---------- test connection endpoints ---------- */
 
   testGooglePlaces: ownerProcedure.mutation(async ({ ctx }) => {
-    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.google_places_key"]);
+    const settings = await ctx.db.setting.findMany({ where: { userId: ctx.user.id } });
     const key = getSettingString(settingsRowsToMap(settings), "api.google_places_key");
     if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Google Places API key is niet geconfigureerd." });
 
@@ -278,7 +284,7 @@ export const settingsRouter = router({
   }),
 
   testAnthropicKey: ownerProcedure.mutation(async ({ ctx }) => {
-    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.anthropic_key"]);
+    const settings = await ctx.db.setting.findMany({ where: { userId: ctx.user.id } });
     const key = getSettingString(settingsRowsToMap(settings), "api.anthropic_key");
     if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Anthropic API key is niet geconfigureerd." });
 
@@ -307,7 +313,7 @@ export const settingsRouter = router({
   }),
 
   testOpenaiKey: ownerProcedure.mutation(async ({ ctx }) => {
-    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.openai_key"]);
+    const settings = await ctx.db.setting.findMany({ where: { userId: ctx.user.id } });
     const key = getSettingString(settingsRowsToMap(settings), "api.openai_key");
     if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "OpenAI API key is niet geconfigureerd." });
 
@@ -333,7 +339,7 @@ export const settingsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const nodemailer = await import("nodemailer");
-      const settings = await loadUserSettingRows(ctx.db, ctx.user.id);
+      const settings = await ctx.db.setting.findMany({ where: { userId: ctx.user.id } });
       const cfg = await loadEmailSettings(ctx.db, ctx.user.id);
       const host = cfg.smtpHost;
       const port = cfg.smtpPort;
@@ -407,7 +413,7 @@ export const settingsRouter = router({
         .optional(),
     )
     .mutation(async ({ ctx, input }) => {
-      const settingRows = await loadUserSettingRows(ctx.db, ctx.user.id);
+      const settingRows = await ctx.db.setting.findMany({ where: { userId: ctx.user.id } });
       const settingsMap = settingsRowsToMap(settingRows);
       const fromEmail = getSettingString(settingsMap, "email.from_email");
       const smtpUser = getSettingString(settingsMap, "email.smtp_user");
@@ -521,7 +527,7 @@ export const settingsRouter = router({
 
   testImap: ownerProcedure.mutation(async ({ ctx }) => {
     const { ImapFlow } = await import("imapflow");
-    const settings = await loadUserSettingRows(ctx.db, ctx.user.id);
+    const settings = await ctx.db.setting.findMany({ where: { userId: ctx.user.id } });
     const settingsMap = settingsRowsToMap(settings);
     const host = getSettingString(settingsMap, "email.imap_host");
     const port = getSettingString(settingsMap, "email.imap_port", "993");

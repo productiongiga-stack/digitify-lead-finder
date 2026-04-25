@@ -17,7 +17,6 @@ export async function GET(request: Request) {
   var dataset = currentScript ? currentScript.dataset : {};
   var position = dataset.position === "bottom-left" ? "bottom-left" : "bottom-right";
   var autoOpen = Number(dataset.autoOpen || "0");
-  var tenant = (dataset.tenant || "").trim();
 
   function parseBoolean(value, fallback) {
     if (value === undefined || value === null || value === "") return fallback;
@@ -31,15 +30,16 @@ export async function GET(request: Request) {
     var company = dataset.company || (remote && remote.companyName) || "Digitify";
     var color = dataset.color || (remote && remote.primaryColor) || "#6366f1";
     var avatarUrl = dataset.avatar || (remote && remote.avatarUrl) || "";
+    var account = dataset.account || dataset.tenant || "";
     var askNameRemote = !!(remote && remote.askNameBeforeChat);
     var askName = parseBoolean(dataset.askName, askNameRemote);
 
     var iframeUrl = new URL("${origin}/embed/chatbot");
+    if (account) iframeUrl.searchParams.set("account", account);
     if (dataset.company) iframeUrl.searchParams.set("company", dataset.company);
     if (dataset.color) iframeUrl.searchParams.set("color", dataset.color);
     if (dataset.welcome) iframeUrl.searchParams.set("welcome", dataset.welcome);
     if (askName) iframeUrl.searchParams.set("askName", "1");
-    if (tenant) iframeUrl.searchParams.set("tenant", tenant);
 
     var host = document.createElement("div");
     host.setAttribute("data-digitify-chatbot", "true");
@@ -166,7 +166,10 @@ export async function GET(request: Request) {
     }
   }
 
-  fetch("${origin}/api/public/chatbot/settings" + (tenant ? ("?tenant=" + encodeURIComponent(tenant)) : ""))
+  var settingsUrl = new URL("${origin}/api/public/chatbot/settings");
+  if (dataset.account || dataset.tenant) settingsUrl.searchParams.set("account", dataset.account || dataset.tenant);
+
+  fetch(settingsUrl.toString())
     .then(function (response) { return response.ok ? response.json() : null; })
     .then(function (remote) { mount(remote); })
     .catch(function () { mount(null); });

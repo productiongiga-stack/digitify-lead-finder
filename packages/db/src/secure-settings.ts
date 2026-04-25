@@ -21,10 +21,21 @@ function deriveKey(value: string) {
   return createHash("sha256").update(value).digest();
 }
 
+function resolveFallbackSecretValue() {
+  const fallback = process.env.NEXTAUTH_SECRET?.trim() || "";
+  if (!fallback || fallback === "change-me-in-production") return "";
+  return fallback;
+}
+
 function resolvePrimaryEncryptionKey() {
   const settingsKey = process.env.SETTINGS_ENCRYPTION_KEY?.trim() || "";
   if (settingsKey && settingsKey !== "change-me-in-production") {
     return deriveKey(settingsKey);
+  }
+
+  const fallback = resolveFallbackSecretValue();
+  if (fallback) {
+    return deriveKey(fallback);
   }
 
   if (process.env.NODE_ENV === "production") {
@@ -33,16 +44,14 @@ function resolvePrimaryEncryptionKey() {
     );
   }
 
-  const fallback = process.env.NEXTAUTH_SECRET?.trim() || "";
-  if (!fallback || fallback === "change-me-in-production") return null;
-  return deriveKey(fallback);
+  return null;
 }
 
 function resolveLegacyEncryptionKey() {
-  const fallback = process.env.NEXTAUTH_SECRET?.trim() || "";
-  if (!fallback || fallback === "change-me-in-production") return null;
+  const fallback = resolveFallbackSecretValue();
+  if (!fallback) return null;
   const settingsKey = process.env.SETTINGS_ENCRYPTION_KEY?.trim() || "";
-  if (settingsKey && settingsKey === fallback) return null;
+  if (!settingsKey || settingsKey === "change-me-in-production" || settingsKey === fallback) return null;
   return deriveKey(fallback);
 }
 

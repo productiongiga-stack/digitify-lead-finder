@@ -1,12 +1,28 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-
-function userSettingKey(userId: string, key: string) {
-  return `user:${userId}:${key.trim()}`;
-}
+import { getPublicOwnerKeyFromUrl, resolvePublicOwner } from "@digitify/api/src/lib/tenant";
 
 export async function GET(request: Request) {
-  const tenant = new URL(request.url).searchParams.get("tenant")?.trim() || "";
+  const owner = await resolvePublicOwner(prisma, getPublicOwnerKeyFromUrl(request.url));
+  if (!owner) {
+    return NextResponse.json({
+      enabled: false,
+      companyName: "",
+      companySlogan: "",
+      welcomeMessage: "Deze chatbot is niet gekoppeld aan een account.",
+      offlineMessage: "Deze chatbot is niet beschikbaar.",
+      primaryColor: "#6366f1",
+      avatarUrl: "",
+      trainingNotes: "",
+      knowledgePages: "",
+      responseStyle: "Professioneel, kort en duidelijk",
+      language: "Nederlands",
+      autoMessagesEnabled: false,
+      aiResponsesEnabled: false,
+      askNameBeforeChat: false,
+    });
+  }
+
   const keys = [
     "chatbot.enabled",
     "chatbot.company_name",
@@ -27,21 +43,18 @@ export async function GET(request: Request) {
     "branding.logo_url",
   ];
 
-  const scopedKeys = tenant ? keys.map((key) => userSettingKey(tenant, key)) : keys;
-
   const settings = await prisma.setting.findMany({
-    where: { key: { in: scopedKeys } },
+    where: { userId: owner.id, key: { in: keys } },
   });
 
   const map = Object.fromEntries(
     settings.map((item) => {
-      const key = tenant ? item.key.replace(`user:${tenant}:`, "") : item.key;
       const raw = item.value;
-      if (typeof raw !== "string") return [key, raw];
+      if (typeof raw !== "string") return [item.key, raw];
       try {
-        return [key, JSON.parse(raw)];
+        return [item.key, JSON.parse(raw)];
       } catch {
-        return [key, raw.trim()];
+        return [item.key, raw.trim()];
       }
     })
   ) as Record<string, unknown>;
