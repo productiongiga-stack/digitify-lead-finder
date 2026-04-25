@@ -7,7 +7,8 @@ import { Button } from "@digitify/ui";
 import { Input } from "@digitify/ui";
 import { Label } from "@digitify/ui";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@digitify/ui";
-import { Loader2, Zap } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import { AuthLogo } from "@/components/auth/auth-logo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -40,8 +41,8 @@ export default function LoginPage() {
   return (
     <Card className="border-0 shadow-2xl">
       <CardHeader className="space-y-1 text-center">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[#f9ae5a] text-[#14100b]">
-          <Zap className="h-6 w-6" />
+        <div className="mx-auto mb-4">
+          <AuthLogo size="lg" />
         </div>
         <CardTitle className="text-2xl font-bold">Welkom terug</CardTitle>
         <CardDescription>Log in op je Digitify account</CardDescription>

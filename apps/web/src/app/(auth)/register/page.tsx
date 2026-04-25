@@ -4,7 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Textarea } from "@digitify/ui";
-import { CheckCircle2, Loader2, Sparkles } from "lucide-react";
+import { CheckCircle2, Loader2 } from "lucide-react";
+import { AuthLogo } from "@/components/auth/auth-logo";
 
 export default function RegisterPage() {
   const [name, setName] = useState("");
@@ -40,8 +41,8 @@ export default function RegisterPage() {
   return (
     <Card className="border-0 shadow-2xl">
       <CardHeader className="space-y-1 text-center">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-md bg-[#f9ae5a] text-[#14100b]">
-          <Sparkles className="h-6 w-6" />
+        <div className="mx-auto mb-4">
+          <AuthLogo size="lg" />
         </div>
         <CardTitle className="text-2xl font-bold">Toegang aanvragen</CardTitle>
         <CardDescription>Verifieer je e-mail en wacht op goedkeuring van een admin.</CardDescription>

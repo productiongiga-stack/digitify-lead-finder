@@ -1,6 +1,6 @@
-import Image from "next/image";
 import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
+import { AuthLogo } from "@/components/auth/auth-logo";
 
 const benefits = [
   "Automatisch leads zoeken en scoren",
@@ -20,8 +20,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
 
         {/* Logo */}
         <Link href="/" className="relative z-10 flex items-center gap-3">
-          <Image src="/favicon.png" alt="Digitify" width={36} height={36} className="rounded-lg" />
-          <span className="text-xl font-bold text-white tracking-tight">Digitify</span>
+          <AuthLogo size="sm" showText textClassName="text-white" />
         </Link>
 
         {/* Center content */}
@@ -71,8 +70,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <div className="flex flex-1 flex-col items-center justify-center px-6 py-12">
         {/* Mobile-only logo */}
         <Link href="/" className="mb-8 flex items-center gap-2 lg:hidden">
-          <Image src="/favicon.png" alt="Digitify" width={28} height={28} className="rounded-md" />
-          <span className="font-bold text-[#0d1520]">Digitify</span>
+          <AuthLogo size="sm" showText />
         </Link>
 
         <div className="w-full max-w-md">{children}</div>
