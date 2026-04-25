@@ -98,7 +98,7 @@ export async function loadEmailSettings(db: PrismaClient): Promise<EmailSettings
     fromTitle: getSettingString(settings, "email.from_title"),
     headerSlogan: getSettingString(settings, "email.header_slogan"),
     companyName: getSettingString(settings, "branding.company_name") || getSettingString(settings, "company.name"),
-    primaryColor: getSettingString(settings, "branding.primary_color", "#6366f1"),
+    primaryColor: getSettingString(settings, "branding.primary_color", "#f9ae5a"),
     logoUrl: getSettingString(settings, "branding.logo_url"),
     website: getSettingString(settings, "branding.website") || getSettingString(settings, "company.website"),
     signature: getSettingString(settings, "email.signature"),

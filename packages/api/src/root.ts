@@ -17,6 +17,7 @@ import { domainRouter } from "./routers/domain.router";
 import { reviewRouter } from "./routers/review.router";
 import { quoteRouter } from "./routers/quote.router";
 import { chatbotRouter } from "./routers/chatbot.router";
+import { registrationRouter } from "./routers/registration.router";
 
 export const appRouter = router({
   dashboard: dashboardRouter,
@@ -37,6 +38,7 @@ export const appRouter = router({
   review: reviewRouter,
   quote: quoteRouter,
   chatbot: chatbotRouter,
+  registration: registrationRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -10,7 +10,7 @@
     --card-foreground: 224 71.4% 4.1%;
     --popover: 0 0% 100%;
     --popover-foreground: 224 71.4% 4.1%;
-    --primary: 212 84% 45%;
+    --primary: 31 93% 66%;
     --primary-foreground: 210 20% 98%;
     --secondary: 210 20% 94%;
     --secondary-foreground: 220.9 39.3% 11%;
@@ -22,7 +22,7 @@
     --destructive-foreground: 210 20% 98%;
     --border: 214 21% 89%;
     --input: 214 21% 89%;
-    --ring: 212 84% 45%;
+    --ring: 31 93% 66%;
     --radius: 0.75rem;
   }
 
@@ -33,7 +33,7 @@
     --card-foreground: 210 20% 98%;
     --popover: 224 71.4% 6%;
     --popover-foreground: 210 20% 98%;
-    --primary: 212 80% 62%;
+    --primary: 31 93% 66%;
     --primary-foreground: 210 20% 98%;
     --secondary: 215 27.9% 16.9%;
     --secondary-foreground: 210 20% 98%;
@@ -45,7 +45,7 @@
     --destructive-foreground: 210 20% 98%;
     --border: 215 27.9% 16.9%;
     --input: 215 27.9% 16.9%;
-    --ring: 212 80% 62%;
+    --ring: 31 93% 66%;
   }
 }
 
@@ -79,8 +79,8 @@
     font-feature-settings: "rlig" 1, "calt" 1;
     overflow-x: hidden;
     background-image:
-      radial-gradient(circle at top left, rgba(59, 130, 246, 0.08), transparent 28%),
-      radial-gradient(circle at top right, rgba(14, 165, 233, 0.06), transparent 22%);
+      radial-gradient(circle at top left, rgba(249, 174, 90, 0.12), transparent 28%),
+      radial-gradient(circle at top right, rgba(18, 166, 106, 0.06), transparent 22%);
     min-height: 100vh;
   }
   ::selection {
@@ -98,5 +98,14 @@
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
   }
 }

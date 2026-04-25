@@ -6,12 +6,13 @@ import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Skeleton, Inpu
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@digitify/ui";
-import { ArrowLeft, UserPlus, Loader2, Trash2, AlertTriangle } from "lucide-react";
+import { ArrowLeft, UserPlus, Loader2, Trash2, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 
 export default function TeamSettingsPage() {
   const { data: users, isLoading } = trpc.user.list.useQuery();
+  const { data: requests, isLoading: requestsLoading } = trpc.registration.listRequests.useQuery();
   const utils = trpc.useUtils();
 
   const updateRole = trpc.user.updateRole.useMutation({
@@ -34,6 +35,17 @@ export default function TeamSettingsPage() {
       utils.user.list.invalidate();
       setDeleteTarget(null);
     },
+  });
+
+  const approveRequest = trpc.registration.approve.useMutation({
+    onSuccess: () => {
+      utils.registration.listRequests.invalidate();
+      utils.user.list.invalidate();
+    },
+  });
+
+  const rejectRequest = trpc.registration.reject.useMutation({
+    onSuccess: () => utils.registration.listRequests.invalidate(),
   });
 
   const [showInvite, setShowInvite] = useState(false);
@@ -121,6 +133,84 @@ export default function TeamSettingsPage() {
             )}
           </TableBody>
         </Table>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Registratieaanvragen</CardTitle>
+          <p className="text-sm text-muted-foreground">Geverifieerde aanvragen kunnen hier goed- of afgekeurd worden.</p>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Naam</TableHead>
+                <TableHead>E-mail</TableHead>
+                <TableHead>Bedrijf</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Aangevraagd</TableHead>
+                <TableHead className="w-[160px]"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {requestsLoading ? (
+                Array.from({ length: 2 }).map((_, i) => (
+                  <TableRow key={i}>
+                    {Array.from({ length: 6 }).map((_, j) => (
+                      <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : requests?.length ? (
+                requests.map((request: NonNullable<typeof requests>[number]) => (
+                  <TableRow key={request.id}>
+                    <TableCell className="font-medium">
+                      <div>{request.name}</div>
+                      {request.message && <div className="mt-1 max-w-[320px] truncate text-xs text-muted-foreground">{request.message}</div>}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{request.email}</TableCell>
+                    <TableCell>{request.company || "—"}</TableCell>
+                    <TableCell>
+                      <Badge variant={request.status === "PENDING_APPROVAL" ? "default" : request.status === "APPROVED" ? "secondary" : "outline"}>
+                        {request.status.replaceAll("_", " ").toLowerCase()}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{formatDate(request.createdAt)}</TableCell>
+                    <TableCell>
+                      {request.status === "PENDING_APPROVAL" && (
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            className="bg-emerald-600 text-white hover:bg-emerald-700"
+                            disabled={approveRequest.isPending || rejectRequest.isPending}
+                            onClick={() => approveRequest.mutate({ requestId: request.id, role: "MEMBER" })}
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                            Goedkeuren
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            disabled={approveRequest.isPending || rejectRequest.isPending}
+                            onClick={() => rejectRequest.mutate({ requestId: request.id })}
+                          >
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                    Geen registratieaanvragen.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
       </Card>
 
       {/* Invite User Dialog */}

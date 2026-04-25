@@ -24,7 +24,7 @@ export interface BrandingConfig {
   emailFromEmail: string;
 }
 
-const DEFAULT_PRIMARY_COLOR = "#6366f1";
+const DEFAULT_PRIMARY_COLOR = "#f9ae5a";
 
 export function useBranding(enabled = true): { branding: BrandingConfig; isLoading: boolean } {
   const { data: settings, isLoading } = trpc.settings.getAll.useQuery(undefined, {

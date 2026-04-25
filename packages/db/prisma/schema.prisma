@@ -36,8 +36,66 @@ model User {
   reviewRequests ReviewRequest[]
   quotes       Quote[]
   chatAssignments ChatSession[] @relation("ChatAssignee")
+  reviewedRegistrationRequests RegistrationRequest[] @relation("RegistrationReviewer")
+  reviewedFeedbackItems FeedbackItem[] @relation("FeedbackReviewer")
 
   @@map("users")
+}
+
+model RegistrationRequest {
+  id                    String                    @id @default(cuid())
+  name                  String
+  email                 String
+  company               String?
+  message               String?                   @db.Text
+  passwordHash          String
+  requestedRole         UserRole                  @default(MEMBER)
+  status                RegistrationRequestStatus @default(PENDING_EMAIL_VERIFICATION)
+  emailVerificationToken String                   @unique
+  emailVerifiedAt       DateTime?
+  reviewedById          String?
+  reviewedAt            DateTime?
+  rejectionReason       String?                   @db.Text
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+
+  reviewedBy            User?                     @relation("RegistrationReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status, createdAt])
+  @@index([email])
+  @@map("registration_requests")
+}
+
+enum RegistrationRequestStatus {
+  PENDING_EMAIL_VERIFICATION
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+model FeedbackItem {
+  id             String         @id @default(cuid())
+  userId         String?
+  userEmail      String?
+  subject        String
+  message        String         @db.Text
+  pageUrl        String?
+  status         FeedbackStatus @default(OPEN)
+  reviewedById   String?
+  reviewedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  reviewedBy     User?          @relation("FeedbackReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status, createdAt])
+  @@map("feedback_items")
+}
+
+enum FeedbackStatus {
+  OPEN
+  TRIAGED
+  CLOSED
 }
 
 enum UserRole {

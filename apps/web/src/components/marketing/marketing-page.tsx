@@ -17,6 +17,8 @@ import {
   Star,
   Users2,
   Zap,
+  Target,
+  Layers3,
 } from "lucide-react";
 
 type MarketingPageKey = "home" | "product" | "solutions" | "about" | "contact";
@@ -53,6 +55,26 @@ const featureCards = [
     title: "Bookings & reviews",
     copy: "Laat prospects afspraken boeken, verzamel reviews en toon widgets op je website.",
   },
+  {
+    icon: Target,
+    title: "Lead scoring",
+    copy: "Meet websitekwaliteit, local SEO, reviews, social presence en commerciële fit in één score.",
+  },
+  {
+    icon: Bot,
+    title: "Chatbot & embeds",
+    copy: "Zet chat, offertes, bookings en reviews als snelle conversiepunten op je website.",
+  },
+  {
+    icon: Quote,
+    title: "Quote flow",
+    copy: "Maak van een lead meteen een offerte en volg de status zonder contextverlies.",
+  },
+  {
+    icon: Layers3,
+    title: "Rapporten & cockpit",
+    copy: "Zie pipelinewaarde, actiepunten, campagnes en groeikansen in één operationeel overzicht.",
+  },
 ];
 
 const workflowSteps = [
@@ -85,7 +107,7 @@ const pageCopy: Record<MarketingPageKey, { eyebrow: string; title: string; body:
     eyebrow: "Digitify Lead Finder",
     title: "Van lead naar klant, zonder ruis.",
     body:
-      "Ontdek leads, beheer outreach, maak offertes, plan afspraken, verzamel reviews en activeer je chatbot vanuit een premium workspace voor groei.",
+      "Een digitale groeimachine door Digitify: vind betere leads, scoreer commerciële fit en zet elke kans om naar outreach, offerte, booking of review.",
   },
   product: {
     eyebrow: "Product",
@@ -122,6 +144,7 @@ export function MarketingPage({ page }: MarketingPageProps) {
       <Hero copy={copy} page={page} />
       <TrustBar />
       <ProductSection />
+      <EaseSection />
       <FeatureSection />
       <SolutionsSection />
       <AboutSection />
@@ -136,7 +159,7 @@ function MarketingHeader() {
     <header className="sticky top-0 z-50 border-b border-[#dfe5df]/80 bg-[#f7f8f6]/88 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
         <Link href="/" className="flex items-center gap-3" aria-label="Digitify Lead Finder home">
-          <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[#0d1520] text-white shadow-sm">
+          <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[#f9ae5a] text-[#14100b] shadow-sm">
             <Zap className="h-4 w-4" />
           </span>
           <span className="leading-tight">
@@ -146,7 +169,7 @@ function MarketingHeader() {
         </Link>
         <nav className="hidden items-center gap-7 text-sm font-medium text-[#344052] md:flex" aria-label="Hoofdnavigatie">
           {navItems.map((item) => (
-            <Link key={item.href} href={item.href} className="transition hover:text-[#0d63ce]">
+            <Link key={item.href} href={item.href} className="transition hover:text-[#f9ae5a]">
               {item.label}
             </Link>
           ))}
@@ -154,13 +177,13 @@ function MarketingHeader() {
         <div className="flex items-center gap-2">
           <Link
             href="/login"
-            className="inline-flex h-9 items-center justify-center rounded-md border border-[#cfd8d2] bg-white px-3 text-sm font-semibold text-[#172131] shadow-sm transition hover:border-[#9fb4c8] hover:text-[#0d63ce]"
+            className="inline-flex h-9 items-center justify-center rounded-md border border-[#cfd8d2] bg-white px-3 text-sm font-semibold text-[#172131] shadow-sm transition hover:border-[#9fb4c8] hover:text-[#f9ae5a]"
           >
             Login
           </Link>
           <Link
             href="/contact"
-            className="hidden h-9 items-center justify-center rounded-md bg-[#0d63ce] px-4 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(13,99,206,0.24)] transition hover:bg-[#0b57b5] sm:inline-flex"
+            className="hidden h-9 items-center justify-center rounded-md bg-[#f9ae5a] px-4 text-sm font-semibold text-[#14100b] shadow-[0_10px_24px_rgba(249,174,90,0.28)] transition hover:bg-[#eca04e] sm:inline-flex"
           >
             Plan demo
           </Link>
@@ -175,7 +198,7 @@ function Hero({ copy, page }: { copy: (typeof pageCopy)[MarketingPageKey]; page:
     <section className="relative overflow-hidden border-b border-[#dfe5df] bg-[linear-gradient(180deg,#fbfcfb_0%,#eef3ef_100%)]">
       <div className="mx-auto grid min-h-[calc(86vh-4rem)] max-w-7xl items-center gap-12 px-5 py-14 sm:px-8 lg:grid-cols-[0.9fr_1.1fr] lg:py-16">
         <div className="max-w-2xl">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-md border border-[#cfd8d2] bg-white/80 px-3 py-1.5 text-xs font-semibold uppercase text-[#0d63ce] shadow-sm">
+          <div className="mb-6 inline-flex items-center gap-2 rounded-md border border-[#cfd8d2] bg-white/80 px-3 py-1.5 text-xs font-semibold uppercase text-[#f9ae5a] shadow-sm">
             <Sparkles className="h-3.5 w-3.5" />
             {copy.eyebrow}
           </div>
@@ -186,14 +209,14 @@ function Hero({ copy, page }: { copy: (typeof pageCopy)[MarketingPageKey]; page:
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link
               href="/contact"
-              className="inline-flex h-12 items-center justify-center rounded-md bg-[#0d63ce] px-6 text-sm font-semibold text-white shadow-[0_16px_36px_rgba(13,99,206,0.24)] transition hover:bg-[#0b57b5]"
+              className="inline-flex h-12 items-center justify-center rounded-md bg-[#f9ae5a] px-6 text-sm font-semibold text-[#14100b] shadow-[0_16px_36px_rgba(249,174,90,0.28)] transition hover:bg-[#eca04e]"
             >
               Plan een demo
               <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
             <Link
               href={page === "product" ? "/login" : "/product"}
-              className="inline-flex h-12 items-center justify-center rounded-md border border-[#cfd8d2] bg-white px-6 text-sm font-semibold text-[#172131] shadow-sm transition hover:border-[#9fb4c8] hover:text-[#0d63ce]"
+              className="inline-flex h-12 items-center justify-center rounded-md border border-[#cfd8d2] bg-white px-6 text-sm font-semibold text-[#172131] shadow-sm transition hover:border-[#9fb4c8] hover:text-[#f9ae5a]"
             >
               Bekijk de app
               <ChevronRight className="ml-2 h-4 w-4" />
@@ -205,7 +228,9 @@ function Hero({ copy, page }: { copy: (typeof pageCopy)[MarketingPageKey]; page:
             <ProofPoint value="BE" label="door Digitify" />
           </div>
         </div>
-        <ProductMockup />
+        <div className="motion-safe:animate-[float_7s_ease-in-out_infinite]">
+          <ProductMockup />
+        </div>
       </div>
     </section>
   );
@@ -234,7 +259,7 @@ function ProductMockup() {
         <div className="rounded-[6px] border border-white/10 bg-[#f9fbfa] p-4">
           <div className="flex items-center justify-between border-b border-[#e2e8e3] pb-4">
             <div>
-              <div className="text-xs font-semibold uppercase text-[#0d63ce]">Pipeline vandaag</div>
+              <div className="text-xs font-semibold uppercase text-[#f9ae5a]">Pipeline vandaag</div>
               <div className="mt-1 text-lg font-semibold">Lead Finder Suite</div>
             </div>
             <div className="flex items-center gap-2 rounded-md border border-[#dfe5df] bg-white px-3 py-2 text-xs font-medium text-[#344052]">
@@ -253,7 +278,7 @@ function ProductMockup() {
                   <div className="mt-3 flex items-center justify-between text-xs text-[#6a7684]">
                     <span>{status}</span>
                     <span className="h-1.5 w-24 overflow-hidden rounded-full bg-[#e6ebe7]">
-                      <span className="block h-full w-3/4 rounded-full bg-[#0d63ce]" />
+                      <span className="block h-full w-3/4 rounded-full bg-[#f9ae5a]" />
                     </span>
                   </div>
                 </div>
@@ -265,12 +290,12 @@ function ProductMockup() {
                   <div className="text-sm font-semibold">Campagne orchestration</div>
                   <div className="mt-1 text-xs text-[#6a7684]">E-mail, offerte, booking en reviewflow.</div>
                 </div>
-                <BarChart3 className="h-5 w-5 text-[#0d63ce]" />
+                <BarChart3 className="h-5 w-5 text-[#f9ae5a]" />
               </div>
               <div className="mt-5 space-y-3">
                 {workflowSteps.map((step, index) => (
                   <div key={step} className="flex items-center gap-3">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[#eef4fb] text-xs font-semibold text-[#0d63ce]">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[#eef4fb] text-xs font-semibold text-[#f9ae5a]">
                       {index + 1}
                     </span>
                     <span className="flex-1 text-sm text-[#344052]">{step}</span>
@@ -307,7 +332,7 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
 function ModuleTile({ icon: Icon, label, value }: { icon: typeof Bot; label: string; value: string }) {
   return (
     <div className="rounded-md border border-[#dfe5df] bg-white p-3 shadow-sm">
-      <Icon className="h-4 w-4 text-[#0d63ce]" />
+      <Icon className="h-4 w-4 text-[#f9ae5a]" />
       <div className="mt-3 text-sm font-semibold">{label}</div>
       <div className="mt-1 text-xs text-[#6a7684]">{value}</div>
     </div>
@@ -339,12 +364,43 @@ function ProductSection() {
       />
       <div className="mx-auto mt-12 grid max-w-7xl gap-4 px-5 sm:px-8 lg:grid-cols-4">
         {featureCards.map((feature) => (
-          <article key={feature.title} className="rounded-[8px] border border-[#dfe5df] bg-white p-6 shadow-sm">
-            <feature.icon className="h-5 w-5 text-[#0d63ce]" />
+          <article key={feature.title} className="rounded-[8px] border border-[#dfe5df] bg-white p-6 shadow-sm transition duration-300 hover:-translate-y-1 hover:border-[#f9ae5a] hover:shadow-[0_18px_44px_rgba(13,21,32,0.08)]">
+            <feature.icon className="h-5 w-5 text-[#f9ae5a]" />
             <h3 className="mt-5 text-lg font-semibold">{feature.title}</h3>
             <p className="mt-3 text-sm leading-6 text-[#5a6878]">{feature.copy}</p>
           </article>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function EaseSection() {
+  return (
+    <section className="bg-[#fbf7f0] py-20">
+      <div className="mx-auto grid max-w-7xl gap-8 px-5 sm:px-8 lg:grid-cols-[0.8fr_1.2fr]">
+        <div>
+          <p className="text-sm font-semibold uppercase text-[#b66d1e]">Zo makkelijk werkt het</p>
+          <h2 className="mt-4 text-4xl font-semibold leading-tight">Van zoekopdracht naar opvolging in minuten.</h2>
+          <p className="mt-5 leading-7 text-[#5a6878]">
+            Lead Find is gemaakt om snel te handelen: zoek een niche of regio, laat de app kansen scoren en stuur de beste leads direct door naar je pipeline.
+          </p>
+        </div>
+        <div className="grid gap-3">
+          {[
+            ["1", "Zoek", "Kies regio, sector of type bedrijf en verzamel relevante prospects."],
+            ["2", "Score", "Zie welke bedrijven online kansen laten liggen en dus sneller waarde zien."],
+            ["3", "Actie", "Start outreach, maak een offerte of plan een demo vanuit dezelfde leadkaart."],
+          ].map(([number, title, copy]) => (
+            <div key={title} className="flex gap-4 rounded-[8px] border border-[#edd5bb] bg-white p-5 shadow-sm transition duration-300 hover:-translate-y-1">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[#f9ae5a] font-semibold text-[#14100b]">{number}</span>
+              <div>
+                <h3 className="font-semibold">{title}</h3>
+                <p className="mt-1 text-sm leading-6 text-[#5a6878]">{copy}</p>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -413,7 +469,7 @@ function AboutSection() {
     <section id="over-ons" className="bg-[#eef3ef] py-20">
       <div className="mx-auto grid max-w-7xl gap-10 px-5 sm:px-8 lg:grid-cols-[0.9fr_1.1fr]">
         <div>
-          <p className="text-sm font-semibold uppercase text-[#0d63ce]">Gemaakt door Digitify</p>
+          <p className="text-sm font-semibold uppercase text-[#f9ae5a]">Gemaakt door Digitify</p>
           <h2 className="mt-4 text-4xl font-semibold leading-tight">Belgische digitale expertise, verpakt in een praktisch groeisysteem.</h2>
         </div>
         <div className="space-y-5 text-base leading-8 text-[#4d5b6b]">
@@ -425,7 +481,7 @@ function AboutSection() {
             Het resultaat is een app die de dagelijkse realiteit van sales, marketing en operations respecteert: overzicht,
             snelheid en een professionele ervaring voor elke prospect.
           </p>
-          <Link href="https://www.digitify.be" className="inline-flex items-center text-sm font-semibold text-[#0d63ce]">
+          <Link href="https://www.digitify.be" className="inline-flex items-center text-sm font-semibold text-[#f9ae5a]">
             Bezoek www.digitify.be
             <ArrowRight className="ml-2 h-4 w-4" />
           </Link>
@@ -463,8 +519,8 @@ function ContactSection({ highlight }: { highlight: boolean }) {
             </Link>
           </div>
         </div>
-        <aside className={`rounded-[8px] border p-6 ${highlight ? "border-[#0d63ce] bg-[#eef6ff]" : "border-[#dfe5df] bg-[#f9fbfa]"}`}>
-          <Globe2 className="h-6 w-6 text-[#0d63ce]" />
+        <aside className={`rounded-[8px] border p-6 ${highlight ? "border-[#f9ae5a] bg-[#eef6ff]" : "border-[#dfe5df] bg-[#f9fbfa]"}`}>
+          <Globe2 className="h-6 w-6 text-[#f9ae5a]" />
           <h3 className="mt-5 text-xl font-semibold">Wat je krijgt in de demo</h3>
           <ul className="mt-5 space-y-4 text-sm text-[#4d5b6b]">
             <li className="flex gap-3">
@@ -489,7 +545,7 @@ function ContactSection({ highlight }: { highlight: boolean }) {
 function SectionIntro({ eyebrow, title, copy }: { eyebrow: string; title: string; copy: string }) {
   return (
     <div className="mx-auto max-w-3xl px-5 text-center sm:px-8">
-      <p className="text-sm font-semibold uppercase text-[#0d63ce]">{eyebrow}</p>
+      <p className="text-sm font-semibold uppercase text-[#f9ae5a]">{eyebrow}</p>
       <h2 className="mt-4 text-4xl font-semibold leading-tight text-[#0d1520]">{title}</h2>
       <p className="mt-5 text-base leading-7 text-[#5a6878]">{copy}</p>
     </div>
@@ -498,22 +554,52 @@ function SectionIntro({ eyebrow, title, copy }: { eyebrow: string; title: string
 
 function MarketingFooter() {
   return (
-    <footer className="border-t border-[#dfe5df] bg-[#f7f8f6]">
-      <div className="mx-auto flex max-w-7xl flex-col gap-6 px-5 py-8 text-sm text-[#5a6878] sm:px-8 md:flex-row md:items-center md:justify-between">
+    <footer className="border-t border-[#2a2118] bg-[#12100d] text-white">
+      <div className="mx-auto grid max-w-7xl gap-10 px-5 py-14 sm:px-8 lg:grid-cols-[1.2fr_0.8fr_0.8fr]">
         <div>
-          <div className="font-semibold text-[#0d1520]">Digitify Lead Finder</div>
-          <div className="mt-1">Gemaakt door Digitify. Premium lead generation en opvolging.</div>
+          <div className="inline-flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-md bg-[#f9ae5a] text-[#14100b]">
+              <Zap className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="font-semibold">Digitify Lead Finder</div>
+              <div className="text-xs text-[#bdb5ad]">Partner in Digital Solutions</div>
+            </div>
+          </div>
+          <p className="mt-6 max-w-md leading-7 text-[#d6cec5]">
+            Premium lead discovery en opvolging, gemaakt door Digitify voor bedrijven die digitale groei praktisch willen organiseren.
+          </p>
+          <div className="mt-6 text-sm text-[#bdb5ad]">
+            contact@digitify.be · +32 (0) 486 51 57 73 · BTW BE0685.556.507
+          </div>
         </div>
-        <div className="flex flex-wrap gap-5">
+        <div>
+          <div className="font-semibold text-[#f9ae5a]">Website</div>
+          <div className="mt-4 grid gap-3 text-sm text-[#d6cec5]">
           {navItems.map((item) => (
-            <Link key={item.href} href={item.href} className="hover:text-[#0d63ce]">
+            <Link key={item.href} href={item.href} className="hover:text-[#f9ae5a]">
               {item.label}
             </Link>
           ))}
-          <Link href="/login" className="font-semibold text-[#0d63ce]">
+          </div>
+        </div>
+        <div>
+          <div className="font-semibold text-[#f9ae5a]">Actie</div>
+          <div className="mt-4 grid gap-3 text-sm text-[#d6cec5]">
+          <Link href="/login" className="hover:text-[#f9ae5a]">
             Login
           </Link>
+          <Link href="/register" className="hover:text-[#f9ae5a]">
+            Registreren
+          </Link>
+          <Link href="https://www.digitify.be" className="hover:text-[#f9ae5a]">
+            www.digitify.be
+          </Link>
+          </div>
         </div>
+      </div>
+      <div className="border-t border-white/10 px-5 py-5 text-center text-xs text-[#9d948b]">
+        © {new Date().getFullYear()} Digitify. Webdesign, media en marketing voor digitale groei.
       </div>
     </footer>
   );

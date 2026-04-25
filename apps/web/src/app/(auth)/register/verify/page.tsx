@@ -1,0 +1,51 @@
+"use client";
+
+import { Suspense, useEffect } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { trpc } from "@/lib/trpc/client";
+import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@digitify/ui";
+import { CheckCircle2, Loader2, XCircle } from "lucide-react";
+
+function VerifyRegistrationContent() {
+  const searchParams = useSearchParams();
+  const token = searchParams.get("token") || "";
+  const verify = trpc.registration.verifyEmail.useMutation();
+
+  useEffect(() => {
+    if (token && verify.status === "idle") {
+      verify.mutate({ token });
+    }
+  }, [token, verify]);
+
+  return (
+    <Card className="border-0 shadow-2xl">
+      <CardHeader className="text-center">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-md bg-[#f9ae5a] text-[#14100b]">
+          {verify.isPending || verify.status === "idle" ? <Loader2 className="h-6 w-6 animate-spin" /> : verify.isError ? <XCircle className="h-6 w-6" /> : <CheckCircle2 className="h-6 w-6" />}
+        </div>
+        <CardTitle>{verify.isError ? "Verificatie mislukt" : verify.isSuccess ? "E-mail bevestigd" : "E-mail verifiëren"}</CardTitle>
+        <CardDescription>
+          {verify.isError
+            ? verify.error.message
+            : verify.isSuccess
+              ? "Je aanvraag staat klaar voor goedkeuring door een admin."
+              : "We controleren je verificatielink."}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="text-center">
+        <Button asChild>
+          <Link href="/login">Naar login</Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function VerifyRegistrationPage() {
+  return (
+    <Suspense fallback={<Card className="border-0 shadow-2xl"><CardHeader className="text-center"><CardTitle>E-mail verifiëren</CardTitle><CardDescription>Even geduld.</CardDescription></CardHeader></Card>}>
+      <VerifyRegistrationContent />
+    </Suspense>
+  );
+}

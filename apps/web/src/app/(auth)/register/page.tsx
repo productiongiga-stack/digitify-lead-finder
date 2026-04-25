@@ -1,25 +1,93 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@digitify/ui";
-import { Zap } from "lucide-react";
+import { trpc } from "@/lib/trpc/client";
+import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Textarea } from "@digitify/ui";
+import { CheckCircle2, Loader2, Sparkles } from "lucide-react";
 
 export default function RegisterPage() {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [company, setCompany] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
+  const requestAccess = trpc.registration.requestAccess.useMutation({
+    onSuccess: () => setSubmitted(true),
+  });
+
+  if (submitted) {
+    return (
+      <Card className="border-0 shadow-2xl">
+        <CardHeader className="text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-md bg-[#f9ae5a] text-[#14100b]">
+            <CheckCircle2 className="h-6 w-6" />
+          </div>
+          <CardTitle>Check je inbox</CardTitle>
+          <CardDescription>We hebben een verificatielink gestuurd. Na bevestiging kan een admin je aanvraag goedkeuren.</CardDescription>
+        </CardHeader>
+        <CardContent className="text-center">
+          <Link href="/login" className="text-sm font-semibold text-primary hover:underline">
+            Terug naar login
+          </Link>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="border-0 shadow-2xl">
       <CardHeader className="space-y-1 text-center">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-          <Zap className="h-6 w-6" />
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-md bg-[#f9ae5a] text-[#14100b]">
+          <Sparkles className="h-6 w-6" />
         </div>
-        <CardTitle className="text-2xl font-bold">Registratie</CardTitle>
-        <CardDescription>
-          Neem contact op met de beheerder om een account aan te vragen
-        </CardDescription>
+        <CardTitle className="text-2xl font-bold">Toegang aanvragen</CardTitle>
+        <CardDescription>Verifieer je e-mail en wacht op goedkeuring van een admin.</CardDescription>
       </CardHeader>
-      <CardContent className="text-center">
-        <Link href="/login" className="text-sm text-primary hover:underline">
-          Terug naar inloggen
-        </Link>
+      <CardContent>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            requestAccess.mutate({ name, email, company, password, message });
+          }}
+        >
+          <div className="space-y-2">
+            <Label>Naam</Label>
+            <Input value={name} onChange={(event) => setName(event.target.value)} required />
+          </div>
+          <div className="space-y-2">
+            <Label>E-mail</Label>
+            <Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+          </div>
+          <div className="space-y-2">
+            <Label>Bedrijf</Label>
+            <Input value={company} onChange={(event) => setCompany(event.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label>Wachtwoord</Label>
+            <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} required />
+          </div>
+          <div className="space-y-2">
+            <Label>Waarom wil je toegang?</Label>
+            <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={3} />
+          </div>
+          {requestAccess.isError && (
+            <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{requestAccess.error.message}</p>
+          )}
+          <Button className="w-full bg-[#f9ae5a] text-[#14100b] hover:bg-[#eca04e]" disabled={requestAccess.isPending}>
+            {requestAccess.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Aanvraag versturen
+          </Button>
+          <p className="text-center text-xs text-muted-foreground">
+            Al toegang?{" "}
+            <Link href="/login" className="font-semibold text-primary hover:underline">
+              Login
+            </Link>
+          </p>
+        </form>
       </CardContent>
     </Card>
   );
