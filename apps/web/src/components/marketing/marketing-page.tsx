@@ -738,79 +738,11 @@ function SolutionsPage() {
               Groei-workflows voor teams die geen tijd <span className="gradient-text">willen verliezen.</span>
             </h1>
             <p className="mt-5 text-base leading-7 text-[#4d5b6b]">
-              Van agencies tot lokale dienstverleners: Lead Finder vormt zich rond concrete workflows zoals leadkwalificatie, campagne-opvolging, bookings en reviewgroei.
+              Alles is white-labelbaar: van lead search en outreach tot offertes, bookings, chatbot en rapportering met lead score — volledig in jouw branding.
             </p>
             <Link href="/register" className="group mt-8 inline-flex h-11 items-center rounded-xl bg-[#f9ae5a] px-7 text-sm font-bold text-[#14100b] shadow-[0_6px_24px_rgba(249,174,90,0.5)] transition-all hover:bg-[#eca04e]">
               Gratis aanmelden <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
             </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* Cards */}
-      <section className="bg-[#f7f8f6] py-24">
-        <div className="mx-auto max-w-7xl space-y-7 px-5 sm:px-8">
-          {solutions.map(({ icon: Icon, title, tagline, color, intro, usecases, results }, idx) => (
-            <article key={title} className="reveal overflow-hidden rounded-2xl border border-[#e2e8e3] bg-white shadow-sm transition-all hover:shadow-[0_12px_40px_rgba(13,21,32,0.08)]" data-delay={String(idx * 80)}>
-              <div className="flex items-center gap-4 border-b border-[#f0f4f1] p-6 sm:p-7" style={{ background: `linear-gradient(135deg, ${color}08, transparent)` }}>
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: `${color}18` }}>
-                  <Icon className="h-6 w-6" style={{ color }} />
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>Oplossing {idx + 1}</p>
-                  <h2 className="text-xl font-extrabold text-[#0d1520]">{title}</h2>
-                  <p className="mt-0.5 text-sm text-[#5a6878]">{tagline}</p>
-                </div>
-              </div>
-              <div className="grid gap-7 p-6 sm:p-7 lg:grid-cols-[1fr_1.4fr]">
-                <div>
-                  <p className="text-sm leading-7 text-[#4d5b6b]">{intro}</p>
-                  <ul className="mt-5 space-y-2">
-                    {results.map((r) => (
-                      <li key={r} className="flex items-center gap-2 text-sm text-[#344052]">
-                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#12a66a]" />
-                        {r}
-                      </li>
-                    ))}
-                  </ul>
-                  <Link href="/register" className="group mt-5 inline-flex items-center text-sm font-bold transition" style={{ color }}>
-                    Aanmelden voor {title.replace("Voor ", "")} <ArrowRight className="ml-1 h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
-                  </Link>
-                </div>
-                <div className="grid gap-2.5 sm:grid-cols-2">
-                  {usecases.map(({ t, c }) => (
-                    <div key={t} className="rounded-xl border border-[#e8eee8] bg-[#f9fbfa] p-4 transition hover:bg-white hover:shadow-sm">
-                      <p className="text-sm font-bold text-[#0d1520]">{t}</p>
-                      <p className="mt-1 text-sm leading-6 text-[#5a6878]">{c}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      {/* Comparison */}
-      <section className="bg-white py-20">
-        <div className="mx-auto max-w-3xl px-5 sm:px-8">
-          <div className="reveal text-center">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">Vergelijking</p>
-            <h2 className="mt-2 text-2xl font-extrabold text-[#0d1520]">Lead Finder vs. losse tools</h2>
-          </div>
-          <div className="reveal mt-8 overflow-hidden rounded-2xl border border-[#e2e8e3]">
-            <div className="grid grid-cols-3 border-b border-[#e2e8e3] bg-[#f9fbfa] px-5 py-3 text-xs font-bold text-[#344052]">
-              <div>Functie</div>
-              <div className="text-center text-[#f9ae5a]">✦ Lead Finder</div>
-              <div className="text-center text-[#9aafbe]">Losse tools</div>
-            </div>
-            {[["Lead discovery + scoring",true,false],["Outreach + campagnes",true,"Deels"],["Offertes + rapporten",true,false],["Booking widgets",true,false],["Review management",true,false],["AI chatbot",true,false],["Geïntegreerde pipeline",true,false],["Belgisch support",true,false]].map(([f, o, t]) => (
-              <div key={String(f)} className="grid grid-cols-3 border-b border-[#f7f8f6] px-5 py-3.5 text-sm last:border-0 hover:bg-[#fafcfa]">
-                <div className="text-[#344052]">{f}</div>
-                <div className="text-center">{o === true ? <CheckCircle2 className="mx-auto h-4 w-4 text-[#12a66a]" /> : <span className="text-[#9aafbe]">{o}</span>}</div>
-                <div className="text-center text-[#d1d5db]">{t === false ? "✕" : <span className="text-[#9aafbe]">{t}</span>}</div>
-              </div>
-            ))}
           </div>
         </div>
       </section>
@@ -826,6 +758,27 @@ function SolutionsPage() {
             <p className="mt-4 text-base leading-7 text-[#5a6878]">
               Hieronder zie je een visuele copy van de vier meest gebruikte modules: offerte configurator, booking agenda, chatbot en reviewsysteem.
             </p>
+            <div className="mt-7 grid gap-2.5 text-left sm:grid-cols-3">
+              {[
+                {
+                  title: "1 · Google Maps Lead Search",
+                  copy: "Vind en kwalificeer leads vanuit kaartdata in een volledig white-label omgeving.",
+                },
+                {
+                  title: "2 · Outreach met AI",
+                  copy: "Laat AI mails opmaken en verstuur ze rechtstreeks vanuit je eigen merkidentiteit.",
+                },
+                {
+                  title: "3 · Rapporten met lead score",
+                  copy: "Lever scoregebaseerde rapporten op in dezelfde white-label presentatieflow.",
+                },
+              ].map((item) => (
+                <div key={item.title} className="rounded-xl border border-[#e2e8e3] bg-white p-3.5 shadow-sm">
+                  <p className="text-[11px] font-extrabold text-[#0d1520]">{item.title}</p>
+                  <p className="mt-1.5 text-[11px] leading-5 text-[#5a6878]">{item.copy}</p>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="mt-12 space-y-5">
@@ -933,6 +886,87 @@ function SolutionsPage() {
               </div>
             </article>
           </div>
+        </div>
+      </section>
+
+      {/* Comparison */}
+      <section className="bg-white py-20">
+        <div className="mx-auto max-w-3xl px-5 sm:px-8">
+          <div className="reveal text-center">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">Vergelijking</p>
+            <h2 className="mt-2 text-2xl font-extrabold text-[#0d1520]">Lead Finder vs. losse tools</h2>
+          </div>
+          <div className="reveal mt-8 overflow-hidden rounded-2xl border border-[#e2e8e3]">
+            <div className="grid grid-cols-3 border-b border-[#e2e8e3] bg-[#f9fbfa] px-5 py-3 text-xs font-bold text-[#344052]">
+              <div>Functie</div>
+              <div className="text-center text-[#f9ae5a]">✦ Lead Finder</div>
+              <div className="text-center text-[#9aafbe]">Losse tools</div>
+            </div>
+            {[
+              ["Google Maps lead search", true, false],
+              ["AI outreach mails opmaken + versturen", true, "Deels"],
+              ["Rapporten met lead score", true, false],
+              ["Volledige white-label branding", true, false],
+              ["Booking widgets", true, false],
+              ["Review management", true, false],
+              ["AI chatbot", true, false],
+              ["Geïntegreerde pipeline", true, false],
+            ].map(([f, o, t]) => (
+              <div key={String(f)} className="grid grid-cols-3 border-b border-[#f7f8f6] px-5 py-3.5 text-sm last:border-0 hover:bg-[#fafcfa]">
+                <div className="text-[#344052]">{f}</div>
+                <div className="text-center">{o === true ? <CheckCircle2 className="mx-auto h-4 w-4 text-[#12a66a]" /> : <span className="text-[#9aafbe]">{o}</span>}</div>
+                <div className="text-center text-[#d1d5db]">{t === false ? "✕" : <span className="text-[#9aafbe]">{t}</span>}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Cards */}
+      <section className="bg-[#f7f8f6] py-24">
+        <div className="mx-auto max-w-7xl space-y-7 px-5 sm:px-8">
+          <div className="reveal mx-auto max-w-2xl text-center">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">Voor wie</p>
+            <h2 className="mt-2 text-3xl font-extrabold text-[#0d1520] sm:text-4xl">Kies de oplossing die past bij je team.</h2>
+          </div>
+          {solutions.map(({ icon: Icon, title, tagline, color, intro, usecases, results }, idx) => (
+            <article key={title} className="reveal overflow-hidden rounded-2xl border border-[#e2e8e3] bg-white shadow-sm transition-all hover:shadow-[0_12px_40px_rgba(13,21,32,0.08)]" data-delay={String(idx * 80)}>
+              <div className="flex items-center gap-4 border-b border-[#f0f4f1] p-6 sm:p-7" style={{ background: `linear-gradient(135deg, ${color}08, transparent)` }}>
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl" style={{ backgroundColor: `${color}18` }}>
+                  <Icon className="h-6 w-6" style={{ color }} />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>Oplossing {idx + 1}</p>
+                  <h2 className="text-xl font-extrabold text-[#0d1520]">{title}</h2>
+                  <p className="mt-0.5 text-sm text-[#5a6878]">{tagline}</p>
+                </div>
+              </div>
+              <div className="grid gap-7 p-6 sm:p-7 lg:grid-cols-[1fr_1.4fr]">
+                <div>
+                  <p className="text-sm leading-7 text-[#4d5b6b]">{intro}</p>
+                  <ul className="mt-5 space-y-2">
+                    {results.map((r) => (
+                      <li key={r} className="flex items-center gap-2 text-sm text-[#344052]">
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#12a66a]" />
+                        {r}
+                      </li>
+                    ))}
+                  </ul>
+                  <Link href="/register" className="group mt-5 inline-flex items-center text-sm font-bold transition" style={{ color }}>
+                    Aanmelden voor {title.replace("Voor ", "")} <ArrowRight className="ml-1 h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+                  </Link>
+                </div>
+                <div className="grid gap-2.5 sm:grid-cols-2">
+                  {usecases.map(({ t, c }) => (
+                    <div key={t} className="rounded-xl border border-[#e8eee8] bg-[#f9fbfa] p-4 transition hover:bg-white hover:shadow-sm">
+                      <p className="text-sm font-bold text-[#0d1520]">{t}</p>
+                      <p className="mt-1 text-sm leading-6 text-[#5a6878]">{c}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </article>
+          ))}
         </div>
       </section>
 
