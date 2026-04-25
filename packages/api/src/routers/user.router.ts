@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { TRPCError } from "@trpc/server";
-import { router, protectedProcedure, adminProcedure } from "../trpc";
+import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -46,16 +46,27 @@ export const userRouter = router({
     });
   }),
 
-  updateRole: adminProcedure
+  updateRole: ownerProcedure
     .input(z.object({ userId: z.string(), role: z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"]) }))
     .mutation(async ({ ctx, input }) => {
+      const target = await ctx.db.user.findUnique({
+        where: { id: input.userId },
+        select: { role: true },
+      });
+      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Gebruiker niet gevonden." });
+      if (target.role === "OWNER" && input.role !== "OWNER") {
+        const owners = await ctx.db.user.count({ where: { role: "OWNER" } });
+        if (owners <= 1) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Er moet minstens één owner blijven." });
+        }
+      }
       return ctx.db.user.update({
         where: { id: input.userId },
         data: { role: input.role },
       });
     }),
 
-  createUser: adminProcedure
+  createUser: ownerProcedure
     .input(
       z.object({
         name: z.string().min(1),
@@ -80,11 +91,22 @@ export const userRouter = router({
       });
     }),
 
-  deleteUser: adminProcedure
+  deleteUser: ownerProcedure
     .input(z.object({ userId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       if (input.userId === ctx.user.id) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Je kunt jezelf niet verwijderen." });
+      }
+      const target = await ctx.db.user.findUnique({
+        where: { id: input.userId },
+        select: { role: true },
+      });
+      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Gebruiker niet gevonden." });
+      if (target.role === "OWNER") {
+        const owners = await ctx.db.user.count({ where: { role: "OWNER" } });
+        if (owners <= 1) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "De laatste owner kan niet verwijderd worden." });
+        }
       }
 
       await ctx.db.user.delete({ where: { id: input.userId } });

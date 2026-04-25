@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSession } from "next-auth/react";
 import { trpc } from "@/lib/trpc/client";
 import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Skeleton, Input, Label } from "@digitify/ui";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
@@ -11,6 +12,9 @@ import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 
 export default function TeamSettingsPage() {
+  const { data: session } = useSession();
+  const currentRole = (session?.user as { role?: string } | undefined)?.role;
+  const canManageUsers = currentRole === "OWNER";
   const { data: users, isLoading } = trpc.user.list.useQuery();
   const { data: requests, isLoading: requestsLoading } = trpc.registration.listRequests.useQuery();
   const utils = trpc.useUtils();
@@ -66,10 +70,12 @@ export default function TeamSettingsPage() {
           <h1 className="text-xl font-bold tracking-tight">Team & Rollen</h1>
           <p className="text-sm text-muted-foreground">Beheer gebruikers en hun rechten</p>
         </div>
-        <Button onClick={() => setShowInvite(true)}>
-          <UserPlus className="mr-2 h-4 w-4" />
-          Uitnodigen
-        </Button>
+        {canManageUsers ? (
+          <Button onClick={() => setShowInvite(true)}>
+            <UserPlus className="mr-2 h-4 w-4" />
+            Uitnodigen
+          </Button>
+        ) : null}
       </div>
 
       <Card>
@@ -99,34 +105,40 @@ export default function TeamSettingsPage() {
                   <TableCell className="font-medium">{user.name || "—"}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{user.email}</TableCell>
                   <TableCell>
-                    <Select
-                      value={user.role}
-                      onValueChange={(role) =>
-                        updateRole.mutate({ userId: user.id, role: role as any })
-                      }
-                    >
-                      <SelectTrigger className="w-[120px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="OWNER">Owner</SelectItem>
-                        <SelectItem value="ADMIN">Admin</SelectItem>
-                        <SelectItem value="MEMBER">Member</SelectItem>
-                        <SelectItem value="VIEWER">Viewer</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {canManageUsers ? (
+                      <Select
+                        value={user.role}
+                        onValueChange={(role) =>
+                          updateRole.mutate({ userId: user.id, role: role as any })
+                        }
+                      >
+                        <SelectTrigger className="w-[120px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="OWNER">Owner</SelectItem>
+                          <SelectItem value="ADMIN">Admin</SelectItem>
+                          <SelectItem value="MEMBER">Member</SelectItem>
+                          <SelectItem value="VIEWER">Viewer</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Badge variant="outline">{user.role.toLowerCase()}</Badge>
+                    )}
                   </TableCell>
                   <TableCell>{user._count.leads}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{formatDate(user.createdAt)}</TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-destructive hover:text-destructive"
-                      onClick={() => setDeleteTarget({ id: user.id, name: user.name })}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {canManageUsers ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => setDeleteTarget({ id: user.id, name: user.name })}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))

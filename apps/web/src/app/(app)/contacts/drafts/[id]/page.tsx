@@ -61,7 +61,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const router = useRouter();
   const { data: session } = useSession();
   const utils = trpc.useUtils();
-  const isAdmin = (session?.user as { role?: string } | undefined)?.role === "ADMIN";
+  const role = (session?.user as { role?: string } | undefined)?.role;
+  const isAdmin = role === "OWNER" || role === "ADMIN";
 
   const { data: draft, isLoading } = trpc.contact.getDraftById.useQuery({ id });
 

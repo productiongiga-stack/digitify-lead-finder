@@ -7,11 +7,12 @@ import {
   redactSecretSettingValue,
   SECRET_REDACTION_MASK,
 } from "@digitify/db";
-import { router, protectedProcedure, adminProcedure } from "../trpc";
+import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
 import { loadEmailSettings } from "../lib/email-sender";
 import { formatSmtpErrorMessage, normalizeTlsOptions } from "../lib/email-utils";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadUserSettingRows, userSettingKey } from "../lib/user-settings";
+import { assertCanManageSettingKey, canReadSettingKey, filterReadableSettingsForRole } from "../lib/permissions";
 
 /* ---------- helpers ---------- */
 
@@ -145,6 +146,7 @@ export const settingsRouter = router({
     .input(z.object({ key: z.string() }))
     .query(async ({ ctx, input }) => {
       const setting = await ctx.db.setting.findUnique({ where: { key: userSettingKey(ctx.user.id, input.key) } });
+      if (!canReadSettingKey(ctx.user.role, input.key)) return null;
       if (!setting) return null;
       const settingsMap = settingsRowsToMap([{ key: input.key, value: setting.value }]);
       const value = settingsMap[input.key];
@@ -154,12 +156,13 @@ export const settingsRouter = router({
   getAll: protectedProcedure.query(async ({ ctx }) => {
     const rows = await loadUserSettingRows(ctx.db, ctx.user.id);
     const map = settingsRowsToMap(rows);
-    return sanitizeSettingsForViewer(map);
+    return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
   }),
 
-  update: adminProcedure
+  update: protectedProcedure
     .input(z.object({ key: z.string(), value: z.any() }))
     .mutation(async ({ ctx, input }) => {
+      assertCanManageSettingKey(ctx.user.role, input.key);
       const scopedKey = userSettingKey(ctx.user.id, input.key);
       if (isSecretNoopUpdate(input.key, input.value)) {
         const current = await ctx.db.setting.findUnique({ where: { key: scopedKey } });
@@ -184,9 +187,12 @@ export const settingsRouter = router({
       return result;
     }),
 
-  batchUpdate: adminProcedure
+  batchUpdate: protectedProcedure
     .input(z.array(z.object({ key: z.string(), value: z.any() })))
     .mutation(async ({ ctx, input }) => {
+      for (const item of input) {
+        assertCanManageSettingKey(ctx.user.role, item.key.trim());
+      }
       const uniqueEntries = Array.from(
         new Map(
           input
@@ -243,7 +249,7 @@ export const settingsRouter = router({
 
   /* ---------- test connection endpoints ---------- */
 
-  testGooglePlaces: adminProcedure.mutation(async ({ ctx }) => {
+  testGooglePlaces: ownerProcedure.mutation(async ({ ctx }) => {
     const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.google_places_key"]);
     const key = getSettingString(settingsRowsToMap(settings), "api.google_places_key");
     if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Google Places API key is niet geconfigureerd." });
@@ -271,7 +277,7 @@ export const settingsRouter = router({
     }
   }),
 
-  testAnthropicKey: adminProcedure.mutation(async ({ ctx }) => {
+  testAnthropicKey: ownerProcedure.mutation(async ({ ctx }) => {
     const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.anthropic_key"]);
     const key = getSettingString(settingsRowsToMap(settings), "api.anthropic_key");
     if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Anthropic API key is niet geconfigureerd." });
@@ -300,7 +306,7 @@ export const settingsRouter = router({
     }
   }),
 
-  testOpenaiKey: adminProcedure.mutation(async ({ ctx }) => {
+  testOpenaiKey: ownerProcedure.mutation(async ({ ctx }) => {
     const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.openai_key"]);
     const key = getSettingString(settingsRowsToMap(settings), "api.openai_key");
     if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "OpenAI API key is niet geconfigureerd." });
@@ -319,7 +325,7 @@ export const settingsRouter = router({
     }
   }),
 
-  testSmtp: adminProcedure
+  testSmtp: ownerProcedure
     .input(
       z.object({
         toEmail: z.string().email().optional(),
@@ -392,7 +398,7 @@ export const settingsRouter = router({
       }
     }),
 
-  checkEmailDns: adminProcedure
+  checkEmailDns: ownerProcedure
     .input(
       z
         .object({
@@ -513,7 +519,7 @@ export const settingsRouter = router({
       };
     }),
 
-  testImap: adminProcedure.mutation(async ({ ctx }) => {
+  testImap: ownerProcedure.mutation(async ({ ctx }) => {
     const { ImapFlow } = await import("imapflow");
     const settings = await loadUserSettingRows(ctx.db, ctx.user.id);
     const settingsMap = settingsRowsToMap(settings);

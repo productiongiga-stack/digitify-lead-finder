@@ -13,6 +13,8 @@ export type Context = {
   requestId: string;
 };
 
+export type AppRole = "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
+
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
 });
@@ -118,3 +120,9 @@ export const adminProcedure = t.procedure
   .use(withRateLimit)
   .use(isAuthenticated)
   .use(hasRole("OWNER", "ADMIN"));
+
+export const ownerProcedure = t.procedure
+  .use(withLogging)
+  .use(withRateLimit)
+  .use(isAuthenticated)
+  .use(hasRole("OWNER"));

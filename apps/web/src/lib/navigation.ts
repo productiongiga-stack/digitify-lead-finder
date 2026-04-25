@@ -23,6 +23,7 @@ import {
   Building2,
   SlidersHorizontal,
 } from "lucide-react";
+import type { AppRole } from "@/lib/permissions";
 
 export type NavItem = {
   href: string;
@@ -70,23 +71,24 @@ export type SettingsSection = {
   title: string;
   description: string;
   icon: LucideIcon;
+  allowedRoles?: AppRole[];
 };
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
-  { href: "/settings/integrations", title: "Integraties & API Keys", description: "SMTP/IMAP + externe API verbindingen", icon: Key },
-  { href: "/settings/branding", title: "Branding", description: "Logo, kleuren en huisstijl", icon: Palette },
-  { href: "/settings/scoring", title: "Scoring Configuratie", description: "Pas scoring gewichten en factoren aan", icon: Gauge },
-  { href: "/settings/team", title: "Team & Rollen", description: "Beheer gebruikers en rechten", icon: Users },
-  { href: "/settings/email", title: "E-mail Instellingen", description: "Afzenderprofiel, layout en signatures", icon: Mail },
-  { href: "/settings/pipeline", title: "Pipeline Stages", description: "Beheer je sales pipeline stappen", icon: GitBranch },
-  { href: "/settings/ai", title: "AI Assistent", description: "Model, taal en tone of voice", icon: Bot },
-  { href: "/settings/company", title: "Bedrijfsgegevens", description: "Naam, adres, BTW en KBO", icon: Building2 },
-  { href: "/settings/bookings", title: "Booking Widget", description: "Beschikbaarheid en booking embed", icon: Calendar },
-  { href: "/settings/reviews", title: "Review Widget", description: "Review links, embed en instellingen", icon: Star },
-  { href: "/settings/quotes", title: "Offerte Configurator", description: "Template, teksten en flow", icon: Receipt },
-  { href: "/settings/display", title: "Weergave", description: "UI dichtheid en mail/PDF typografie", icon: SlidersHorizontal },
-  { href: "/settings/chatbot", title: "Chatbot Widget", description: "Widgetgedrag en trainingsinstellingen", icon: MessageSquare },
-  { href: "/settings/feedback", title: "Feedback", description: "Bekijk en behandel feedback uit de app", icon: MessageSquareWarning },
+  { href: "/settings/integrations", title: "Integraties & API Keys", description: "SMTP/IMAP + externe API verbindingen", icon: Key, allowedRoles: ["OWNER"] },
+  { href: "/settings/branding", title: "Branding", description: "Logo, kleuren en huisstijl", icon: Palette, allowedRoles: ["OWNER"] },
+  { href: "/settings/scoring", title: "Scoring Configuratie", description: "Pas scoring gewichten en factoren aan", icon: Gauge, allowedRoles: ["OWNER", "ADMIN"] },
+  { href: "/settings/team", title: "Team & Rollen", description: "Beheer gebruikers en rechten", icon: Users, allowedRoles: ["OWNER", "ADMIN"] },
+  { href: "/settings/email", title: "E-mail Instellingen", description: "Afzenderprofiel, layout en signatures", icon: Mail, allowedRoles: ["OWNER"] },
+  { href: "/settings/pipeline", title: "Pipeline Stages", description: "Beheer je sales pipeline stappen", icon: GitBranch, allowedRoles: ["OWNER", "ADMIN"] },
+  { href: "/settings/ai", title: "AI Assistent", description: "Model, taal en tone of voice", icon: Bot, allowedRoles: ["OWNER"] },
+  { href: "/settings/company", title: "Bedrijfsgegevens", description: "Naam, adres, BTW en KBO", icon: Building2, allowedRoles: ["OWNER"] },
+  { href: "/settings/bookings", title: "Booking Widget", description: "Beschikbaarheid en booking embed", icon: Calendar, allowedRoles: ["OWNER", "ADMIN"] },
+  { href: "/settings/reviews", title: "Review Widget", description: "Review links, embed en instellingen", icon: Star, allowedRoles: ["OWNER", "ADMIN"] },
+  { href: "/settings/quotes", title: "Offerte Configurator", description: "Template, teksten en flow", icon: Receipt, allowedRoles: ["OWNER", "ADMIN"] },
+  { href: "/settings/display", title: "Weergave", description: "UI dichtheid en mail/PDF typografie", icon: SlidersHorizontal, allowedRoles: ["OWNER", "ADMIN", "MEMBER", "VIEWER"] },
+  { href: "/settings/chatbot", title: "Chatbot Widget", description: "Widgetgedrag en trainingsinstellingen", icon: MessageSquare, allowedRoles: ["OWNER", "ADMIN"] },
+  { href: "/settings/feedback", title: "Feedback", description: "Bekijk en behandel feedback uit de app", icon: MessageSquareWarning, allowedRoles: ["OWNER", "ADMIN"] },
 ];
 
 type PageTitleRoute = { path: string; title: string };

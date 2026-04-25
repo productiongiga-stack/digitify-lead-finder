@@ -1,19 +1,24 @@
 "use client";
 
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Tabs, TabsContent, TabsList, TabsTrigger } from "@digitify/ui";
 import { SETTINGS_SECTIONS } from "@/lib/navigation";
+import { hasRole } from "@/lib/permissions";
 
 export default function SettingsPage() {
-  const featuredSections = SETTINGS_SECTIONS.slice(0, 3);
+  const { data: session } = useSession();
+  const role = (session?.user as { role?: string } | undefined)?.role;
+  const visibleSections = SETTINGS_SECTIONS.filter((section) => !section.allowedRoles || hasRole(role, section.allowedRoles));
+  const featuredSections = visibleSections.slice(0, 3);
   const groupedSections = {
-    essentials: SETTINGS_SECTIONS.filter((section) =>
+    essentials: visibleSections.filter((section) =>
       ["/settings/integrations", "/settings/branding", "/settings/company", "/settings/display"].includes(section.href)
     ),
-    communication: SETTINGS_SECTIONS.filter((section) =>
+    communication: visibleSections.filter((section) =>
       ["/settings/email", "/settings/ai", "/settings/reviews", "/settings/chatbot", "/settings/feedback"].includes(section.href)
     ),
-    operations: SETTINGS_SECTIONS.filter((section) =>
+    operations: visibleSections.filter((section) =>
       ["/settings/bookings", "/settings/quotes", "/settings/pipeline", "/settings/scoring", "/settings/team"].includes(section.href)
     ),
   };

@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { Prisma } from "@digitify/db";
 import { router, adminProcedure, protectedProcedure, publicProcedure } from "../trpc";
 import { sendBrandedEmail } from "../lib/email-sender";
+import { canApproveRole } from "../lib/permissions";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -126,6 +127,12 @@ export const registrationRouter = router({
   approve: adminProcedure
     .input(z.object({ requestId: z.string(), role: z.enum(["ADMIN", "MEMBER", "VIEWER"]).default("MEMBER") }))
     .mutation(async ({ ctx, input }) => {
+      if (!canApproveRole(ctx.user.role, input.role)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Admins kunnen registratieaanvragen alleen als member of viewer goedkeuren.",
+        });
+      }
       const request = await ctx.db.registrationRequest.findUnique({ where: { id: input.requestId } });
       if (!request || request.status !== "PENDING_APPROVAL") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Deze aanvraag kan niet worden goedgekeurd." });
