@@ -40,11 +40,11 @@ export default function LoginPage() {
   return (
     <Card className="border-0 shadow-2xl">
       <CardHeader className="space-y-1 text-center">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[#f9ae5a] text-[#14100b]">
           <Zap className="h-6 w-6" />
         </div>
-        <CardTitle className="text-2xl font-bold">Lead Search</CardTitle>
-        <CardDescription>Log in om door te gaan</CardDescription>
+        <CardTitle className="text-2xl font-bold">Welkom terug</CardTitle>
+        <CardDescription>Log in op je Digitify account</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -73,7 +73,7 @@ export default function LoginPage() {
           {error && (
             <p className="text-sm text-destructive">{error}</p>
           )}
-          <Button type="submit" className="w-full" disabled={loading}>
+          <Button type="submit" className="w-full bg-[#f9ae5a] text-[#14100b] hover:bg-[#eca04e]" disabled={loading}>
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Inloggen
           </Button>
