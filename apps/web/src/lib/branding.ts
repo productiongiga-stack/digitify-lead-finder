@@ -26,8 +26,9 @@ export interface BrandingConfig {
 
 const DEFAULT_PRIMARY_COLOR = "#6366f1";
 
-export function useBranding(): { branding: BrandingConfig; isLoading: boolean } {
+export function useBranding(enabled = true): { branding: BrandingConfig; isLoading: boolean } {
   const { data: settings, isLoading } = trpc.settings.getAll.useQuery(undefined, {
+    enabled,
     staleTime: 60_000,
   });
 

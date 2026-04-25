@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { readSettingString } from "@/lib/settings";
 
@@ -10,7 +11,10 @@ function applyDensity(value: "comfortable" | "compact") {
 }
 
 export function UiDensityProvider() {
+  const pathname = usePathname();
+  const isPublicMarketingPath = ["/", "/product", "/oplossingen", "/over-ons", "/contact"].includes(pathname);
   const { data: settings } = trpc.settings.getAll.useQuery(undefined, {
+    enabled: !isPublicMarketingPath,
     staleTime: 60_000,
   });
 

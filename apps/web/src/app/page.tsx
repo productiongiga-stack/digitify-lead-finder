@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { MarketingPage } from "@/components/marketing/marketing-page";
 
 export default function Home() {
-  redirect("/dashboard");
+  return <MarketingPage page="home" />;
 }

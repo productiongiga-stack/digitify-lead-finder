@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { useBranding } from "@/lib/branding";
 
 export function DynamicFavicon() {
-  const { branding } = useBranding();
+  const pathname = usePathname();
+  const isPublicMarketingPath = ["/", "/product", "/oplossingen", "/over-ons", "/contact"].includes(pathname);
+  const { branding } = useBranding(!isPublicMarketingPath);
 
   useEffect(() => {
     if (!branding.faviconUrl) return;

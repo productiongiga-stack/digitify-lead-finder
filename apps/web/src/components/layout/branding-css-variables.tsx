@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { useBranding } from "@/lib/branding";
 
 function hexToHslString(hex: string) {
@@ -45,7 +46,9 @@ function hexToHslString(hex: string) {
 }
 
 export function BrandingCssVariables() {
-  const { branding } = useBranding();
+  const pathname = usePathname();
+  const isPublicMarketingPath = ["/", "/product", "/oplossingen", "/over-ons", "/contact"].includes(pathname);
+  const { branding } = useBranding(!isPublicMarketingPath);
 
   useEffect(() => {
     const primary = hexToHslString(branding.primaryColor);
