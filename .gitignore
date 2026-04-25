@@ -1,0 +1,24 @@
+node_modules/
+.pnpm-store/
+dist/
+.next/
+.turbo/
+*.tsbuildinfo
+.vercel/
+apps/web/.vercel/
+
+.env
+.env.local
+.env.*.local
+
+.DS_Store
+*.pem
+*.log
+*.zip
+
+coverage/
+.claude/
+.vercel
+
+# User-uploaded files (use object storage in production)
+apps/web/public/uploads/

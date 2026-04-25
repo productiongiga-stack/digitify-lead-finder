@@ -1,0 +1,65 @@
+import { randomUUID } from "node:crypto";
+import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth/session";
+
+function resolveAppUrl() {
+  const candidates = [
+    process.env.NEXTAUTH_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.APP_URL,
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "",
+  ];
+
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim();
+    if (!trimmed) continue;
+    try {
+      return new URL(trimmed).toString().replace(/\/$/, "");
+    } catch {
+      continue;
+    }
+  }
+
+  return "http://localhost:3000";
+}
+
+export async function GET(request: Request) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim() || "";
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
+  if (!clientId || !clientSecret) {
+    return NextResponse.redirect(new URL("/settings/bookings?google=missing-config", request.url));
+  }
+
+  const appUrl = resolveAppUrl();
+  const redirectUri = `${appUrl}/api/integrations/google-calendar/callback`;
+  const state = randomUUID();
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent");
+  url.searchParams.set("scope", [
+    "openid",
+    "email",
+    "profile",
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/calendar.readonly",
+  ].join(" "));
+  url.searchParams.set("state", state);
+
+  const response = NextResponse.redirect(url);
+  response.cookies.set("digitify_google_calendar_state", state, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: appUrl.startsWith("https://"),
+    path: "/",
+    maxAge: 60 * 15,
+  });
+  return response;
+}

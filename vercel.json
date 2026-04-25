@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "pnpm install",
+  "buildCommand": "export NEXTAUTH_URL=${NEXTAUTH_URL:-${NEXT_PUBLIC_APP_URL:-http://localhost:3000}} && pnpm --filter @digitify/db db:generate && pnpm --filter @digitify/web build",
+  "outputDirectory": "apps/web/.next",
+  "crons": [
+    {
+      "path": "/api/cron/drip",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/bookings-sync",
+      "schedule": "30 8 * * *"
+    }
+  ]
+}
