@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc";
+import { type PrismaClient } from "@digitify/db";
 import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
 import {
   deleteGoogleBookingEvent,
@@ -37,7 +38,7 @@ function getBookingEndDate(booking: { date: Date; duration: number }) {
 }
 
 async function logBookingActivity(params: {
-  db: any;
+  db: PrismaClient;
   leadId?: string | null;
   userId: string;
   bookingId: string;
@@ -61,7 +62,7 @@ async function logBookingActivity(params: {
 }
 
 async function syncBookingCalendarEvent(
-  db: any,
+  db: PrismaClient,
   booking: {
     id: string;
     clientName: string;
@@ -107,7 +108,7 @@ async function syncBookingCalendarEvent(
 }
 
 async function sendBookingChangeEmails(params: {
-  db: any;
+  db: PrismaClient;
   booking: {
     clientName: string;
     clientEmail: string | null;
@@ -261,7 +262,7 @@ export const bookingRouter = router({
           createdById: ctx.user.id,
         },
       });
-      const emailCfg = await loadEmailSettings(ctx.db as any);
+      const emailCfg = await loadEmailSettings(ctx.db);
       const companyName = emailCfg.companyName || emailCfg.fromName || "Digitify";
       const booking = await syncBookingCalendarEvent(ctx.db, created, companyName);
 
@@ -378,7 +379,7 @@ export const bookingRouter = router({
       }
 
       const updatedRow = await ctx.db.booking.update({ where: { id }, data: updateData });
-      const emailCfg = await loadEmailSettings(ctx.db as any);
+      const emailCfg = await loadEmailSettings(ctx.db);
       const companyName = emailCfg.companyName || emailCfg.fromName || "Digitify";
       const adminRecipient = emailCfg.fromEmail || emailCfg.smtpUser || "";
       const updated = await syncBookingCalendarEvent(ctx.db, updatedRow, companyName);
@@ -420,7 +421,7 @@ export const bookingRouter = router({
         where: { id: input.id },
         data: { status: "CONFIRMED" },
       });
-      const emailCfg = await loadEmailSettings(ctx.db as any);
+      const emailCfg = await loadEmailSettings(ctx.db);
       const companyName = emailCfg.companyName || emailCfg.fromName || "Digitify";
       const adminRecipient = emailCfg.fromEmail || emailCfg.smtpUser || "";
       const synced = await syncBookingCalendarEvent(ctx.db, updated, companyName);
@@ -470,7 +471,7 @@ export const bookingRouter = router({
             : booking.notes,
         },
       });
-      const emailCfg = await loadEmailSettings(ctx.db as any);
+      const emailCfg = await loadEmailSettings(ctx.db);
       const companyName = emailCfg.companyName || emailCfg.fromName || "Digitify";
       const adminRecipient = emailCfg.fromEmail || emailCfg.smtpUser || "";
       const synced = await syncBookingCalendarEvent(ctx.db, updated, companyName);

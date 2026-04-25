@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createHmac } from "node:crypto";
 import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
+import { type PrismaClient } from "@digitify/db";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { ensureLeadLink } from "../lib/lead-link";
 
@@ -63,7 +64,7 @@ type QuoteLeadResolution =
   | { mode: "will_create"; leadId: null; leadName: string | null }
   | { mode: "missing"; leadId: null; leadName: null };
 
-async function resolveQuoteLeadForEmail(db: any, quote: QuoteForEmail): Promise<QuoteLeadResolution> {
+async function resolveQuoteLeadForEmail(db: PrismaClient, quote: QuoteForEmail): Promise<QuoteLeadResolution> {
   if (quote.leadId && quote.lead?.id) {
     return {
       mode: "linked",

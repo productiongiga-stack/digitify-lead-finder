@@ -4,6 +4,7 @@ import { prisma } from "@digitify/db";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
 import { randomUUID } from "crypto";
+import "@/lib/env";
 
 const handler = (req: Request) =>
   fetchRequestHandler({

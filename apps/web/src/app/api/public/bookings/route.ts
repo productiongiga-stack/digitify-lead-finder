@@ -168,7 +168,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Het gekozen tijdslot past niet op het ingestelde interval." }, { status: 400 });
     }
     const bookingEnd = new Date(bookingDate.getTime() + duration * 60 * 1000);
-    const googleAvailability = await isGoogleSlotAvailable(prisma as any, {
+    const googleAvailability = await isGoogleSlotAvailable(prisma, {
       start: bookingDate,
       end: bookingEnd,
     });
@@ -237,7 +237,7 @@ export async function POST(request: Request) {
       },
     });
     try {
-      const event = await upsertGoogleBookingEvent(prisma as any, {
+      const event = await upsertGoogleBookingEvent(prisma, {
         start: booking.date,
         end: bookingEnd,
         summary: `Afspraak met ${booking.clientName}`,

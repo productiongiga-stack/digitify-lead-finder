@@ -6,6 +6,7 @@ import {
   buildLeadContext,
   replacePlaceholders,
 } from "@digitify/email";
+import { type PrismaClient } from "@digitify/db";
 import { formatSmtpErrorMessage, normalizeAiPlaceholderSyntax, normalizeLegacyPlaceholders, normalizeTlsOptions } from "./email-utils";
 import { getSettingBoolean, getSettingNumber, getSettingString, settingsRowsToMap } from "./settings";
 import { extractEmailTemplateMetadata } from "./email-content";
@@ -48,7 +49,7 @@ interface SendBrandedEmailParams {
 /**
  * Load email and branding settings from the database.
  */
-export async function loadEmailSettings(db: any): Promise<EmailSettings> {
+export async function loadEmailSettings(db: PrismaClient): Promise<EmailSettings> {
   const settingKeys = [
     "email.provider",
     "email.smtp_host",
@@ -120,7 +121,7 @@ export async function loadEmailSettings(db: any): Promise<EmailSettings> {
  * Returns { success, messageId?, error? }.
  */
 export async function sendBrandedEmail(
-  db: any,
+  db: PrismaClient,
   params: SendBrandedEmailParams
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const cfg = await loadEmailSettings(db);

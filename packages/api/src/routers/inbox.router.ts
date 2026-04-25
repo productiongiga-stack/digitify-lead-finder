@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { ImapFlow } from "imapflow";
 import nodemailer from "nodemailer";
 import { createHash } from "node:crypto";
-import { Prisma } from "@digitify/db";
+import { type PrismaClient, Prisma } from "@digitify/db";
 import { normalizeTlsOptions } from "../lib/email-utils";
 import { buildLeadContext, generateBrandedHtml, replacePlaceholders, type EmailLayout } from "@digitify/email";
 import { loadEmailSettings } from "../lib/email-sender";
@@ -41,7 +41,7 @@ function readPrismaErrorCode(error: unknown) {
 }
 
 async function assertNotDuplicateSend(
-  db: any,
+  db: PrismaClient,
   params: { userId: string; guardKey: string },
 ) {
   const now = Date.now();
@@ -221,7 +221,7 @@ async function appendToSentMailbox(
 }
 
 async function sendInboxMessage(params: {
-  db: any;
+  db: PrismaClient;
   userId: string;
   input: {
     to: string;
@@ -378,7 +378,7 @@ async function sendInboxMessage(params: {
 
 export const inboxRouter = router({
   mailboxes: protectedProcedure.query(async ({ ctx }) => {
-    const config = await getImapConfig(ctx.db as any);
+    const config = await getImapConfig(ctx.db);
 
     return withImap(config, async (client) => {
       const mailboxes = await client.list();
@@ -420,7 +420,7 @@ export const inboxRouter = router({
   list: protectedProcedure
     .input(z.object({ mailbox: z.string().default("INBOX") }).optional())
     .query(async ({ ctx, input }) => {
-      const config = await getImapConfig(ctx.db as any);
+      const config = await getImapConfig(ctx.db);
       const mailbox = input?.mailbox || "INBOX";
 
       return withImap(config, async (client) => {
@@ -486,7 +486,7 @@ export const inboxRouter = router({
   getMessage: protectedProcedure
     .input(z.object({ uid: z.number(), mailbox: z.string().default("INBOX") }))
     .query(async ({ ctx, input }) => {
-      const config = await getImapConfig(ctx.db as any);
+      const config = await getImapConfig(ctx.db);
 
       return withImap(config, async (client) => {
         const lock = await client.getMailboxLock(input.mailbox);

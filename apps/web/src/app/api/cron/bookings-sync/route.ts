@@ -59,7 +59,7 @@ async function sendBookingSyncEmails(input: {
   const tasks: Promise<unknown>[] = [];
   if (input.booking.clientEmail) {
     tasks.push(
-      sendBrandedEmail(prisma as any, {
+      sendBrandedEmail(prisma, {
         toEmail: input.booking.clientEmail,
         subject: input.title,
         body: [`Beste ${input.booking.clientName},`, "", input.introCustomer, "", details].join("\n"),
@@ -70,7 +70,7 @@ async function sendBookingSyncEmails(input: {
 
   if (input.adminRecipient) {
     tasks.push(
-      sendBrandedEmail(prisma as any, {
+      sendBrandedEmail(prisma, {
         toEmail: input.adminRecipient,
         subject: `${input.title} · ${input.booking.clientName}`,
         body: [input.introAdmin, "", `Klant: ${input.booking.clientName}`, details].join("\n"),
@@ -87,7 +87,7 @@ async function runBookingsSync(request: Request) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const emailCfg = await loadEmailSettings(prisma as any);
+  const emailCfg = await loadEmailSettings(prisma);
   const companyName = emailCfg.companyName || emailCfg.fromName || "Digitify";
   const adminRecipient = emailCfg.fromEmail || emailCfg.smtpUser || "";
 
@@ -110,7 +110,7 @@ async function runBookingsSync(request: Request) {
     if (!eventId) continue;
 
     try {
-      const remote = await getGoogleBookingEvent(prisma as any, eventId);
+      const remote = await getGoogleBookingEvent(prisma, eventId);
       if (!remote.enabled) {
         return NextResponse.json({
           success: true,
