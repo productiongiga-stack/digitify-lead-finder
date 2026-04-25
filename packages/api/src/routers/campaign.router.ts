@@ -6,6 +6,7 @@ import { type PrismaClient } from "@digitify/db";
 import { normalizeAiPlaceholderSyntax } from "../lib/email-utils";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
+import { loadUserSettingRows } from "../lib/user-settings";
 
 type DripMode = "lead" | "review";
 
@@ -133,6 +134,7 @@ async function runScheduledSequence(params: {
       body: draft.body,
       recipientCompany: draft.lead.companyName,
       leadId: draft.lead.id,
+      userId: activityUserId,
     });
 
     if (sendResult.success) {
@@ -340,10 +342,8 @@ function buildLeadFollowUpStep(baseSubject: string, step: number) {
   };
 }
 
-async function getOpenClawClient(db: PrismaClient): Promise<{ client: OpenClawClient | null }> {
-  const rows = await db.setting.findMany({
-    where: { key: { in: ["api.ai_provider", "openclaw.model", "api.anthropic_key", "api.openai_key"] } },
-  });
+async function getOpenClawClient(db: PrismaClient, userId: string): Promise<{ client: OpenClawClient | null }> {
+  const rows = await loadUserSettingRows(db, userId, ["api.ai_provider", "openclaw.model", "api.anthropic_key", "api.openai_key"]);
   const settings = settingsRowsToMap(rows);
   const provider = getSettingString(settings, "api.ai_provider", "anthropic");
   const model = getSettingString(settings, "openclaw.model", "claude-sonnet-4-20250514");
@@ -657,7 +657,7 @@ export const campaignRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const mode = input.mode as DripMode;
-      const { client } = await getOpenClawClient(ctx.db);
+      const { client } = await getOpenClawClient(ctx.db, ctx.user.id);
       if (mode === "lead" && !client) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
@@ -771,7 +771,7 @@ export const campaignRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const mode = input.mode as DripMode;
-      const { client } = await getOpenClawClient(ctx.db);
+      const { client } = await getOpenClawClient(ctx.db, ctx.user.id);
 
       const campaign = await ctx.db.campaign.findUnique({
         where: { id: input.campaignId },
@@ -942,6 +942,7 @@ export const campaignRouter = router({
             body: step1Draft.body,
             recipientCompany: lead.companyName,
             leadId: lead.id,
+            userId: ctx.user.id,
           });
 
           if (sendResult.success) {

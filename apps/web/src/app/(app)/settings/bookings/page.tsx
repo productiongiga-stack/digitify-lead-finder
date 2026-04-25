@@ -160,7 +160,7 @@ export default function BookingSettingsPage() {
   const [description, setDescription] = useState(
     "Vraag eenvoudig een afspraak aan. We bevestigen uw boeking zo snel mogelijk."
   );
-  const [color, setColor] = useState("#f59e0b");
+  const [color, setColor] = useState("#f9ae5a");
   const [theme, setTheme] = useState("light");
   const [brandName, setBrandName] = useState("Digitify");
   const [meetingName, setMeetingName] = useState("Kennismaking");
@@ -186,7 +186,7 @@ export default function BookingSettingsPage() {
       "bookings.embed_description",
       "Vraag eenvoudig een afspraak aan. We bevestigen uw boeking zo snel mogelijk."
     );
-    const nextColor = readSettingString(settings, "bookings.embed_color", "#f59e0b");
+    const nextColor = readSettingString(settings, "bookings.embed_color", "#f9ae5a");
     const nextTheme = readSettingString(settings, "bookings.embed_theme", "light");
     const nextBrandName = readSettingString(
       settings,

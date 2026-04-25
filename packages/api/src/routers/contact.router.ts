@@ -3,6 +3,7 @@ import { router, protectedProcedure, adminProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { getSettingString } from "../lib/settings";
+import { loadUserSettingRows } from "../lib/user-settings";
 
 const DEFAULT_TEMPLATE_PACK: Array<{
   name: string;
@@ -150,9 +151,7 @@ export const contactRouter = router({
     }),
 
   getFollowUpQueue: protectedProcedure.query(async ({ ctx }) => {
-    const settings = await ctx.db.setting.findMany({
-      where: { key: { in: ["email.followup_days"] } },
-    });
+    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["email.followup_days"]);
     const followupDays = Math.max(
       1,
       Number.parseInt(getSettingString(settings, "email.followup_days", "3"), 10) || 3,
@@ -356,7 +355,7 @@ export const contactRouter = router({
         const followUpDays =
           Number.parseInt(
             getSettingString(
-              await ctx.db.setting.findMany({ where: { key: { in: ["email.followup_days"] } } }),
+              await loadUserSettingRows(ctx.db, ctx.user.id, ["email.followup_days"]),
               "email.followup_days",
               "3",
             ),
@@ -369,6 +368,7 @@ export const contactRouter = router({
           body: draft.body,
           recipientCompany: draft.lead?.companyName ?? draft.toEmail,
           leadId: draft.leadId,
+          userId: ctx.user.id,
         });
 
         if (!result.success) {

@@ -1,6 +1,7 @@
 import { randomBytes, scryptSync } from "crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { Prisma } from "@digitify/db";
 import { router, adminProcedure, protectedProcedure, publicProcedure } from "../trpc";
 import { sendBrandedEmail } from "../lib/email-sender";
 
@@ -176,18 +177,77 @@ export const registrationRouter = router({
       return { success: true };
     }),
 
+  listFeedback: adminProcedure.query(async ({ ctx }) => {
+    try {
+      return await ctx.db.feedbackItem.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 100,
+        select: {
+          id: true,
+          userId: true,
+          userEmail: true,
+          subject: true,
+          message: true,
+          pageUrl: true,
+          status: true,
+          createdAt: true,
+          reviewedAt: true,
+          reviewedBy: { select: { id: true, name: true, email: true } },
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        ["P2021", "P2022"].includes(error.code)
+      ) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Feedback tabel ontbreekt nog in Supabase. Run eerst de feedback SQL migration.",
+        });
+      }
+      throw error;
+    }
+  }),
+
+  updateFeedbackStatus: adminProcedure
+    .input(z.object({ id: z.string(), status: z.enum(["OPEN", "TRIAGED", "CLOSED"]) }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.db.feedbackItem.update({
+        where: { id: input.id },
+        data: {
+          status: input.status,
+          reviewedById: ctx.user.id,
+          reviewedAt: new Date(),
+        },
+      });
+    }),
+
   sendFeedback: protectedProcedure
     .input(z.object({ subject: z.string().min(3), message: z.string().min(10), pageUrl: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
-      const feedback = await ctx.db.feedbackItem.create({
-        data: {
-          userId: ctx.user.id,
-          userEmail: ctx.user.email,
-          subject: input.subject,
-          message: input.message,
-          pageUrl: input.pageUrl || null,
-        },
-      });
+      let feedback;
+      try {
+        feedback = await ctx.db.feedbackItem.create({
+          data: {
+            userId: ctx.user.id,
+            userEmail: ctx.user.email,
+            subject: input.subject,
+            message: input.message,
+            pageUrl: input.pageUrl || null,
+          },
+        });
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          ["P2021", "P2022"].includes(error.code)
+        ) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Feedback tabel ontbreekt nog in Supabase. Run eerst de feedback SQL migration.",
+          });
+        }
+        throw error;
+      }
 
       await notifyAdmins(
         ctx.db,

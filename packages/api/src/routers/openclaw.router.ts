@@ -4,11 +4,10 @@ import { OpenClawClient, type OpenClawContext } from "@digitify/openclaw";
 import { normalizeAiPlaceholderSyntax } from "../lib/email-utils";
 import { type PrismaClient } from "@digitify/db";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
+import { loadUserSettingRows } from "../lib/user-settings";
 
-async function getClient(db: PrismaClient): Promise<{ client: OpenClawClient | null; model: string }> {
-  const rows = await db.setting.findMany({
-    where: { key: { in: ["api.ai_provider", "openclaw.model", "api.anthropic_key", "api.openai_key"] } },
-  });
+async function getClient(db: PrismaClient, userId: string): Promise<{ client: OpenClawClient | null; model: string }> {
+  const rows = await loadUserSettingRows(db, userId, ["api.ai_provider", "openclaw.model", "api.anthropic_key", "api.openai_key"]);
   const settings = settingsRowsToMap(rows);
   const provider = getSettingString(settings, "api.ai_provider", "anthropic");
   const model = getSettingString(settings, "openclaw.model", "claude-sonnet-4-20250514");
@@ -47,25 +46,19 @@ function splitLines(value: string) {
     .filter(Boolean);
 }
 
-async function loadBusinessContext(db: PrismaClient) {
-  const rows = await db.setting.findMany({
-    where: {
-      key: {
-        in: [
-          "branding.company_name",
-          "company.name",
-          "company.niche",
-          "company.website",
-          "company.email",
-          "company.phone",
-          "chatbot.training_notes",
-          "chatbot.knowledge_pages",
-          "chatbot.response_style",
-          "openclaw.business_context",
-        ],
-      },
-    },
-  });
+async function loadBusinessContext(db: PrismaClient, userId: string) {
+  const rows = await loadUserSettingRows(db, userId, [
+    "branding.company_name",
+    "company.name",
+    "company.niche",
+    "company.website",
+    "company.email",
+    "company.phone",
+    "chatbot.training_notes",
+    "chatbot.knowledge_pages",
+    "chatbot.response_style",
+    "openclaw.business_context",
+  ]);
   const map = new Map(rows.map((row) => [row.key, row.value]));
   const companyName =
     readSettingValue(map.get("branding.company_name")) ||
@@ -108,7 +101,7 @@ export const openclawRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { client, model } = await getClient(ctx.db);
+      const { client, model } = await getClient(ctx.db, ctx.user.id);
       if (!client) {
         return {
           response: "OpenClaw is nog niet geconfigureerd. Ga naar Instellingen → Integraties om je API key in te stellen.",
@@ -120,7 +113,7 @@ export const openclawRouter = router({
       const openclawContext: OpenClawContext = {
         currentPage: input.context.currentPage,
       };
-      const businessContextData = await loadBusinessContext(ctx.db);
+      const businessContextData = await loadBusinessContext(ctx.db, ctx.user.id);
       openclawContext.businessContext = businessContextData.businessContext;
 
       if (input.context.leadId) {
@@ -167,9 +160,7 @@ export const openclawRouter = router({
       }
 
       // Get settings for OpenClaw behavior
-      const settings = await ctx.db.setting.findMany({
-        where: { key: { in: ["openclaw_aggressiveness", "openclaw_tone", "openclaw_language"] } },
-      });
+      const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["openclaw_aggressiveness", "openclaw_tone", "openclaw_language"]);
       const localSettingsMap = new Map(settings.map((item) => [item.key, item.value]));
       openclawContext.settings = {
         aggressiveness: readSettingValue(localSettingsMap.get("openclaw_aggressiveness"), "medium"),
@@ -202,7 +193,7 @@ export const openclawRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { client } = await getClient(ctx.db);
+      const { client } = await getClient(ctx.db, ctx.user.id);
       if (!client) {
         return { draft: null, error: "API key niet geconfigureerd. Ga naar Instellingen → Integraties." };
       }
@@ -234,7 +225,7 @@ export const openclawRouter = router({
           suggestedServices,
         },
       };
-      const businessContextData = await loadBusinessContext(ctx.db);
+      const businessContextData = await loadBusinessContext(ctx.db, ctx.user.id);
       openclawContext.businessContext = businessContextData.businessContext;
       openclawContext.settings = {
         aggressiveness: "balanced",
@@ -304,7 +295,7 @@ export const openclawRouter = router({
       style: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { client } = await getClient(ctx.db);
+      const { client } = await getClient(ctx.db, ctx.user.id);
       if (!client) {
         return { rewritten: null, error: "API key niet geconfigureerd." };
       }
@@ -347,7 +338,7 @@ ONDERWERP: [nieuwe onderwerpregel]
             gmbRating: null,
             gmbReviewCount: null,
           },
-          businessContext: (await loadBusinessContext(ctx.db)).businessContext,
+          businessContext: (await loadBusinessContext(ctx.db, ctx.user.id)).businessContext,
         }
       );
 
@@ -366,7 +357,7 @@ ONDERWERP: [nieuwe onderwerpregel]
   analyzeLead: protectedProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const { client } = await getClient(ctx.db);
+      const { client } = await getClient(ctx.db, ctx.user.id);
       if (!client) {
         return { analysis: null, error: "API key niet geconfigureerd. Ga naar Instellingen → Integraties." };
       }
@@ -388,7 +379,7 @@ ONDERWERP: [nieuwe onderwerpregel]
         .filter(Boolean);
 
       const analysis = await client.analyzeLead({
-        businessContext: (await loadBusinessContext(ctx.db)).businessContext,
+        businessContext: (await loadBusinessContext(ctx.db, ctx.user.id)).businessContext,
         leadData: {
           companyName: lead.companyName,
           website: lead.website,

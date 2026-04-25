@@ -948,7 +948,7 @@ export default function QuoteSettingsPage() {
   const [loaded, setLoaded] = useState(false);
   const [title, setTitle] = useState("Stel uw pakket samen");
   const [description, setDescription] = useState("Kies de diensten die voor uw bedrijf relevant zijn en vraag daarna een offerte op maat aan.");
-  const [color, setColor] = useState("#f59e0b");
+  const [color, setColor] = useState("#f9ae5a");
   const [badge, setBadge] = useState("Offerte Configurator");
   const [disclaimer, setDisclaimer] = useState("Niets wordt automatisch verstuurd. Uw aanvraag komt eerst intern binnen voor goedkeuring.");
   const [ctaLabel, setCtaLabel] = useState("Vraag offerte aan");

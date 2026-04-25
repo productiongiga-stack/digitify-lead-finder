@@ -11,6 +11,7 @@ import { router, protectedProcedure, adminProcedure } from "../trpc";
 import { loadEmailSettings } from "../lib/email-sender";
 import { formatSmtpErrorMessage, normalizeTlsOptions } from "../lib/email-utils";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
+import { loadUserSettingRows, userSettingKey } from "../lib/user-settings";
 
 /* ---------- helpers ---------- */
 
@@ -143,15 +144,15 @@ export const settingsRouter = router({
   get: protectedProcedure
     .input(z.object({ key: z.string() }))
     .query(async ({ ctx, input }) => {
-      const setting = await ctx.db.setting.findUnique({ where: { key: input.key } });
+      const setting = await ctx.db.setting.findUnique({ where: { key: userSettingKey(ctx.user.id, input.key) } });
       if (!setting) return null;
-      const settingsMap = settingsRowsToMap([setting]);
+      const settingsMap = settingsRowsToMap([{ key: input.key, value: setting.value }]);
       const value = settingsMap[input.key];
       return sanitizeSingleSettingForViewer(input.key, value);
     }),
 
   getAll: protectedProcedure.query(async ({ ctx }) => {
-    const rows = await ctx.db.setting.findMany();
+    const rows = await loadUserSettingRows(ctx.db, ctx.user.id);
     const map = settingsRowsToMap(rows);
     return sanitizeSettingsForViewer(map);
   }),
@@ -159,17 +160,18 @@ export const settingsRouter = router({
   update: adminProcedure
     .input(z.object({ key: z.string(), value: z.any() }))
     .mutation(async ({ ctx, input }) => {
+      const scopedKey = userSettingKey(ctx.user.id, input.key);
       if (isSecretNoopUpdate(input.key, input.value)) {
-        const current = await ctx.db.setting.findUnique({ where: { key: input.key } });
+        const current = await ctx.db.setting.findUnique({ where: { key: scopedKey } });
         if (current) return current;
         return ctx.db.setting.create({
-          data: { key: input.key, value: "" },
+          data: { key: scopedKey, value: "" },
         });
       }
       const result = await ctx.db.setting.upsert({
-        where: { key: input.key },
+        where: { key: scopedKey },
         update: { value: sanitizeSettingValue(input.key, input.value) },
-        create: { key: input.key, value: sanitizeSettingValue(input.key, input.value) },
+        create: { key: scopedKey, value: sanitizeSettingValue(input.key, input.value) },
       });
       await ctx.db.activity.create({
         data: {
@@ -200,8 +202,8 @@ export const settingsRouter = router({
       await ctx.db.$transaction([
         ...uniqueEntries.map((item) =>
           ctx.db.setting.upsert({
-            where: { key: item.key },
-            create: { key: item.key, value: item.value },
+            where: { key: userSettingKey(ctx.user.id, item.key) },
+            create: { key: userSettingKey(ctx.user.id, item.key), value: item.value },
             update: { value: item.value },
           }),
         ),
@@ -242,7 +244,7 @@ export const settingsRouter = router({
   /* ---------- test connection endpoints ---------- */
 
   testGooglePlaces: adminProcedure.mutation(async ({ ctx }) => {
-    const settings = await ctx.db.setting.findMany();
+    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.google_places_key"]);
     const key = getSettingString(settingsRowsToMap(settings), "api.google_places_key");
     if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Google Places API key is niet geconfigureerd." });
 
@@ -270,7 +272,7 @@ export const settingsRouter = router({
   }),
 
   testAnthropicKey: adminProcedure.mutation(async ({ ctx }) => {
-    const settings = await ctx.db.setting.findMany();
+    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.anthropic_key"]);
     const key = getSettingString(settingsRowsToMap(settings), "api.anthropic_key");
     if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Anthropic API key is niet geconfigureerd." });
 
@@ -299,7 +301,7 @@ export const settingsRouter = router({
   }),
 
   testOpenaiKey: adminProcedure.mutation(async ({ ctx }) => {
-    const settings = await ctx.db.setting.findMany();
+    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.openai_key"]);
     const key = getSettingString(settingsRowsToMap(settings), "api.openai_key");
     if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "OpenAI API key is niet geconfigureerd." });
 
@@ -325,8 +327,8 @@ export const settingsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const nodemailer = await import("nodemailer");
-      const settings = await ctx.db.setting.findMany();
-      const cfg = await loadEmailSettings(ctx.db);
+      const settings = await loadUserSettingRows(ctx.db, ctx.user.id);
+      const cfg = await loadEmailSettings(ctx.db, ctx.user.id);
       const host = cfg.smtpHost;
       const port = cfg.smtpPort;
       const user = cfg.smtpUser;
@@ -399,7 +401,7 @@ export const settingsRouter = router({
         .optional(),
     )
     .mutation(async ({ ctx, input }) => {
-      const settingRows = await ctx.db.setting.findMany();
+      const settingRows = await loadUserSettingRows(ctx.db, ctx.user.id);
       const settingsMap = settingsRowsToMap(settingRows);
       const fromEmail = getSettingString(settingsMap, "email.from_email");
       const smtpUser = getSettingString(settingsMap, "email.smtp_user");
@@ -513,7 +515,7 @@ export const settingsRouter = router({
 
   testImap: adminProcedure.mutation(async ({ ctx }) => {
     const { ImapFlow } = await import("imapflow");
-    const settings = await ctx.db.setting.findMany();
+    const settings = await loadUserSettingRows(ctx.db, ctx.user.id);
     const settingsMap = settingsRowsToMap(settings);
     const host = getSettingString(settingsMap, "email.imap_host");
     const port = getSettingString(settingsMap, "email.imap_port", "993");

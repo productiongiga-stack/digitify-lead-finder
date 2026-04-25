@@ -3,7 +3,7 @@ import { getSettingBoolean, getSettingString, settingsRowsToMap, type SettingRow
 
 type SettingsDb = {
   setting: {
-    findMany: (args?: unknown) => Promise<SettingRow[]>;
+    findMany: (args?: any) => Promise<SettingRow[]>;
   };
 };
 
@@ -27,6 +27,7 @@ type GoogleEventWindow = {
   attendeeEmail?: string;
   location?: string;
   existingEventId?: string | null;
+  userId?: string;
 };
 
 type GoogleEventItem = {
@@ -169,24 +170,24 @@ export function upsertGoogleEventIdInNotes(notes: string | null | undefined, eve
   return `${base ? `${base}\n` : ""}[[GCAL_EVENT_ID=${eventId}]]`;
 }
 
-export async function loadGoogleCalendarSyncConfig(db: SettingsDb): Promise<GoogleCalendarSyncConfig> {
-  const settingRows = await db.setting.findMany({
-    where: {
-      key: {
-        in: [
-          "bookings.google_sync_enabled",
-          "bookings.google_calendar_id",
-          "bookings.google_service_account_email",
-          "bookings.google_service_account_private_key",
-          "bookings.google_oauth_access_token",
-          "bookings.google_oauth_refresh_token",
-          "bookings.google_oauth_account_email",
-          "bookings.google_calendar_timezone",
-          "branding.company_name",
-        ],
-      },
-    },
-  } as any);
+export async function loadGoogleCalendarSyncConfig(db: SettingsDb, userId?: string): Promise<GoogleCalendarSyncConfig> {
+  const keys = [
+    "bookings.google_sync_enabled",
+    "bookings.google_calendar_id",
+    "bookings.google_service_account_email",
+    "bookings.google_service_account_private_key",
+    "bookings.google_oauth_access_token",
+    "bookings.google_oauth_refresh_token",
+    "bookings.google_oauth_account_email",
+    "bookings.google_calendar_timezone",
+    "branding.company_name",
+  ];
+  const settingRows = userId
+    ? (await db.setting.findMany({ where: { key: { in: keys.map((key) => `user:${userId}:${key}`) } } } as any)).map((row) => ({
+        ...row,
+        key: row.key.replace(`user:${userId}:`, ""),
+      }))
+    : await db.setting.findMany({ where: { key: { in: keys } } } as any);
   const map = settingsRowsToMap(settingRows);
 
   return {
@@ -211,9 +212,9 @@ function hasGoogleAuth(config: GoogleCalendarSyncConfig) {
 
 export async function isGoogleSlotAvailable(
   db: SettingsDb,
-  options: { start: Date; end: Date; ignoreEventId?: string | null }
+  options: { start: Date; end: Date; ignoreEventId?: string | null; userId?: string }
 ) {
-  const config = await loadGoogleCalendarSyncConfig(db);
+  const config = await loadGoogleCalendarSyncConfig(db, options.userId);
   if (!config.enabled || !config.calendarId || !hasGoogleAuth(config)) {
     return { enabled: false, available: true as const };
   }
@@ -249,7 +250,7 @@ export async function upsertGoogleBookingEvent(
   db: SettingsDb,
   options: GoogleEventWindow
 ): Promise<{ synced: boolean; eventId: string | null; htmlLink?: string }> {
-  const config = await loadGoogleCalendarSyncConfig(db);
+  const config = await loadGoogleCalendarSyncConfig(db, options.userId);
   if (!config.enabled || !config.calendarId || !hasGoogleAuth(config)) {
     return { synced: false, eventId: options.existingEventId || null };
   }
@@ -289,10 +290,11 @@ export async function upsertGoogleBookingEvent(
 
 export async function deleteGoogleBookingEvent(
   db: SettingsDb,
-  existingEventId: string | null | undefined
+  existingEventId: string | null | undefined,
+  userId?: string
 ) {
   if (!existingEventId) return { synced: false };
-  const config = await loadGoogleCalendarSyncConfig(db);
+  const config = await loadGoogleCalendarSyncConfig(db, userId);
   if (!config.enabled || !config.calendarId || !hasGoogleAuth(config)) {
     return { synced: false };
   }
@@ -320,7 +322,8 @@ export async function deleteGoogleBookingEvent(
 
 export async function getGoogleBookingEvent(
   db: SettingsDb,
-  eventId: string | null | undefined
+  eventId: string | null | undefined,
+  userId?: string
 ): Promise<
   | {
       enabled: false;
@@ -344,7 +347,7 @@ export async function getGoogleBookingEvent(
     return { enabled: false, found: false, cancelled: false, eventId: null };
   }
 
-  const config = await loadGoogleCalendarSyncConfig(db);
+  const config = await loadGoogleCalendarSyncConfig(db, userId);
   if (!config.enabled || !config.calendarId || !hasGoogleAuth(config)) {
     return { enabled: false, found: false, cancelled: false, eventId: null };
   }

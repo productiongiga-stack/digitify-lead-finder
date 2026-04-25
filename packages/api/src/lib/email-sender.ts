@@ -10,6 +10,7 @@ import { type PrismaClient } from "@digitify/db";
 import { formatSmtpErrorMessage, normalizeAiPlaceholderSyntax, normalizeLegacyPlaceholders, normalizeTlsOptions } from "./email-utils";
 import { getSettingBoolean, getSettingNumber, getSettingString, settingsRowsToMap } from "./settings";
 import { extractEmailTemplateMetadata } from "./email-content";
+import { loadUserSettingRows } from "./user-settings";
 
 interface EmailSettings {
   providerName: string;
@@ -44,12 +45,13 @@ interface SendBrandedEmailParams {
   layout?: EmailLayout;
   placeholderContext?: Record<string, string | number | undefined>;
   attachments?: EmailAttachment[];
+  userId?: string;
 }
 
 /**
  * Load email and branding settings from the database.
  */
-export async function loadEmailSettings(db: PrismaClient): Promise<EmailSettings> {
+export async function loadEmailSettings(db: PrismaClient, userId?: string): Promise<EmailSettings> {
   const settingKeys = [
     "email.provider",
     "email.smtp_host",
@@ -75,9 +77,9 @@ export async function loadEmailSettings(db: PrismaClient): Promise<EmailSettings
     "company.website",
   ];
 
-  const settingRows = await db.setting.findMany({
-    where: { key: { in: settingKeys } },
-  });
+  const settingRows = userId
+    ? await loadUserSettingRows(db, userId, settingKeys)
+    : await db.setting.findMany({ where: { key: { in: settingKeys } } });
   const settings = settingsRowsToMap(settingRows);
 
   const hasSmtpCredentials = Boolean(
@@ -124,7 +126,7 @@ export async function sendBrandedEmail(
   db: PrismaClient,
   params: SendBrandedEmailParams
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  const cfg = await loadEmailSettings(db);
+  const cfg = await loadEmailSettings(db, params.userId);
   const effectiveFromEmail = cfg.fromEmail || cfg.smtpUser;
   const effectiveFromName = cfg.fromName || cfg.companyName || cfg.smtpUser;
   if (!effectiveFromEmail) {
@@ -163,7 +165,14 @@ export async function sendBrandedEmail(
     });
 
     if (lead) {
-      leadContext = buildLeadContext(lead, {
+      leadContext = buildLeadContext({
+        ...lead,
+        email: lead.email ?? undefined,
+        phone: lead.phone ?? undefined,
+        website: lead.website ?? undefined,
+        industry: lead.industry ?? undefined,
+        city: lead.city ?? undefined,
+      }, {
         senderName: effectiveFromName,
         senderTitle: cfg.fromTitle,
         senderCompany: cfg.companyName,

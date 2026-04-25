@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
+import { getSettingString, settingsRowsToMap } from "../lib/settings";
+import { loadUserSettingRows } from "../lib/user-settings";
 
 const searchStringSchema = z
   .string()
@@ -89,13 +91,8 @@ export const searchRouter = router({
         })
     )
     .mutation(async ({ ctx, input }) => {
-      // Get API key from settings
-      const setting = await ctx.db.setting.findUnique({
-        where: { key: "api.google_places_key" },
-      });
-
-      const rawKey = setting?.value;
-      const apiKey = rawKey ? String(rawKey).replace(/"/g, "") : null;
+      const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.google_places_key"]);
+      const apiKey = getSettingString(settingsRowsToMap(settings), "api.google_places_key");
       if (!apiKey) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",

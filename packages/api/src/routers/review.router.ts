@@ -144,7 +144,7 @@ export const reviewRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "Review request is al verzonden" });
       }
 
-      const cfg = await loadEmailSettings(ctx.db);
+      const cfg = await loadEmailSettings(ctx.db, ctx.user.id);
       const platformLabel = getPlatformLabel(review.platform);
       const reviewGateUrl = getReviewGateUrl(review.id);
 
@@ -170,6 +170,7 @@ export const reviewRouter = router({
         body: `${body}\n\n[[CTA_TEXT=Geef uw beoordeling]]\n[[CTA_URL=${reviewGateUrl}]]`,
         recipientCompany: review.lead?.companyName ?? review.clientName,
         leadId: review.leadId || undefined,
+        userId: ctx.user.id,
       });
 
       if (!result.success) {
@@ -220,7 +221,7 @@ export const reviewRouter = router({
         });
       }
 
-      const cfg = await loadEmailSettings(ctx.db);
+      const cfg = await loadEmailSettings(ctx.db, ctx.user.id);
       const results: { id: string; success: boolean; error?: string }[] = [];
 
       for (const review of sendable) {
@@ -250,6 +251,7 @@ export const reviewRouter = router({
             body: `${body}\n\n[[CTA_TEXT=Geef uw beoordeling]]\n[[CTA_URL=${reviewGateUrl}]]`,
             recipientCompany: review.lead?.companyName ?? review.clientName,
             leadId: review.leadId || undefined,
+            userId: ctx.user.id,
           });
 
           if (result.success) {

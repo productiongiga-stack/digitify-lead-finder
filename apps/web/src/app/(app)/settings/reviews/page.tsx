@@ -49,7 +49,7 @@ export default function ReviewSettingsPage() {
   const [description, setDescription] = useState(
     "Geef eerst intern een score. Bij 4 of 5 sterren tonen we automatisch de reviewplatformen."
   );
-  const [color, setColor] = useState("#f59e0b");
+  const [color, setColor] = useState("#f9ae5a");
   const [googleUrl, setGoogleUrl] = useState("");
   const [trustpilotUrl, setTrustpilotUrl] = useState("");
   const [facebookUrl, setFacebookUrl] = useState("");

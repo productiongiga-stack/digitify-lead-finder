@@ -26,7 +26,7 @@ export default function BrandingSettingsPage() {
 
   const [companyName, setCompanyName] = useState("");
   const [companySlogan, setCompanySlogan] = useState("");
-  const [primaryColor, setPrimaryColor] = useState("#6366f1");
+  const [primaryColor, setPrimaryColor] = useState("#f9ae5a");
   const [fromName, setFromName] = useState("");
   const [fromEmail, setFromEmail] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
@@ -37,7 +37,7 @@ export default function BrandingSettingsPage() {
   const [initialValues, setInitialValues] = useState({
     companyName: "",
     companySlogan: "",
-    primaryColor: "#6366f1",
+    primaryColor: "#f9ae5a",
     fromName: "",
     fromEmail: "",
   });
@@ -60,7 +60,7 @@ export default function BrandingSettingsPage() {
       };
       setCompanyName(get("branding.company_name"));
       setCompanySlogan(get("branding.company_slogan"));
-      setPrimaryColor(get("branding.primary_color", "#6366f1"));
+      setPrimaryColor(get("branding.primary_color", "#f9ae5a"));
       setFromName(get("email.from_name"));
       setFromEmail(get("email.from_email"));
       setLogoUrl(get("branding.logo_url"));
@@ -68,7 +68,7 @@ export default function BrandingSettingsPage() {
       setInitialValues({
         companyName: get("branding.company_name"),
         companySlogan: get("branding.company_slogan"),
-        primaryColor: get("branding.primary_color", "#6366f1"),
+        primaryColor: get("branding.primary_color", "#f9ae5a"),
         fromName: get("email.from_name"),
         fromEmail: get("email.from_email"),
       });

@@ -11,10 +11,9 @@ import { loadEmailSettings } from "../lib/email-sender";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
 import { ensureLeadLink } from "../lib/lead-link";
 import { extractEmailTemplateMetadata } from "../lib/email-content";
+import { loadUserSettingRows } from "../lib/user-settings";
 
 /* ---------- helpers ---------- */
-
-type SettingRow = { key: string; value: unknown };
 
 const recentSendGuards = new Map<string, number>();
 const SEND_GUARD_WINDOW_MS = 60_000;
@@ -118,8 +117,8 @@ function resolveLayoutForType(type: string, fallback: EmailLayout): EmailLayout 
   }
 }
 
-async function getImapConfig(db: { setting: { findMany: () => Promise<SettingRow[]> } }) {
-  const rows = await db.setting.findMany();
+async function getImapConfig(db: PrismaClient, userId: string) {
+  const rows = await loadUserSettingRows(db, userId);
   const settings = settingsRowsToMap(rows);
   const host = getSettingString(settings, "email.imap_host");
   const port = getSettingString(settings, "email.imap_port", "993");
@@ -149,8 +148,8 @@ async function getImapConfig(db: { setting: { findMany: () => Promise<SettingRow
   };
 }
 
-async function getSmtpConfig(db: { setting: { findMany: () => Promise<SettingRow[]> } }) {
-  const rows = await db.setting.findMany();
+async function getSmtpConfig(db: PrismaClient, userId: string) {
+  const rows = await loadUserSettingRows(db, userId);
   const settings = settingsRowsToMap(rows);
   const host = getSettingString(settings, "email.smtp_host");
   const port = getSettingString(settings, "email.smtp_port", "587");
@@ -233,9 +232,9 @@ async function sendInboxMessage(params: {
     references?: string;
   };
 }) {
-  const smtpConfig = await getSmtpConfig(params.db);
-  const imapConfig = await getImapConfig(params.db);
-  const emailSettings = await loadEmailSettings(params.db);
+  const smtpConfig = await getSmtpConfig(params.db, params.userId);
+  const imapConfig = await getImapConfig(params.db, params.userId);
+  const emailSettings = await loadEmailSettings(params.db, params.userId);
 
   const guardKey = createSendGuardKey(
     params.userId,
@@ -378,7 +377,7 @@ async function sendInboxMessage(params: {
 
 export const inboxRouter = router({
   mailboxes: protectedProcedure.query(async ({ ctx }) => {
-    const config = await getImapConfig(ctx.db);
+    const config = await getImapConfig(ctx.db, ctx.user.id);
 
     return withImap(config, async (client) => {
       const mailboxes = await client.list();
@@ -420,7 +419,7 @@ export const inboxRouter = router({
   list: protectedProcedure
     .input(z.object({ mailbox: z.string().default("INBOX") }).optional())
     .query(async ({ ctx, input }) => {
-      const config = await getImapConfig(ctx.db);
+      const config = await getImapConfig(ctx.db, ctx.user.id);
       const mailbox = input?.mailbox || "INBOX";
 
       return withImap(config, async (client) => {
@@ -486,7 +485,7 @@ export const inboxRouter = router({
   getMessage: protectedProcedure
     .input(z.object({ uid: z.number(), mailbox: z.string().default("INBOX") }))
     .query(async ({ ctx, input }) => {
-      const config = await getImapConfig(ctx.db);
+      const config = await getImapConfig(ctx.db, ctx.user.id);
 
       return withImap(config, async (client) => {
         const lock = await client.getMailboxLock(input.mailbox);

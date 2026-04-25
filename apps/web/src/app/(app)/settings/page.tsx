@@ -11,7 +11,7 @@ export default function SettingsPage() {
       ["/settings/integrations", "/settings/branding", "/settings/company", "/settings/display"].includes(section.href)
     ),
     communication: SETTINGS_SECTIONS.filter((section) =>
-      ["/settings/email", "/settings/ai", "/settings/reviews", "/settings/chatbot"].includes(section.href)
+      ["/settings/email", "/settings/ai", "/settings/reviews", "/settings/chatbot", "/settings/feedback"].includes(section.href)
     ),
     operations: SETTINGS_SECTIONS.filter((section) =>
       ["/settings/bookings", "/settings/quotes", "/settings/pipeline", "/settings/scoring", "/settings/team"].includes(section.href)

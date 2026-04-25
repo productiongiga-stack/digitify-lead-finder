@@ -35,7 +35,7 @@ import { useToast } from "@/components/feedback/toast-provider";
 import { getAppUrl } from "@/lib/config";
 import { readSettingBoolean, readSettingString } from "@/lib/settings";
 
-function normalizeHexColor(value: string, fallback = "#6366f1") {
+function normalizeHexColor(value: string, fallback = "#f9ae5a") {
   const trimmed = value.trim();
   return /^#[0-9a-fA-F]{6}$/.test(trimmed) ? trimmed : fallback;
 }
@@ -78,7 +78,7 @@ export default function ChatbotSettingsPage() {
   const [autoMessagesEnabled, setAutoMessagesEnabled] = useState(true);
   const [aiResponsesEnabled, setAiResponsesEnabled] = useState(true);
   const [askNameBeforeChat, setAskNameBeforeChat] = useState(false);
-  const [primaryColor, setPrimaryColor] = useState("#6366f1");
+  const [primaryColor, setPrimaryColor] = useState("#f9ae5a");
   const [position, setPosition] = useState<"bottom-right" | "bottom-left">(
     "bottom-right"
   );
@@ -108,7 +108,7 @@ export default function ChatbotSettingsPage() {
     setAutoMessagesEnabled(readSettingBoolean(settings, "chatbot.auto_messages_enabled", true));
     setAiResponsesEnabled(readSettingBoolean(settings, "chatbot.ai_responses_enabled", true));
     setAskNameBeforeChat(readSettingBoolean(settings, "chatbot.ask_name_before_chat", false));
-    setPrimaryColor(normalizeHexColor(readSettingString(settings, "chatbot.primary_color", "#6366f1")));
+    setPrimaryColor(normalizeHexColor(readSettingString(settings, "chatbot.primary_color", "#f9ae5a")));
     setPosition(normalizePosition(readSettingString(settings, "chatbot.position", "bottom-right")));
     setAutoOpenDelay(normalizeAutoOpenDelay(readSettingString(settings, "chatbot.auto_open_delay", "0")));
     setAvatarUrl(readSettingString(settings, "chatbot.avatar_url", ""));
@@ -389,7 +389,7 @@ export default function ChatbotSettingsPage() {
                   value={primaryColor}
                   onChange={(e) => setPrimaryColor(e.target.value)}
                   className="w-32 font-mono text-sm"
-                  placeholder="#6366f1"
+                  placeholder="#f9ae5a"
                 />
               </div>
             </div>

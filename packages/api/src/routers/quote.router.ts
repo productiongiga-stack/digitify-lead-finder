@@ -635,6 +635,7 @@ export const quoteRouter = router({
         recipientCompany: quote.clientCompany || quote.clientName,
         leadId: linkedLead.id,
         layout: "proposal",
+        userId: ctx.user.id,
         placeholderContext: {
           quoteNumber: quote.quoteNumber,
           offerTitle: `Offerte ${quote.quoteNumber}`,

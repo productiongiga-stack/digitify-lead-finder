@@ -71,14 +71,16 @@ async function syncBookingCalendarEvent(
     duration: number;
     notes: string | null;
     status: string;
+    leadId?: string | null;
   },
-  companyName: string
+  companyName: string,
+  userId?: string
 ) {
   const existingEventId = extractGoogleEventId(booking.notes);
   const shouldDelete = booking.status === "REJECTED" || booking.status === "CANCELLED";
   if (shouldDelete) {
     if (!existingEventId) return booking;
-    await deleteGoogleBookingEvent(db, existingEventId).catch(() => null);
+    await deleteGoogleBookingEvent(db, existingEventId, userId).catch(() => null);
     return db.booking.update({
       where: { id: booking.id },
       data: { notes: upsertGoogleEventIdInNotes(booking.notes, null) },
@@ -98,6 +100,7 @@ async function syncBookingCalendarEvent(
     ].join("\n"),
     attendeeEmail: booking.clientEmail || undefined,
     existingEventId,
+    userId,
   });
   if (!event.synced || !event.eventId) return booking;
 
@@ -123,6 +126,7 @@ async function sendBookingChangeEmails(params: {
   customerIntro: string;
   adminSubject: string;
   adminIntro: string;
+  userId?: string;
 }) {
   const { booking, companyName, adminRecipient } = params;
   const details = [
@@ -140,6 +144,7 @@ async function sendBookingChangeEmails(params: {
         subject: params.customerSubject,
         body: [`Beste ${booking.clientName},`, "", params.customerIntro, "", details].join("\n"),
         recipientCompany: booking.clientName,
+        userId: params.userId,
       })
     );
   }
@@ -150,6 +155,7 @@ async function sendBookingChangeEmails(params: {
         subject: params.adminSubject,
         body: [params.adminIntro, "", `Klant: ${booking.clientName}`, `E-mail: ${booking.clientEmail || "-"}`, details].join("\n"),
         recipientCompany: companyName,
+        userId: params.userId,
       })
     );
   }
@@ -243,6 +249,7 @@ export const bookingRouter = router({
       const googleSlot = await isGoogleSlotAvailable(ctx.db as any, {
         start: bookingDate,
         end: bookingEnd,
+        userId: ctx.user.id,
       });
       if (googleSlot.enabled && !googleSlot.available) {
         throw new TRPCError({
@@ -262,9 +269,9 @@ export const bookingRouter = router({
           createdById: ctx.user.id,
         },
       });
-      const emailCfg = await loadEmailSettings(ctx.db);
+      const emailCfg = await loadEmailSettings(ctx.db, ctx.user.id);
       const companyName = emailCfg.companyName || emailCfg.fromName || "Digitify";
-      const booking = await syncBookingCalendarEvent(ctx.db, created, companyName);
+      const booking = await syncBookingCalendarEvent(ctx.db, created, companyName, ctx.user.id);
 
       await logBookingActivity({
         db: ctx.db,
@@ -299,6 +306,7 @@ export const bookingRouter = router({
               `We bevestigen uw afspraak zo snel mogelijk.`,
             ].join("\n"),
             recipientCompany: booking.clientName,
+            userId: ctx.user.id,
           }),
         );
       }
@@ -315,6 +323,7 @@ export const bookingRouter = router({
               sharedBody,
             ].join("\n"),
             recipientCompany: companyName,
+            userId: ctx.user.id,
           }),
         );
       }
@@ -365,6 +374,7 @@ export const bookingRouter = router({
         start: nextDate,
         end: new Date(nextDate.getTime() + nextDuration * 60 * 1000),
         ignoreEventId: extractGoogleEventId(existing.notes),
+        userId: ctx.user.id,
       });
       if (
         slotCheck.enabled &&
@@ -379,10 +389,10 @@ export const bookingRouter = router({
       }
 
       const updatedRow = await ctx.db.booking.update({ where: { id }, data: updateData });
-      const emailCfg = await loadEmailSettings(ctx.db);
+      const emailCfg = await loadEmailSettings(ctx.db, ctx.user.id);
       const companyName = emailCfg.companyName || emailCfg.fromName || "Digitify";
       const adminRecipient = emailCfg.fromEmail || emailCfg.smtpUser || "";
-      const updated = await syncBookingCalendarEvent(ctx.db, updatedRow, companyName);
+      const updated = await syncBookingCalendarEvent(ctx.db, updatedRow, companyName, ctx.user.id);
       await logBookingActivity({
         db: ctx.db,
         leadId: updated.leadId,
@@ -401,6 +411,7 @@ export const bookingRouter = router({
         customerIntro: "Uw afspraakgegevens werden aangepast. Hieronder vindt u de nieuwste planning.",
         adminSubject: `Booking aangepast: ${updated.clientName}`,
         adminIntro: "Een booking werd aangepast in de app.",
+        userId: ctx.user.id,
       });
       return updated;
     }),
@@ -421,10 +432,10 @@ export const bookingRouter = router({
         where: { id: input.id },
         data: { status: "CONFIRMED" },
       });
-      const emailCfg = await loadEmailSettings(ctx.db);
+      const emailCfg = await loadEmailSettings(ctx.db, ctx.user.id);
       const companyName = emailCfg.companyName || emailCfg.fromName || "Digitify";
       const adminRecipient = emailCfg.fromEmail || emailCfg.smtpUser || "";
-      const synced = await syncBookingCalendarEvent(ctx.db, updated, companyName);
+      const synced = await syncBookingCalendarEvent(ctx.db, updated, companyName, ctx.user.id);
       await sendBookingChangeEmails({
         db: ctx.db,
         booking: synced,
@@ -434,6 +445,7 @@ export const bookingRouter = router({
         customerIntro: `Uw afspraak bij ${companyName} is bevestigd.`,
         adminSubject: `Booking bevestigd: ${synced.clientName}`,
         adminIntro: "Een booking werd bevestigd.",
+        userId: ctx.user.id,
       });
       await logBookingActivity({
         db: ctx.db,
@@ -471,10 +483,10 @@ export const bookingRouter = router({
             : booking.notes,
         },
       });
-      const emailCfg = await loadEmailSettings(ctx.db);
+      const emailCfg = await loadEmailSettings(ctx.db, ctx.user.id);
       const companyName = emailCfg.companyName || emailCfg.fromName || "Digitify";
       const adminRecipient = emailCfg.fromEmail || emailCfg.smtpUser || "";
-      const synced = await syncBookingCalendarEvent(ctx.db, updated, companyName);
+      const synced = await syncBookingCalendarEvent(ctx.db, updated, companyName, ctx.user.id);
       await sendBookingChangeEmails({
         db: ctx.db,
         booking: synced,
@@ -484,6 +496,7 @@ export const bookingRouter = router({
         customerIntro: `Uw booking aanvraag bij ${companyName} kon momenteel niet bevestigd worden.${input.reason ? ` Reden: ${input.reason}` : ""}`,
         adminSubject: `Booking afgewezen: ${synced.clientName}`,
         adminIntro: "Een booking werd afgewezen.",
+        userId: ctx.user.id,
       });
       await logBookingActivity({
         db: ctx.db,

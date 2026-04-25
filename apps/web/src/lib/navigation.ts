@@ -12,6 +12,7 @@ import {
   Globe2,
   Star,
   MessageSquare,
+  MessageSquareWarning,
   Receipt,
   Gauge,
   Palette,
@@ -85,6 +86,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/quotes", title: "Offerte Configurator", description: "Template, teksten en flow", icon: Receipt },
   { href: "/settings/display", title: "Weergave", description: "UI dichtheid en mail/PDF typografie", icon: SlidersHorizontal },
   { href: "/settings/chatbot", title: "Chatbot Widget", description: "Widgetgedrag en trainingsinstellingen", icon: MessageSquare },
+  { href: "/settings/feedback", title: "Feedback", description: "Bekijk en behandel feedback uit de app", icon: MessageSquareWarning },
 ];
 
 type PageTitleRoute = { path: string; title: string };
@@ -121,6 +123,7 @@ const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
   { path: "/settings/reviews", title: "Review Widget" },
   { path: "/settings/quotes", title: "Offerte Configurator" },
   { path: "/settings/chatbot", title: "Chatbot Widget" },
+  { path: "/settings/feedback", title: "Feedback" },
   { path: "/settings/display", title: "Weergave" },
   { path: "/settings", title: "Instellingen" },
 ];

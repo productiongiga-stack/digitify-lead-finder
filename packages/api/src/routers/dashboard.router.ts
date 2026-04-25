@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
+import { loadUserSettingRows } from "../lib/user-settings";
 
 function getSettingString(
   settings: Array<{ key: string; value: unknown }>,
@@ -118,10 +119,7 @@ export const dashboardRouter = router({
   }),
 
   getUnifiedReminders: protectedProcedure.query(async ({ ctx }) => {
-    const settings = await ctx.db.setting.findMany({
-      where: { key: { in: ["email.followup_days"] } },
-      select: { key: true, value: true },
-    });
+    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["email.followup_days"]);
     const followupDays = Math.max(
       1,
       Number.parseInt(getSettingString(settings, "email.followup_days", "3"), 10) || 3,
