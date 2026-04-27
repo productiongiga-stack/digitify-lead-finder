@@ -1,6 +1,5 @@
 import { type PrismaClient } from "@digitify/db";
 import { ensurePublicTenantToken } from "./public-tenant";
-import { ensureTenantSchemaCompatibility } from "./tenant-schema-compat";
 import { userSettingKey } from "./user-settings";
 
 const WORKSPACE_INIT_KEY = "workspace.initialized_v2";
@@ -110,12 +109,6 @@ const DEFAULT_SERVICE_CATALOG = [
 export async function ensureUserWorkspace(db: PrismaClient, userId: string, fallbackCompanyName?: string | null) {
   const cachedAt = workspaceCache.get(userId);
   if (cachedAt && Date.now() - cachedAt < WORKSPACE_CACHE_TTL_MS) return;
-
-  try {
-    await ensureTenantSchemaCompatibility(db);
-  } catch {
-    // If schema auto-fix fails (permissions/network), we still run safe fallback below.
-  }
 
   const initKey = userSettingKey(userId, WORKSPACE_INIT_KEY);
   const initialized = await db.setting.findUnique({
