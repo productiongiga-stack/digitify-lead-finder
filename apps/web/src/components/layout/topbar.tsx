@@ -48,14 +48,14 @@ export function Topbar() {
   return (
     <header className="sticky top-0 z-20 flex h-12 items-center justify-between border-b bg-background/90 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/65 sm:px-4">
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" className="lg:hidden" onClick={toggleMobileSidebar}>
+        <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg border-border/70 lg:hidden" onClick={toggleMobileSidebar}>
           <Menu className="h-4 w-4" />
         </Button>
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+          <p className="hidden text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70 sm:block">
             Werkruimte
           </p>
-          <h2 className="truncate text-sm font-semibold">
+          <h2 className="truncate text-sm font-semibold sm:text-[15px]">
             {pageTitle}
           </h2>
         </div>
@@ -72,6 +72,36 @@ export function Topbar() {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg sm:hidden">
+              <Plus className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>Snelle acties</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/leads/search">Leads zoeken</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/campaigns">Campagnes</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/contacts">Outbound</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/quotes">Offertes</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/reports">Rapporten</Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/crm">CRM</Link>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" className="hidden sm:inline-flex">
               <Plus className="mr-2 h-4 w-4" />
               Snel starten
@@ -81,28 +111,28 @@ export function Topbar() {
             <DropdownMenuLabel>Snelle acties</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <Link href="/leads/search">Nieuwe lead zoeken</Link>
+              <Link href="/leads/search">Leads zoeken</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href="/leads/new">Lead manueel toevoegen</Link>
+              <Link href="/campaigns">Campagnes</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href="/campaigns/new">Nieuwe campagne</Link>
+              <Link href="/contacts">Outbound</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href="/contacts/compose">Nieuwe e-mail opstellen</Link>
+              <Link href="/quotes">Offertes</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href="/quotes/new">Nieuwe offerte</Link>
+              <Link href="/reports">Rapporten</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href="/reviews">Review aanvragen</Link>
+              <Link href="/crm">CRM</Link>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
         <Link href="/contacts/approval" className="relative">
-          <Button variant="ghost" size="icon" aria-label="Goedkeuringswachtrij">
+          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" aria-label="Goedkeuringswachtrij">
             <Bell className="h-4 w-4" />
           </Button>
           {(kpis?.pendingDrafts ?? 0) > 0 ? (
@@ -115,13 +145,14 @@ export function Topbar() {
           ) : null}
         </Link>
 
-        <Button variant="ghost" size="icon" onClick={toggleOpenClaw}>
+        <Button variant="ghost" size="icon" className="hidden h-8 w-8 rounded-lg md:inline-flex" onClick={toggleOpenClaw}>
           <Bot className="h-4 w-4" />
         </Button>
 
         <Button
           variant="ghost"
           size="icon"
+          className="hidden h-8 w-8 rounded-lg md:inline-flex"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />

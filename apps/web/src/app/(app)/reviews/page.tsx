@@ -149,25 +149,46 @@ export default function ReviewsPage() {
   ];
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Reviews</h1>
-          <p className="text-sm text-muted-foreground">
+    <div className="app-page">
+      <div className="app-page-header">
+        <div className="app-page-heading">
+          <h1 className="app-page-title">Reviews</h1>
+          <p className="app-page-subtitle">
             Beheer review-aanvragen en beoordelingen
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="app-page-actions">
           <Link href="/settings/reviews">
-            <Button variant="outline">
+            <Button variant="outline" size="sm">
               <Settings2 className="mr-2 h-4 w-4" />
               Embed & Instellingen
             </Button>
           </Link>
-          <Button onClick={() => setCreateOpen(true)}>
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Review Aanvragen
           </Button>
+        </div>
+      </div>
+
+      {/* Filter tabs */}
+      <div className="-mx-1 overflow-x-auto px-1 pb-1">
+        <div className="flex min-w-max flex-wrap gap-2">
+          {filterTabs.map((tab) => (
+            <Button
+              key={tab.label}
+              variant={statusFilter === tab.key ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStatusFilter(tab.key)}
+            >
+              {tab.label}
+              {tab.count !== undefined && (
+                <Badge variant="secondary" className="ml-1.5 h-5 min-w-5 px-1 text-xs">
+                  {tab.count}
+                </Badge>
+              )}
+            </Button>
+          ))}
         </div>
       </div>
 
@@ -231,25 +252,6 @@ export default function ReviewsPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      {/* Filter tabs */}
-      <div className="flex flex-wrap gap-2">
-        {filterTabs.map((tab) => (
-          <Button
-            key={tab.label}
-            variant={statusFilter === tab.key ? "default" : "outline"}
-            size="sm"
-            onClick={() => setStatusFilter(tab.key)}
-          >
-            {tab.label}
-            {tab.count !== undefined && (
-              <Badge variant="secondary" className="ml-1.5 h-5 min-w-5 px-1 text-xs">
-                {tab.count}
-              </Badge>
-            )}
-          </Button>
-        ))}
       </div>
 
       {/* Table */}

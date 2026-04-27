@@ -49,6 +49,36 @@
   }
 }
 
+@layer components {
+  .app-page {
+    @apply space-y-4 lg:space-y-5;
+  }
+
+  .app-page-header {
+    @apply flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between;
+  }
+
+  .app-page-heading {
+    @apply min-w-0 space-y-1;
+  }
+
+  .app-page-title {
+    @apply truncate text-lg font-bold tracking-tight sm:text-xl;
+  }
+
+  .app-page-subtitle {
+    @apply max-w-3xl text-xs text-muted-foreground sm:text-sm;
+  }
+
+  .app-page-actions {
+    @apply flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end;
+  }
+
+  .app-page-filters {
+    @apply flex flex-wrap items-center gap-2 rounded-xl border bg-card/80 p-3 shadow-sm;
+  }
+}
+
 @layer base {
   * {
     @apply border-border;

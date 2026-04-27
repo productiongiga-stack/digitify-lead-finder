@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import {
   Button,
@@ -17,6 +17,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from "@digitify/ui";
 import Link from "next/link";
 import { Plus, FileText, Euro, TrendingUp, CheckCircle, Send, Clock, XCircle } from "lucide-react";
@@ -66,12 +70,15 @@ function formatDateShort(d: Date | string) {
 
 export default function QuotesPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const leadIdFilter = searchParams.get("leadId") || undefined;
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
 
   const { data, isLoading } = trpc.quote.list.useQuery({
     page,
     perPage: 20,
+    leadId: leadIdFilter,
     status: statusFilter as "DRAFT" | "SENT" | "VIEWED" | "ACCEPTED" | "REJECTED" | "EXPIRED" | undefined,
   });
   const { data: stats } = trpc.quote.getStats.useQuery();
@@ -88,21 +95,68 @@ export default function QuotesPage() {
   );
 
   return (
-    <div className="space-y-5">
+    <div className="app-page">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Offertes</h1>
-          <p className="text-sm text-muted-foreground">
+      <div className="app-page-header">
+        <div className="app-page-heading">
+          <h1 className="app-page-title">Offertes</h1>
+          <p className="app-page-subtitle">
             Beheer en verstuur offertes naar je klanten
           </p>
         </div>
-        <Link href="/embed/quotes">
-          <Button>
+        <div className="app-page-actions">
+          <Link href="/embed/quotes">
+          <Button size="sm">
             <Plus className="mr-2 h-4 w-4" />
             Nieuwe Offerte
           </Button>
-        </Link>
+          </Link>
+        </div>
+      </div>
+
+      <Tabs defaultValue="overview" className="space-y-4">
+        <TabsList className="grid w-full max-w-sm grid-cols-2">
+          <TabsTrigger value="overview">Overzicht</TabsTrigger>
+          <TabsTrigger value="info">Info</TabsTrigger>
+        </TabsList>
+
+      <TabsContent value="overview" className="space-y-4">
+      {/* Filter Tabs */}
+      <div className="-mx-1 overflow-x-auto px-1 pb-1">
+        <div className="flex min-w-max flex-wrap gap-2">
+          {FILTER_TABS.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <Button
+                key={tab.label}
+                variant={statusFilter === tab.key ? "default" : "outline"}
+                size="sm"
+                onClick={() => {
+                  setStatusFilter(tab.key);
+                  setPage(1);
+                }}
+              >
+                <Icon className="mr-1.5 h-3.5 w-3.5" />
+                {tab.label}
+              </Button>
+            );
+          })}
+          {statusFilter ? (
+            <Badge variant="outline" className="h-9 px-3">
+              Filter: {STATUS_MAP[statusFilter]?.label ?? statusFilter}
+            </Badge>
+          ) : null}
+          {leadIdFilter ? (
+            <Badge variant="outline" className="h-9 px-3">
+              Lead filter actief
+            </Badge>
+          ) : null}
+          {leadIdFilter ? (
+            <Button asChild variant="ghost" size="sm">
+              <Link href={`/leads/${leadIdFilter}`}>Open lead</Link>
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -160,33 +214,9 @@ export default function QuotesPage() {
           </CardContent>
         </Card>
       </div>
+      </TabsContent>
 
-      {/* Filter Tabs */}
-      <div className="flex gap-2 flex-wrap">
-        {FILTER_TABS.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <Button
-              key={tab.label}
-              variant={statusFilter === tab.key ? "default" : "outline"}
-              size="sm"
-              onClick={() => {
-                setStatusFilter(tab.key);
-                setPage(1);
-              }}
-            >
-              <Icon className="mr-1.5 h-3.5 w-3.5" />
-              {tab.label}
-            </Button>
-          );
-        })}
-        {statusFilter ? (
-          <Badge variant="outline" className="h-9 px-3">
-            Filter: {STATUS_MAP[statusFilter]?.label ?? statusFilter}
-          </Badge>
-        ) : null}
-      </div>
-
+      <TabsContent value="info" className="space-y-4">
       <div className="grid gap-3 xl:grid-cols-3">
         <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
           <CardContent className="p-4">
@@ -228,7 +258,9 @@ export default function QuotesPage() {
           </CardContent>
         </Card>
       </div>
+      </TabsContent>
 
+      <TabsContent value="overview" className="space-y-4">
       {/* Summary bar */}
       {quotes.length > 0 && (
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
@@ -281,6 +313,36 @@ export default function QuotesPage() {
               )}
             </div>
           ) : (
+            <>
+            <div className="grid gap-3 p-3 md:hidden">
+              {quotes.map((quote: NonNullable<typeof quotes>[number]) => {
+                const statusInfo = STATUS_MAP[quote.status] ?? STATUS_MAP.DRAFT;
+                return (
+                  <button
+                    key={quote.id}
+                    type="button"
+                    onClick={() => router.push(`/quotes/${quote.id}`)}
+                    className="rounded-xl border p-3 text-left transition-colors hover:bg-muted/40"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{quote.clientCompany || quote.clientName}</p>
+                        {quote.clientCompany ? (
+                          <p className="mt-1 text-xs text-muted-foreground">{quote.clientName}</p>
+                        ) : null}
+                        <p className="mt-1 text-[11px] text-muted-foreground">{quote.quoteNumber}</p>
+                      </div>
+                      <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold">{formatCurrency(quote.total)}</p>
+                      <p className="text-xs text-muted-foreground">{formatDateShort(quote.createdAt)}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="hidden md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -347,6 +409,8 @@ export default function QuotesPage() {
                 })}
               </TableBody>
             </Table>
+            </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -375,6 +439,8 @@ export default function QuotesPage() {
           </Button>
         </div>
       )}
+      </TabsContent>
+      </Tabs>
     </div>
   );
 }

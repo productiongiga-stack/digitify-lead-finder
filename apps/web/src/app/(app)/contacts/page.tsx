@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import {
   Button,
@@ -16,6 +17,10 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from "@digitify/ui";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
@@ -31,12 +36,15 @@ import {
 } from "@/lib/contact-status";
 
 export default function ContactsPage() {
+  const searchParams = useSearchParams();
+  const leadIdFilter = searchParams.get("leadId") || undefined;
   const [statusFilter, setStatusFilter] = useState("");
   const [sendingDraftId, setSendingDraftId] = useState<string | null>(null);
   const utils = trpc.useUtils();
 
   const { data, isLoading } = trpc.contact.listDrafts.useQuery({
     status: statusFilter || undefined,
+    leadId: leadIdFilter,
     page: 1,
     pageSize: 50,
   });
@@ -80,35 +88,81 @@ export default function ContactsPage() {
   const followUpItems = followUpQueue?.items ?? [];
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Outbound Center</h1>
-          <p className="text-sm text-muted-foreground">
+    <div className="app-page">
+      <div className="app-page-header">
+        <div className="app-page-heading">
+          <h1 className="app-page-title">Outbound Center</h1>
+          <p className="app-page-subtitle">
             Opstellen, goedkeuren en verzenden van outreach. Inkomende mail loopt via Inbox.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="app-page-actions">
           <Link href="/contacts/compose">
-            <Button>
+            <Button size="sm">
               <PenSquare className="mr-2 h-4 w-4" />
               Nieuwe E-mail
             </Button>
           </Link>
           <Link href="/contacts/templates">
-            <Button variant="outline">
+            <Button variant="outline" size="sm">
               <FileText className="mr-2 h-4 w-4" />
               Templates
             </Button>
           </Link>
           <Link href="/contacts/approval">
-            <Button variant="outline">
+            <Button variant="outline" size="sm">
               <CheckCircle className="mr-2 h-4 w-4" />
               Goedkeuringswachtrij
             </Button>
           </Link>
         </div>
       </div>
+
+      <Tabs defaultValue="overview" className="space-y-4">
+        <TabsList className="grid w-full max-w-sm grid-cols-2">
+          <TabsTrigger value="overview">Overzicht</TabsTrigger>
+          <TabsTrigger value="info">Info</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-4">
+      <Card className="p-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v === "all" ? "" : v)}>
+            <SelectTrigger className="w-full sm:w-[190px]">
+              <SelectValue placeholder="Filter op status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Alle statussen</SelectItem>
+              {OUTBOUND_STATUS_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Link href="/contacts/inbox">
+            <Button variant="ghost" size="sm">
+              <Inbox className="mr-1.5 h-3.5 w-3.5" />
+              Naar Inbox
+            </Button>
+          </Link>
+          {activeFilterCount > 0 ? (
+            <Badge variant="outline" className="h-9 px-3">
+              Filter: {OUTBOUND_STATUS_LABELS[statusFilter] || statusFilter}
+            </Badge>
+          ) : null}
+          {leadIdFilter ? (
+            <>
+              <Badge variant="outline" className="h-9 px-3">
+                Lead filter actief
+              </Badge>
+              <Button asChild variant="ghost" size="sm">
+                <Link href={`/leads/${leadIdFilter}`}>Open lead</Link>
+              </Button>
+            </>
+          ) : null}
+        </div>
+      </Card>
 
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-6">
         <Card>
@@ -152,6 +206,9 @@ export default function ContactsPage() {
         </Card>
       </div>
 
+      </TabsContent>
+
+      <TabsContent value="info" className="space-y-4">
       <Card className="border-dashed">
         <CardContent className="p-3 text-xs text-muted-foreground">
           <span className="font-medium text-foreground">Flow:</span> Concept -&gt; Goedkeuring -&gt; Verzenden.{" "}
@@ -237,37 +294,76 @@ export default function ContactsPage() {
           )}
         </CardContent>
       </Card>
+      </TabsContent>
 
-      <Card className="p-4">
-        <div className="flex items-center gap-3">
-          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v === "all" ? "" : v)}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter op status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Alle statussen</SelectItem>
-              {OUTBOUND_STATUS_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Link href="/contacts/inbox">
-            <Button variant="ghost" size="sm">
-              <Inbox className="mr-1.5 h-3.5 w-3.5" />
-              Naar Inbox
-            </Button>
-          </Link>
-          {activeFilterCount > 0 ? (
-            <Badge variant="outline" className="h-9 px-3">
-              Filter: {OUTBOUND_STATUS_LABELS[statusFilter] || statusFilter}
-            </Badge>
-          ) : null}
-        </div>
-      </Card>
-
+      <TabsContent value="overview" className="space-y-4">
       <Card>
+        <div className="grid gap-3 p-3 md:hidden">
+          {isLoading ? (
+            Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-xl" />)
+          ) : (data?.items.length ?? 0) === 0 ? (
+            <div className="flex flex-col items-center gap-2 rounded-xl border px-4 py-10 text-center">
+              <Mail className="h-8 w-8 text-muted-foreground/30" />
+              <p className="text-sm text-muted-foreground">Nog geen e-mail drafts</p>
+            </div>
+          ) : (
+            (data?.items ?? []).map((draft: NonNullable<typeof data>["items"][number]) => (
+              <div key={draft.id} className="rounded-xl border p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <Link href={`/leads/${draft.lead.id}`} className="text-sm font-semibold hover:text-primary">
+                      {draft.lead.companyName}
+                    </Link>
+                    <Link href={`/contacts/drafts/${draft.id}`} className="mt-1 block truncate text-xs text-muted-foreground hover:text-primary">
+                      {draft.subject}
+                    </Link>
+                  </div>
+                  <Badge variant={OUTBOUND_STATUS_VARIANTS[draft.status] || "secondary"}>
+                    {OUTBOUND_STATUS_LABELS[draft.status] || draft.status}
+                  </Badge>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {draft.author.name} · {formatDate(draft.createdAt)}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={`/contacts/drafts/${draft.id}`}>
+                      <Eye className="mr-1.5 h-3.5 w-3.5" />
+                      Open
+                    </Link>
+                  </Button>
+                  {canSendOutboundDraft(draft.status) ? (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      disabled={sendEmail.isPending}
+                      onClick={() => {
+                        setSendingDraftId(draft.id);
+                        sendEmail.mutate(
+                          { id: draft.id },
+                          {
+                            onSettled: () => {
+                              setSendingDraftId(null);
+                            },
+                          },
+                        );
+                      }}
+                    >
+                      <Send className="mr-1.5 h-3.5 w-3.5" />
+                      {sendEmail.isPending && sendingDraftId === draft.id
+                        ? "Verzenden..."
+                        : draft.status === "FAILED"
+                          ? "Opnieuw verzenden"
+                          : "Verzenden"}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="hidden md:block">
         <Table>
           <TableHeader>
             <TableRow>
@@ -380,7 +476,10 @@ export default function ContactsPage() {
             )}
           </TableBody>
         </Table>
+        </div>
       </Card>
+      </TabsContent>
+      </Tabs>
     </div>
   );
 }

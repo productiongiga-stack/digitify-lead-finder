@@ -181,6 +181,7 @@ export const quoteRouter = router({
         .object({
           page: z.number().min(1).default(1),
           perPage: z.number().min(1).max(50).default(10),
+          leadId: z.string().optional(),
           status: z
             .enum([
               "DRAFT",
@@ -195,11 +196,14 @@ export const quoteRouter = router({
         .default({})
     )
     .query(async ({ ctx, input }) => {
-      const { page, perPage, status } = input;
-      const where = status ? { status, createdById: ctx.user.id } : { createdById: ctx.user.id };
+      const { page, perPage, status, leadId } = input;
+      if (leadId) await assertLeadAccess(ctx.db, ctx.user.id, leadId);
+      const where: Record<string, unknown> = { createdById: ctx.user.id };
+      if (status) where.status = status;
+      if (leadId) where.leadId = leadId;
       const [quotes, total] = await Promise.all([
         ctx.db.quote.findMany({
-          where,
+          where: where as any,
           orderBy: { createdAt: "desc" },
           skip: (page - 1) * perPage,
           take: perPage,
@@ -209,7 +213,7 @@ export const quoteRouter = router({
             _count: { select: { items: true } },
           },
         }),
-        ctx.db.quote.count({ where }),
+        ctx.db.quote.count({ where: where as any }),
       ]);
       return {
         quotes,
@@ -303,7 +307,27 @@ export const quoteRouter = router({
         where: { createdById: ctx.user.id },
       });
       const quoteNumber = `OFF-${year}-${ctx.user.id.slice(-4).toUpperCase()}-${String(count + 1).padStart(4, "0")}`;
-      if (input.leadId) await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      let resolvedLeadId = input.leadId || null;
+      if (resolvedLeadId) {
+        await assertLeadAccess(ctx.db, ctx.user.id, resolvedLeadId);
+      } else {
+        const clientEmail = input.clientEmail?.trim().toLowerCase();
+        const companyCandidate = (input.clientCompany || input.clientName || "").trim();
+        if (clientEmail || companyCandidate) {
+          const existingLead = await ctx.db.lead.findFirst({
+            where: {
+              createdById: ctx.user.id,
+              OR: [
+                ...(clientEmail ? [{ email: clientEmail }] : []),
+                ...(companyCandidate ? [{ companyName: companyCandidate }] : []),
+              ],
+            },
+            select: { id: true },
+            orderBy: { updatedAt: "desc" },
+          });
+          resolvedLeadId = existingLead?.id ?? null;
+        }
+      }
 
       // Calculate totals
       const items = input.items.map((item, i) => ({
@@ -319,7 +343,7 @@ export const quoteRouter = router({
       const quote = await ctx.db.quote.create({
         data: {
           quoteNumber,
-          leadId: input.leadId || null,
+          leadId: resolvedLeadId,
           clientName: input.clientName,
           clientEmail: input.clientEmail,
           clientPhone: input.clientPhone,
@@ -349,11 +373,11 @@ export const quoteRouter = router({
 
       await ctx.db.activity.create({
         data: {
-          leadId: input.leadId || null,
+          leadId: resolvedLeadId,
           userId: ctx.user.id,
           type: "QUOTE_CREATED",
           title: `Offerte ${quoteNumber} aangemaakt voor ${input.clientName}`,
-          metadata: { quoteId: quote.id, total },
+          metadata: { quoteId: quote.id, total, leadLinked: Boolean(resolvedLeadId) },
         },
       });
 

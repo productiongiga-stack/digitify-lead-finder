@@ -207,31 +207,53 @@ export default function BookingsPage() {
   }).slice(0, 5);
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Boekingen</h1>
-          <p className="text-sm text-muted-foreground">
+    <div className="app-page">
+      <div className="app-page-header">
+        <div className="app-page-heading">
+          <h1 className="app-page-title">Boekingen</h1>
+          <p className="app-page-subtitle">
             Beheer je planning, opvolging en publieke bookingflow vanuit een centrale werkqueue.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="app-page-actions">
           <Link href="/settings/bookings#google-agenda">
-            <Button variant="outline">
+            <Button variant="outline" size="sm">
               <Calendar className="mr-2 h-4 w-4" />
               Google Agenda koppelen
             </Button>
           </Link>
           <Link href="/settings/bookings">
-            <Button variant="outline">
+            <Button variant="outline" size="sm">
               <Settings2 className="mr-2 h-4 w-4" />
               Embed & Instellingen
             </Button>
           </Link>
-          <Button onClick={() => setCreateOpen(true)}>
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Nieuwe Boeking
           </Button>
+        </div>
+      </div>
+
+      {/* Filter tabs */}
+      <div className="-mx-1 overflow-x-auto px-1 pb-1">
+        <div className="flex min-w-max gap-2">
+          {filterTabs.map((tab) => (
+            <Button
+              key={tab.label}
+              variant={statusFilter === tab.key ? "default" : "outline"}
+              size="sm"
+              className="whitespace-nowrap"
+              onClick={() => setStatusFilter(tab.key)}
+            >
+              {tab.label}
+              {tab.count !== undefined && (
+                <Badge variant="secondary" className="ml-1.5 h-5 min-w-5 px-1 text-xs">
+                  {tab.count}
+                </Badge>
+              )}
+            </Button>
+          ))}
         </div>
       </div>
 
@@ -363,28 +385,6 @@ export default function BookingsPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      {/* Filter tabs */}
-      <div className="-mx-1 overflow-x-auto px-1 pb-1">
-        <div className="flex min-w-max gap-2">
-          {filterTabs.map((tab) => (
-            <Button
-              key={tab.label}
-              variant={statusFilter === tab.key ? "default" : "outline"}
-              size="sm"
-              className="whitespace-nowrap"
-              onClick={() => setStatusFilter(tab.key)}
-            >
-              {tab.label}
-              {tab.count !== undefined && (
-                <Badge variant="secondary" className="ml-1.5 h-5 min-w-5 px-1 text-xs">
-                  {tab.count}
-                </Badge>
-              )}
-            </Button>
-          ))}
-        </div>
       </div>
 
       <div className="grid gap-3 xl:grid-cols-3">

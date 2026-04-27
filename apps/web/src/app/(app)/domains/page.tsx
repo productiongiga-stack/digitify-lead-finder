@@ -235,18 +235,43 @@ export default function DomainsPage() {
   const domainToDelete = domains.find((domain: NonNullable<typeof domains>[number]) => domain.id === deleteId);
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Domeinen</h1>
-          <p className="text-sm text-muted-foreground">
+    <div className="app-page">
+      <div className="app-page-header">
+        <div className="app-page-heading">
+          <h1 className="app-page-title">Domeinen</h1>
+          <p className="app-page-subtitle">
             Beheer domeinnamen, SSL-certificaten en website-analyse
           </p>
         </div>
-        <Button onClick={() => setOpen(true)}>
+        <div className="app-page-actions">
+        <Button size="sm" onClick={() => setOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Nieuw Domein
         </Button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="-mx-1 overflow-x-auto px-1 pb-1">
+        <div className="flex min-w-max gap-2">
+          <Button
+            variant={!statusFilter ? "default" : "outline"}
+            size="sm"
+            onClick={() => setStatusFilter(undefined)}
+          >
+            Alles
+          </Button>
+          {Object.entries(STATUS_MAP).map(([key, { label }]) => (
+            <Button
+              key={key}
+              variant={statusFilter === key ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStatusFilter(key)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
       </div>
 
       {/* Stats */}
@@ -316,27 +341,6 @@ export default function DomainsPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant={!statusFilter ? "default" : "outline"}
-          size="sm"
-          onClick={() => setStatusFilter(undefined)}
-        >
-          Alles
-        </Button>
-        {Object.entries(STATUS_MAP).map(([key, { label }]) => (
-          <Button
-            key={key}
-            variant={statusFilter === key ? "default" : "outline"}
-            size="sm"
-            onClick={() => setStatusFilter(key)}
-          >
-            {label}
-          </Button>
-        ))}
       </div>
 
       {/* Domain Cards */}

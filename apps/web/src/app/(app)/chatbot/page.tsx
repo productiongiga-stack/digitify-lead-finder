@@ -240,11 +240,11 @@ export default function ChatbotInboxPage() {
   const isMac = typeof window !== "undefined" && window.navigator.platform.toLowerCase().includes("mac");
 
   return (
-    <div className="space-y-4">
+    <div className="app-page">
       {/* Page header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
+      <div className="app-page-header">
+        <div className="app-page-heading">
+          <h1 className="app-page-title flex items-center gap-2">
             <MessageSquare className="h-6 w-6" />
             Chatbot Gesprekken
             {unreadCount > 0 && (
@@ -253,22 +253,24 @@ export default function ChatbotInboxPage() {
               </Badge>
             )}
           </h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="app-page-subtitle">
             Bekijk en beheer chatbot gesprekken met bezoekers
           </p>
         </div>
-        <Link href="/chatbot/settings">
+        <div className="app-page-actions">
+          <Link href="/chatbot/settings">
           <Button variant="outline" size="sm">
             <Settings className="mr-2 h-4 w-4" />
             Instellingen
           </Button>
-        </Link>
+          </Link>
+        </div>
       </div>
 
       {/* Two-column layout */}
-      <div className="grid h-[calc(100vh-11.5rem)] grid-cols-1 gap-3 md:grid-cols-[33%_1fr]">
+      <div className="grid grid-cols-1 gap-3 md:h-[calc(100dvh-11.5rem)] md:grid-cols-[33%_1fr]">
         {/* ======== LEFT PANEL: Session list ======== */}
-        <Card className="flex flex-col overflow-hidden">
+        <Card className={cn("flex min-h-[340px] flex-col overflow-hidden md:min-h-0", selectedId ? "hidden md:flex" : "")}>
           {/* Search */}
           <div className="space-y-2 border-b p-2.5">
             <div className="relative">
@@ -451,7 +453,7 @@ export default function ChatbotInboxPage() {
         </Card>
 
         {/* ======== RIGHT PANEL: Conversation detail ======== */}
-        <Card className="flex flex-col overflow-hidden">
+        <Card className={cn("flex min-h-[420px] flex-col overflow-hidden md:min-h-0", !selectedId ? "hidden md:flex" : "")}>
           {!selectedId ? (
             /* Empty state */
             <div className="flex flex-col items-center justify-center h-full text-center p-8">
@@ -473,6 +475,15 @@ export default function ChatbotInboxPage() {
               <div className="space-y-2 border-b p-3">
                 <div className="flex items-start justify-between">
                   <div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="mb-2 h-7 px-2 text-xs md:hidden"
+                      onClick={() => setSelectedId(null)}
+                    >
+                      <ChevronLeft className="mr-1 h-3.5 w-3.5" />
+                      Terug naar gesprekken
+                    </Button>
                     <h2 className="text-lg font-semibold">
                       {session.visitorName || "Anonieme Bezoeker"}
                     </h2>

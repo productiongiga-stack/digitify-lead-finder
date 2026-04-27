@@ -14,6 +14,15 @@ import {
 import {
   Button, Badge, Input, Card, Skeleton, Checkbox,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+  Tabs, TabsContent, TabsList, TabsTrigger,
+} from "@digitify/ui";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@digitify/ui";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -24,9 +33,10 @@ import {
 import {
   Search, Plus, ChevronLeft, ChevronRight, ArrowUpDown,
   Star, Globe, Mail as MailIcon, Tag, Trash2, RefreshCw, Eye,
-  SearchX, Send, Target, X,
+  SearchX, Send, Target, X, ChevronDown,
 } from "lucide-react";
 import { cn, formatScore, formatDate, safeExternalUrl } from "@/lib/utils";
+import { LEADS_WORKFLOW_ITEMS } from "@/lib/navigation";
 
 function getOpportunityMetrics(lead: {
   overallScore: number | null;
@@ -197,23 +207,43 @@ export default function LeadsPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Leads</h1>
-          <p className="text-sm text-muted-foreground">
+    <div className="app-page">
+      <div className="app-page-header">
+        <div className="app-page-heading">
+          <h1 className="app-page-title">Leads</h1>
+          <p className="app-page-subtitle">
             {data?.total ?? 0} leads gevonden
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="app-page-actions">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                Workflow
+                <ChevronDown className="ml-2 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>Leads Dropdown</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {LEADS_WORKFLOW_ITEMS.map((item) => (
+                <DropdownMenuItem key={item.href} asChild>
+                  <Link href={item.href}>
+                    <item.icon className="mr-2 h-4 w-4" />
+                    {item.label}
+                  </Link>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Link href="/leads/new">
-            <Button variant="outline">
+            <Button variant="outline" size="sm">
               <Plus className="mr-2 h-4 w-4" />
               Nieuwe Lead
             </Button>
           </Link>
           <Link href="/leads/search">
-            <Button>
+            <Button size="sm">
               <Search className="mr-2 h-4 w-4" />
               Zoek Leads
             </Button>
@@ -221,10 +251,17 @@ export default function LeadsPage() {
         </div>
       </div>
 
+      <Tabs defaultValue="overview" className="space-y-4">
+        <TabsList className="grid w-full max-w-sm grid-cols-2">
+          <TabsTrigger value="overview">Overzicht</TabsTrigger>
+          <TabsTrigger value="info">Info</TabsTrigger>
+        </TabsList>
+
+      <TabsContent value="overview" className="space-y-4">
       {/* Filters */}
-      <Card className="p-4">
+      <Card className="p-3 sm:p-4">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative min-w-[170px] flex-1 sm:min-w-[220px]">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Zoek op naam, email, stad..."
@@ -234,7 +271,7 @@ export default function LeadsPage() {
             />
           </div>
           <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v === "all" ? "" : v); setPage(1); }}>
-            <SelectTrigger className="w-[150px]">
+            <SelectTrigger className="w-[138px] sm:w-[150px]">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -247,7 +284,7 @@ export default function LeadsPage() {
             </SelectContent>
           </Select>
           <Select value={priorityFilter} onValueChange={(v) => { setPriorityFilter(v === "all" ? "" : v); setPage(1); }}>
-            <SelectTrigger className="w-[130px]">
+            <SelectTrigger className="w-[122px] sm:w-[130px]">
               <SelectValue placeholder="Prioriteit" />
             </SelectTrigger>
             <SelectContent>
@@ -301,7 +338,11 @@ export default function LeadsPage() {
             </Button>
           ) : null}
         </div>
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
+      </Card>
+      </TabsContent>
+
+      <TabsContent value="info" className="space-y-4">
+        <div className="grid gap-2 md:grid-cols-3">
           <button
             type="button"
             onClick={() => {
@@ -346,23 +387,32 @@ export default function LeadsPage() {
           </button>
         </div>
         {hasResults && topLead ? (
-          <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 p-3">
+          <Card className="border-border/60 bg-muted/30 p-3">
             <p className="text-xs font-semibold">Aanbevolen eerste actie</p>
             <p className="mt-1 text-sm text-muted-foreground">
               Begin met <span className="font-medium text-foreground">{topLead.companyName}</span>
               {topLead.scorePriority ? ` (${topLead.scorePriority})` : ""} en open de detailpagina voor de volgende stap.
             </p>
-          </div>
-        ) : null}
-      </Card>
+          </Card>
+        ) : (
+          <Card className="border-border/60 bg-muted/20 p-3">
+            <p className="text-xs font-semibold">Tip</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Gebruik de focusknoppen om snel tussen warme leads, nieuwe instroom en offerte-opvolging te wisselen.
+            </p>
+          </Card>
+        )}
+      </TabsContent>
+
+      <TabsContent value="overview" className="space-y-4">
 
       {/* Bulk Action Bar */}
       {someSelected && (
-        <div className="sticky top-0 z-20 flex items-center justify-between rounded-lg border bg-primary/5 px-4 py-3 shadow-sm backdrop-blur-sm">
+        <div className="sticky top-0 z-20 flex flex-col gap-2 rounded-lg border bg-primary/5 px-4 py-3 shadow-sm backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
           <span className="text-sm font-medium">
             {selectedIds.size} lead{selectedIds.size !== 1 ? "s" : ""} geselecteerd
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" onClick={() => setShowTagDialog(true)}>
               <Tag className="mr-2 h-3.5 w-3.5" />
               Tag toevoegen
@@ -384,6 +434,100 @@ export default function LeadsPage() {
 
       {/* Table */}
       <Card>
+        <div className="grid gap-3 p-3 md:hidden">
+          {isLoading ? (
+            Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-32 w-full rounded-xl" />)
+          ) : !data?.items.length ? (
+            <div className="flex flex-col items-center justify-center rounded-xl border px-4 py-10 text-center">
+              <SearchX className="h-7 w-7 text-muted-foreground/50" />
+              <p className="mt-3 text-sm font-medium">Geen leads gevonden</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {search || statusFilter || priorityFilter
+                  ? "Pas de filters aan om meer leads te zien."
+                  : "Zoek nieuwe leads om te starten."}
+              </p>
+            </div>
+          ) : (
+            data.items.map((lead: NonNullable<typeof data>["items"][number]) => {
+              const opportunity = getOpportunityMetrics({
+                overallScore: lead.overallScore,
+                website: lead.website,
+                email: lead.email,
+                phone: lead.phone,
+                gmbRating: lead.gmbRating,
+                gmbReviewCount: lead.gmbReviewCount,
+                facebookUrl: lead.facebookUrl,
+                instagramUrl: lead.instagramUrl,
+                linkedinUrl: lead.linkedinUrl,
+              });
+
+              return (
+                <div key={lead.id} className="rounded-xl border p-3">
+                  <button
+                    type="button"
+                    className="w-full text-left"
+                    onClick={() => router.push(`/leads/${lead.id}`)}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{lead.companyName}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {[lead.city, lead.country].filter(Boolean).join(", ") || "Locatie onbekend"}
+                        </p>
+                      </div>
+                      <span className={cn("text-base font-semibold", lead.overallScore ? (lead.overallScore >= 80 ? "text-red-600 dark:text-red-400" : lead.overallScore >= 60 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground") : "text-muted-foreground")}>
+                        {formatScore(lead.overallScore)}
+                      </span>
+                    </div>
+                  </button>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Badge variant={getLeadStatusBadgeVariant(lead.status)}>
+                      {getLeadStatusLabel(lead.status)}
+                    </Badge>
+                    {lead.scorePriority ? (
+                      <Badge variant={getLeadPriorityBadgeVariant(lead.scorePriority)}>
+                        {lead.scorePriority}
+                      </Badge>
+                    ) : null}
+                    {lead.gmbRating != null ? (
+                      <Badge variant="outline" className="gap-1">
+                        <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                        {lead.gmbRating} ({lead.gmbReviewCount})
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] text-muted-foreground">
+                    <div className="rounded-lg border bg-muted/20 px-2 py-1.5">Fit {opportunity.fitScore}</div>
+                    <div className="rounded-lg border bg-muted/20 px-2 py-1.5">Contact {opportunity.contactability}</div>
+                    <div className="rounded-lg border bg-muted/20 px-2 py-1.5">Gap {opportunity.digitalGap}</div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={() => router.push(`/leads/${lead.id}`)}>
+                      <Eye className="mr-1.5 h-3.5 w-3.5" />
+                      Open
+                    </Button>
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`/contacts/compose?leadId=${lead.id}`}>
+                        <Send className="mr-1.5 h-3.5 w-3.5" />
+                        Mail
+                      </Link>
+                    </Button>
+                    {safeExternalUrl(lead.website) ? (
+                      <Button asChild size="sm" variant="ghost">
+                        <a href={safeExternalUrl(lead.website)!} target="_blank" rel="noopener noreferrer">
+                          <Globe className="mr-1.5 h-3.5 w-3.5" />
+                          Website
+                        </a>
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div className="hidden md:block">
         <Table>
           <TableHeader>
             <TableRow>
@@ -603,6 +747,7 @@ export default function LeadsPage() {
             )}
           </TableBody>
         </Table>
+        </div>
 
         {/* Pagination */}
         {data && data.totalPages > 1 && (
@@ -622,6 +767,8 @@ export default function LeadsPage() {
           </div>
         )}
       </Card>
+      </TabsContent>
+      </Tabs>
 
       {/* Tag Dialog */}
       <Dialog open={showTagDialog} onOpenChange={setShowTagDialog}>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import {
@@ -21,6 +22,10 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from "@digitify/ui";
 import { FileText, Plus, Trash2, Calendar, User } from "lucide-react";
 
@@ -59,17 +64,17 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Rapporten</h1>
-          <p className="text-sm text-muted-foreground">
+    <div className="app-page">
+      <div className="app-page-header">
+        <div className="app-page-heading">
+          <h1 className="app-page-title">Rapporten</h1>
+          <p className="app-page-subtitle">
             Genereer en bekijk rapporten over je leads
           </p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
-            <Button>
+            <Button size="sm">
               <Plus className="mr-2 h-4 w-4" />
               Rapport Genereren
             </Button>
@@ -107,6 +112,13 @@ export default function ReportsPage() {
         </Dialog>
       </div>
 
+      <Tabs defaultValue="overview" className="space-y-4">
+        <TabsList className="grid w-full max-w-sm grid-cols-2">
+          <TabsTrigger value="overview">Overzicht</TabsTrigger>
+          <TabsTrigger value="info">Info</TabsTrigger>
+        </TabsList>
+
+      <TabsContent value="overview" className="space-y-4">
       {reportsQuery.isLoading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -207,6 +219,42 @@ export default function ReportsPage() {
           )}
         </>
       )}
+      </TabsContent>
+
+      <TabsContent value="info" className="space-y-4">
+        <div className="grid gap-3 lg:grid-cols-3">
+          <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
+            <CardContent className="p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gebruik</p>
+              <p className="mt-2 text-sm font-medium">
+                Genereer rapporten per campagne om snel trends in leadkwaliteit, score en output te zien.
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
+            <CardContent className="p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Voor wie</p>
+              <p className="mt-2 text-sm font-medium">
+                Handig voor sales en operations om wekelijkse opvolging en campagnebeslissingen te onderbouwen.
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
+            <CardContent className="p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gerelateerd</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button asChild size="sm" variant="outline">
+                  <Link href="/campaigns">Campagnes</Link>
+                </Button>
+                <Button asChild size="sm" variant="ghost">
+                  <Link href="/leads">Leads</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </TabsContent>
+      </Tabs>
     </div>
   );
 }

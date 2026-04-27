@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import {
   Button,
@@ -57,6 +57,8 @@ const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
 
 export default function NewQuotePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const prefillLeadId = searchParams.get("leadId");
 
   // Client fields
   const [clientName, setClientName] = useState("");
@@ -98,6 +100,10 @@ export default function NewQuotePage() {
     { filters: { search: leadSearch }, page: 1, pageSize: 10 },
     { enabled: leadSearch.length > 1 }
   );
+  const prefillLeadQuery = trpc.lead.getById.useQuery(
+    { id: prefillLeadId || "" },
+    { enabled: Boolean(prefillLeadId) }
+  );
 
   // Service catalog
   const servicesQuery = trpc.quote.getServices.useQuery();
@@ -114,6 +120,18 @@ export default function NewQuotePage() {
     const cats = new Set(services.map((s: (typeof services)[number]) => s.category));
     return Array.from(cats);
   }, [services]);
+
+  useEffect(() => {
+    if (!prefillLeadId || !prefillLeadQuery.data) return;
+    const lead = prefillLeadQuery.data;
+    setLeadId(lead.id);
+    setLeadSearch(lead.companyName || "");
+    setClientCompany((prev) => prev || lead.companyName || "");
+    setClientName((prev) => prev || lead.companyName || "");
+    setClientEmail((prev) => prev || lead.email || "");
+    setClientPhone((prev) => prev || lead.phone || "");
+    setClientAddress((prev) => prev || [lead.address, lead.zipCode, lead.city, lead.country].filter(Boolean).join(", "));
+  }, [prefillLeadId, prefillLeadQuery.data]);
 
   const createMutation = trpc.quote.create.useMutation({
     onSuccess: (data) => {
@@ -351,7 +369,17 @@ export default function NewQuotePage() {
 
                 {/* Link to existing lead */}
                 <div className="space-y-2">
-                  <Label>Koppel aan bestaande lead (optioneel)</Label>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Label>Koppel aan bestaande lead of klant (optioneel)</Label>
+                    <div className="flex items-center gap-2">
+                      <Button asChild type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs">
+                        <Link href="/crm">Open CRM</Link>
+                      </Button>
+                      <Button asChild type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs">
+                        <Link href="/leads/new">Nieuwe relatie</Link>
+                      </Button>
+                    </div>
+                  </div>
                   <Input
                     placeholder="Zoek een lead op naam..."
                     value={leadSearch}

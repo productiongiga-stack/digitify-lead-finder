@@ -18,8 +18,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Sidebar />
       <AppShell>
         <Topbar />
-        <main className="flex-1">
-          <div className="mx-auto w-full max-w-[1680px] p-3 sm:p-4 lg:p-5">
+        <main className="flex-1 overflow-x-clip">
+          <div className="mx-auto w-full max-w-[1680px] overflow-x-clip p-3 sm:p-4 lg:p-5">
             {children}
           </div>
         </main>

@@ -73,7 +73,7 @@ export function OpenClawPanel() {
   };
 
   return (
-    <div className="fixed right-0 top-0 z-50 flex h-full w-[400px] flex-col border-l bg-background shadow-2xl">
+    <div className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[400px] flex-col border-l bg-background shadow-2xl">
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div className="flex items-center gap-2">

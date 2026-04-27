@@ -8,6 +8,7 @@ import {
 } from "@/lib/lead-status";
 import {
   Card, CardContent, CardHeader, CardTitle, Badge, Skeleton, Button,
+  Tabs, TabsList, TabsTrigger, TabsContent,
 } from "@digitify/ui";
 import {
   Users, UserPlus, Flame, TrendingUp, Receipt, MessageSquare, Mail, Trophy,
@@ -43,13 +44,13 @@ function KpiCard({
       <CardContent className="p-4">
         <div className="flex items-start justify-between">
           <div className="space-y-0.5">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <p className="max-w-[14ch] text-[10px] font-medium uppercase leading-tight tracking-wide text-muted-foreground sm:text-[11px]">
               {title}
             </p>
             {loading ? (
               <Skeleton className="mt-1 h-7 w-14" />
             ) : (
-              <p className="text-xl font-bold tracking-tight">{value}</p>
+              <p className="text-lg font-bold tracking-tight sm:text-xl">{value}</p>
             )}
           </div>
           <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${bgClass}`}>
@@ -900,349 +901,369 @@ function DomainMonitor() {
    ================================================================ */
 export default function DashboardPage() {
   const { data: kpis, isLoading } = trpc.dashboard.getKpis.useQuery();
+  const queueCount = (kpis?.pendingDrafts ?? 0) + (kpis?.failedEmails ?? 0) + (kpis?.pendingReviews ?? 0);
 
   return (
-    <div className="space-y-5">
+    <div className="app-page">
       {/* Header */}
-      <div>
-        <h1 className="text-xl font-bold tracking-tight">Dashboard</h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">
+      <div className="app-page-heading">
+        <h1 className="app-page-title">Dashboard</h1>
+        <p className="app-page-subtitle">
           Welkom terug. Hier is je overzicht.
         </p>
-      </div>
-
-      <FocusBoard
-        kpis={kpis ? {
-          failedEmails: kpis.failedEmails,
-          pendingDrafts: kpis.pendingDrafts,
-          pendingReviews: kpis.pendingReviews,
-          hotLeads: kpis.hotLeads,
-        } : undefined}
-        loading={isLoading}
-      />
-
-      {/* KPI Cards - 4 columns */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
-        <KpiCard
-          title="Totaal Leads"
-          value={kpis?.totalLeads ?? 0}
-          icon={Users}
-          href="/leads"
-          loading={isLoading}
-          colorClass="text-blue-600"
-          bgClass="bg-blue-50 dark:bg-blue-900/30"
-        />
-        <KpiCard
-          title="Nieuwe Leads (deze week)"
-          value={kpis?.newLeads ?? 0}
-          icon={UserPlus}
-          href="/leads?status=NEW"
-          loading={isLoading}
-          colorClass="text-green-600"
-          bgClass="bg-green-50 dark:bg-green-900/30"
-        />
-        <KpiCard
-          title="Hot Leads"
-          value={kpis?.hotLeads ?? 0}
-          icon={Flame}
-          href="/leads?priority=Hot"
-          loading={isLoading}
-          colorClass="text-red-600"
-          bgClass="bg-red-50 dark:bg-red-900/30"
-        />
-        <KpiCard
-          title="Gemiddelde Score"
-          value={kpis?.avgScore ?? 0}
-          icon={TrendingUp}
-          loading={isLoading}
-          colorClass="text-purple-600"
-          bgClass="bg-purple-50 dark:bg-purple-900/30"
-        />
-        <KpiCard
-          title="Openstaande Offertes"
-          value={kpis?.activeQuotes ?? 0}
-          icon={Receipt}
-          href="/quotes"
-          loading={isLoading}
-          colorClass="text-orange-600"
-          bgClass="bg-orange-50 dark:bg-orange-900/30"
-        />
-        <KpiCard
-          title="Ongelezen Chats"
-          value={kpis?.unreadChats ?? 0}
-          icon={MessageSquare}
-          href="/chatbot"
-          loading={isLoading}
-          colorClass="text-indigo-600"
-          bgClass="bg-indigo-50 dark:bg-indigo-900/30"
-        />
-        <KpiCard
-          title="E-mails in Draft"
-          value={kpis?.pendingDrafts ?? 0}
-          icon={Mail}
-          href="/contacts/approval"
-          loading={isLoading}
-          colorClass="text-yellow-600"
-          bgClass="bg-yellow-50 dark:bg-yellow-900/30"
-        />
-        <KpiCard
-          title="Gewonnen Deals"
-          value={kpis?.wonLeads ?? 0}
-          icon={Trophy}
-          href="/leads?status=WON"
-          loading={isLoading}
-          colorClass="text-emerald-600"
-          bgClass="bg-emerald-50 dark:bg-emerald-900/30"
-        />
-        <KpiCard
-          title="Respons Rate"
-          value={`${kpis?.responseRate ?? 0}%`}
-          icon={Send}
-          loading={isLoading}
-          colorClass="text-cyan-600"
-          bgClass="bg-cyan-50 dark:bg-cyan-900/30"
-        />
-        <KpiCard
-          title="Conversie Rate"
-          value={`${kpis?.conversionRate ?? 0}%`}
-          icon={Trophy}
-          loading={isLoading}
-          colorClass="text-lime-600"
-          bgClass="bg-lime-50 dark:bg-lime-900/30"
-        />
-        <KpiCard
-          title="Actieve Campagne Leads"
-          value={kpis?.activeCampaignLeadCount ?? 0}
-          icon={Target}
-          href="/campaigns"
-          loading={isLoading}
-          colorClass="text-fuchsia-600"
-          bgClass="bg-fuchsia-50 dark:bg-fuchsia-900/30"
-        />
-        <KpiCard
-          title="Geplande Drips"
-          value={kpis?.scheduledEmails ?? 0}
-          icon={Clock}
-          href="/campaigns"
-          loading={isLoading}
-          colorClass="text-violet-600"
-          bgClass="bg-violet-50 dark:bg-violet-900/30"
-        />
-        <KpiCard
-          title="Mislukte E-mails"
-          value={kpis?.failedEmails ?? 0}
-          icon={AlertTriangle}
-          href="/contacts"
-          loading={isLoading}
-          colorClass="text-red-600"
-          bgClass="bg-red-50 dark:bg-red-900/30"
-        />
-        <KpiCard
-          title="Pending Reviews"
-          value={kpis?.pendingReviews ?? 0}
-          icon={Star}
-          href="/reviews"
-          loading={isLoading}
-          colorClass="text-amber-600"
-          bgClass="bg-amber-50 dark:bg-amber-900/30"
-        />
-      </div>
-
-      {/* Second row: 2-column layout */}
-      <div className="grid gap-4 lg:grid-cols-5">
-        {/* Left column - wider (~60%) */}
-        <div className="space-y-4 lg:col-span-3">
-          <Card className="border-border/50 shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Zap className="h-4 w-4 text-primary" />
-                Snelle Acties
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <QuickActions />
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/50 shadow-sm">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <ActivityIcon className="h-4 w-4 text-primary" />
-                  Recente Activiteit
-                </CardTitle>
-                <Link
-                  href="/leads"
-                  className="text-[11px] font-medium text-primary hover:underline"
-                >
-                  Bekijk alles
-                </Link>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <ActivityFeed />
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Right column (~40%) */}
-        <div className="space-y-4 lg:col-span-2">
-          <Card className="border-border/50 shadow-sm">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <TrendingUp className="h-4 w-4 text-primary" />
-                  Top Leads
-                </CardTitle>
-                <Link
-                  href="/leads"
-                  className="text-[11px] font-medium text-primary hover:underline"
-                >
-                  Alle leads
-                </Link>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <TopLeads />
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/50 shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Target className="h-4 w-4 text-primary" />
-                Pipeline Overzicht
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <PipelineOverview />
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/50 shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                Opvolging Nodig
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <FollowUpWidget />
-            </CardContent>
-          </Card>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Badge variant="secondary" className="h-7 px-2.5">
+            {kpis?.totalLeads ?? 0} leads
+          </Badge>
+          <Badge variant={queueCount > 0 ? "warning" : "success"} className="h-7 px-2.5">
+            {queueCount > 0 ? `${queueCount} items vragen actie` : "Geen open actie-items"}
+          </Badge>
         </div>
       </div>
 
-      {/* Third row: 3-column layout */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="border-border/50 shadow-sm">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Calendar className="h-4 w-4 text-blue-600" />
-                Aankomende Boekingen
-              </CardTitle>
-              <Link
-                href="/bookings"
-                className="text-[11px] font-medium text-primary hover:underline"
-              >
-                Alles
-              </Link>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <UpcomingBookings />
-          </CardContent>
-        </Card>
+      <Tabs defaultValue="overview" className="space-y-4">
+        <TabsList className="grid w-full max-w-sm grid-cols-2">
+          <TabsTrigger value="overview">Overzicht</TabsTrigger>
+          <TabsTrigger value="info">Info</TabsTrigger>
+        </TabsList>
 
-        <Card className="border-border/50 shadow-sm">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <MessageSquare className="h-4 w-4 text-indigo-600" />
-                Openstaande Chats
-              </CardTitle>
-              <Link
-                href="/chatbot"
-                className="text-[11px] font-medium text-primary hover:underline"
-              >
-                Alles
-              </Link>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <OpenChats />
-          </CardContent>
-        </Card>
-
-        <Card className="border-border/50 shadow-sm">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Mail className="h-4 w-4 text-emerald-600" />
-                Mail Health
-              </CardTitle>
-              <Link
-                href="/settings/integrations"
-                className="text-[11px] font-medium text-primary hover:underline"
-              >
-                Instellingen
-              </Link>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <MailHealthCard
-              kpis={kpis ? {
-                sentEmails: kpis.sentEmails,
-                failedEmails: kpis.failedEmails,
-                pendingDrafts: kpis.pendingDrafts,
-                scheduledEmails: kpis.scheduledEmails,
-              } : undefined}
+        <TabsContent value="overview" className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <KpiCard
+              title="Totaal Leads"
+              value={kpis?.totalLeads ?? 0}
+              icon={Users}
+              href="/leads"
               loading={isLoading}
+              colorClass="text-blue-600"
+              bgClass="bg-blue-50 dark:bg-blue-900/30"
             />
-          </CardContent>
-        </Card>
+            <KpiCard
+              title="Nieuwe Leads (deze week)"
+              value={kpis?.newLeads ?? 0}
+              icon={UserPlus}
+              href="/leads?status=NEW"
+              loading={isLoading}
+              colorClass="text-green-600"
+              bgClass="bg-green-50 dark:bg-green-900/30"
+            />
+            <KpiCard
+              title="Hot Leads"
+              value={kpis?.hotLeads ?? 0}
+              icon={Flame}
+              href="/leads?priority=Hot"
+              loading={isLoading}
+              colorClass="text-red-600"
+              bgClass="bg-red-50 dark:bg-red-900/30"
+            />
+            <KpiCard
+              title="Openstaande Offertes"
+              value={kpis?.activeQuotes ?? 0}
+              icon={Receipt}
+              href="/quotes"
+              loading={isLoading}
+              colorClass="text-orange-600"
+              bgClass="bg-orange-50 dark:bg-orange-900/30"
+            />
+            <KpiCard
+              title="Ongelezen Chats"
+              value={kpis?.unreadChats ?? 0}
+              icon={MessageSquare}
+              href="/chatbot"
+              loading={isLoading}
+              colorClass="text-indigo-600"
+              bgClass="bg-indigo-50 dark:bg-indigo-900/30"
+            />
+            <KpiCard
+              title="E-mails in Draft"
+              value={kpis?.pendingDrafts ?? 0}
+              icon={Mail}
+              href="/contacts/approval"
+              loading={isLoading}
+              colorClass="text-yellow-600"
+              bgClass="bg-yellow-50 dark:bg-yellow-900/30"
+            />
+            <KpiCard
+              title="Mislukte E-mails"
+              value={kpis?.failedEmails ?? 0}
+              icon={AlertTriangle}
+              href="/contacts"
+              loading={isLoading}
+              colorClass="text-red-600"
+              bgClass="bg-red-50 dark:bg-red-900/30"
+            />
+            <KpiCard
+              title="Pending Reviews"
+              value={kpis?.pendingReviews ?? 0}
+              icon={Star}
+              href="/reviews"
+              loading={isLoading}
+              colorClass="text-amber-600"
+              bgClass="bg-amber-50 dark:bg-amber-900/30"
+            />
+          </div>
 
-        <Card className="border-border/50 shadow-sm">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Clock className="h-4 w-4 text-violet-600" />
-                Reminders
-              </CardTitle>
-              <Link
-                href="/contacts"
-                className="text-[11px] font-medium text-primary hover:underline"
-              >
-                Outbound
-              </Link>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <RemindersHub />
-          </CardContent>
-        </Card>
+          <div className="grid gap-4 lg:grid-cols-5">
+            <div className="space-y-4 lg:col-span-3">
+              <Card className="border-border/50 shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Zap className="h-4 w-4 text-primary" />
+                    Snelle Acties
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <QuickActions />
+                </CardContent>
+              </Card>
 
-        <Card className="border-border/50 shadow-sm md:col-span-2 xl:col-span-1">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Globe2 className="h-4 w-4 text-amber-600" />
-                Domeinmonitor
-              </CardTitle>
-              <Link
-                href="/domains"
-                className="text-[11px] font-medium text-primary hover:underline"
-              >
-                Alles
-              </Link>
+              <Card className="border-border/50 shadow-sm">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2 text-sm">
+                      <ActivityIcon className="h-4 w-4 text-primary" />
+                      Recente Activiteit
+                    </CardTitle>
+                    <Link
+                      href="/leads"
+                      className="text-[11px] font-medium text-primary hover:underline"
+                    >
+                      Bekijk alles
+                    </Link>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <ActivityFeed />
+                </CardContent>
+              </Card>
             </div>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <DomainMonitor />
-          </CardContent>
-        </Card>
-      </div>
+
+            <div className="space-y-4 lg:col-span-2">
+              <Card className="border-border/50 shadow-sm">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2 text-sm">
+                      <TrendingUp className="h-4 w-4 text-primary" />
+                      Top Leads
+                    </CardTitle>
+                    <Link
+                      href="/leads"
+                      className="text-[11px] font-medium text-primary hover:underline"
+                    >
+                      Alle leads
+                    </Link>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <TopLeads />
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="info" className="space-y-4">
+          <FocusBoard
+            kpis={kpis ? {
+              failedEmails: kpis.failedEmails,
+              pendingDrafts: kpis.pendingDrafts,
+              pendingReviews: kpis.pendingReviews,
+              hotLeads: kpis.hotLeads,
+            } : undefined}
+            loading={isLoading}
+          />
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <KpiCard
+              title="Gemiddelde Score"
+              value={kpis?.avgScore ?? 0}
+              icon={TrendingUp}
+              loading={isLoading}
+              colorClass="text-purple-600"
+              bgClass="bg-purple-50 dark:bg-purple-900/30"
+            />
+            <KpiCard
+              title="Gewonnen Deals"
+              value={kpis?.wonLeads ?? 0}
+              icon={Trophy}
+              href="/leads?status=WON"
+              loading={isLoading}
+              colorClass="text-emerald-600"
+              bgClass="bg-emerald-50 dark:bg-emerald-900/30"
+            />
+            <KpiCard
+              title="Respons Rate"
+              value={`${kpis?.responseRate ?? 0}%`}
+              icon={Send}
+              loading={isLoading}
+              colorClass="text-cyan-600"
+              bgClass="bg-cyan-50 dark:bg-cyan-900/30"
+            />
+            <KpiCard
+              title="Conversie Rate"
+              value={`${kpis?.conversionRate ?? 0}%`}
+              icon={Trophy}
+              loading={isLoading}
+              colorClass="text-lime-600"
+              bgClass="bg-lime-50 dark:bg-lime-900/30"
+            />
+            <KpiCard
+              title="Actieve Campagne Leads"
+              value={kpis?.activeCampaignLeadCount ?? 0}
+              icon={Target}
+              href="/campaigns"
+              loading={isLoading}
+              colorClass="text-fuchsia-600"
+              bgClass="bg-fuchsia-50 dark:bg-fuchsia-900/30"
+            />
+            <KpiCard
+              title="Geplande Drips"
+              value={kpis?.scheduledEmails ?? 0}
+              icon={Clock}
+              href="/campaigns"
+              loading={isLoading}
+              colorClass="text-violet-600"
+              bgClass="bg-violet-50 dark:bg-violet-900/30"
+            />
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Card className="border-border/50 shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Target className="h-4 w-4 text-primary" />
+                  Pipeline Overzicht
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <PipelineOverview />
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50 shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  Opvolging Nodig
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <FollowUpWidget />
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50 shadow-sm">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Mail className="h-4 w-4 text-emerald-600" />
+                    Mail Health
+                  </CardTitle>
+                  <Link
+                    href="/settings/integrations"
+                    className="text-[11px] font-medium text-primary hover:underline"
+                  >
+                    Instellingen
+                  </Link>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <MailHealthCard
+                  kpis={kpis ? {
+                    sentEmails: kpis.sentEmails,
+                    failedEmails: kpis.failedEmails,
+                    pendingDrafts: kpis.pendingDrafts,
+                    scheduledEmails: kpis.scheduledEmails,
+                  } : undefined}
+                  loading={isLoading}
+                />
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <Card className="border-border/50 shadow-sm">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Calendar className="h-4 w-4 text-blue-600" />
+                    Aankomende Boekingen
+                  </CardTitle>
+                  <Link
+                    href="/bookings"
+                    className="text-[11px] font-medium text-primary hover:underline"
+                  >
+                    Alles
+                  </Link>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <UpcomingBookings />
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50 shadow-sm">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <MessageSquare className="h-4 w-4 text-indigo-600" />
+                    Openstaande Chats
+                  </CardTitle>
+                  <Link
+                    href="/chatbot"
+                    className="text-[11px] font-medium text-primary hover:underline"
+                  >
+                    Alles
+                  </Link>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <OpenChats />
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50 shadow-sm">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Clock className="h-4 w-4 text-violet-600" />
+                    Reminders
+                  </CardTitle>
+                  <Link
+                    href="/contacts"
+                    className="text-[11px] font-medium text-primary hover:underline"
+                  >
+                    Outbound
+                  </Link>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <RemindersHub />
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50 shadow-sm">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Globe2 className="h-4 w-4 text-amber-600" />
+                    Domeinmonitor
+                  </CardTitle>
+                  <Link
+                    href="/domains"
+                    className="text-[11px] font-medium text-primary hover:underline"
+                  >
+                    Alles
+                  </Link>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <DomainMonitor />
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -19,6 +19,10 @@ import {
   DialogTitle,
   DialogTrigger,
   DialogFooter,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from "@digitify/ui";
 import {
   Select,
@@ -395,6 +399,13 @@ export default function LeadSearchPage() {
         </p>
       </div>
 
+      <Tabs defaultValue="overview" className="space-y-4">
+        <TabsList className="grid w-full max-w-sm grid-cols-2">
+          <TabsTrigger value="overview">Overzicht</TabsTrigger>
+          <TabsTrigger value="info">Info</TabsTrigger>
+        </TabsList>
+
+      <TabsContent value="overview" className="space-y-5">
       {/* API key missing warning */}
       {apiKeyMissing && (
         <Card className="border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30">
@@ -659,7 +670,116 @@ export default function LeadSearchPage() {
             </div>
           ) : (
             <>
-              <div className="divide-y rounded-md border">
+              <div className="grid gap-3 md:hidden">
+                {paginatedResults.map((result: SearchResult) => {
+                  const isSaved = savedIds.has(result.placeId);
+                  const isSaving =
+                    saveMutation.isPending &&
+                    saveMutation.variables?.placeId === result.placeId;
+                  const existingLead = existingLeadsMap.get(result.placeId);
+                  const leadId = savedLeadIds.get(result.placeId) || existingLead?.id;
+                  const { score, priority } = calcPreviewScore(result);
+                  const isSelected = selectedIds.has(result.placeId);
+
+                  return (
+                    <div
+                      key={result.placeId}
+                      className={`rounded-xl border p-3 transition-colors ${isSelected ? "border-primary/40 bg-primary/5" : ""}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelect(result.placeId)}
+                              className="h-3.5 w-3.5 shrink-0 rounded border-gray-300 accent-primary"
+                            />
+                            <h3 className="truncate text-sm font-medium">{result.displayName}</h3>
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                            {result.primaryType ? (
+                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                                {result.primaryType.replace(/_/g, " ")}
+                              </Badge>
+                            ) : null}
+                            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${scoreBadgeClasses(priority)}`}>
+                              {score} {priority}
+                            </span>
+                            {existingLead ? (
+                              <Link href={`/leads/${existingLead.id}`}>
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-blue-300 text-blue-600 dark:border-blue-700 dark:text-blue-400">
+                                  Al opgeslagen
+                                </Badge>
+                              </Link>
+                            ) : null}
+                          </div>
+                          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                            {result.formattedAddress ? (
+                              <p className="flex items-center gap-1">
+                                <MapPin className="h-3 w-3 shrink-0" />
+                                <span className="truncate">{result.formattedAddress}</span>
+                              </p>
+                            ) : null}
+                            {result.nationalPhoneNumber ? (
+                              <p className="flex items-center gap-1">
+                                <Phone className="h-3 w-3" />
+                                {result.nationalPhoneNumber}
+                              </p>
+                            ) : null}
+                            {result.rating != null ? (
+                              <p className="flex items-center gap-1">
+                                <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                                {result.rating}
+                                {result.userRatingCount != null ? ` (${result.userRatingCount})` : ""}
+                              </p>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant={isSaved ? "secondary" : "default"}
+                          disabled={isSaved || isSaving}
+                          onClick={() => handleSave(result)}
+                          className="h-8 text-xs"
+                        >
+                          {isSaving ? (
+                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          ) : isSaved ? (
+                            <Check className="mr-1 h-3 w-3" />
+                          ) : (
+                            <Save className="mr-1 h-3 w-3" />
+                          )}
+                          {isSaved ? "Opgeslagen" : "Opslaan"}
+                        </Button>
+                        {isSaved && leadId ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openCampaignDialog(leadId)}
+                            className="h-8 text-xs"
+                          >
+                            <FolderPlus className="mr-1 h-3 w-3" />
+                            Campagne
+                          </Button>
+                        ) : null}
+                        {result.websiteUri ? (
+                          <Button asChild size="sm" variant="ghost" className="h-8 text-xs">
+                            <a href={result.websiteUri} target="_blank" rel="noopener noreferrer">
+                              <Globe className="mr-1 h-3 w-3" />
+                              Website
+                            </a>
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="hidden divide-y rounded-md border md:block">
                 {/* Table Header */}
                 {paginatedResults.length > 0 && (
                   <div className="flex items-center gap-3 bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">
@@ -833,7 +953,7 @@ export default function LeadSearchPage() {
 
               {/* Pagination */}
               {totalPages > 1 && (
-                <div className="mt-4 flex items-center justify-between">
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm text-muted-foreground">
                     Pagina {currentPage} van {totalPages} ({results.length} resultaten)
                   </p>
@@ -847,7 +967,7 @@ export default function LeadSearchPage() {
                       <ChevronLeft className="mr-1 h-4 w-4" />
                       Vorige
                     </Button>
-                    <div className="flex items-center gap-1">
+                    <div className="hidden items-center gap-1 md:flex">
                       {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
                         <Button
                           key={page}
@@ -883,6 +1003,42 @@ export default function LeadSearchPage() {
           )}
         </CardContent>
       </Card>
+      </TabsContent>
+
+      <TabsContent value="info" className="space-y-4">
+        <div className="grid gap-3 lg:grid-cols-3">
+          <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
+            <CardContent className="p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Voor wie</p>
+              <p className="mt-2 text-sm font-medium">
+                Voor teams die snel lokale bedrijven willen vinden en direct in leadflow willen zetten.
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
+            <CardContent className="p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Hoe gebruiken</p>
+              <p className="mt-2 text-sm font-medium">
+                Zoek op niche + stad, selecteer kansrijke resultaten en stuur ze meteen naar leads of campagnes.
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
+            <CardContent className="p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gerelateerd</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button asChild size="sm" variant="outline">
+                  <Link href="/campaigns">Campagnes</Link>
+                </Button>
+                <Button asChild size="sm" variant="ghost">
+                  <Link href="/leads">Leads</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </TabsContent>
+      </Tabs>
 
       {/* Add to Campaign Dialog */}
       <Dialog open={campaignDialogOpen} onOpenChange={(open) => { if (!open) { setCampaignDialogOpen(false); setCampaignLeadId(null); } }}>
