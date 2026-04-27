@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui-store";
 import { useBranding } from "@/lib/branding";
@@ -22,6 +22,7 @@ import {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { sidebarCollapsed, toggleSidebar, mobileSidebarOpen, setMobileSidebarOpen } = useUIStore();
   const { branding } = useBranding();
   const hasLeadWorkflowMatch = LEADS_WORKFLOW_ITEMS.some(
@@ -32,6 +33,34 @@ export function Sidebar() {
   useEffect(() => {
     if (hasLeadWorkflowMatch) setLeadWorkflowOpen(true);
   }, [hasLeadWorkflowMatch]);
+
+  useEffect(() => {
+    // Warm common app routes so first navigation feels instant.
+    const routes = [
+      ...MAIN_NAV_ITEMS.map((item) => item.href),
+      ...LEADS_WORKFLOW_ITEMS.map((item) => item.href),
+      ...TOOL_NAV_ITEMS.map((item) => item.href),
+      ...BOTTOM_NAV_ITEMS.map((item) => item.href),
+    ];
+    let cancelled = false;
+    const prefetchRoutes = () => {
+      if (cancelled) return;
+      routes.forEach((href) => router.prefetch(href));
+    };
+    const browser = globalThis as any;
+    if (typeof browser.requestIdleCallback === "function") {
+      const id = browser.requestIdleCallback(prefetchRoutes, { timeout: 1500 });
+      return () => {
+        cancelled = true;
+        browser.cancelIdleCallback?.(id);
+      };
+    }
+    const timeout = browser.setTimeout(prefetchRoutes, 250);
+    return () => {
+      cancelled = true;
+      browser.clearTimeout(timeout);
+    };
+  }, [router]);
 
   const logoUrl = branding.logoUrl;
   const brandName = branding.companyName || process.env.NEXT_PUBLIC_APP_NAME || "Lead Finder";
@@ -105,6 +134,7 @@ export function Sidebar() {
                     <Link
                       href={item.href}
                       onClick={() => setMobileSidebarOpen(false)}
+                      onMouseEnter={() => router.prefetch(item.href)}
                       className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2.5 text-sm font-medium"
                     >
                       <item.icon className="h-4 w-4 shrink-0" />
@@ -128,6 +158,7 @@ export function Sidebar() {
                             key={entry.href}
                             href={entry.href}
                             onClick={() => setMobileSidebarOpen(false)}
+                            onMouseEnter={() => router.prefetch(entry.href)}
                             className={cn(
                               "flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors",
                               workflowActive
@@ -151,6 +182,7 @@ export function Sidebar() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setMobileSidebarOpen(false)}
+                onMouseEnter={() => router.prefetch(item.href)}
                 className={cn(
                   "flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-sm font-medium transition-all",
                   isActive
@@ -183,6 +215,7 @@ export function Sidebar() {
                     key={item.href}
                     href={item.href}
                     onClick={() => setMobileSidebarOpen(false)}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={cn(
                       "flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-sm font-medium transition-all",
                       isActive
@@ -221,6 +254,7 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               onClick={() => setMobileSidebarOpen(false)}
+              onMouseEnter={() => router.prefetch(item.href)}
               className={cn(
                 "flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-sm font-medium transition-all",
                 isActive

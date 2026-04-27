@@ -2,7 +2,7 @@ import { type PrismaClient } from "@digitify/db";
 
 let ensurePromise: Promise<void> | null = null;
 let ensuredAt = 0;
-const ENSURE_TTL_MS = 60_000;
+const ENSURE_TTL_MS = 6 * 60 * 60 * 1000;
 
 const TENANT_SCHEMA_STATEMENTS = [
   `ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'MODERATOR'`,

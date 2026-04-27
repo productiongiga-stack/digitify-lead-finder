@@ -3,6 +3,8 @@ import { type PrismaClient } from "@digitify/db";
 import { userSettingKey } from "./user-settings";
 
 export const PUBLIC_TENANT_SETTING_KEY = "chatbot.public_tenant_token";
+const TOKEN_CACHE_TTL_MS = 30 * 60 * 1000;
+const tokenCache = new Map<string, { token: string; cachedAt: number }>();
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,120}$/;
 
@@ -39,13 +41,21 @@ export function normalizePublicTenantToken(rawTenant: string | null | undefined)
 }
 
 export async function ensurePublicTenantToken(db: PrismaClient, userId: string) {
+  const cached = tokenCache.get(userId);
+  if (cached && Date.now() - cached.cachedAt < TOKEN_CACHE_TTL_MS) {
+    return cached.token;
+  }
+
   const scopedKey = userSettingKey(userId, PUBLIC_TENANT_SETTING_KEY);
   const existing = await db.setting.findUnique({
     where: { key: scopedKey },
     select: { value: true },
   });
   const currentToken = parseSettingString(existing?.value);
-  if (normalizePublicTenantToken(currentToken)) return currentToken;
+  if (normalizePublicTenantToken(currentToken)) {
+    tokenCache.set(userId, { token: currentToken, cachedAt: Date.now() });
+    return currentToken;
+  }
 
   const token = randomBytes(24).toString("base64url");
   await db.setting.upsert({
@@ -53,6 +63,7 @@ export async function ensurePublicTenantToken(db: PrismaClient, userId: string) 
     create: { key: scopedKey, value: token },
     update: { value: token },
   });
+  tokenCache.set(userId, { token, cachedAt: Date.now() });
   return token;
 }
 

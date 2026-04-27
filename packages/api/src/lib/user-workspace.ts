@@ -4,6 +4,8 @@ import { ensureTenantSchemaCompatibility } from "./tenant-schema-compat";
 import { userSettingKey } from "./user-settings";
 
 const WORKSPACE_INIT_KEY = "workspace.initialized_v2";
+const WORKSPACE_CACHE_TTL_MS = 10 * 60 * 1000;
+const workspaceCache = new Map<string, number>();
 
 const DEFAULT_PIPELINE_STAGES = [
   { name: "Nieuw", color: "#f9ae5a", sortOrder: 0, isDefault: true },
@@ -106,6 +108,9 @@ const DEFAULT_SERVICE_CATALOG = [
 ] as const;
 
 export async function ensureUserWorkspace(db: PrismaClient, userId: string, fallbackCompanyName?: string | null) {
+  const cachedAt = workspaceCache.get(userId);
+  if (cachedAt && Date.now() - cachedAt < WORKSPACE_CACHE_TTL_MS) return;
+
   try {
     await ensureTenantSchemaCompatibility(db);
   } catch {
@@ -119,6 +124,7 @@ export async function ensureUserWorkspace(db: PrismaClient, userId: string, fall
   });
   if (initialized) {
     await ensurePublicTenantToken(db, userId);
+    workspaceCache.set(userId, Date.now());
     return;
   }
 
@@ -221,4 +227,5 @@ export async function ensureUserWorkspace(db: PrismaClient, userId: string, fall
   }
 
   await ensurePublicTenantToken(db, userId);
+  workspaceCache.set(userId, Date.now());
 }
