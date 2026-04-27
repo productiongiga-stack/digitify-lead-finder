@@ -48,6 +48,7 @@ import {
   CheckCircle,
   Bell,
   AlertOctagon,
+  Euro,
 } from "lucide-react";
 import Link from "next/link";
 import { formatRelativeTime, formatDate } from "@/lib/utils";
