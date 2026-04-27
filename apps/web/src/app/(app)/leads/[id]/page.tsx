@@ -162,12 +162,6 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     },
   });
 
-  const createQuote = trpc.quote.createFromLead.useMutation({
-    onSuccess: (data) => {
-      router.push(`/quotes/${data.id}`);
-    },
-  });
-
   /* loading skeleton */
   if (isLoading) {
     return (
@@ -357,13 +351,11 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                 {generateReport.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <FileText className="mr-1.5 h-3.5 w-3.5" />}
                 {generateReport.isPending ? "Genereren..." : "Genereer Voorstel"}
               </Button>
-              <Button
-                variant="outline" size="sm"
-                onClick={() => createQuote.mutate({ leadId: id })}
-                disabled={createQuote.isPending}
-              >
-                {createQuote.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Receipt className="mr-1.5 h-3.5 w-3.5" />}
-                {createQuote.isPending ? "Aanmaken..." : "Maak Offerte"}
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/quotes/new?leadId=${id}`}>
+                  <Receipt className="mr-1.5 h-3.5 w-3.5" />
+                  Maak Offerte
+                </Link>
               </Button>
               <Button
                 variant="outline"

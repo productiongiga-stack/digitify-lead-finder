@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc/client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Button,
   Card,
@@ -103,6 +104,7 @@ function formatTimestamp(date: string | Date): string {
 /* ---------- Main component ---------- */
 
 export default function ChatbotInboxPage() {
+  const router = useRouter();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<SessionStatus | "ALL">(
     "ALL"
@@ -185,13 +187,6 @@ export default function ChatbotInboxPage() {
   });
 
   const convertToLead = trpc.chatbot.convertToLead.useMutation({
-    onSuccess: () => {
-      utils.chatbot.getSession.invalidate({ id: selectedId! });
-      utils.chatbot.listSessions.invalidate();
-    },
-  });
-
-  const convertToQuote = trpc.chatbot.convertToQuote.useMutation({
     onSuccess: () => {
       utils.chatbot.getSession.invalidate({ id: selectedId! });
       utils.chatbot.listSessions.invalidate();
@@ -599,8 +594,8 @@ export default function ChatbotInboxPage() {
                     variant="outline"
                     size="sm"
                     className="h-8 text-xs"
-                    onClick={() => convertToQuote.mutate({ sessionId: selectedId! })}
-                    disabled={convertToQuote.isPending}
+                    onClick={() => selectedId && router.push(`/quotes/new?chatSessionId=${selectedId}`)}
+                    disabled={!selectedId}
                   >
                     <FilePlus2 className="mr-1.5 h-3 w-3" />
                     Naar offerte
