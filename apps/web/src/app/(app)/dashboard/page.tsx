@@ -60,7 +60,7 @@ const quickActions = [
   { icon: Search, label: "Zoek Leads", description: "Doorzoek bedrijven", href: "/leads/search" },
   { icon: Target, label: "Nieuwe Campagne", description: "Campagne starten", href: "/campaigns" },
   { icon: Mail, label: "E-mail Opstellen", description: "Contact opnemen", href: "/contacts/compose" },
-  { icon: Receipt, label: "Nieuwe Offerte", description: "Offerte configurator", href: "/embed/quotes" },
+  { icon: Receipt, label: "Nieuwe Offerte", description: "Offerte configurator", href: "/quotes/new" },
   { icon: Calendar, label: "Boek Afspraak", description: "Planning beheren", href: "/bookings" },
   { icon: Star, label: "Review Aanvragen", description: "Reviews verzamelen", href: "/reviews" },
 ];

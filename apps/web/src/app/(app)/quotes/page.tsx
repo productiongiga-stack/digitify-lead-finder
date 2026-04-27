@@ -248,7 +248,7 @@ export default function QuotesPage() {
             Alle offertes tonen
           </Button>
         ) : (
-          <Link href="/embed/quotes">
+          <Link href="/quotes/new">
             <Button size="sm">
               <Plus className="mr-2 h-4 w-4" />
               Nieuwe Offerte
@@ -267,7 +267,7 @@ export default function QuotesPage() {
           <p className="app-page-subtitle">Beheer en verstuur offertes naar je klanten</p>
         </div>
         <div className="app-page-actions">
-          <Link href="/embed/quotes">
+          <Link href="/quotes/new">
             <Button size="sm">
               <Plus className="mr-2 h-4 w-4" />
               Nieuwe Offerte
@@ -364,7 +364,7 @@ export default function QuotesPage() {
                     : "Geen open pipeline-items. Tijd voor nieuwe opportuniteiten."}
                 </p>
                 <Button asChild size="sm" variant="outline" className="mt-2.5">
-                  <Link href={nextQuote ? `/quotes/${nextQuote.id}` : "/embed/quotes"}>
+                  <Link href={nextQuote ? `/quotes/${nextQuote.id}` : "/quotes/new"}>
                     {nextQuote ? "Open bovenste offerte" : "Nieuwe offerte"}
                   </Link>
                 </Button>
