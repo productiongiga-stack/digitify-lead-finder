@@ -28,6 +28,7 @@ import {
   UserPlus,
   Flame,
   TrendingUp,
+  Euro,
   Receipt,
   MessageSquare,
   Mail,
