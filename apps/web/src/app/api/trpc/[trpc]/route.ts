@@ -1,10 +1,14 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "@digitify/api";
 import { prisma } from "@digitify/db";
+import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-schema-compat";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
 import { randomUUID } from "crypto";
 import "@/lib/env";
+
+// Kick off schema/index compatibility once per server instance without blocking requests.
+void ensureTenantSchemaCompatibility(prisma).catch(() => {});
 
 const handler = (req: Request) =>
   fetchRequestHandler({

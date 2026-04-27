@@ -1,7 +1,6 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { type PrismaClient } from "@digitify/db";
-import { ensureTenantSchemaCompatibility } from "./lib/tenant-schema-compat";
 
 export type Context = {
   db: PrismaClient;
@@ -110,21 +109,11 @@ const enforceTrialAccess = t.middleware(async ({ ctx, next }) => {
   return next();
 });
 
-const withTenantSchemaCompat = t.middleware(async ({ ctx, next }) => {
-  try {
-    await ensureTenantSchemaCompatibility(ctx.db);
-  } catch {
-    // Do not block request lifecycle when DB DDL permissions are restricted.
-  }
-  return next();
-});
-
 export const protectedProcedure = t.procedure
   .use(withLogging)
   .use(withRateLimit)
   .use(isAuthenticated)
-  .use(enforceTrialAccess)
-  .use(withTenantSchemaCompat);
+  .use(enforceTrialAccess);
 
 // Stricter rate limit for AI/email endpoints (20 req/min)
 export const aiRateLimitedProcedure = t.procedure
@@ -135,8 +124,7 @@ export const aiRateLimitedProcedure = t.procedure
     return next();
   }))
   .use(isAuthenticated)
-  .use(enforceTrialAccess)
-  .use(withTenantSchemaCompat);
+  .use(enforceTrialAccess);
 
 const hasRole = (...roles: string[]) =>
   t.middleware(({ ctx, next }) => {
@@ -154,7 +142,6 @@ export const adminProcedure = t.procedure
   .use(withRateLimit)
   .use(isAuthenticated)
   .use(enforceTrialAccess)
-  .use(withTenantSchemaCompat)
   .use(hasRole("OWNER", "ADMIN"));
 
 export const ownerProcedure = t.procedure
@@ -162,5 +149,4 @@ export const ownerProcedure = t.procedure
   .use(withRateLimit)
   .use(isAuthenticated)
   .use(enforceTrialAccess)
-  .use(withTenantSchemaCompat)
   .use(hasRole("OWNER"));

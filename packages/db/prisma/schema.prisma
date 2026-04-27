@@ -233,6 +233,10 @@ model Lead {
   @@index([assignedToId])
   @@index([source])
   @@index([createdAt(sort: Desc)])
+  @@index([createdById])
+  @@index([createdById, createdAt(sort: Desc)])
+  @@index([createdById, updatedAt(sort: Desc)])
+  @@index([createdById, status])
   @@map("leads")
 }
 
@@ -399,6 +403,7 @@ model Campaign {
   templates     EmailTemplate[]
   reports       Report[]
 
+  @@index([createdById])
   @@map("campaigns")
 }
 
@@ -483,6 +488,8 @@ model EmailDraft {
   @@index([leadId])
   @@index([scheduledFor])
   @@index([sequenceId, sequenceStep])
+  @@index([authorId])
+  @@index([approverId])
   @@map("email_drafts")
 }
 
@@ -541,6 +548,7 @@ model Activity {
 
   @@index([leadId, createdAt(sort: Desc)])
   @@index([createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
   @@map("activities")
 }
 
@@ -673,6 +681,7 @@ model Report {
   reportTemplate ReportTemplate? @relation(fields: [reportTemplateId], references: [id])
   generatedBy    User            @relation(fields: [generatedById], references: [id])
 
+  @@index([generatedById])
   @@map("reports")
 }
 
@@ -744,6 +753,8 @@ model Booking {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([createdById])
+  @@index([createdById, date])
   @@map("bookings")
 }
 
@@ -764,6 +775,8 @@ model Domain {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  @@index([createdById])
+  @@index([createdById, expiresAt])
   @@map("domains")
 }
 
@@ -787,6 +800,8 @@ model ReviewRequest {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  @@index([createdById])
+  @@index([createdById, status])
   @@map("review_requests")
 }
 
@@ -829,6 +844,9 @@ model Quote {
 
   @@index([status])
   @@index([createdAt(sort: Desc)])
+  @@index([createdById])
+  @@index([createdById, status])
+  @@index([createdById, createdAt(sort: Desc)])
   @@map("quotes")
 }
 
@@ -903,6 +921,7 @@ model ChatSession {
   @@index([status])
   @@index([isRead])
   @@index([createdAt(sort: Desc)])
+  @@index([assignedToId, updatedAt(sort: Desc)])
   @@map("chat_sessions")
 }
 

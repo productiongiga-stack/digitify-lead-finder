@@ -28,12 +28,14 @@ export function Topbar() {
   const { toggleOpenClaw, toggleMobileSidebar } = useUIStore();
   const { branding } = useBranding();
   const { data: kpis } = trpc.dashboard.getKpis.useQuery(undefined, {
-    staleTime: 30_000,
-    refetchInterval: 30_000,
+    staleTime: 2 * 60_000,
+    refetchInterval: 2 * 60_000,
+    refetchOnWindowFocus: false,
   });
   const { data: followUps } = trpc.contact.getFollowUpQueue.useQuery(undefined, {
-    staleTime: 30_000,
-    refetchInterval: 30_000,
+    staleTime: 2 * 60_000,
+    refetchInterval: 2 * 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const initials = session?.user?.name
