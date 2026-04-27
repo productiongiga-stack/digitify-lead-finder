@@ -27,14 +27,9 @@ export function Topbar() {
   const pathname = usePathname();
   const { toggleOpenClaw, toggleMobileSidebar } = useUIStore();
   const { branding } = useBranding();
-  const { data: kpis } = trpc.dashboard.getKpis.useQuery(undefined, {
-    staleTime: 2 * 60_000,
-    refetchInterval: 2 * 60_000,
-    refetchOnWindowFocus: false,
-  });
-  const { data: followUps } = trpc.contact.getFollowUpQueue.useQuery(undefined, {
-    staleTime: 2 * 60_000,
-    refetchInterval: 2 * 60_000,
+  const { data: topbarStats } = trpc.contact.getTopbarStats.useQuery(undefined, {
+    staleTime: 60_000,
+    refetchInterval: 60_000,
     refetchOnWindowFocus: false,
   });
 
@@ -45,7 +40,7 @@ export function Topbar() {
     .toUpperCase() ?? "U";
 
   const pageTitle = resolvePageTitle(pathname, branding.companyName);
-  const followUpCount = followUps?.items.length ?? 0;
+  const followUpCount = topbarStats?.followUpCount ?? 0;
 
   return (
     <header className="sticky top-0 z-20 flex h-12 items-center justify-between border-b bg-background/90 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/65 sm:px-4">
@@ -137,12 +132,12 @@ export function Topbar() {
           <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" aria-label="Goedkeuringswachtrij">
             <Bell className="h-4 w-4" />
           </Button>
-          {(kpis?.pendingDrafts ?? 0) > 0 ? (
+          {(topbarStats?.pendingDrafts ?? 0) > 0 ? (
             <Badge
               variant="destructive"
               className="absolute -right-1.5 -top-1.5 h-5 min-w-5 justify-center rounded-full px-1 text-[10px]"
             >
-              {kpis?.pendingDrafts}
+              {topbarStats?.pendingDrafts}
             </Badge>
           ) : null}
         </Link>

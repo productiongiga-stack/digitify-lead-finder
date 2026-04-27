@@ -119,6 +119,39 @@ const DEFAULT_TEMPLATE_PACK: Array<{
 ];
 
 export const contactRouter = router({
+  getTopbarStats: protectedProcedure.query(async ({ ctx }) => {
+    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["email.followup_days"]);
+    const followupDays = Math.max(
+      1,
+      Number.parseInt(getSettingString(settings, "email.followup_days", "3"), 10) || 3,
+    );
+    const reminderThreshold = new Date(Date.now() - followupDays * 24 * 60 * 60 * 1000);
+
+    const [pendingDrafts, followupLeads] = await Promise.all([
+      ctx.db.emailDraft.count({
+        where: { status: "PENDING_APPROVAL", lead: { createdById: ctx.user.id } },
+      }),
+      ctx.db.emailDraft.findMany({
+        where: {
+          status: "SENT",
+          sentAt: { lte: reminderThreshold },
+          lead: {
+            createdById: ctx.user.id,
+            status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
+          },
+        },
+        select: { leadId: true },
+        distinct: ["leadId"],
+        take: 30,
+      }),
+    ]);
+
+    return {
+      pendingDrafts,
+      followUpCount: followupLeads.length,
+    };
+  }),
+
   listDrafts: protectedProcedure
     .input(
       z.object({
