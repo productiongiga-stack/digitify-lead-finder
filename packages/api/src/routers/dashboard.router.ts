@@ -23,32 +23,31 @@ export const dashboardRouter = router({
       totalLeads,
       newLeads,
       hotLeads,
-      contactedLeads,
+      leadStatusBuckets,
       totalCampaigns,
-      pendingDrafts,
-      sentEmails,
-      wonLeads,
+      emailStatusBuckets,
       leadsWithScore,
       activeQuotes,
       totalQuoteValue,
       unreadChats,
       activeCampaignLeadCount,
-      scheduledEmails,
-      failedEmails,
       pendingReviews,
-      contactedAndBeyondLeads,
-      respondedLeads,
+      quoteStatusBuckets,
     ] = await Promise.all([
       ctx.db.lead.count({ where: { createdById: ctx.user.id } }),
       ctx.db.lead.count({ where: { createdById: ctx.user.id, createdAt: { gte: weekAgo } } }),
       ctx.db.lead.count({ where: { createdById: ctx.user.id, scorePriority: "Hot" } }),
-      ctx.db.lead.count({ where: { createdById: ctx.user.id, status: "CONTACTED" } }),
-      ctx.db.campaign.count({ where: { createdById: ctx.user.id } }),
-      ctx.db.emailDraft.count({
-        where: { status: "PENDING_APPROVAL", lead: { createdById: ctx.user.id } },
+      ctx.db.lead.groupBy({
+        by: ["status"],
+        where: { createdById: ctx.user.id },
+        _count: { _all: true },
       }),
-      ctx.db.emailDraft.count({ where: { status: "SENT", lead: { createdById: ctx.user.id } } }),
-      ctx.db.lead.count({ where: { createdById: ctx.user.id, status: "WON" } }),
+      ctx.db.campaign.count({ where: { createdById: ctx.user.id } }),
+      ctx.db.emailDraft.groupBy({
+        by: ["status"],
+        where: { lead: { createdById: ctx.user.id } },
+        _count: { _all: true },
+      }),
       ctx.db.lead.aggregate({
         _avg: { overallScore: true },
         where: { createdById: ctx.user.id, overallScore: { not: null } },
@@ -67,22 +66,41 @@ export const dashboardRouter = router({
           },
         },
       }),
-      ctx.db.emailDraft.count({ where: { status: "SCHEDULED", lead: { createdById: ctx.user.id } } }),
-      ctx.db.emailDraft.count({ where: { status: "FAILED", lead: { createdById: ctx.user.id } } }),
       ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.id } }),
-      ctx.db.lead.count({
-        where: {
-          createdById: ctx.user.id,
-          status: { in: ["CONTACTED", "RESPONDED", "QUALIFIED", "PROPOSAL_SENT", "WON"] },
-        },
-      }),
-      ctx.db.lead.count({
-        where: {
-          createdById: ctx.user.id,
-          status: { in: ["RESPONDED", "QUALIFIED", "PROPOSAL_SENT", "WON"] },
-        },
+      ctx.db.quote.groupBy({
+        by: ["status"],
+        where: { createdById: ctx.user.id },
+        _count: { _all: true },
       }),
     ]);
+
+    const leadStatusCount = Object.fromEntries(
+      leadStatusBuckets.map((item) => [item.status, item._count._all]),
+    ) as Record<string, number>;
+    const emailStatusCount = Object.fromEntries(
+      emailStatusBuckets.map((item) => [item.status, item._count._all]),
+    ) as Record<string, number>;
+    const quoteStatusCount = Object.fromEntries(
+      quoteStatusBuckets.map((item) => [item.status, item._count._all]),
+    ) as Record<string, number>;
+
+    const contactedLeads = leadStatusCount.CONTACTED ?? 0;
+    const wonLeads = leadStatusCount.WON ?? 0;
+    const pendingDrafts = emailStatusCount.PENDING_APPROVAL ?? 0;
+    const sentEmails = emailStatusCount.SENT ?? 0;
+    const scheduledEmails = emailStatusCount.SCHEDULED ?? 0;
+    const failedEmails = emailStatusCount.FAILED ?? 0;
+    const respondedLeads =
+      (leadStatusCount.RESPONDED ?? 0) +
+      (leadStatusCount.QUALIFIED ?? 0) +
+      (leadStatusCount.PROPOSAL_SENT ?? 0) +
+      (leadStatusCount.WON ?? 0);
+    const contactedAndBeyondLeads =
+      (leadStatusCount.CONTACTED ?? 0) +
+      (leadStatusCount.RESPONDED ?? 0) +
+      (leadStatusCount.QUALIFIED ?? 0) +
+      (leadStatusCount.PROPOSAL_SENT ?? 0) +
+      (leadStatusCount.WON ?? 0);
 
     const conversionRate = totalLeads > 0 ? Math.round((wonLeads / totalLeads) * 100) : 0;
     const responseRate =
@@ -100,7 +118,7 @@ export const dashboardRouter = router({
       sentEmails,
       wonLeads,
       avgScore: Math.round(leadsWithScore._avg.overallScore ?? 0),
-      activeQuotes,
+      activeQuotes: activeQuotes || (quoteStatusCount.DRAFT ?? 0) + (quoteStatusCount.SENT ?? 0) + (quoteStatusCount.VIEWED ?? 0),
       totalQuoteValue: totalQuoteValue._sum.total ?? 0,
       unreadChats,
       activeCampaignLeadCount,

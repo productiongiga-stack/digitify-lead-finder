@@ -1,6 +1,7 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { type PrismaClient } from "@digitify/db";
+import { patchRequestContext, recordRouteMetric } from "@digitify/db";
 
 export type Context = {
   db: PrismaClient;
@@ -57,8 +58,10 @@ setInterval(() => {
 // --- Logging middleware ---
 const withLogging = t.middleware(async ({ ctx, path, type, next }) => {
   const start = Date.now();
+  patchRequestContext({ trpcPath: path, trpcType: type });
   const result = await next();
   const durationMs = Date.now() - start;
+  recordRouteMetric({ path, type, durationMs, ok: result.ok });
 
   if (!result.ok) {
     const errorCode = result.error instanceof TRPCError ? result.error.code : undefined;

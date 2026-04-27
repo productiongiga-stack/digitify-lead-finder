@@ -2,6 +2,8 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { resolveCname, resolveTxt } from "node:dns/promises";
 import {
+  clearPerformanceSnapshot,
+  getPerformanceSnapshot,
   isSecretSettingKey,
   protectSettingValue,
   redactSecretSettingValue,
@@ -143,6 +145,15 @@ function buildSmtpDnsGuide(input: { smtpHost: string; smtpUser: string; fromEmai
 }
 
 export const settingsRouter = router({
+  getPerformanceMetrics: ownerProcedure
+    .input(z.object({ limit: z.number().min(5).max(200).default(50) }).optional())
+    .query(async ({ input }) => getPerformanceSnapshot(input?.limit ?? 50)),
+
+  clearPerformanceMetrics: ownerProcedure.mutation(async () => {
+    clearPerformanceSnapshot();
+    return { success: true };
+  }),
+
   getPublicMarketingFooter: publicProcedure.query(async ({ ctx }) => {
     const owner = await ctx.db.user.findFirst({
       where: { role: "OWNER" },
