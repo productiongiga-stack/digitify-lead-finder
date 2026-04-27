@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { loadEmailSettings, sendBrandedEmail } from "@digitify/api/src/lib/email-sender";
+import { log } from "@digitify/api/src/lib/logger";
 import {
   extractGoogleEventId,
   getGoogleBookingEvent,
@@ -84,12 +85,16 @@ async function sendBookingSyncEmails(input: {
 
 async function runBookingsSync(request: Request) {
   if (!isAuthorized(request)) {
+    log.security.warn("Bookings sync cron unauthorized request");
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const emailCfg = await loadEmailSettings(prisma);
-  const companyName = emailCfg.companyName || emailCfg.fromName || "Digitify";
-  const adminRecipient = emailCfg.fromEmail || emailCfg.smtpUser || "";
+  const emailCfg = await loadEmailSettings(prisma).catch((error) => {
+    log.integration.error("Bookings sync failed to load email settings", undefined, error);
+    return null;
+  });
+  const companyName = emailCfg?.companyName || emailCfg?.fromName || "Digitify";
+  const adminRecipient = emailCfg?.fromEmail || emailCfg?.smtpUser || "";
 
   const bookings = await prisma.booking.findMany({
     where: {
@@ -104,6 +109,8 @@ async function runBookingsSync(request: Request) {
   let changed = 0;
   let cancelled = 0;
   let failed = 0;
+
+  log.job.info("Bookings sync cron started", { bookings: bookings.length });
 
   for (const booking of bookings) {
     const eventId = extractGoogleEventId(booking.notes);
@@ -184,11 +191,13 @@ async function runBookingsSync(request: Request) {
         introCustomer: "Uw afspraak werd bijgewerkt via de gekoppelde agenda synchronisatie.",
         introAdmin: "Een booking werd automatisch bijgewerkt vanuit Google agenda.",
       });
-    } catch {
+    } catch (error) {
       failed += 1;
+      log.integration.error("Bookings sync item failed", { bookingId: booking.id, eventId }, error);
     }
   }
 
+  log.job.info("Bookings sync cron completed", { checked, changed, cancelled, failed });
   return NextResponse.json({ success: true, checked, changed, cancelled, failed });
 }
 

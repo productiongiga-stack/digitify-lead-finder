@@ -12,6 +12,7 @@ import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/s
 import { ensureLeadLink } from "../lib/lead-link";
 import { extractEmailTemplateMetadata } from "../lib/email-content";
 import { loadUserSettingRows } from "../lib/user-settings";
+import { log } from "../lib/logger";
 
 /* ---------- helpers ---------- */
 
@@ -115,6 +116,43 @@ function resolveLayoutForType(type: string, fallback: EmailLayout): EmailLayout 
     default:
       return fallback;
   }
+}
+
+function mapInboxTypeToEmailType(type: "quote" | "lead_contact" | "reply" | "follow_up" | "general" | "booking_confirmation") {
+  switch (type) {
+    case "quote":
+      return "QUOTE" as const;
+    case "lead_contact":
+      return "LEAD_CONTACT" as const;
+    case "reply":
+      return "REPLY" as const;
+    case "follow_up":
+      return "FOLLOW_UP" as const;
+    case "booking_confirmation":
+    case "general":
+      return "TRANSACTIONAL" as const;
+    default:
+      return "LEAD_CONTACT" as const;
+  }
+}
+
+function resolveAppUrl() {
+  const candidates = [
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.NEXTAUTH_URL,
+    process.env.APP_URL,
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "",
+  ];
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim();
+    if (!trimmed) continue;
+    try {
+      return new URL(trimmed).toString().replace(/\/$/, "");
+    } catch {
+      continue;
+    }
+  }
+  return "http://localhost:3000";
 }
 
 async function getImapConfig(db: PrismaClient, userId: string) {
@@ -296,6 +334,18 @@ async function sendInboxMessage(params: {
   ]
     .filter(Boolean)
     .join("\n\n");
+  const draft = await params.db.emailDraft.create({
+    data: {
+      leadId: linkedLead.id,
+      authorId: params.userId,
+      toEmail: params.input.to,
+      subject,
+      body: resolvedBody,
+      status: "SENDING",
+      type: mapInboxTypeToEmailType(params.input.type),
+    },
+  });
+  const trackingPixel = `<img src="${resolveAppUrl()}/api/public/email/open/${encodeURIComponent(draft.id)}" alt="" width="1" height="1" style="display:none;border:0;outline:none;"/>`;
   const htmlBody = generateBrandedHtml({
     subject,
     body: plainBody,
@@ -312,6 +362,7 @@ async function sendInboxMessage(params: {
     ctaUrl: templateMetadata.ctaUrl,
     typographyMode: emailSettings.typographyMode,
   });
+  const htmlBodyWithTracking = `${htmlBody}${trackingPixel}`;
 
   const transporter = nodemailer.createTransport({
     host: smtpConfig.host,
@@ -321,37 +372,63 @@ async function sendInboxMessage(params: {
     tls: smtpConfig.tls,
   });
 
-  const info = await transporter.sendMail({
-    from: fromName ? `"${fromName}" <${fromEmail}>` : fromEmail,
-    to: params.input.to,
-    subject,
-    html: htmlBody,
-    text: plainBody,
-    replyTo: emailSettings.replyTo || undefined,
-    bcc: emailSettings.bcc || undefined,
-    inReplyTo: params.input.inReplyTo || undefined,
-    references: params.input.references || undefined,
-  });
+  let info: nodemailer.SentMessageInfo;
+  try {
+    info = await transporter.sendMail({
+      from: fromName ? `"${fromName}" <${fromEmail}>` : fromEmail,
+      to: params.input.to,
+      subject,
+      html: htmlBodyWithTracking,
+      text: plainBody,
+      replyTo: emailSettings.replyTo || undefined,
+      bcc: emailSettings.bcc || undefined,
+      inReplyTo: params.input.inReplyTo || undefined,
+      references: params.input.references || undefined,
+    });
 
-  if (!info.messageId) {
+    if (!info.messageId) {
+      throw new Error("Missing messageId");
+    }
+  } catch (error) {
+    await params.db.emailDraft.update({
+      where: { id: draft.id },
+      data: {
+        status: "FAILED",
+        rejectionNote: error instanceof Error ? error.message : "E-mail kon niet worden verzonden",
+      },
+    });
     throw new TRPCError({
       code: "INTERNAL_SERVER_ERROR",
       message: "E-mail kon niet worden verzonden",
     });
   }
 
+  await params.db.emailDraft.update({
+    where: { id: draft.id },
+    data: {
+      status: "SENT",
+      sentAt: new Date(),
+      messageId: info.messageId,
+      rejectionNote: null,
+    },
+  });
+
   try {
     await appendToSentMailbox(imapConfig, {
       from: fromName ? `"${fromName}" <${fromEmail}>` : fromEmail,
       to: params.input.to,
       subject,
-      html: htmlBody,
+      html: htmlBodyWithTracking,
       messageId: info.messageId,
       inReplyTo: params.input.inReplyTo,
       references: params.input.references,
     });
-  } catch {
-    // E-mail is al verstuurd; IMAP append is best effort.
+  } catch (error) {
+    log.email.warn("IMAP append to Sent failed", {
+      userId: params.userId,
+      leadId: linkedLead.id,
+      messageId: info.messageId,
+    }, error);
   }
 
   await params.db.activity.create({
@@ -366,6 +443,7 @@ async function sendInboxMessage(params: {
         messageId: info.messageId,
         to: params.input.to,
         sendGuardKey: guardKey,
+        draftId: draft.id,
       },
     },
   });

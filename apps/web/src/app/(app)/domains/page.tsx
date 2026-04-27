@@ -8,6 +8,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
   Input, Label, Textarea,
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  CreateModal, EmptyState,
 } from "@digitify/ui";
 import {
   Globe2, Plus, Shield, ShieldAlert, ShieldOff, ShieldQuestion,
@@ -358,12 +359,12 @@ export default function DomainsPage() {
         </div>
       ) : !domains.length ? (
         <Card>
-          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-            <Globe2 className="h-10 w-10 text-muted-foreground/40" />
-            <p className="mt-3 text-sm font-medium">Geen domeinen gevonden</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Voeg een domein toe om te beginnen.
-            </p>
+          <CardContent className="p-0">
+            <EmptyState
+              icon={<Globe2 />}
+              title="Geen domeinen gevonden"
+              description="Voeg een domein toe om te beginnen."
+            />
           </CardContent>
         </Card>
       ) : (
@@ -922,33 +923,22 @@ export default function DomainsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteId !== null} onOpenChange={(o) => !o && setDeleteId(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Domein verwijderen</DialogTitle>
-            <DialogDescription>
-              Deze actie kan niet ongedaan worden gemaakt.
-            </DialogDescription>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground py-4">
-            Weet je zeker dat je het domein &quot;{domainToDelete?.domainName}&quot; wilt verwijderen?
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteId(null)}>
-              Annuleren
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={deleteMutation.isPending}
-              onClick={() => deleteId && deleteMutation.mutate({ id: deleteId })}
-            >
-              {deleteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Verwijderen
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Delete Confirmation */}
+      <CreateModal
+        open={deleteId !== null}
+        onOpenChange={(o) => !o && setDeleteId(null)}
+        title="Domein verwijderen"
+        description="Deze actie kan niet ongedaan worden gemaakt."
+        submitLabel="Verwijderen"
+        submitVariant="destructive"
+        pending={deleteMutation.isPending}
+        onSubmit={() => deleteId && deleteMutation.mutate({ id: deleteId })}
+      >
+        <p className="text-sm text-muted-foreground">
+          Weet je zeker dat je het domein &quot;{domainToDelete?.domainName}&quot; wilt
+          verwijderen?
+        </p>
+      </CreateModal>
     </div>
   );
 }

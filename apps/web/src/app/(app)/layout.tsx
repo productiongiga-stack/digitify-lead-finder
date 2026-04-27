@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth/session";
+import { getCurrentUser } from "@/lib/auth/session";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { OpenClawPanelWrapper } from "@/components/openclaw/panel-wrapper";
@@ -7,9 +7,9 @@ import { AppShell } from "@/components/layout/app-shell";
 import { FeedbackButton } from "@/components/feedback/feedback-button";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const session = await getSession();
+  const user = await getCurrentUser();
 
-  if (!session) {
+  if (!user) {
     redirect("/login");
   }
 

@@ -251,6 +251,7 @@ export const contactRouter = router({
         subject: z.string().min(1),
         body: z.string().min(1),
         templateId: z.string().optional(),
+        type: z.enum(["LEAD_CONTACT", "QUOTE", "REPLY", "FOLLOW_UP", "REVIEW_REQUEST", "TRANSACTIONAL"]).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -429,6 +430,7 @@ export const contactRouter = router({
           recipientCompany: draft.lead?.companyName ?? draft.toEmail,
           leadId: draft.leadId,
           userId: ctx.user.id,
+          trackingDraftId: draft.id,
         });
 
         if (!result.success) {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { runAllDueDripsWorker } from "@digitify/api/src/routers/campaign.router";
+import { log } from "@digitify/api/src/lib/logger";
 
 function isAuthorized(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -21,6 +22,7 @@ function isAuthorized(request: Request) {
 
 async function runDripWorker(request: Request) {
   if (!isAuthorized(request)) {
+    log.security.warn("Drip cron unauthorized request");
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
@@ -29,8 +31,22 @@ async function runDripWorker(request: Request) {
     select: { id: true },
   });
 
-  const summary = await runAllDueDripsWorker(prisma, actor?.id);
-  return NextResponse.json({ success: true, ...summary });
+  try {
+    log.job.info("Drip cron started", { actorId: actor?.id || null });
+    const summary = await runAllDueDripsWorker(prisma, actor?.id);
+    log.job.info("Drip cron completed", {
+      actorId: actor?.id || null,
+      sequences: summary.sequences,
+      due: summary.due,
+      sent: summary.sent,
+      failed: summary.failed,
+      stopped: summary.stopped,
+    });
+    return NextResponse.json({ success: true, ...summary });
+  } catch (error) {
+    log.job.error("Drip cron failed", { actorId: actor?.id || null }, error);
+    return NextResponse.json({ success: false, error: "Worker failed" }, { status: 500 });
+  }
 }
 
 export const dynamic = "force-dynamic";

@@ -16,11 +16,14 @@ function hashPassword(password: string): string {
 async function main() {
   console.log("Seeding database...");
 
-  // Create admin user — override via SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD env vars
-  const adminEmail = process.env.SEED_ADMIN_EMAIL || "admin@example.com";
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
-  if (!adminPassword && process.env.NODE_ENV === "production") {
-    throw new Error("SEED_ADMIN_PASSWORD must be set in production. Set the env var and re-run.");
+  // Create owner user — explicit credentials are required to avoid accidental demo accounts.
+  const adminEmail = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase() || "";
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD?.trim() || "";
+  if (!adminEmail || !adminPassword) {
+    throw new Error("SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD are required for db seed.");
+  }
+  if (adminPassword.length < 12) {
+    throw new Error("SEED_ADMIN_PASSWORD must be at least 12 characters.");
   }
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
@@ -28,7 +31,8 @@ async function main() {
     create: {
       email: adminEmail,
       name: "Admin",
-      passwordHash: hashPassword(adminPassword || "changeme-" + Math.random().toString(36).slice(2)),
+      passwordHash: hashPassword(adminPassword),
+      emailVerified: new Date(),
       role: UserRole.OWNER,
     },
   });
@@ -706,7 +710,7 @@ async function main() {
   }
 
   console.log("Seed completed!");
-  console.log(`  - 1 admin user (admin@example.com)`);
+  console.log(`  - 1 owner user (${adminEmail})`);
   console.log(`  - ${stages.length} pipeline stages`);
   console.log(`  - ${weights.length} scoring weights`);
   console.log(`  - ${tags.length} tags`);

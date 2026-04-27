@@ -4,6 +4,7 @@ import { router, protectedProcedure } from "../trpc";
 import { type PrismaClient } from "@digitify/db";
 import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
 import { assertLeadAccess } from "../lib/tenant";
+import { log } from "../lib/logger";
 import {
   deleteGoogleBookingEvent,
   extractGoogleEventId,
@@ -137,7 +138,7 @@ async function sendBookingChangeEmails(params: {
     `Notities: ${booking.notes || "Geen notities."}`,
   ].join("\n");
 
-  const emailTasks: Promise<unknown>[] = [];
+  const emailTasks: Promise<{ success: boolean; messageId?: string; error?: string }>[] = [];
   if (booking.clientEmail) {
     emailTasks.push(
       sendBrandedEmail(params.db, {
@@ -160,7 +161,24 @@ async function sendBookingChangeEmails(params: {
       })
     );
   }
-  await Promise.allSettled(emailTasks);
+  const results = await Promise.allSettled(emailTasks);
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled") {
+      if (!result.value.success) {
+        log.email.error("Booking notification email failed", {
+          userId: params.userId,
+          channel: index === 0 ? "customer" : "admin",
+          status: "failed",
+          error: result.value.error || "unknown",
+        });
+      }
+      return;
+    }
+    log.email.error("Booking notification email rejected", {
+      userId: params.userId,
+      channel: index === 0 ? "customer" : "admin",
+    }, result.reason);
+  });
 }
 
 export const bookingRouter = router({
@@ -293,7 +311,7 @@ export const bookingRouter = router({
         `Notities: ${booking.notes || "Geen notities."}`,
       ].join("\n");
 
-      const emailTasks: Promise<unknown>[] = [];
+      const emailTasks: Promise<{ success: boolean; messageId?: string; error?: string }>[] = [];
       if (booking.clientEmail) {
         emailTasks.push(
           sendBrandedEmail(ctx.db, {
@@ -329,7 +347,25 @@ export const bookingRouter = router({
           }),
         );
       }
-      await Promise.allSettled(emailTasks);
+      const results = await Promise.allSettled(emailTasks);
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled") {
+          if (!result.value.success) {
+            log.email.error("Booking create email failed", {
+              userId: ctx.user.id,
+              channel: index === 0 ? "customer" : "admin",
+              bookingId: booking.id,
+              error: result.value.error || "unknown",
+            });
+          }
+          return;
+        }
+        log.email.error("Booking create email rejected", {
+          userId: ctx.user.id,
+          channel: index === 0 ? "customer" : "admin",
+          bookingId: booking.id,
+        }, result.reason);
+      });
 
       return booking;
     }),

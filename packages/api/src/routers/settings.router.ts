@@ -16,6 +16,7 @@ import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/s
 import { invalidateUserSettingsCache, loadUserSettingRows, userSettingKey } from "../lib/user-settings";
 import { assertCanManageSettingKey, canReadSettingKey, filterReadableSettingsForRole } from "../lib/permissions";
 import { ensureUserWorkspace } from "../lib/user-workspace";
+import { normalizeSettingKey, validateSettingValue } from "../lib/setting-validation";
 
 /* ---------- helpers ---------- */
 
@@ -217,13 +218,14 @@ export const settingsRouter = router({
   get: protectedProcedure
     .input(z.object({ key: z.string() }))
     .query(async ({ ctx, input }) => {
+      const key = normalizeSettingKey(input.key);
       await ensureUserWorkspace(ctx.db, ctx.user.id, ctx.user.name);
-      const setting = await ctx.db.setting.findUnique({ where: { key: userSettingKey(ctx.user.id, input.key) } });
-      if (!canReadSettingKey(ctx.user.role, input.key)) return null;
+      const setting = await ctx.db.setting.findUnique({ where: { key: userSettingKey(ctx.user.id, key) } });
+      if (!canReadSettingKey(ctx.user.role, key)) return null;
       if (!setting) return null;
-      const settingsMap = settingsRowsToMap([{ key: input.key, value: setting.value }]);
-      const value = settingsMap[input.key];
-      return sanitizeSingleSettingForViewer(input.key, value);
+      const settingsMap = settingsRowsToMap([{ key, value: setting.value }]);
+      const value = settingsMap[key];
+      return sanitizeSingleSettingForViewer(key, value);
     }),
 
   getBranding: protectedProcedure.query(async ({ ctx }) => {
@@ -266,26 +268,29 @@ export const settingsRouter = router({
   update: protectedProcedure
     .input(z.object({ key: z.string(), value: z.any() }))
     .mutation(async ({ ctx, input }) => {
-      assertCanManageSettingKey(ctx.user.role, input.key);
-      const scopedKey = userSettingKey(ctx.user.id, input.key);
-      if (isSecretNoopUpdate(input.key, input.value)) {
+      const key = normalizeSettingKey(input.key);
+      assertCanManageSettingKey(ctx.user.role, key);
+      const scopedKey = userSettingKey(ctx.user.id, key);
+      if (isSecretNoopUpdate(key, input.value)) {
         const current = await ctx.db.setting.findUnique({ where: { key: scopedKey } });
         if (current) return current;
         return ctx.db.setting.create({
           data: { key: scopedKey, value: "" },
         });
       }
+      const validatedValue = validateSettingValue(key, input.value);
+      const sanitizedValue = sanitizeSettingValue(key, validatedValue);
       const result = await ctx.db.setting.upsert({
         where: { key: scopedKey },
-        update: { value: sanitizeSettingValue(input.key, input.value) },
-        create: { key: scopedKey, value: sanitizeSettingValue(input.key, input.value) },
+        update: { value: sanitizedValue },
+        create: { key: scopedKey, value: sanitizedValue },
       });
       await ctx.db.activity.create({
         data: {
           userId: ctx.user.id,
           type: "LEAD_UPDATED",
-          title: `Instelling "${input.key}" gewijzigd`,
-          metadata: { key: input.key, isSecret: isSecretSettingKey(input.key) },
+          title: `Instelling "${key}" gewijzigd`,
+          metadata: { key, isSecret: isSecretSettingKey(key) },
         },
       });
       invalidateUserSettingsCache(ctx.user.id);
@@ -295,19 +300,21 @@ export const settingsRouter = router({
   batchUpdate: protectedProcedure
     .input(z.array(z.object({ key: z.string(), value: z.any() })))
     .mutation(async ({ ctx, input }) => {
-      for (const item of input) {
-        assertCanManageSettingKey(ctx.user.role, item.key.trim());
+      const normalizedEntries = input.map((item) => ({
+        key: normalizeSettingKey(item.key),
+        value: item.value,
+      }));
+
+      for (const item of normalizedEntries) {
+        assertCanManageSettingKey(ctx.user.role, item.key);
       }
       const uniqueEntries = Array.from(
         new Map(
-          input
-            .map((item) => ({ key: item.key.trim(), value: item.value }))
-            .filter((item) => item.key.length > 0)
+          normalizedEntries
             .filter((item) => !isSecretNoopUpdate(item.key, item.value))
-            .map((item) => [item.key, sanitizeSettingValue(item.key, item.value)]),
+            .map((item) => [item.key, sanitizeSettingValue(item.key, validateSettingValue(item.key, item.value))]),
         ).entries(),
       )
-        .filter(([key]) => key.length > 0)
         .map(([key, value]) => ({ key, value }));
       if (uniqueEntries.length === 0) return { success: true };
       await ctx.db.$transaction([

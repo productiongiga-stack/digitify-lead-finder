@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
+import { log } from "@digitify/api/src/lib/logger";
+import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -92,6 +94,7 @@ export async function OPTIONS() {
 
 export async function POST(request: Request) {
   try {
+    const ip = getClientIp(request);
     const rawBody = await request.text();
     const payload = rawBody ? JSON.parse(rawBody) as Record<string, unknown> : {};
     const domainId = String(payload.domainId || "").trim();
@@ -107,6 +110,18 @@ export async function POST(request: Request) {
 
     if (!domainId || !pageUrl) {
       return NextResponse.json({ error: "Domein en pagina zijn verplicht." }, { status: 400, headers: corsHeaders });
+    }
+    const limiter = enforceRateLimit(request, {
+      key: `public-tracker:${domainId}:${ip}`,
+      limit: 1200,
+      windowMs: 60 * 60 * 1000,
+      message: "Te veel tracking events. Probeer later opnieuw.",
+    });
+    if (limiter) {
+      for (const [header, value] of Object.entries(corsHeaders)) {
+        limiter.headers.set(header, value);
+      }
+      return limiter;
     }
 
     const domain = await prisma.domain.findUnique({
@@ -290,7 +305,10 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({ success: true }, { headers: corsHeaders });
-  } catch {
+  } catch (error) {
+    log.api.error("Public tracker ingest failed", {
+      route: "/api/public/tracker",
+    }, error);
     return NextResponse.json({ success: false }, { status: 500, headers: corsHeaders });
   }
 }

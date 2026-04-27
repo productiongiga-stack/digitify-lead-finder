@@ -1,38 +1,33 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
-import { getSession } from "@/lib/auth/session";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { log } from "@digitify/api/src/lib/logger";
+import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const session = await getSession();
-    const sessionEmail = session?.user?.email?.trim().toLowerCase() || "";
-    const sessionUser = sessionEmail
-      ? await prisma.user.findUnique({ where: { email: sessionEmail }, select: { id: true } })
-      : null;
-    const tenantUserId =
-      (await resolveUserIdFromPublicTenantToken(prisma, String(body.tenant || ""))) ||
-      sessionUser?.id ||
-      null;
+    const tenantUserId = await resolveUserIdFromPublicTenantToken(prisma, String(body.tenant || ""));
     if (!tenantUserId) {
+      log.security.warn("Public quote request rejected: invalid tenant token");
       return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
     }
 
-    const forwarded = request.headers.get("x-forwarded-for") || "";
-    const ip = forwarded.split(",")[0]?.trim() || "unknown";
-    const limiter = checkRateLimit({
+    const ip = getClientIp(request);
+    const burstLimiter = enforceRateLimit(request, {
+      key: `public-quote-burst:${tenantUserId}:${ip}`,
+      limit: 3,
+      windowMs: 60_000,
+      message: "Te veel aanvragen. Wacht even en probeer opnieuw.",
+    });
+    if (burstLimiter) return burstLimiter;
+    const hourlyLimiter = enforceRateLimit(request, {
       key: `public-quote:${tenantUserId}:${ip}`,
       limit: 5,
       windowMs: 60 * 60 * 1000,
+      message: "Te veel aanvragen. Probeer het later opnieuw.",
     });
-    if (!limiter.allowed) {
-      return NextResponse.json(
-        { error: "Te veel aanvragen. Probeer het later opnieuw." },
-        { status: 429 }
-      );
-    }
+    if (hourlyLimiter) return hourlyLimiter;
     const clientName = String(body.clientName || "").trim().slice(0, 200);
     const clientAddress = String(body.clientAddress || "").trim().slice(0, 500);
     const clientVat = String(body.clientVat || "").trim().slice(0, 50);
@@ -118,7 +113,10 @@ export async function POST(request: Request) {
       quoteNumber: quote.quoteNumber,
       message: "De aanvraag is opgeslagen en wacht op interne goedkeuring.",
     });
-  } catch {
+  } catch (error) {
+    log.api.error("Public quote request failed", {
+      route: "/api/public/quotes/request",
+    }, error);
     return NextResponse.json(
       { error: "Offerteaanvraag opslaan mislukt." },
       { status: 500 }

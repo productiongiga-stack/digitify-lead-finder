@@ -2,6 +2,27 @@ import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { assertLeadAccess, ownedChatSessionWhere } from "../lib/tenant";
+import { checkRateLimit } from "../lib/rate-limit-bucket";
+
+function enforceChatbotRateLimit(params: {
+  userId: string;
+  bucket: string;
+  limit: number;
+  windowMs: number;
+  message: string;
+}) {
+  const result = checkRateLimit({
+    key: `chatbot:${params.bucket}:${params.userId}`,
+    limit: params.limit,
+    windowMs: params.windowMs,
+  });
+  if (!result.allowed) {
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: params.message,
+    });
+  }
+}
 
 export const chatbotRouter = router({
   // List all chat sessions with filtering
@@ -14,6 +35,13 @@ export const chatbotRouter = router({
       search: z.string().optional(),
     }).default({}))
     .query(async ({ ctx, input }) => {
+      enforceChatbotRateLimit({
+        userId: ctx.user.id,
+        bucket: "list",
+        limit: 120,
+        windowMs: 60_000,
+        message: "Te veel chatbot-opvragingen op korte tijd.",
+      });
       const { page, perPage, status, isRead, search } = input;
       const filters: any = {};
       if (status) filters.status = status;
@@ -78,6 +106,13 @@ export const chatbotRouter = router({
       content: z.string().min(1),
     }))
     .mutation(async ({ ctx, input }) => {
+      enforceChatbotRateLimit({
+        userId: ctx.user.id,
+        bucket: "send",
+        limit: 80,
+        windowMs: 60_000,
+        message: "Te veel chatberichten op korte tijd.",
+      });
       const session = await ctx.db.chatSession.findFirst({
         where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
       });
@@ -128,6 +163,13 @@ export const chatbotRouter = router({
   convertToLead: protectedProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      enforceChatbotRateLimit({
+        userId: ctx.user.id,
+        bucket: "summary",
+        limit: 20,
+        windowMs: 60_000,
+        message: "Te veel samenvattingen op korte tijd.",
+      });
       const session = await ctx.db.chatSession.findFirst({
         where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
         include: { messages: { orderBy: { createdAt: "asc" } } },
@@ -346,6 +388,13 @@ export const chatbotRouter = router({
       initialMessage: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      enforceChatbotRateLimit({
+        userId: ctx.user.id,
+        bucket: "create",
+        limit: 30,
+        windowMs: 60_000,
+        message: "Te veel nieuwe chatsessies op korte tijd.",
+      });
       const session = await ctx.db.chatSession.create({
         data: {
           assignedToId: ctx.user.id,

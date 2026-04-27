@@ -8,6 +8,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
   Input, Label, Textarea, Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  CreateModal, EmptyState,
 } from "@digitify/ui";
 import {
   Calendar, Plus, Clock, CheckCircle2, XCircle, Trash2, Pencil,
@@ -493,13 +494,11 @@ export default function BookingsPage() {
               ))}
             </div>
           ) : !sortedBookings.length ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <Calendar className="h-10 w-10 text-muted-foreground/40" />
-              <p className="mt-3 text-sm font-medium">Geen boekingen gevonden</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Maak een nieuwe boeking aan om te beginnen.
-              </p>
-            </div>
+            <EmptyState
+              icon={<Calendar />}
+              title="Geen boekingen gevonden"
+              description="Maak een nieuwe boeking aan om te beginnen."
+            />
           ) : (
             <>
             <div className="grid gap-3 p-4 xl:hidden">
@@ -865,29 +864,25 @@ export default function BookingsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Boeking Verwijderen</DialogTitle>
-            <DialogDescription>
-              Weet je zeker dat je de boeking van <strong>{deleteTarget?.name}</strong> wilt verwijderen? Dit kan niet ongedaan worden gemaakt.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)}>
-              Annuleren
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => deleteTarget && deleteMutation.mutate({ id: deleteTarget.id })}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? "Verwijderen..." : "Verwijderen"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Delete Confirmation */}
+      <CreateModal
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Boeking verwijderen"
+        description={
+          deleteTarget
+            ? `Weet je zeker dat je de boeking van ${deleteTarget.name} wilt verwijderen? Dit kan niet ongedaan worden gemaakt.`
+            : ""
+        }
+        submitLabel="Verwijderen"
+        submitVariant="destructive"
+        pending={deleteMutation.isPending}
+        onSubmit={() => deleteTarget && deleteMutation.mutate({ id: deleteTarget.id })}
+      >
+        <p className="text-sm text-muted-foreground">
+          Verwijderde boekingen zijn niet meer terug te halen.
+        </p>
+      </CreateModal>
     </div>
   );
 }

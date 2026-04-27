@@ -3,6 +3,7 @@ import { prisma } from "@digitify/db";
 import { replacePlaceholders } from "@digitify/email";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { REVIEW_PUBLIC_TEXT_FIELDS, getReviewTextDefault } from "@/lib/review-text";
+import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
 function userSettingKey(userId: string, key: string) {
   return `user:${userId}:${key.trim()}`;
@@ -48,6 +49,14 @@ function resolveReviewText(
 
 export async function GET(_: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
+  const ip = getClientIp(_);
+  const limiter = enforceRateLimit(_, {
+    key: `public-review-get:${id}:${ip}`,
+    limit: 240,
+    windowMs: 60 * 60 * 1000,
+    message: "Te veel aanvragen. Probeer later opnieuw.",
+  });
+  if (limiter) return limiter;
   const review = await prisma.reviewRequest.findUnique({
     where: { id },
     include: { lead: { select: { companyName: true } } },
@@ -126,8 +135,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     );
   }
 
-  const forwarded = request.headers.get("x-forwarded-for") || "";
-  const ip = forwarded.split(",")[0]?.trim() || "unknown";
+  const ip = getClientIp(request);
   const limiter = checkRateLimit({
     key: `public-review:${id}:${ip}`,
     limit: 10,

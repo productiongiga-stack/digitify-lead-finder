@@ -3,6 +3,7 @@ import superjson from "superjson";
 import { type PrismaClient } from "@digitify/db";
 import { patchRequestContext, recordRouteMetric } from "@digitify/db";
 import { invalidateDashboardCacheForUser } from "./lib/dashboard-cache";
+import { log } from "./lib/logger";
 
 export type Context = {
   db: PrismaClient;
@@ -82,13 +83,22 @@ const withLogging = t.middleware(async ({ ctx, path, type, next }) => {
 
   if (!result.ok) {
     const errorCode = result.error instanceof TRPCError ? result.error.code : undefined;
-    console.error(`[tRPC] [${ctx.requestId}] ${type} ${path} — ERROR ${durationMs}ms`, {
-      error: result.error?.message,
+    log.api.error(`tRPC ${type} ${path} failed`, {
+      requestId: ctx.requestId,
+      path,
+      type,
+      durationMs,
       code: errorCode,
       userId: ctx.user?.id,
-    });
+    }, result.error);
   } else if (durationMs > 2000) {
-    console.warn(`[tRPC] [${ctx.requestId}] ${type} ${path} — SLOW ${durationMs}ms`, { userId: ctx.user?.id });
+    log.api.warn(`tRPC ${type} ${path} slow`, {
+      requestId: ctx.requestId,
+      path,
+      type,
+      durationMs,
+      userId: ctx.user?.id,
+    });
   }
 
   if (result.ok && type === "mutation" && ctx.user?.id && shouldInvalidateDashboardCache(path)) {

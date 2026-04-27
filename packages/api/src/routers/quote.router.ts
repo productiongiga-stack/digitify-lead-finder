@@ -653,35 +653,76 @@ export const quoteRouter = router({
       ]
         .filter(Boolean)
         .join("\n");
-
-      const result = await sendBrandedEmail(ctx.db, {
-        toEmail: quote.clientEmail,
-        subject: `Offerte ${quote.quoteNumber} voor ${quote.clientCompany || quote.clientName}`,
-        body: `${body}\n\n[[CTA_TEXT=Bekijk offerte]]\n[[CTA_URL=${quoteUrl}]]`,
-        recipientCompany: quote.clientCompany || quote.clientName,
-        leadId: linkedLead.id,
-        layout: "proposal",
-        userId: ctx.user.id,
-        placeholderContext: {
-          quoteNumber: quote.quoteNumber,
-          offerTitle: `Offerte ${quote.quoteNumber}`,
-          offerPrice: formatCurrency(quote.total),
+      const composedBody = `${body}\n\n[[CTA_TEXT=Bekijk offerte]]\n[[CTA_URL=${quoteUrl}]]`;
+      const emailDraft = await ctx.db.emailDraft.create({
+        data: {
+          leadId: linkedLead.id,
+          authorId: ctx.user.id,
+          toEmail: quote.clientEmail,
+          subject: `Offerte ${quote.quoteNumber} voor ${quote.clientCompany || quote.clientName}`,
+          body: composedBody,
+          status: "SENDING",
+          type: "QUOTE",
         },
-        attachments: [
-          {
-            filename: attachmentName,
-            path: quoteDownloadUrl,
-            contentType: "application/pdf",
-          },
-        ],
       });
 
+      let result: Awaited<ReturnType<typeof sendBrandedEmail>>;
+      try {
+        result = await sendBrandedEmail(ctx.db, {
+          toEmail: quote.clientEmail,
+          subject: emailDraft.subject,
+          body: composedBody,
+          recipientCompany: quote.clientCompany || quote.clientName,
+          leadId: linkedLead.id,
+          layout: "proposal",
+          userId: ctx.user.id,
+          trackingDraftId: emailDraft.id,
+          placeholderContext: {
+            quoteNumber: quote.quoteNumber,
+            offerTitle: `Offerte ${quote.quoteNumber}`,
+            offerPrice: formatCurrency(quote.total),
+          },
+          attachments: [
+            {
+              filename: attachmentName,
+              path: quoteDownloadUrl,
+              contentType: "application/pdf",
+            },
+          ],
+        });
+      } catch (error) {
+        await ctx.db.emailDraft.update({
+          where: { id: emailDraft.id },
+          data: {
+            status: "FAILED",
+            rejectionNote: error instanceof Error ? error.message : "Offerte e-mail verzenden mislukt",
+          },
+        });
+        throw error;
+      }
+
       if (!result.success) {
+        await ctx.db.emailDraft.update({
+          where: { id: emailDraft.id },
+          data: {
+            status: "FAILED",
+            rejectionNote: result.error || "Offerte e-mail verzenden mislukt",
+          },
+        });
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: result.error || "Offerte e-mail verzenden mislukt",
         });
       }
+      await ctx.db.emailDraft.update({
+        where: { id: emailDraft.id },
+        data: {
+          status: "SENT",
+          sentAt: new Date(),
+          messageId: result.messageId || null,
+          rejectionNote: null,
+        },
+      });
 
       const updated = await ctx.db.quote.update({
         where: { id: input.id },

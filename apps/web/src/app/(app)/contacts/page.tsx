@@ -24,6 +24,7 @@ import {
 } from "@digitify/ui";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
+import { EmptyState } from "@digitify/ui";
 import { Mail, FileText, CheckCircle, Eye, Send, Inbox, ArrowRight, PenSquare } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { EmailPreview } from "@/components/email/preview";
@@ -302,9 +303,8 @@ export default function ContactsPage() {
           {isLoading ? (
             Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-xl" />)
           ) : (data?.items.length ?? 0) === 0 ? (
-            <div className="flex flex-col items-center gap-2 rounded-xl border px-4 py-10 text-center">
-              <Mail className="h-8 w-8 text-muted-foreground/30" />
-              <p className="text-sm text-muted-foreground">Nog geen e-mail drafts</p>
+            <div className="rounded-xl border">
+              <EmptyState icon={<Mail />} title="Nog geen e-mail drafts" size="sm" />
             </div>
           ) : (
             (data?.items ?? []).map((draft: NonNullable<typeof data>["items"][number]) => (
@@ -387,10 +387,7 @@ export default function ContactsPage() {
             ) : data?.items.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="h-32 text-center">
-                  <div className="flex flex-col items-center gap-2">
-                    <Mail className="h-8 w-8 text-muted-foreground/30" />
-                    <p className="text-sm text-muted-foreground">Nog geen e-mail drafts</p>
-                  </div>
+                  <EmptyState icon={<Mail />} title="Nog geen e-mail drafts" size="sm" />
                 </TableCell>
               </TableRow>
             ) : (

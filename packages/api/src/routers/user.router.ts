@@ -3,6 +3,7 @@ import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
 import { ensureUserWorkspace } from "../lib/user-workspace";
+import { passwordPolicySchema } from "../lib/password-policy";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -73,7 +74,7 @@ export const userRouter = router({
       z.object({
         name: z.string().min(1),
         email: z.string().email(),
-        password: z.string().min(6),
+        password: passwordPolicySchema,
         role: z.enum(["ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER", "VIEWER"]),
       })
     )

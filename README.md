@@ -24,7 +24,7 @@ pnpm db:generate
 # Push schema naar database
 pnpm db:push
 
-# Seed demo data
+# Seed baseline data
 pnpm db:seed
 
 # Start development server
@@ -33,7 +33,17 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000)
 
-**Demo login:** admin@digitify.be / admin123
+### Initial owner account
+
+The seed script creates one `OWNER` user. Credentials are required via env before running `pnpm db:seed`:
+
+```bash
+SEED_ADMIN_EMAIL=you@example.com SEED_ADMIN_PASSWORD='a-strong-password-123' pnpm db:seed
+```
+
+`SEED_ADMIN_EMAIL` + `SEED_ADMIN_PASSWORD` are mandatory in every environment.
+
+> Never commit credentials, `.env`, or hardcoded passwords. Sensitive settings (API keys, SMTP/IMAP passwords, OAuth tokens) are encrypted at rest with `SETTINGS_ENCRYPTION_KEY` (AES-256-GCM).
 
 ## Stack
 

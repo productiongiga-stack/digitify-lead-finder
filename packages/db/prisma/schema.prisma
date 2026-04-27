@@ -459,6 +459,7 @@ model EmailDraft {
   subject      String
   body         String      @db.Text
   status       EmailStatus @default(DRAFT)
+  type         EmailType   @default(LEAD_CONTACT)
 
   sequenceId   String?
   sequenceStep Int?
@@ -490,6 +491,7 @@ model EmailDraft {
   @@index([sequenceId, sequenceStep])
   @@index([authorId])
   @@index([approverId])
+  @@index([type])
   @@map("email_drafts")
 }
 
@@ -503,6 +505,15 @@ enum EmailStatus {
   SENT
   FAILED
   BOUNCED
+}
+
+enum EmailType {
+  LEAD_CONTACT
+  QUOTE
+  REPLY
+  FOLLOW_UP
+  REVIEW_REQUEST
+  TRANSACTIONAL
 }
 
 model EmailSequence {

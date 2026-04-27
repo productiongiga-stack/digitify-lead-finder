@@ -34,6 +34,7 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
+  EmptyState,
 } from "@digitify/ui";
 import {
   Building2,
@@ -253,13 +254,11 @@ export default function CrmPage() {
               ))}
             </div>
           ) : rows.length === 0 ? (
-            <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
-              <Building2 className="h-10 w-10 text-muted-foreground/40" />
-              <p className="mt-3 text-sm font-medium">Geen relaties gevonden</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Maak een klant aan of pas je zoekfilter aan.
-              </p>
-            </div>
+            <EmptyState
+              icon={<Building2 />}
+              title="Geen relaties gevonden"
+              description="Maak een klant aan of pas je zoekfilter aan."
+            />
           ) : (
             <>
               <div className="grid gap-3 p-3 md:hidden">

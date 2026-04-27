@@ -1,28 +1,30 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
-import { getSession } from "@/lib/auth/session";
+import { log } from "@digitify/api/src/lib/logger";
+import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
 function userSettingKey(userId: string, key: string) {
   return `user:${userId}:${key.trim()}`;
 }
 
 export async function GET(request: Request) {
-  const session = await getSession();
-  const sessionEmail = session?.user?.email?.trim().toLowerCase() || "";
-  const sessionUser = sessionEmail
-    ? await prisma.user.findUnique({ where: { email: sessionEmail }, select: { id: true } })
-    : null;
-  const tenantUserId =
-    (await resolveUserIdFromPublicTenantToken(
-      prisma,
-      new URL(request.url).searchParams.get("tenant"),
-    )) ||
-    sessionUser?.id ||
-    null;
+  const tenantUserId = await resolveUserIdFromPublicTenantToken(
+    prisma,
+    new URL(request.url).searchParams.get("tenant"),
+  );
   if (!tenantUserId) {
+    log.security.warn("Public quote services rejected: invalid tenant token");
     return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
   }
+  const ip = getClientIp(request);
+  const limiter = enforceRateLimit(request, {
+    key: `public-quote-services:${tenantUserId}:${ip}`,
+    limit: 180,
+    windowMs: 60 * 60 * 1000,
+    message: "Te veel aanvragen. Probeer later opnieuw.",
+  });
+  if (limiter) return limiter;
 
   const [services, settings] = await Promise.all([
     prisma.serviceCatalog.findMany({

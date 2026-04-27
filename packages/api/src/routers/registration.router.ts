@@ -6,6 +6,7 @@ import { router, adminProcedure, protectedProcedure, publicProcedure } from "../
 import { sendBrandedEmail } from "../lib/email-sender";
 import { canApproveRole } from "../lib/permissions";
 import { ensureUserWorkspace } from "../lib/user-workspace";
+import { passwordPolicySchema } from "../lib/password-policy";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -46,7 +47,7 @@ export const registrationRouter = router({
         email: z.string().email(),
         company: z.string().max(160).optional(),
         message: z.string().max(1200).optional(),
-        password: z.string().min(8),
+        password: passwordPolicySchema,
       })
     )
     .mutation(async ({ ctx, input }) => {

@@ -2,6 +2,7 @@ import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@digitify/db";
 import { scryptSync, timingSafeEqual } from "crypto";
+import { log } from "@digitify/api/src/lib/logger";
 
 function normalizeAbsoluteUrl(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
@@ -58,9 +59,14 @@ function isLegacyHash(storedHash: string): boolean {
 export const authOptions: NextAuthOptions = {
   session: {
     strategy: "jwt",
+    maxAge: 60 * 60 * 12,
+    updateAge: 60 * 15,
   },
   pages: {
     signIn: "/login",
+  },
+  jwt: {
+    maxAge: 60 * 60 * 12,
   },
   providers: [
     CredentialsProvider({
@@ -70,15 +76,36 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) return null;
+        if (!credentials?.email || !credentials?.password) {
+          log.auth.warn("Login attempt with missing credentials");
+          return null;
+        }
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
-        });
+        const email = credentials.email.toLowerCase().trim();
+        const user = await prisma.user.findUnique({ where: { email } });
 
-        if (!user || !user.passwordHash) return null;
+        if (!user || !user.passwordHash) {
+          log.auth.warn("Login failed: unknown user", { email });
+          return null;
+        }
 
-        if (!verifyPassword(credentials.password, user.passwordHash)) return null;
+        if (!verifyPassword(credentials.password, user.passwordHash)) {
+          log.auth.warn("Login failed: bad password", { email, userId: user.id });
+          return null;
+        }
+
+        if (!user.emailVerified) {
+          if (user.role === "OWNER" || user.role === "ADMIN") {
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { emailVerified: new Date() },
+            });
+            log.auth.info("Backfilled emailVerified for privileged account", { userId: user.id });
+          } else {
+            log.auth.warn("Login blocked: email not verified", { email, userId: user.id });
+            return null;
+          }
+        }
 
         // Transparently upgrade legacy SHA256 hashes to scrypt on successful login
         if (isLegacyHash(user.passwordHash)) {
@@ -87,8 +114,10 @@ export const authOptions: NextAuthOptions = {
             where: { id: user.id },
             data: { passwordHash: upgraded },
           });
+          log.auth.info("Password hash upgraded to scrypt", { userId: user.id });
         }
 
+        log.auth.info("Login success", { userId: user.id, email });
         return {
           id: user.id,
           email: user.email,

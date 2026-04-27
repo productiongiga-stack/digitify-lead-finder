@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { getSession } from "@/lib/auth/session";
+import { getCurrentUser } from "@/lib/auth/session";
 import { buildQuotePdfHtml, renderQuotePdfBuffer } from "@/lib/quote-pdf";
 
 export const runtime = "nodejs";
@@ -14,21 +14,15 @@ function userSettingPrefix(userId: string) {
 }
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
-  if (!session) {
+  const currentUser = await getCurrentUser();
+  if (!currentUser || typeof (currentUser as any).id !== "string") {
     return NextResponse.json({ error: "Niet geauthenticeerd" }, { status: 401 });
   }
-  const sessionEmail = session.user?.email?.trim().toLowerCase() || "";
-  const sessionUser = sessionEmail
-    ? await prisma.user.findUnique({ where: { email: sessionEmail }, select: { id: true } })
-    : null;
-  if (!sessionUser) {
-    return NextResponse.json({ error: "Niet geauthenticeerd" }, { status: 401 });
-  }
+  const userId = (currentUser as any).id as string;
 
   const { id } = await params;
   const quote = await prisma.quote.findFirst({
-    where: { id, createdById: sessionUser.id },
+    where: { id, createdById: userId },
     include: { items: { orderBy: { sortOrder: "asc" } } },
   });
 
@@ -36,7 +30,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     return NextResponse.json({ error: "Offerte niet gevonden" }, { status: 404 });
   }
 
-  const prefix = userSettingPrefix(sessionUser.id);
+  const prefix = userSettingPrefix(userId);
   const settingsRows = await prisma.setting.findMany({
     where: { key: { startsWith: prefix } },
   });

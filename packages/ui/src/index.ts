@@ -18,4 +18,11 @@ export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./comp
 export { ScrollArea, ScrollBar } from "./components/scroll-area";
 export { Skeleton } from "./components/skeleton";
 export { Checkbox } from "./components/checkbox";
+export { DataTable, type DataTableColumn, type DataTablePagination, type SortDir } from "./components/data-table";
+export { CreateModal, type CreateModalProps } from "./components/create-modal";
+export { StatusBadge, statusBadgeVariants, type StatusBadgeProps } from "./components/status-badge";
+export { EmptyState, type EmptyStateProps } from "./components/empty-state";
+export { StatsCards, type StatItem, type StatsCardsProps } from "./components/stats-cards";
+export { Timeline, type TimelineItem, type TimelineProps } from "./components/timeline";
+export { BulkActions, type BulkActionsProps } from "./components/bulk-actions";
 export { cn } from "./lib/utils";

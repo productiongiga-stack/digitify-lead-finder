@@ -100,7 +100,7 @@ pnpm db:generate
 pnpm db:push
 
 # Seed initiële data
-pnpm db:seed
+SEED_ADMIN_EMAIL="owner@jouwdomein.be" SEED_ADMIN_PASSWORD="sterk-wachtwoord-min-12" pnpm db:seed
 
 # Build de applicatie
 pnpm build
@@ -278,7 +278,9 @@ pg_dump -U digitify digitify_leads > /backups/digitify_$(date +%Y%m%d).sql
 - [ ] Firewall staat alleen SSH + HTTP/HTTPS toe
 - [ ] PM2 is ingesteld met auto-start
 - [ ] Seed data is geladen
-- [ ] Admin wachtwoord is gewijzigd (niet meer admin123)
+- [ ] `SEED_ADMIN_EMAIL` + `SEED_ADMIN_PASSWORD` zijn via env gezet voor de eerste seed (geen hardcoded waarden in code/docs)
+- [ ] `SETTINGS_ENCRYPTION_KEY` is gezet (≠ default) — vereist voor versleutelde API-keys/SMTP/OAuth tokens
+- [ ] `NEXTAUTH_SECRET` is gezet en uniek per omgeving
 - [ ] Google Places API key is ingesteld via Instellingen
 - [ ] Anthropic/OpenAI API key is ingesteld via Instellingen
 - [ ] SMTP is geconfigureerd voor e-mail verzending

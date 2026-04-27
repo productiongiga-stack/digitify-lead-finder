@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { sendBrandedEmail } from "@digitify/api/src/lib/email-sender";
+import { log } from "@digitify/api/src/lib/logger";
 import {
   isGoogleSlotAvailable,
   upsertGoogleBookingEvent,
   upsertGoogleEventIdInNotes,
 } from "@digitify/api/src/lib/google-calendar";
 import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
-import { getSession } from "@/lib/auth/session";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
 function getSetting(settings: Array<{ key: string; value: unknown }>, key: string, fallback = "") {
   const row = settings.find((item) => item.key === key);
@@ -71,31 +71,26 @@ function parseWeeklySchedule(
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const forwarded = request.headers.get("x-forwarded-for") || "";
-    const ip = forwarded.split(",")[0]?.trim() || "unknown";
-    const session = await getSession();
-    const sessionEmail = session?.user?.email?.trim().toLowerCase() || "";
-    const sessionUser = sessionEmail
-      ? await prisma.user.findUnique({ where: { email: sessionEmail }, select: { id: true } })
-      : null;
-    const tenantUserId =
-      (await resolveUserIdFromPublicTenantToken(prisma, String(body.tenant || ""))) ||
-      sessionUser?.id ||
-      null;
+    const ip = getClientIp(request);
+    const tenantUserId = await resolveUserIdFromPublicTenantToken(prisma, String(body.tenant || ""));
     if (!tenantUserId) {
+      log.security.warn("Public booking rejected: invalid tenant token", { ip });
       return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
     }
-    const limiter = checkRateLimit({
+    const burstLimiter = enforceRateLimit(request, {
+      key: `public-booking-burst:${tenantUserId}:${ip}`,
+      limit: 4,
+      windowMs: 60_000,
+      message: "Te veel aanvragen. Wacht even en probeer opnieuw.",
+    });
+    if (burstLimiter) return burstLimiter;
+    const hourlyLimiter = enforceRateLimit(request, {
       key: `public-booking:${tenantUserId}:${ip}`,
       limit: 12,
       windowMs: 60 * 60 * 1000,
+      message: "Te veel aanvragen. Probeer het binnen enkele minuten opnieuw.",
     });
-    if (!limiter.allowed) {
-      return NextResponse.json(
-        { error: "Te veel aanvragen. Probeer het binnen enkele minuten opnieuw." },
-        { status: 429 },
-      );
-    }
+    if (hourlyLimiter) return hourlyLimiter;
     const honeypot = String(body.website || "").trim();
     if (honeypot) {
       return NextResponse.json({ success: true });
@@ -291,7 +286,7 @@ export async function POST(request: Request) {
     const notesText = booking.notes || "Geen extra notities.";
 
     if (clientEmail) {
-      await sendBrandedEmail(prisma, {
+      const result = await sendBrandedEmail(prisma, {
         toEmail: clientEmail,
         subject: `Boeking ontvangen bij ${companyName}`,
         body: [
@@ -307,11 +302,19 @@ export async function POST(request: Request) {
         ].join("\n"),
         recipientCompany: clientName,
         userId: tenantUserId,
-      }).catch(() => null);
+      });
+      if (!result.success) {
+        log.email.error("Public booking customer email failed", {
+          tenantUserId,
+          bookingId: booking.id,
+          to: clientEmail,
+          error: result.error || "unknown",
+        });
+      }
     }
 
     if (adminRecipient) {
-      await sendBrandedEmail(prisma, {
+      const result = await sendBrandedEmail(prisma, {
         toEmail: adminRecipient,
         subject: `Nieuwe booking aanvraag: ${clientName}`,
         body: [
@@ -325,14 +328,25 @@ export async function POST(request: Request) {
         ].join("\n"),
         recipientCompany: companyName,
         userId: tenantUserId,
-      }).catch(() => null);
+      });
+      if (!result.success) {
+        log.email.error("Public booking admin email failed", {
+          tenantUserId,
+          bookingId: booking.id,
+          to: adminRecipient,
+          error: result.error || "unknown",
+        });
+      }
     }
 
     return NextResponse.json({
       success: true,
       bookingId: booking.id,
     });
-  } catch {
+  } catch (error) {
+    log.api.error("Public booking request failed", {
+      route: "/api/public/bookings",
+    }, error);
     return NextResponse.json(
       { error: "Boeking opslaan mislukt." },
       { status: 500 }

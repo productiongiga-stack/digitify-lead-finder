@@ -8,6 +8,7 @@ import {
 } from "@digitify/email";
 import { type PrismaClient } from "@digitify/db";
 import { formatSmtpErrorMessage, normalizeAiPlaceholderSyntax, normalizeLegacyPlaceholders, normalizeTlsOptions } from "./email-utils";
+import { log } from "./logger";
 import { getSettingBoolean, getSettingNumber, getSettingString, settingsRowsToMap } from "./settings";
 import { extractEmailTemplateMetadata } from "./email-content";
 import { loadUserSettingRows } from "./user-settings";
@@ -46,6 +47,26 @@ interface SendBrandedEmailParams {
   placeholderContext?: Record<string, string | number | undefined>;
   attachments?: EmailAttachment[];
   userId?: string;
+  trackingDraftId?: string;
+}
+
+function resolveAppUrl() {
+  const candidates = [
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.NEXTAUTH_URL,
+    process.env.APP_URL,
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "",
+  ];
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim();
+    if (!trimmed) continue;
+    try {
+      return new URL(trimmed).toString().replace(/\/$/, "");
+    } catch {
+      continue;
+    }
+  }
+  return "http://localhost:3000";
 }
 
 /**
@@ -130,6 +151,10 @@ export async function sendBrandedEmail(
   const effectiveFromEmail = cfg.fromEmail || cfg.smtpUser;
   const effectiveFromName = cfg.fromName || cfg.companyName || cfg.smtpUser;
   if (!effectiveFromEmail) {
+    log.email.warn("Email send aborted: missing from address", {
+      userId: params.userId,
+      to: params.toEmail,
+    });
     return {
       success: false,
       error: "E-mail afzender ontbreekt. Configureer eerst SMTP en e-mailinstellingen.",
@@ -216,6 +241,9 @@ export async function sendBrandedEmail(
     logoUrl: cfg.logoUrl,
     hidePoweredBy: true,
   });
+  const htmlWithTrackingPixel = params.trackingDraftId
+    ? `${html}<img src="${resolveAppUrl()}/api/public/email/open/${encodeURIComponent(params.trackingDraftId)}" alt="" width="1" height="1" style="display:none;border:0;outline:none;"/>`
+    : html;
 
   if (cfg.providerName === "smtp" && (!cfg.smtpHost || !cfg.smtpUser || !cfg.smtpPass)) {
     return {
@@ -248,12 +276,29 @@ export async function sendBrandedEmail(
     from: effectiveFromEmail,
     fromName: effectiveFromName,
     subject: safeSubject,
-    html,
+    html: htmlWithTrackingPixel,
     text: bodyWithSignature.replace(/<[^>]*>/g, ""),
     replyTo: cfg.replyTo || undefined,
     bcc: cfg.bcc || undefined,
     attachments: params.attachments,
   });
+
+  if (!result.success) {
+    log.email.error("Email send failed", {
+      userId: params.userId,
+      provider: cfg.providerName,
+      to: params.toEmail,
+      from: effectiveFromEmail,
+      smtpHost: cfg.providerName === "smtp" ? cfg.smtpHost : undefined,
+    }, result.error);
+  } else {
+    log.email.info("Email sent", {
+      userId: params.userId,
+      provider: cfg.providerName,
+      to: params.toEmail,
+      messageId: result.messageId,
+    });
+  }
 
   return {
     success: result.success,

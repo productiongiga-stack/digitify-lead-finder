@@ -6,6 +6,7 @@ import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-sc
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
 import { randomUUID } from "crypto";
+import { log } from "@digitify/api/src/lib/logger";
 import "@/lib/env";
 
 let compatScheduled = false;
@@ -21,14 +22,29 @@ const handler = async (req: Request) => {
   scheduleSchemaCompat();
   const requestId = randomUUID();
   const session = await getServerSession(authOptions);
-  const user = session?.user
+  const sessionUserId = typeof (session?.user as any)?.id === "string" ? (session?.user as any).id : "";
+  const userRecord = sessionUserId
+    ? await prisma.user.findUnique({
+        where: { id: sessionUserId },
+        select: { id: true, email: true, name: true, role: true },
+      })
+    : null;
+  const user = userRecord
     ? {
-        id: (session.user as any).id,
-        email: session.user.email!,
-        name: session.user.name ?? null,
-        role: (session.user as any).role ?? "MEMBER",
+        id: userRecord.id,
+        email: userRecord.email,
+        name: userRecord.name ?? null,
+        role: userRecord.role,
       }
     : null;
+
+  if (session && !user) {
+    log.security.warn("Dropping stale/invalid tRPC session", {
+      requestId,
+      sessionUserId,
+      sessionEmail: session.user?.email || null,
+    });
+  }
 
   return runWithRequestContext(
     {

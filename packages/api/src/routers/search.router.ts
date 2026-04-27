@@ -3,6 +3,8 @@ import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadUserSettingRows } from "../lib/user-settings";
+import { checkRateLimit } from "../lib/rate-limit-bucket";
+import { log } from "../lib/logger";
 
 const searchStringSchema = z
   .string()
@@ -91,6 +93,18 @@ export const searchRouter = router({
         })
     )
     .mutation(async ({ ctx, input }) => {
+      const rateLimit = checkRateLimit({
+        key: `lead-search:${ctx.user.id}`,
+        limit: 20,
+        windowMs: 60_000,
+      });
+      if (!rateLimit.allowed) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Te veel zoekopdrachten op korte tijd. Wacht even en probeer opnieuw.",
+        });
+      }
+
       const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.google_places_key"]);
       const apiKey = getSettingString(settingsRowsToMap(settings), "api.google_places_key");
       if (!apiKey) {
@@ -136,7 +150,12 @@ export const searchRouter = router({
 
         if (!response.ok) {
           const errorBody = await response.text();
-          console.error("Google Places API error:", response.status, errorBody);
+          log.integration.error("Google Places API error", {
+            userId: ctx.user.id,
+            status: response.status,
+            bodyPreview: errorBody.slice(0, 200),
+            textQuery,
+          });
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
             message: `Google Places API fout (${response.status}). Controleer je API key en probeer opnieuw.`,

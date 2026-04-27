@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma, revealSettingValue } from "@digitify/db";
 import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
+import { log } from "@digitify/api/src/lib/logger";
 import { createHash } from "node:crypto";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
 const recentMessages = new Map<string, number>();
 
@@ -344,13 +345,22 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const sessionId = url.searchParams.get("sessionId")?.trim();
   const tenantUserId = await resolveUserIdFromPublicTenantToken(prisma, url.searchParams.get("tenant"));
+  const ip = getClientIp(request);
 
   if (!sessionId) {
     return NextResponse.json({ error: "Sessie is verplicht." }, { status: 400 });
   }
   if (!tenantUserId) {
+    log.security.warn("Public chatbot session GET rejected: invalid tenant token", { ip });
     return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
   }
+  const limiter = enforceRateLimit(request, {
+    key: `public-chatbot-get:${tenantUserId}:${sessionId}:${ip}`,
+    limit: 180,
+    windowMs: 60 * 60 * 1000,
+    message: "Te veel aanvragen. Probeer later opnieuw.",
+  });
+  if (limiter) return limiter;
 
   const session = await prisma.chatSession.findFirst({
     where: {
@@ -389,19 +399,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const forwarded = request.headers.get("x-forwarded-for") || "";
-    const ip = forwarded.split(",")[0]?.trim() || "unknown";
-    const limiter = checkRateLimit({
-      key: `public-chatbot:${ip}`,
-      limit: 100,
-      windowMs: 60 * 60 * 1000,
-    });
-    if (!limiter.allowed) {
-      return NextResponse.json(
-        { error: "Te veel berichten op korte tijd. Probeer binnen enkele minuten opnieuw." },
-        { status: 429 },
-      );
-    }
+    const ip = getClientIp(request);
 
     const body = await request.json();
     const message = String(body.message || "").trim();
@@ -415,8 +413,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Bericht is verplicht." }, { status: 400 });
     }
     if (!tenantUserId) {
+      log.security.warn("Public chatbot POST rejected: invalid tenant token", { ip });
       return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
     }
+    const burstLimiter = enforceRateLimit(request, {
+      key: `public-chatbot-burst:${tenantUserId}:${ip}`,
+      limit: 8,
+      windowMs: 60_000,
+      message: "Te veel berichten op korte tijd. Probeer binnen enkele minuten opnieuw.",
+    });
+    if (burstLimiter) return burstLimiter;
+    const hourlyLimiter = enforceRateLimit(request, {
+      key: `public-chatbot:${tenantUserId}:${ip}`,
+      limit: 100,
+      windowMs: 60 * 60 * 1000,
+      message: "Te veel berichten op korte tijd. Probeer binnen enkele minuten opnieuw.",
+    });
+    if (hourlyLimiter) return hourlyLimiter;
     if (message.length > 4000) {
       return NextResponse.json({ error: "Bericht is te lang." }, { status: 400 });
     }
@@ -575,7 +588,12 @@ export async function POST(request: Request) {
           if (aiReply) {
             reply = aiReply;
           }
-        } catch {
+        } catch (error) {
+          log.integration.warn("Public chatbot AI fallback triggered", {
+            tenantUserId,
+            provider: aiConfig.provider,
+            model: aiConfig.model,
+          }, error);
           // Keep fallback response when AI provider fails.
         }
       }
@@ -671,7 +689,10 @@ export async function POST(request: Request) {
       reply,
       intent: intent.intent,
     });
-  } catch {
+  } catch (error) {
+    log.api.error("Public chatbot session POST failed", {
+      route: "/api/public/chatbot/session",
+    }, error);
     return NextResponse.json(
       { error: "Chatbericht verzenden mislukt." },
       { status: 500 }
