@@ -7,12 +7,34 @@ function nonEmpty(value: string | undefined | null): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-// Never override an explicitly provided DATABASE_URL.
-// Fallbacks are only used when DATABASE_URL is missing.
-process.env.DATABASE_URL =
-  nonEmpty(process.env.DATABASE_URL) ||
-  nonEmpty(process.env.POSTGRES_PRISMA_URL) ||
-  nonEmpty(process.env.POSTGRES_URL);
+function hasTenantIdentifier(value: string | undefined) {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    if (url.hostname.includes("ep-")) return true;
+    if (url.searchParams.has("external_id") || url.searchParams.has("sni_hostname")) return true;
+    const options = url.searchParams.get("options");
+    if (options && options.includes("project=")) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function resolveDatabaseUrl() {
+  const configured = nonEmpty(process.env.DATABASE_URL);
+  const prismaUrl = nonEmpty(process.env.POSTGRES_PRISMA_URL);
+  const pooledUrl = nonEmpty(process.env.POSTGRES_URL);
+  if (!configured) return prismaUrl || pooledUrl;
+
+  if (hasTenantIdentifier(configured)) return configured;
+  if (prismaUrl && hasTenantIdentifier(prismaUrl)) return prismaUrl;
+  if (pooledUrl && hasTenantIdentifier(pooledUrl)) return pooledUrl;
+  return configured;
+}
+
+// Prefer a connection string that includes tenant routing metadata for managed Postgres providers.
+process.env.DATABASE_URL = resolveDatabaseUrl();
 
 process.env.DIRECT_URL =
   nonEmpty(process.env.DIRECT_URL) ||

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { loadUserSettingRows } from "../lib/user-settings";
 import { ownedChatSessionWhere } from "../lib/tenant";
+import { readDashboardCache, writeDashboardCache } from "../lib/dashboard-cache";
 
 function getSettingString(
   settings: Array<{ key: string; value: unknown }>,
@@ -14,8 +15,48 @@ function getSettingString(
   return fallback;
 }
 
+type KpiResult = {
+  totalLeads: number;
+  newLeads: number;
+  hotLeads: number;
+  contactedLeads: number;
+  totalCampaigns: number;
+  pendingDrafts: number;
+  sentEmails: number;
+  wonLeads: number;
+  avgScore: number;
+  activeQuotes: number;
+  totalQuoteValue: number;
+  unreadChats: number;
+  activeCampaignLeadCount: number;
+  scheduledEmails: number;
+  failedEmails: number;
+  pendingReviews: number;
+  conversionRate: number;
+  responseRate: number;
+};
+
+type UnifiedReminderItem = {
+  id: string;
+  type: string;
+  title: string;
+  subtitle: string;
+  href: string;
+  dueAt: Date;
+  tone: string;
+};
+
+type UnifiedRemindersResult = {
+  followupDays: number;
+  items: UnifiedReminderItem[];
+};
+
 export const dashboardRouter = router({
   getKpis: protectedProcedure.query(async ({ ctx }) => {
+    const cacheKey = `getKpis:${ctx.user.id}`;
+    const cached = readDashboardCache<KpiResult>(cacheKey);
+    if (cached) return cached;
+
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
 
@@ -108,7 +149,7 @@ export const dashboardRouter = router({
         ? Math.round((respondedLeads / contactedAndBeyondLeads) * 100)
         : 0;
 
-    return {
+    const result: KpiResult = {
       totalLeads,
       newLeads,
       hotLeads,
@@ -128,6 +169,8 @@ export const dashboardRouter = router({
       conversionRate,
       responseRate,
     };
+    writeDashboardCache(cacheKey, result);
+    return result;
   }),
 
   getRecentActivity: protectedProcedure.query(async ({ ctx }) => {
@@ -148,6 +191,10 @@ export const dashboardRouter = router({
   }),
 
   getUnifiedReminders: protectedProcedure.query(async ({ ctx }) => {
+    const cacheKey = `getUnifiedReminders:${ctx.user.id}`;
+    const cached = readDashboardCache<UnifiedRemindersResult>(cacheKey);
+    if (cached) return cached;
+
     const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["email.followup_days"]);
     const followupDays = Math.max(
       1,
@@ -293,7 +340,9 @@ export const dashboardRouter = router({
       .sort((left, right) => new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime())
       .slice(0, 12);
 
-    return { followupDays, items };
+    const result: UnifiedRemindersResult = { followupDays, items };
+    writeDashboardCache(cacheKey, result);
+    return result;
   }),
 
   getPipelineOverview: protectedProcedure.query(async ({ ctx }) => {

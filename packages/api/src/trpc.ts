@@ -2,6 +2,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { type PrismaClient } from "@digitify/db";
 import { patchRequestContext, recordRouteMetric } from "@digitify/db";
+import { invalidateDashboardCacheForUser } from "./lib/dashboard-cache";
 
 export type Context = {
   db: PrismaClient;
@@ -55,6 +56,22 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
+const DASHBOARD_INVALIDATION_PREFIXES = [
+  "lead.",
+  "quote.",
+  "booking.",
+  "campaign.",
+  "contact.",
+  "review.",
+  "crm.",
+  "domain.",
+  "chatbot.",
+];
+
+function shouldInvalidateDashboardCache(path: string) {
+  return DASHBOARD_INVALIDATION_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
 // --- Logging middleware ---
 const withLogging = t.middleware(async ({ ctx, path, type, next }) => {
   const start = Date.now();
@@ -72,6 +89,10 @@ const withLogging = t.middleware(async ({ ctx, path, type, next }) => {
     });
   } else if (durationMs > 2000) {
     console.warn(`[tRPC] [${ctx.requestId}] ${type} ${path} — SLOW ${durationMs}ms`, { userId: ctx.user?.id });
+  }
+
+  if (result.ok && type === "mutation" && ctx.user?.id && shouldInvalidateDashboardCache(path)) {
+    invalidateDashboardCacheForUser(ctx.user.id);
   }
 
   return result;
