@@ -1,0 +1,964 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// AUTH & USERS
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String?
+  passwordHash   String?
+  image          String?
+  emailVerified  DateTime?
+  role           UserRole  @default(MEMBER)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  accounts       Account[]
+  sessions       Session[]
+  leads          Lead[]           @relation("CreatedByUser")
+  assignedLeads  Lead[]           @relation("AssignedToUser")
+  notes          Note[]
+  activities     Activity[]
+  emailDrafts    EmailDraft[]     @relation("DraftAuthor")
+  emailApprovals EmailDraft[]     @relation("DraftApprover")
+  campaigns      Campaign[]
+  reports        Report[]
+  openclawLogs   OpenClawLog[]
+  permissions    UserPermission[]
+  pipelineStages PipelineStage[]
+  tags           Tag[]
+  emailTemplates EmailTemplate[]
+  serviceCatalogEntries ServiceCatalog[]
+  bookings       Booking[]
+  domains        Domain[]
+  reviewRequests ReviewRequest[]
+  quotes       Quote[]
+  chatAssignments ChatSession[] @relation("ChatAssignee")
+  reviewedRegistrationRequests RegistrationRequest[] @relation("RegistrationReviewer")
+  reviewedFeedbackItems FeedbackItem[] @relation("FeedbackReviewer")
+
+  @@map("users")
+}
+
+model RegistrationRequest {
+  id                    String                    @id @default(cuid())
+  name                  String
+  email                 String
+  company               String?
+  message               String?                   @db.Text
+  passwordHash          String
+  requestedRole         UserRole                  @default(MEMBER)
+  status                RegistrationRequestStatus @default(PENDING_EMAIL_VERIFICATION)
+  emailVerificationToken String                   @unique
+  emailVerifiedAt       DateTime?
+  reviewedById          String?
+  reviewedAt            DateTime?
+  rejectionReason       String?                   @db.Text
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+
+  reviewedBy            User?                     @relation("RegistrationReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status, createdAt])
+  @@index([email])
+  @@map("registration_requests")
+}
+
+enum RegistrationRequestStatus {
+  PENDING_EMAIL_VERIFICATION
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+model FeedbackItem {
+  id             String         @id @default(cuid())
+  userId         String?
+  userEmail      String?
+  subject        String
+  message        String         @db.Text
+  pageUrl        String?
+  status         FeedbackStatus @default(OPEN)
+  reviewedById   String?
+  reviewedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  reviewedBy     User?          @relation("FeedbackReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status, createdAt])
+  @@map("feedback_items")
+}
+
+enum FeedbackStatus {
+  OPEN
+  TRIAGED
+  CLOSED
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MODERATOR
+  MEMBER
+  TRIAL
+  TESTER
+  VIEWER
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model UserPermission {
+  id         String @id @default(cuid())
+  userId     String
+  permission String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permission])
+  @@map("user_permissions")
+}
+
+// LEADS
+model Lead {
+  id              String      @id @default(cuid())
+  status          LeadStatus  @default(NEW)
+  pipelineStageId String?
+  createdById     String
+  assignedToId    String?
+
+  companyName     String
+  website         String?
+  phone           String?
+  email           String?
+  industry        String?
+  employeeCount   String?
+
+  address         String?
+  city            String?
+  state           String?
+  country         String?
+  zipCode         String?
+  latitude        Float?
+  longitude       Float?
+
+  gmbPlaceId      String?
+  gmbRating       Float?
+  gmbReviewCount  Int?
+  gmbCategories   String[]
+  gmbPhotosUrl    String?
+
+  facebookUrl     String?
+  linkedinUrl     String?
+  instagramUrl    String?
+  twitterUrl      String?
+  yelpUrl         String?
+  tiktokUrl       String?
+  youtubeUrl      String?
+
+  overallScore    Float?
+  scorePriority   String?
+  scoreComputedAt DateTime?
+
+  source          String?
+  sourceQuery     String?
+
+  lastContactedAt DateTime?
+  lastEnrichedAt  DateTime?
+  doNotContact    Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  createdBy       User        @relation("CreatedByUser", fields: [createdById], references: [id])
+  assignedTo      User?       @relation("AssignedToUser", fields: [assignedToId], references: [id])
+  pipelineStage   PipelineStage? @relation(fields: [pipelineStageId], references: [id])
+
+  scoringFactors  LeadScoringFactor[]
+  tags            LeadTag[]
+  customFieldValues CustomFieldValue[]
+  notes           Note[]
+  activities      Activity[]
+  emailDrafts     EmailDraft[]
+  campaignLeads   CampaignLead[]
+  reports         Report[]
+  enrichmentData  EnrichmentData[]
+  contacts        LeadContact[]
+  openclawSuggestions OpenClawSuggestion[]
+  bookings        Booking[]
+  domains         Domain[]
+  reviewRequests  ReviewRequest[]
+  quotes       Quote[]
+  chatSessions   ChatSession[]
+
+  @@index([companyName])
+  @@index([city, state, country])
+  @@index([overallScore(sort: Desc)])
+  @@index([status])
+  @@index([scorePriority])
+  @@index([assignedToId])
+  @@index([source])
+  @@index([createdAt(sort: Desc)])
+  @@index([createdById])
+  @@index([createdById, createdAt(sort: Desc)])
+  @@index([createdById, updatedAt(sort: Desc)])
+  @@index([createdById, status])
+  @@map("leads")
+}
+
+enum LeadStatus {
+  NEW
+  RESEARCHING
+  CONTACTED
+  RESPONDED
+  QUALIFIED
+  PROPOSAL_SENT
+  WON
+  LOST
+  ARCHIVED
+}
+
+model LeadContact {
+  id        String  @id @default(cuid())
+  leadId    String
+  name      String
+  title     String?
+  email     String?
+  phone     String?
+  isPrimary Boolean @default(false)
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@map("lead_contacts")
+}
+
+// SCORING
+model ScoringWeight {
+  id          String  @id @default(cuid())
+  factorKey   String  @unique
+  label       String
+  description String?
+  weight      Float   @default(1.0)
+  maxPoints   Float   @default(10.0)
+  enabled     Boolean @default(true)
+  category    String?
+  sortOrder   Int     @default(0)
+
+  factors LeadScoringFactor[]
+
+  @@map("scoring_weights")
+}
+
+model LeadScoringFactor {
+  id              String   @id @default(cuid())
+  leadId          String
+  scoringWeightId String
+  rawValue        Float
+  weightedValue   Float
+  explanation     String?
+  metadata        Json?
+  computedAt      DateTime @default(now())
+
+  lead          Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  scoringWeight ScoringWeight @relation(fields: [scoringWeightId], references: [id])
+
+  @@unique([leadId, scoringWeightId])
+  @@map("lead_scoring_factors")
+}
+
+// PIPELINE
+model PipelineStage {
+  id        String  @id @default(cuid())
+  createdById String?
+  name      String
+  color     String  @default("#6366f1")
+  sortOrder Int     @default(0)
+  isDefault Boolean @default(false)
+
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  leads Lead[]
+
+  @@index([createdById])
+  @@unique([createdById, name])
+  @@map("pipeline_stages")
+}
+
+// TAGS
+model Tag {
+  id          String @id @default(cuid())
+  createdById String?
+  name        String
+  color       String @default("#6366f1")
+
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  leads LeadTag[]
+
+  @@index([createdById])
+  @@unique([createdById, name])
+  @@map("tags")
+}
+
+model LeadTag {
+  leadId String
+  tagId  String
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([leadId, tagId])
+  @@map("lead_tags")
+}
+
+// CUSTOM FIELDS
+model CustomField {
+  id        String          @id @default(cuid())
+  name      String
+  key       String          @unique
+  fieldType CustomFieldType @default(TEXT)
+  options   String[]
+  required  Boolean         @default(false)
+  sortOrder Int             @default(0)
+
+  values CustomFieldValue[]
+
+  @@map("custom_fields")
+}
+
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  SELECT
+  MULTI_SELECT
+  URL
+}
+
+model CustomFieldValue {
+  id            String @id @default(cuid())
+  leadId        String
+  customFieldId String
+  value         String
+
+  lead        Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  customField CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+
+  @@unique([leadId, customFieldId])
+  @@map("custom_field_values")
+}
+
+// CAMPAIGNS
+model Campaign {
+  id          String         @id @default(cuid())
+  name        String
+  description String?
+  niche       String?
+  region      String?
+  targetAudience String?
+  idealScore  Float?
+  desiredServices String[]
+  toneOfVoice String?
+  goal        String?
+  status      CampaignStatus @default(DRAFT)
+  createdById String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  createdBy     User           @relation(fields: [createdById], references: [id])
+  campaignLeads CampaignLead[]
+  templates     EmailTemplate[]
+  reports       Report[]
+
+  @@index([createdById])
+  @@map("campaigns")
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+model CampaignLead {
+  campaignId String
+  leadId     String
+  addedAt    DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead     Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, leadId])
+  @@map("campaign_leads")
+}
+
+// EMAIL / CONTACT
+model EmailTemplate {
+  id          String   @id @default(cuid())
+  createdById String?
+  name        String
+  subject     String
+  body        String   @db.Text
+  campaignId  String?
+  isGlobal    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User?     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  campaign  Campaign? @relation(fields: [campaignId], references: [id])
+  drafts    EmailDraft[]
+
+  @@index([createdById])
+  @@unique([createdById, name])
+  @@map("email_templates")
+}
+
+model EmailDraft {
+  id           String      @id @default(cuid())
+  leadId       String
+  templateId   String?
+  authorId     String
+  approverId   String?
+
+  toEmail      String
+  subject      String
+  body         String      @db.Text
+  status       EmailStatus @default(DRAFT)
+  type         EmailType   @default(LEAD_CONTACT)
+
+  sequenceId   String?
+  sequenceStep Int?
+  scheduledFor DateTime?
+
+  approvedAt   DateTime?
+  rejectedAt   DateTime?
+  rejectionNote String?
+
+  sentAt       DateTime?
+  messageId    String?
+  openedAt     DateTime?
+  clickedAt    DateTime?
+  bouncedAt    DateTime?
+  repliedAt    DateTime?
+
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  lead     Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  template EmailTemplate? @relation(fields: [templateId], references: [id])
+  author   User           @relation("DraftAuthor", fields: [authorId], references: [id])
+  approver User?          @relation("DraftApprover", fields: [approverId], references: [id])
+  sequence EmailSequence? @relation(fields: [sequenceId], references: [id])
+
+  @@index([status])
+  @@index([leadId])
+  @@index([scheduledFor])
+  @@index([sequenceId, sequenceStep])
+  @@index([authorId])
+  @@index([approverId])
+  @@index([type])
+  @@map("email_drafts")
+}
+
+enum EmailStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  SCHEDULED
+  SENDING
+  SENT
+  FAILED
+  BOUNCED
+}
+
+enum EmailType {
+  LEAD_CONTACT
+  QUOTE
+  REPLY
+  FOLLOW_UP
+  REVIEW_REQUEST
+  TRANSACTIONAL
+}
+
+model EmailSequence {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  steps       Json
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  drafts EmailDraft[]
+
+  @@map("email_sequences")
+}
+
+// NOTES & ACTIVITIES
+model Note {
+  id        String   @id @default(cuid())
+  leadId    String
+  userId    String
+  content   String   @db.Text
+  isPinned  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("notes")
+}
+
+model Activity {
+  id        String       @id @default(cuid())
+  leadId    String?
+  userId    String?
+  type      ActivityType
+  title     String
+  metadata  Json?
+  createdAt DateTime     @default(now())
+
+  lead Lead? @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([leadId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("activities")
+}
+
+model IdempotencyKey {
+  id        String   @id @default(cuid())
+  scope     String
+  key       String   @unique
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([scope, createdAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+
+enum ActivityType {
+  LEAD_CREATED
+  LEAD_UPDATED
+  LEAD_STATUS_CHANGED
+  LEAD_SCORED
+  LEAD_ENRICHED
+  LEAD_ASSIGNED
+  NOTE_ADDED
+  EMAIL_DRAFTED
+  EMAIL_APPROVED
+  EMAIL_SENT
+  EMAIL_OPENED
+  EMAIL_REPLIED
+  CAMPAIGN_CREATED
+  REPORT_GENERATED
+  OPENCLAW_SUGGESTION
+  SEARCH_PERFORMED
+  QUOTE_CREATED
+  QUOTE_SENT
+  REVIEW_SENT
+}
+
+// ENRICHMENT DATA
+model EnrichmentData {
+  id        String   @id @default(cuid())
+  leadId    String
+  source    String
+  data      Json
+  fetchedAt DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([leadId, source])
+  @@map("enrichment_data")
+}
+
+// OPENCLAW (AI)
+model OpenClawSuggestion {
+  id          String                  @id @default(cuid())
+  leadId      String?
+  type        OpenClawSuggestionType
+  title       String
+  content     String                  @db.Text
+  confidence  Float?
+  status      SuggestionStatus        @default(PENDING)
+  metadata    Json?
+  createdAt   DateTime                @default(now())
+
+  lead Lead? @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@map("openclaw_suggestions")
+}
+
+enum OpenClawSuggestionType {
+  LEAD_RECOMMENDATION
+  EMAIL_DRAFT
+  OPPORTUNITY_ANALYSIS
+  NICHE_INSIGHT
+  SCORING_ANOMALY
+  FOLLOW_UP_REMINDER
+}
+
+enum SuggestionStatus {
+  PENDING
+  ACCEPTED
+  DISMISSED
+  EXPIRED
+}
+
+model OpenClawLog {
+  id          String   @id @default(cuid())
+  userId      String
+  prompt      String   @db.Text
+  response    String   @db.Text
+  model       String
+  tokensUsed  Int?
+  latencyMs   Int?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("openclaw_logs")
+}
+
+// REPORTS
+model ReportTemplate {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  layout      Json
+  branding    Json?
+  isDefault   Boolean @default(false)
+  createdAt   DateTime @default(now())
+
+  reports Report[]
+
+  @@map("report_templates")
+}
+
+model Report {
+  id               String   @id @default(cuid())
+  leadId           String?
+  campaignId       String?
+  reportTemplateId String?
+  generatedById    String
+  title            String
+  type             String   @default("campaign")
+  data             Json
+  pdfUrl           String?
+  createdAt        DateTime @default(now())
+
+  lead           Lead?           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  campaign       Campaign?       @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  reportTemplate ReportTemplate? @relation(fields: [reportTemplateId], references: [id])
+  generatedBy    User            @relation(fields: [generatedById], references: [id])
+
+  @@index([generatedById])
+  @@map("reports")
+}
+
+// SETTINGS
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value Json
+
+  @@map("settings")
+}
+
+// BACKGROUND JOBS
+model BackgroundJob {
+  id          String    @id @default(cuid())
+  type        String
+  status      JobStatus @default(PENDING)
+  payload     Json
+  result      Json?
+  error       String?
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([status, type])
+  @@index([createdAt(sort: Desc)])
+  @@map("background_jobs")
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  RETRYING
+}
+
+// SAVED VIEWS
+model SavedView {
+  id        String   @id @default(cuid())
+  name      String
+  entity    String   @default("lead")
+  filters   Json
+  columns   Json?
+  sortBy    String?
+  sortDir   String?  @default("desc")
+  isDefault Boolean  @default(false)
+  isShared  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("saved_views")
+}
+
+// BOOKINGS
+model Booking {
+  id          String   @id @default(cuid())
+  clientName  String
+  clientEmail String?
+  date        DateTime
+  duration    Int      @default(60)
+  status      String   @default("SCHEDULED") // SCHEDULED, COMPLETED, CANCELLED
+  notes       String?
+  leadId      String?
+  lead        Lead?    @relation(fields: [leadId], references: [id])
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([createdById])
+  @@index([createdById, date])
+  @@map("bookings")
+}
+
+// DOMAINS
+model Domain {
+  id             String    @id @default(cuid())
+  domainName     String    @unique
+  registrar      String?
+  registeredAt   DateTime?
+  expiresAt      DateTime?
+  status         String    @default("ACTIVE") // ACTIVE, EXPIRING, EXPIRED, TRANSFERRED
+  sslStatus      String?   @default("UNKNOWN") // VALID, EXPIRED, NONE, UNKNOWN
+  notes          String?
+  leadId         String?
+  lead           Lead?     @relation(fields: [leadId], references: [id])
+  createdById    String
+  createdBy      User      @relation(fields: [createdById], references: [id])
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([createdById])
+  @@index([createdById, expiresAt])
+  @@map("domains")
+}
+
+// REVIEW REQUESTS
+model ReviewRequest {
+  id          String    @id @default(cuid())
+  clientName  String
+  clientEmail String
+  leadId      String?
+  lead        Lead?     @relation(fields: [leadId], references: [id])
+  status      String    @default("PENDING") // PENDING, SENT, OPENED, REVIEWED
+  platform    String?   @default("google") // google, trustpilot, facebook
+  sentAt      DateTime?
+  reviewedAt  DateTime?
+  rating      Int?
+  reviewUrl   String?
+  feedback    String?   @db.Text
+  feedbackSubmittedAt DateTime? @map("feedback_submitted_at")
+  createdById String
+  createdBy   User      @relation(fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([createdById])
+  @@index([createdById, status])
+  @@map("review_requests")
+}
+
+// OFFERTES (QUOTES)
+model Quote {
+  id            String      @id @default(cuid())
+  quoteNumber   String      @unique
+  leadId        String?
+  clientName    String
+  clientEmail   String?
+  clientPhone   String?
+  clientCompany String?
+  clientAddress String?
+  clientVat     String?     // BTW nummer
+
+  status        QuoteStatus @default(DRAFT)
+  validUntil    DateTime?
+
+  subtotal      Float       @default(0)
+  vatRate       Float       @default(21) // Belgian VAT 21%
+  vatAmount     Float       @default(0)
+  discount      Float       @default(0)
+  total         Float       @default(0)
+
+  notes         String?     @db.Text
+  terms         String?     @db.Text
+  internalNotes String?     @db.Text
+
+  sentAt        DateTime?
+  acceptedAt    DateTime?
+  rejectedAt    DateTime?
+
+  createdById   String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  lead          Lead?       @relation(fields: [leadId], references: [id])
+  createdBy     User        @relation(fields: [createdById], references: [id])
+  items         QuoteItem[]
+
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@index([createdById])
+  @@index([createdById, status])
+  @@index([createdById, createdAt(sort: Desc)])
+  @@map("quotes")
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  VIEWED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+model QuoteItem {
+  id          String  @id @default(cuid())
+  quoteId     String
+  category    String? // webdesign, media, marketing, extras
+  name        String
+  description String?
+  quantity    Int     @default(1)
+  unitPrice   Float
+  total       Float
+  sortOrder   Int     @default(0)
+
+  quote Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@map("quote_items")
+}
+
+// SERVICE CATALOG (for offerte configurator)
+model ServiceCatalog {
+  id          String  @id @default(cuid())
+  createdById String?
+  category    String  // webdesign, media, marketing, extras
+  name        String
+  description String?
+  basePrice   Float
+  unit        String? // per stuk, per uur, per maand, per jaar
+  isActive    Boolean @default(true)
+  sortOrder   Int     @default(0)
+  metadata    Json?   // extra config like packages, included items
+
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([createdById])
+  @@unique([createdById, category, name])
+  @@map("service_catalog")
+}
+
+// CHATBOT
+model ChatSession {
+  id            String         @id @default(cuid())
+  visitorName   String?
+  visitorEmail  String?
+  visitorPhone  String?
+  visitorCompany String?
+  pageUrl       String?
+  status        ChatStatus     @default(OPEN)
+  assignedToId  String?
+  leadId        String?
+  tags          String[]
+  summary       String?        @db.Text
+  intent        String?        // detected intent: price_inquiry, quote_request, booking, contact, support, service_interest
+  internalNotes String?        @db.Text
+  isRead        Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  assignedTo    User?          @relation("ChatAssignee", fields: [assignedToId], references: [id])
+  lead          Lead?          @relation(fields: [leadId], references: [id])
+  messages      ChatMessage[]
+
+  @@index([status])
+  @@index([isRead])
+  @@index([createdAt(sort: Desc)])
+  @@index([assignedToId, updatedAt(sort: Desc)])
+  @@map("chat_sessions")
+}
+
+enum ChatStatus {
+  OPEN
+  WAITING
+  RESOLVED
+  ARCHIVED
+}
+
+model ChatMessage {
+  id          String      @id @default(cuid())
+  sessionId   String
+  role        ChatRole
+  content     String      @db.Text
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+
+  session     ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("chat_messages")
+}
+
+enum ChatRole {
+  VISITOR
+  BOT
+  AGENT
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@digitify/api",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./src/root.ts",
+  "types": "./src/root.ts",
+  "scripts": {
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@digitify/connectors": "workspace:^",
+    "@digitify/db": "workspace:*",
+    "@digitify/email": "workspace:^",
+    "@digitify/openclaw": "workspace:^",
+    "@digitify/scoring": "workspace:^",
+    "@trpc/server": "^11.0.0",
+    "imapflow": "^1.2.18",
+    "nodemailer": "^6.9.0",
+    "superjson": "^2.2.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/imapflow": "^1.0.189",
+    "@types/nodemailer": "^6.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.0.0"
+  }
+}

@@ -1,0 +1,12 @@
+node_modules
+.turbo
+.next
+apps/web/.next
+dist
+coverage
+.DS_Store
+*.log
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local

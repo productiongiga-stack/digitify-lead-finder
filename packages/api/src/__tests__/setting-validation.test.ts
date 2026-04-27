@@ -1,0 +1,48 @@
+import { describe, expect, it } from "vitest";
+import { TRPCError } from "@trpc/server";
+import { normalizeSettingKey, validateSettingValue } from "../lib/setting-validation";
+
+describe("setting key validation", () => {
+  it("accepts valid namespaced keys", () => {
+    expect(normalizeSettingKey("email.smtp_port")).toBe("email.smtp_port");
+    expect(normalizeSettingKey("quotes.embed_product_specs_json")).toBe("quotes.embed_product_specs_json");
+    expect(normalizeSettingKey("openclaw_language")).toBe("openclaw_language");
+  });
+
+  it("rejects invalid key format", () => {
+    expect(() => normalizeSettingKey("SMTP_PORT")).toThrow(TRPCError);
+    expect(() => normalizeSettingKey("noNamespace")).toThrow(TRPCError);
+  });
+});
+
+describe("setting value validation", () => {
+  it("normalizes booleans for boolean keys", () => {
+    expect(validateSettingValue("chatbot.enabled", "true")).toBe(true);
+    expect(validateSettingValue("chatbot.enabled", "0")).toBe(false);
+  });
+
+  it("validates enum values", () => {
+    expect(validateSettingValue("email.provider", "SMTP")).toBe("smtp");
+    expect(() => validateSettingValue("email.provider", "mailgun")).toThrow(TRPCError);
+  });
+
+  it("validates numeric ranges", () => {
+    expect(validateSettingValue("email.smtp_port", "587")).toBe(587);
+    expect(() => validateSettingValue("email.smtp_port", 70000)).toThrow(TRPCError);
+  });
+
+  it("validates URL and color formats", () => {
+    expect(validateSettingValue("branding.logo_url", "https://example.com/logo.png")).toBe("https://example.com/logo.png");
+    expect(() => validateSettingValue("branding.logo_url", "javascript:alert(1)")).toThrow(TRPCError);
+
+    expect(validateSettingValue("branding.primary_color", "#1f2937")).toBe("#1f2937");
+    expect(() => validateSettingValue("branding.primary_color", "red")).toThrow(TRPCError);
+  });
+
+  it("allows object values only for *_json keys", () => {
+    expect(validateSettingValue("quotes.embed_product_specs_json", { productA: ["x"] })).toEqual({
+      productA: ["x"],
+    });
+    expect(() => validateSettingValue("branding.company_name", { invalid: true })).toThrow(TRPCError);
+  });
+});
