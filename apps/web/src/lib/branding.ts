@@ -27,9 +27,10 @@ export interface BrandingConfig {
 const DEFAULT_PRIMARY_COLOR = "#f9ae5a";
 
 export function useBranding(enabled = true): { branding: BrandingConfig; isLoading: boolean } {
-  const { data: settings, isLoading } = trpc.settings.getAll.useQuery(undefined, {
+  const { data: settings, isLoading } = trpc.settings.getBranding.useQuery(undefined, {
     enabled,
-    staleTime: 60_000,
+    staleTime: 10 * 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const get = (key: string, fallback = ""): string => readSettingString(settings, key, fallback);

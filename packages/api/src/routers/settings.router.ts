@@ -215,6 +215,36 @@ export const settingsRouter = router({
       return sanitizeSingleSettingForViewer(input.key, value);
     }),
 
+  getBranding: protectedProcedure.query(async ({ ctx }) => {
+    await ensureUserWorkspace(ctx.db, ctx.user.id, ctx.user.name);
+    const keys = [
+      "branding.company_name",
+      "branding.company_slogan",
+      "branding.logo_url",
+      "branding.favicon_url",
+      "branding.primary_color",
+      "branding.website",
+      "branding.phone",
+      "branding.email",
+      "branding.address",
+      "branding.vat_number",
+      "branding.bank_account",
+      "company.name",
+      "company.website",
+      "company.phone",
+      "company.email",
+      "company.address",
+      "company.vat",
+      "company.kbo",
+      "company.niche",
+      "email.from_name",
+      "email.from_email",
+    ];
+    const rows = await loadUserSettingRows(ctx.db, ctx.user.id, keys);
+    const map = settingsRowsToMap(rows);
+    return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
+  }),
+
   getAll: protectedProcedure.query(async ({ ctx }) => {
     await ensureUserWorkspace(ctx.db, ctx.user.id, ctx.user.name);
     const rows = await loadUserSettingRows(ctx.db, ctx.user.id);

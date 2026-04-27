@@ -7,8 +7,14 @@ import { authOptions } from "@/lib/auth/options";
 import { randomUUID } from "crypto";
 import "@/lib/env";
 
-// Kick off schema/index compatibility once per server instance without blocking requests.
-void ensureTenantSchemaCompatibility(prisma).catch(() => {});
+let compatScheduled = false;
+
+function scheduleSchemaCompat() {
+  if (compatScheduled) return;
+  compatScheduled = true;
+  // Fire-and-forget, only once per runtime instance.
+  void ensureTenantSchemaCompatibility(prisma).catch(() => {});
+}
 
 const handler = (req: Request) =>
   fetchRequestHandler({
@@ -16,6 +22,7 @@ const handler = (req: Request) =>
     req,
     router: appRouter,
     createContext: async () => {
+      scheduleSchemaCompat();
       const session = await getServerSession(authOptions);
       return {
         db: prisma,
