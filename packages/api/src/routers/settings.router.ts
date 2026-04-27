@@ -11,7 +11,7 @@ import { router, publicProcedure, protectedProcedure, adminProcedure, ownerProce
 import { loadEmailSettings } from "../lib/email-sender";
 import { formatSmtpErrorMessage, normalizeTlsOptions } from "../lib/email-utils";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
-import { loadUserSettingRows, userSettingKey } from "../lib/user-settings";
+import { invalidateUserSettingsCache, loadUserSettingRows, userSettingKey } from "../lib/user-settings";
 import { assertCanManageSettingKey, canReadSettingKey, filterReadableSettingsForRole } from "../lib/permissions";
 import { ensureUserWorkspace } from "../lib/user-workspace";
 
@@ -277,6 +277,7 @@ export const settingsRouter = router({
           metadata: { key: input.key, isSecret: isSecretSettingKey(input.key) },
         },
       });
+      invalidateUserSettingsCache(ctx.user.id);
       return result;
     }),
 
@@ -318,6 +319,7 @@ export const settingsRouter = router({
           },
         }),
       ]);
+      invalidateUserSettingsCache(ctx.user.id);
       return { success: true };
     }),
 
