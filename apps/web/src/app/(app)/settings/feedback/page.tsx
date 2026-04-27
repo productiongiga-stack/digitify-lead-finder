@@ -129,7 +129,7 @@ export default function FeedbackSettingsPage() {
         <CardHeader>
           <CardTitle className="text-base">Ingezonden feedback</CardTitle>
           <CardDescription className="text-xs">
-            Alleen admins zien deze lijst. Nieuwe feedback blijft zichtbaar tot ze wordt gesloten.
+            Eigenaars, admins en moderatie-rollen zien deze lijst. Nieuwe feedback blijft zichtbaar tot ze wordt gesloten.
           </CardDescription>
         </CardHeader>
         <CardContent>

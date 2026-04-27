@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
+import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
 
 function userSettingKey(userId: string, key: string) {
   return `user:${userId}:${key.trim()}`;
 }
 
 export async function GET(request: Request) {
-  const tenant = new URL(request.url).searchParams.get("tenant")?.trim() || "";
+  const tenantToken = new URL(request.url).searchParams.get("tenant")?.trim() || "";
+  const tenantUserId = await resolveUserIdFromPublicTenantToken(prisma, tenantToken);
+  if (!tenantUserId) {
+    return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
+  }
   const keys = [
     "chatbot.enabled",
     "chatbot.company_name",
@@ -27,7 +32,7 @@ export async function GET(request: Request) {
     "branding.logo_url",
   ];
 
-  const scopedKeys = tenant ? keys.map((key) => userSettingKey(tenant, key)) : keys;
+  const scopedKeys = keys.map((key) => userSettingKey(tenantUserId, key));
 
   const settings = await prisma.setting.findMany({
     where: { key: { in: scopedKeys } },
@@ -35,7 +40,7 @@ export async function GET(request: Request) {
 
   const map = Object.fromEntries(
     settings.map((item) => {
-      const key = tenant ? item.key.replace(`user:${tenant}:`, "") : item.key;
+      const key = item.key.replace(`user:${tenantUserId}:`, "");
       const raw = item.value;
       if (typeof raw !== "string") return [key, raw];
       try {

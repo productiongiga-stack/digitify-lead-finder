@@ -559,6 +559,10 @@ export default function QuoteEmbedPage() {
   const isPreviewRoute =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("preview") === "1";
+  const tenantToken = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("tenant")?.trim() || "";
+  }, []);
   const [payload, setPayload] = useState<RemotePayload | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [isLivePreview, setIsLivePreview] = useState(false);
@@ -607,7 +611,10 @@ export default function QuoteEmbedPage() {
   useEffect(() => {
     if (isPreviewRoute) return;
     let active = true;
-    fetch("/api/public/quotes/services")
+    const servicesUrl = tenantToken
+      ? `/api/public/quotes/services?tenant=${encodeURIComponent(tenantToken)}`
+      : "/api/public/quotes/services";
+    fetch(servicesUrl)
       .then((response) => {
         if (!response.ok) throw new Error("Configuratie ophalen mislukt.");
         return response.json();
@@ -626,7 +633,7 @@ export default function QuoteEmbedPage() {
     return () => {
       active = false;
     };
-  }, [isPreviewRoute]);
+  }, [isPreviewRoute, tenantToken]);
 
   useEffect(() => {
     if (!isPreviewRoute) return;
@@ -1172,6 +1179,7 @@ export default function QuoteEmbedPage() {
         vatRate,
         discount,
         items: itemsPayload,
+        tenant: tenantToken || undefined,
       }),
     });
 

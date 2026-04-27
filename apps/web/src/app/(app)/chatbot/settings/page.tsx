@@ -55,9 +55,6 @@ export default function ChatbotSettingsPage() {
     retry: 1,
     refetchOnWindowFocus: false,
   });
-  const { data: profile } = trpc.user.getProfile.useQuery(undefined, {
-    refetchOnWindowFocus: false,
-  });
   const utils = trpc.useUtils();
   const { showToast } = useToast();
 
@@ -170,8 +167,9 @@ export default function ChatbotSettingsPage() {
   const appUrl = getAppUrl();
   const safePrimaryColor = normalizeHexColor(primaryColor);
   const safeAutoOpenDelay = normalizeAutoOpenDelay(autoOpenDelay);
-  const tenantAttribute = profile?.id ? `\n  data-tenant="${profile.id}"` : "";
-  const tenantQuery = profile?.id ? `&tenant=${encodeURIComponent(profile.id)}` : "";
+  const tenantToken = readSettingString(settings || {}, "chatbot.public_tenant_token", "");
+  const tenantAttribute = tenantToken ? `\n  data-tenant="${tenantToken}"` : "";
+  const tenantQuery = tenantToken ? `&tenant=${encodeURIComponent(tenantToken)}` : "";
   const embedCode = `<script src="${appUrl}/chatbot/widget.js"
   data-company="${companyName || "MijnBedrijf"}"
   data-color="${safePrimaryColor}"

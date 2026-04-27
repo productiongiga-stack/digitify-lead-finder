@@ -9,15 +9,26 @@ function sanitizeFilename(value: string) {
   return value.replace(/[^a-zA-Z0-9-_]/g, "-");
 }
 
+function userSettingPrefix(userId: string) {
+  return `user:${userId}:`;
+}
+
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "Niet geauthenticeerd" }, { status: 401 });
   }
+  const sessionEmail = session.user?.email?.trim().toLowerCase() || "";
+  const sessionUser = sessionEmail
+    ? await prisma.user.findUnique({ where: { email: sessionEmail }, select: { id: true } })
+    : null;
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Niet geauthenticeerd" }, { status: 401 });
+  }
 
   const { id } = await params;
-  const quote = await prisma.quote.findUnique({
-    where: { id },
+  const quote = await prisma.quote.findFirst({
+    where: { id, createdById: sessionUser.id },
     include: { items: { orderBy: { sortOrder: "asc" } } },
   });
 
@@ -25,8 +36,13 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     return NextResponse.json({ error: "Offerte niet gevonden" }, { status: 404 });
   }
 
-  const settingsRows = await prisma.setting.findMany();
-  const settings = Object.fromEntries(settingsRows.map((row) => [row.key, row.value]));
+  const prefix = userSettingPrefix(sessionUser.id);
+  const settingsRows = await prisma.setting.findMany({
+    where: { key: { startsWith: prefix } },
+  });
+  const settings = Object.fromEntries(
+    settingsRows.map((row) => [row.key.replace(prefix, ""), row.value]),
+  );
   const html = buildQuotePdfHtml({ quote, settings });
   const buffer = await renderQuotePdfBuffer(html);
 

@@ -453,6 +453,7 @@ export const contactRouter = router({
 
   listTemplates: protectedProcedure.query(async ({ ctx }) => {
     return ctx.db.emailTemplate.findMany({
+      where: { createdById: ctx.user.id },
       orderBy: { createdAt: "desc" },
       include: { campaign: { select: { id: true, name: true } } },
     });
@@ -469,33 +470,48 @@ export const contactRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.db.emailTemplate.create({ data: input });
+      if (input.campaignId) {
+        const campaign = await ctx.db.campaign.findFirst({
+          where: { id: input.campaignId, createdById: ctx.user.id },
+          select: { id: true },
+        });
+        if (!campaign) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Campagne niet gevonden." });
+        }
+      }
+      return ctx.db.emailTemplate.create({
+        data: {
+          ...input,
+          createdById: ctx.user.id,
+          isGlobal: false,
+        },
+      });
     }),
 
   seedDefaultTemplates: protectedProcedure.mutation(async ({ ctx }) => {
     const existing = await ctx.db.emailTemplate.findMany({
       where: {
-        OR: DEFAULT_TEMPLATE_PACK.map((template) => ({
-          name: template.name,
-          subject: template.subject,
-        })),
+        createdById: ctx.user.id,
+        OR: DEFAULT_TEMPLATE_PACK.map((template) => ({ name: template.name })),
       },
-      select: { name: true, subject: true },
+      select: { name: true },
     });
-    const existingKeys = new Set(existing.map((item) => `${item.name}::${item.subject}`));
+    const existingNames = new Set(existing.map((item) => item.name));
     const templatesToCreate = DEFAULT_TEMPLATE_PACK.filter(
-      (template) => !existingKeys.has(`${template.name}::${template.subject}`)
+      (template) => !existingNames.has(template.name)
     );
     if (templatesToCreate.length === 0) {
       return { created: 0, total: DEFAULT_TEMPLATE_PACK.length };
     }
     await ctx.db.emailTemplate.createMany({
       data: templatesToCreate.map((template) => ({
+        createdById: ctx.user.id,
         name: template.name,
         subject: template.subject,
         body: template.body,
-        isGlobal: template.isGlobal,
+        isGlobal: false,
       })),
+      skipDuplicates: true,
     });
     return { created: templatesToCreate.length, total: DEFAULT_TEMPLATE_PACK.length };
   }),
@@ -513,13 +529,43 @@ export const contactRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
-      return ctx.db.emailTemplate.update({ where: { id }, data });
+      const template = await ctx.db.emailTemplate.findFirst({
+        where: { id, createdById: ctx.user.id },
+        select: { id: true },
+      });
+      if (!template) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
+      }
+      if (data.campaignId) {
+        const campaign = await ctx.db.campaign.findFirst({
+          where: { id: data.campaignId, createdById: ctx.user.id },
+          select: { id: true },
+        });
+        if (!campaign) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Campagne niet gevonden." });
+        }
+      }
+      return ctx.db.emailTemplate.update({
+        where: { id },
+        data: {
+          ...data,
+          isGlobal: data.isGlobal ?? false,
+        },
+      });
     }),
 
   deleteTemplate: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.db.emailTemplate.delete({ where: { id: input.id } });
+      const template = await ctx.db.emailTemplate.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
+        select: { id: true },
+      });
+      if (!template) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
+      }
+      await ctx.db.emailTemplate.delete({ where: { id: input.id } });
+      return { success: true };
     }),
 
   getDraftById: protectedProcedure

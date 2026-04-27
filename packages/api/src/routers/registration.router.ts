@@ -5,6 +5,7 @@ import { Prisma } from "@digitify/db";
 import { router, adminProcedure, protectedProcedure, publicProcedure } from "../trpc";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { canApproveRole } from "../lib/permissions";
+import { ensureUserWorkspace } from "../lib/user-workspace";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -125,12 +126,12 @@ export const registrationRouter = router({
   ),
 
   approve: adminProcedure
-    .input(z.object({ requestId: z.string(), role: z.enum(["ADMIN", "MEMBER", "VIEWER"]).default("MEMBER") }))
+    .input(z.object({ requestId: z.string(), role: z.enum(["ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER", "VIEWER"]).default("MEMBER") }))
     .mutation(async ({ ctx, input }) => {
       if (!canApproveRole(ctx.user.role, input.role)) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "Admins kunnen registratieaanvragen alleen als member of viewer goedkeuren.",
+          message: "Admins kunnen registratieaanvragen alleen als member, trial, tester of viewer goedkeuren.",
         });
       }
       const request = await ctx.db.registrationRequest.findUnique({ where: { id: input.requestId } });
@@ -147,6 +148,7 @@ export const registrationRouter = router({
           emailVerified: request.emailVerifiedAt || new Date(),
         },
       });
+      await ensureUserWorkspace(ctx.db, user.id, user.name);
 
       await ctx.db.registrationRequest.update({
         where: { id: request.id },
@@ -184,7 +186,10 @@ export const registrationRouter = router({
       return { success: true };
     }),
 
-  listFeedback: adminProcedure.query(async ({ ctx }) => {
+  listFeedback: protectedProcedure.query(async ({ ctx }) => {
+    if (!["OWNER", "ADMIN", "MODERATOR", "MEMBER"].includes(ctx.user.role)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang tot feedbackbeheer." });
+    }
     try {
       return await ctx.db.feedbackItem.findMany({
         orderBy: { createdAt: "desc" },
@@ -216,9 +221,12 @@ export const registrationRouter = router({
     }
   }),
 
-  updateFeedbackStatus: adminProcedure
+  updateFeedbackStatus: protectedProcedure
     .input(z.object({ id: z.string(), status: z.enum(["OPEN", "TRIAGED", "CLOSED"]) }))
     .mutation(async ({ ctx, input }) => {
+      if (!["OWNER", "ADMIN", "MODERATOR", "MEMBER"].includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang tot feedbackbeheer." });
+      }
       return ctx.db.feedbackItem.update({
         where: { id: input.id },
         data: {

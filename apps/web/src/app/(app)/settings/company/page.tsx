@@ -37,6 +37,16 @@ export default function CompanySettingsPage() {
   const [kbo, setKbo] = useState("");
   const [iban, setIban] = useState("");
   const [niche, setNiche] = useState("");
+  const [footerBrandName, setFooterBrandName] = useState("");
+  const [footerTagline, setFooterTagline] = useState("");
+  const [footerDescription, setFooterDescription] = useState("");
+  const [footerEmail, setFooterEmail] = useState("");
+  const [footerPhone, setFooterPhone] = useState("");
+  const [footerLocation, setFooterLocation] = useState("");
+  const [footerWebsiteLabel, setFooterWebsiteLabel] = useState("");
+  const [footerWebsiteUrl, setFooterWebsiteUrl] = useState("");
+  const [footerLegalLine, setFooterLegalLine] = useState("");
+  const [footerCopyrightLine, setFooterCopyrightLine] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -57,6 +67,16 @@ export default function CompanySettingsPage() {
       setKbo(get("company.kbo"));
       setIban(get("company.iban"));
       setNiche(get("company.niche"));
+      setFooterBrandName(get("company.footer_brand_name", "Digitify Lead Finder"));
+      setFooterTagline(get("company.footer_tagline", "Partner in Digital Solutions"));
+      setFooterDescription(get("company.footer_description", "Premium lead discovery en opvolging voor bedrijven die digitale groei praktisch willen organiseren."));
+      setFooterEmail(get("company.footer_email", "hello@digitify.be"));
+      setFooterPhone(get("company.footer_phone", "+32 (0) 486 51 57 73"));
+      setFooterLocation(get("company.footer_location", "België"));
+      setFooterWebsiteLabel(get("company.footer_website_label", "www.digitify.be"));
+      setFooterWebsiteUrl(get("company.footer_website_url", "https://www.digitify.be"));
+      setFooterLegalLine(get("company.footer_legal_line", `© ${new Date().getFullYear()} Digitify`));
+      setFooterCopyrightLine(get("company.footer_copyright_line", `© ${new Date().getFullYear()} Digitify. Webdesign, media en marketing voor digitale groei.`));
       setLoaded(true);
     }
   }, [settings, loaded]);
@@ -86,6 +106,16 @@ export default function CompanySettingsPage() {
       { key: "company.kbo", value: kbo },
       { key: "company.iban", value: iban },
       { key: "company.niche", value: niche },
+      { key: "company.footer_brand_name", value: footerBrandName },
+      { key: "company.footer_tagline", value: footerTagline },
+      { key: "company.footer_description", value: footerDescription },
+      { key: "company.footer_email", value: footerEmail },
+      { key: "company.footer_phone", value: footerPhone },
+      { key: "company.footer_location", value: footerLocation },
+      { key: "company.footer_website_label", value: footerWebsiteLabel },
+      { key: "company.footer_website_url", value: footerWebsiteUrl },
+      { key: "company.footer_legal_line", value: footerLegalLine },
+      { key: "company.footer_copyright_line", value: footerCopyrightLine },
     ]);
   }
 
@@ -190,6 +220,54 @@ export default function CompanySettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Marketing Footer (website)</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 lg:grid-cols-2">
+          <div className="space-y-2">
+            <Label>Footer merknaam</Label>
+            <Input value={footerBrandName} onChange={(e) => setFooterBrandName(e.target.value)} placeholder="Digitify Lead Finder" />
+          </div>
+          <div className="space-y-2">
+            <Label>Footer tagline</Label>
+            <Input value={footerTagline} onChange={(e) => setFooterTagline(e.target.value)} placeholder="Partner in Digital Solutions" />
+          </div>
+          <div className="space-y-2 lg:col-span-2">
+            <Label>Footer beschrijving</Label>
+            <Textarea value={footerDescription} onChange={(e) => setFooterDescription(e.target.value)} rows={3} placeholder="Korte premium beschrijving in de footer." />
+          </div>
+          <div className="space-y-2">
+            <Label>Footer e-mail</Label>
+            <Input value={footerEmail} onChange={(e) => setFooterEmail(e.target.value)} placeholder="hello@digitify.be" />
+          </div>
+          <div className="space-y-2">
+            <Label>Footer telefoon</Label>
+            <Input value={footerPhone} onChange={(e) => setFooterPhone(e.target.value)} placeholder="+32 (0) 486 51 57 73" />
+          </div>
+          <div className="space-y-2">
+            <Label>Footer locatie</Label>
+            <Input value={footerLocation} onChange={(e) => setFooterLocation(e.target.value)} placeholder="België" />
+          </div>
+          <div className="space-y-2">
+            <Label>Footer website label</Label>
+            <Input value={footerWebsiteLabel} onChange={(e) => setFooterWebsiteLabel(e.target.value)} placeholder="www.digitify.be" />
+          </div>
+          <div className="space-y-2">
+            <Label>Footer website URL</Label>
+            <Input value={footerWebsiteUrl} onChange={(e) => setFooterWebsiteUrl(e.target.value)} placeholder="https://www.digitify.be" />
+          </div>
+          <div className="space-y-2">
+            <Label>Footer legal line</Label>
+            <Input value={footerLegalLine} onChange={(e) => setFooterLegalLine(e.target.value)} placeholder={`© ${new Date().getFullYear()} Digitify`} />
+          </div>
+          <div className="space-y-2 lg:col-span-2">
+            <Label>Footer copyright line</Label>
+            <Input value={footerCopyrightLine} onChange={(e) => setFooterCopyrightLine(e.target.value)} placeholder={`© ${new Date().getFullYear()} Digitify. Webdesign, media en marketing voor digitale groei.`} />
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="flex items-center gap-3">
         <Button onClick={handleSave} disabled={batchUpdate.isPending}>

@@ -819,7 +819,7 @@ export const quoteRouter = router({
   // Service catalog
   getServices: protectedProcedure.query(async ({ ctx }) => {
     return ctx.db.serviceCatalog.findMany({
-      where: { isActive: true },
+      where: { isActive: true, createdById: ctx.user.id },
       orderBy: [{ category: "asc" }, { sortOrder: "asc" }],
     });
   }),
@@ -839,18 +839,43 @@ export const quoteRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       if (input.id) {
+        const existing = await ctx.db.serviceCatalog.findFirst({
+          where: { id: input.id, createdById: ctx.user.id },
+          select: { id: true },
+        });
+        if (!existing) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Service niet gevonden." });
+        }
         return ctx.db.serviceCatalog.update({
           where: { id: input.id },
-          data: input,
+          data: {
+            category: input.category,
+            name: input.name,
+            description: input.description,
+            basePrice: input.basePrice,
+            unit: input.unit,
+            isActive: input.isActive,
+            sortOrder: input.sortOrder,
+          },
         });
       }
-      return ctx.db.serviceCatalog.create({ data: input });
+      return ctx.db.serviceCatalog.create({
+        data: {
+          ...input,
+          createdById: ctx.user.id,
+        },
+      });
     }),
 
   deleteService: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await ctx.db.serviceCatalog.delete({ where: { id: input.id } });
+      const deleted = await ctx.db.serviceCatalog.deleteMany({
+        where: { id: input.id, createdById: ctx.user.id },
+      });
+      if (deleted.count === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Service niet gevonden." });
+      }
       return { success: true };
     }),
 

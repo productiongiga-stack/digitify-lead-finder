@@ -59,6 +59,20 @@ export const leadRouter = router({
     .query(async ({ ctx, input }) => {
       const { filters, sortBy, sortDir, page, pageSize } = input;
       const where: Record<string, unknown> = { createdById: ctx.user.id };
+      const [ownedPipelineStageIds, ownedTagIds] = await Promise.all([
+        filters?.pipelineStageIds?.length
+          ? ctx.db.pipelineStage.findMany({
+              where: { id: { in: filters.pipelineStageIds }, createdById: ctx.user.id },
+              select: { id: true },
+            }).then((rows) => rows.map((row) => row.id))
+          : Promise.resolve<string[]>([]),
+        filters?.tags?.length
+          ? ctx.db.tag.findMany({
+              where: { id: { in: filters.tags }, createdById: ctx.user.id },
+              select: { id: true },
+            }).then((rows) => rows.map((row) => row.id))
+          : Promise.resolve<string[]>([]),
+      ]);
 
       if (filters?.search) {
         where.OR = [
@@ -69,7 +83,9 @@ export const leadRouter = router({
         ];
       }
       if (filters?.status?.length) where.status = { in: filters.status };
-      if (filters?.pipelineStageIds?.length) where.pipelineStageId = { in: filters.pipelineStageIds };
+      if (filters?.pipelineStageIds?.length) {
+        where.pipelineStageId = { in: ownedPipelineStageIds.length ? ownedPipelineStageIds : ["__no_stage__"] };
+      }
       if (filters?.scoreMin !== undefined || filters?.scoreMax !== undefined) {
         where.overallScore = {};
         if (filters?.scoreMin !== undefined) (where.overallScore as Record<string, unknown>).gte = filters.scoreMin;
@@ -86,7 +102,7 @@ export const leadRouter = router({
       if (filters?.hasWebsite === false) where.website = null;
       if (filters?.scorePriority) where.scorePriority = filters.scorePriority;
       if (filters?.tags?.length) {
-        where.tags = { some: { tagId: { in: filters.tags } } };
+        where.tags = { some: { tagId: { in: ownedTagIds.length ? ownedTagIds : ["__no_tag__"] } } };
       }
       if (filters?.campaignId) {
         where.campaignLeads = { some: { campaignId: filters.campaignId, campaign: { createdById: ctx.user.id } } };
@@ -236,6 +252,15 @@ export const leadRouter = router({
       const data: Record<string, unknown> = { ...rest };
       if (status !== undefined) data.status = status;
       if (pipelineStageId !== undefined) {
+        if (pipelineStageId) {
+          const stage = await ctx.db.pipelineStage.findFirst({
+            where: { id: pipelineStageId, createdById: ctx.user.id },
+            select: { id: true },
+          });
+          if (!stage) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Pipeline stage niet gevonden." });
+          }
+        }
         data.pipelineStage = pipelineStageId
           ? { connect: { id: pipelineStageId } }
           : { disconnect: true };
@@ -297,6 +322,13 @@ export const leadRouter = router({
   bulkAddTag: protectedProcedure
     .input(z.object({ leadIds: z.array(z.string()).min(1).max(500), tagId: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const tag = await ctx.db.tag.findFirst({
+        where: { id: input.tagId, createdById: ctx.user.id },
+        select: { id: true },
+      });
+      if (!tag) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Tag niet gevonden." });
+      }
       const existing = await ctx.db.leadTag.findMany({
         where: { leadId: { in: input.leadIds }, tagId: input.tagId, lead: { createdById: ctx.user.id } },
         select: { leadId: true },

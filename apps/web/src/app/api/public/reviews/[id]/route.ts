@@ -4,6 +4,10 @@ import { replacePlaceholders } from "@digitify/email";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { REVIEW_PUBLIC_TEXT_FIELDS, getReviewTextDefault } from "@/lib/review-text";
 
+function userSettingKey(userId: string, key: string) {
+  return `user:${userId}:${key.trim()}`;
+}
+
 function getCookieValue(request: Request, name: string) {
   const cookieHeader = request.headers.get("cookie") || "";
   const parts = cookieHeader.split(";").map((part) => part.trim());
@@ -69,12 +73,16 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
           "branding.primary_color",
           "branding.logo_url",
           ...REVIEW_PUBLIC_TEXT_FIELDS.map((field) => field.key),
-        ],
+        ].map((key) => userSettingKey(review.createdById, key)),
       },
     },
   });
+  const scopedSettings = settings.map((row) => ({
+    ...row,
+    key: row.key.replace(`user:${review.createdById}:`, ""),
+  }));
 
-  const companyName = getSetting(settings, "branding.company_name", "Digitify");
+  const companyName = getSetting(scopedSettings, "branding.company_name", "Digitify");
   const platformLabel = getPlatformLabel(review.platform);
   const textContext = {
     clientName: review.clientName,
@@ -88,9 +96,9 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
     id: review.id,
     clientName: review.clientName,
     companyName,
-    companySlogan: getSetting(settings, "branding.company_slogan", ""),
-    primaryColor: getSetting(settings, "branding.primary_color", "#6366f1"),
-    logoUrl: getSetting(settings, "branding.logo_url", ""),
+    companySlogan: getSetting(scopedSettings, "branding.company_slogan", ""),
+    primaryColor: getSetting(scopedSettings, "branding.primary_color", "#6366f1"),
+    logoUrl: getSetting(scopedSettings, "branding.logo_url", ""),
     platform: review.platform || "google",
     platformLabel,
     reviewUrl: review.reviewUrl || "",
@@ -101,7 +109,7 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
     texts: Object.fromEntries(
       REVIEW_PUBLIC_TEXT_FIELDS.map((field) => [
         field.key,
-        resolveReviewText(settings, field.key, textContext),
+        resolveReviewText(scopedSettings, field.key, textContext),
       ])
     ),
   });

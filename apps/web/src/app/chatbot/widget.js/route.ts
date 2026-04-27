@@ -18,6 +18,10 @@ export async function GET(request: Request) {
   var position = dataset.position === "bottom-left" ? "bottom-left" : "bottom-right";
   var autoOpen = Number(dataset.autoOpen || "0");
   var tenant = (dataset.tenant || "").trim();
+  if (!tenant) {
+    console.warn("Digitify chatbot: data-tenant ontbreekt.");
+    return;
+  }
 
   function parseBoolean(value, fallback) {
     if (value === undefined || value === null || value === "") return fallback;
@@ -39,7 +43,7 @@ export async function GET(request: Request) {
     if (dataset.color) iframeUrl.searchParams.set("color", dataset.color);
     if (dataset.welcome) iframeUrl.searchParams.set("welcome", dataset.welcome);
     if (askName) iframeUrl.searchParams.set("askName", "1");
-    if (tenant) iframeUrl.searchParams.set("tenant", tenant);
+    iframeUrl.searchParams.set("tenant", tenant);
 
     var host = document.createElement("div");
     host.setAttribute("data-digitify-chatbot", "true");
@@ -166,7 +170,7 @@ export async function GET(request: Request) {
     }
   }
 
-  fetch("${origin}/api/public/chatbot/settings" + (tenant ? ("?tenant=" + encodeURIComponent(tenant)) : ""))
+  fetch("${origin}/api/public/chatbot/settings?tenant=" + encodeURIComponent(tenant))
     .then(function (response) { return response.ok ? response.json() : null; })
     .then(function (remote) { mount(remote); })
     .catch(function () { mount(null); });

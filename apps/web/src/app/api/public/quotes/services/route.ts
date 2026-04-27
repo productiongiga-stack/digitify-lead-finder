@@ -1,10 +1,32 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
+import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
+import { getSession } from "@/lib/auth/session";
 
-export async function GET() {
+function userSettingKey(userId: string, key: string) {
+  return `user:${userId}:${key.trim()}`;
+}
+
+export async function GET(request: Request) {
+  const session = await getSession();
+  const sessionEmail = session?.user?.email?.trim().toLowerCase() || "";
+  const sessionUser = sessionEmail
+    ? await prisma.user.findUnique({ where: { email: sessionEmail }, select: { id: true } })
+    : null;
+  const tenantUserId =
+    (await resolveUserIdFromPublicTenantToken(
+      prisma,
+      new URL(request.url).searchParams.get("tenant"),
+    )) ||
+    sessionUser?.id ||
+    null;
+  if (!tenantUserId) {
+    return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
+  }
+
   const [services, settings] = await Promise.all([
     prisma.serviceCatalog.findMany({
-      where: { isActive: true },
+      where: { isActive: true, createdById: tenantUserId },
       orderBy: [{ category: "asc" }, { sortOrder: "asc" }],
     }),
     prisma.setting.findMany({
@@ -41,14 +63,17 @@ export async function GET() {
             "quotes.embed_product_specs_json",
             "quotes.embed_category_icons_json",
             "quotes.embed_product_icons_json",
-          ],
+          ].map((key) => userSettingKey(tenantUserId, key)),
         },
       },
     }),
   ]);
 
   const map = Object.fromEntries(
-    settings.map((item) => [item.key, String(item.value).replace(/^"|"$/g, "")])
+    settings.map((item) => [
+      item.key.replace(`user:${tenantUserId}:`, ""),
+      String(item.value).replace(/^"|"$/g, ""),
+    ])
   );
 
   return NextResponse.json({

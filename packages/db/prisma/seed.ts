@@ -3,6 +3,10 @@ import { scryptSync, randomBytes } from "crypto";
 
 const prisma = new PrismaClient();
 
+function userSettingKey(userId: string, key: string) {
+  return `user:${userId}:${key.trim()}`;
+}
+
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(password, salt, 64).toString("hex");
@@ -43,7 +47,11 @@ async function main() {
 
   const createdStages: Record<string, string> = {};
   for (const stage of stages) {
-    const s = await prisma.pipelineStage.create({ data: stage });
+    const s = await prisma.pipelineStage.upsert({
+      where: { createdById_name: { createdById: admin.id, name: stage.name } },
+      update: { ...stage, createdById: admin.id },
+      create: { ...stage, createdById: admin.id },
+    });
     createdStages[stage.name] = s.id;
   }
 
@@ -88,12 +96,49 @@ async function main() {
   const createdTags: Record<string, string> = {};
   for (const t of tags) {
     const tag = await prisma.tag.upsert({
-      where: { name: t.name },
-      update: t,
-      create: t,
+      where: { createdById_name: { createdById: admin.id, name: t.name } },
+      update: { ...t, createdById: admin.id },
+      create: { ...t, createdById: admin.id },
     });
     createdTags[t.name] = tag.id;
   }
+
+  // Create default service catalog
+  await prisma.serviceCatalog.createMany({
+    data: [
+      {
+        createdById: admin.id,
+        category: "webdesign",
+        name: "Website basis",
+        description: "Snelle, professionele website met sterke basisstructuur.",
+        basePrice: 1490,
+        unit: "per project",
+        isActive: true,
+        sortOrder: 0,
+      },
+      {
+        createdById: admin.id,
+        category: "marketing",
+        name: "SEO kickstart",
+        description: "Technische optimalisaties en lokale zichtbaarheid.",
+        basePrice: 690,
+        unit: "per maand",
+        isActive: true,
+        sortOrder: 1,
+      },
+      {
+        createdById: admin.id,
+        category: "extras",
+        name: "Maandelijkse optimalisatie",
+        description: "Doorlopende verbeteringen en rapportage.",
+        basePrice: 290,
+        unit: "per maand",
+        isActive: true,
+        sortOrder: 2,
+      },
+    ],
+    skipDuplicates: true,
+  });
 
   // Create campaigns
   const campaign1 = await prisma.campaign.create({
@@ -565,30 +610,54 @@ async function main() {
   }
 
   // Create email templates
-  await prisma.emailTemplate.create({
-    data: {
+  await prisma.emailTemplate.upsert({
+    where: { createdById_name: { createdById: admin.id, name: "Intro - Webdesign" } },
+    update: {
       name: "Intro - Webdesign",
       subject: "Betere online zichtbaarheid voor {{companyName}}?",
       body: `Beste {{contactName}},\n\nIk kwam {{companyName}} tegen en merkte op dat er enkele kansen zijn om uw online aanwezigheid te versterken.\n\n{{painPoints}}\n\nBij {{senderCompany}} helpen we bedrijven zoals het uwe om meer klanten aan te trekken via een professionele website en sterke online zichtbaarheid.\n\nZou u openstaan voor een kort gesprek van 15 minuten om te bekijken hoe we u kunnen helpen?\n\nMet vriendelijke groeten,\n{{senderName}}\n{{senderCompany}}`,
-      isGlobal: true,
+      isGlobal: false,
     },
+    create: {
+      createdById: admin.id,
+      name: "Intro - Webdesign",
+      subject: "Betere online zichtbaarheid voor {{companyName}}?",
+      body: `Beste {{contactName}},\n\nIk kwam {{companyName}} tegen en merkte op dat er enkele kansen zijn om uw online aanwezigheid te versterken.\n\n{{painPoints}}\n\nBij {{senderCompany}} helpen we bedrijven zoals het uwe om meer klanten aan te trekken via een professionele website en sterke online zichtbaarheid.\n\nZou u openstaan voor een kort gesprek van 15 minuten om te bekijken hoe we u kunnen helpen?\n\nMet vriendelijke groeten,\n{{senderName}}\n{{senderCompany}}`,
+      isGlobal: false,
+    }
   });
 
-  await prisma.emailTemplate.create({
-    data: {
+  await prisma.emailTemplate.upsert({
+    where: { createdById_name: { createdById: admin.id, name: "Intro - SEO" } },
+    update: {
       name: "Intro - SEO",
       subject: "{{companyName}} beter vindbaar in Google?",
       body: `Beste {{contactName}},\n\nIk deed wat onderzoek naar {{companyName}} en zag dat er mogelijkheden zijn om beter gevonden te worden in Google.\n\n{{painPoints}}\n\nBij {{senderCompany}} helpen we bedrijven in {{city}} om hoger te scoren in Google en meer relevante bezoekers aan te trekken.\n\nInteresse in een gratis SEO-analyse? Ik stuur ze graag door.\n\nGroeten,\n{{senderName}}\n{{senderCompany}}`,
-      isGlobal: true,
+      isGlobal: false,
+    },
+    create: {
+      createdById: admin.id,
+      name: "Intro - SEO",
+      subject: "{{companyName}} beter vindbaar in Google?",
+      body: `Beste {{contactName}},\n\nIk deed wat onderzoek naar {{companyName}} en zag dat er mogelijkheden zijn om beter gevonden te worden in Google.\n\n{{painPoints}}\n\nBij {{senderCompany}} helpen we bedrijven in {{city}} om hoger te scoren in Google en meer relevante bezoekers aan te trekken.\n\nInteresse in een gratis SEO-analyse? Ik stuur ze graag door.\n\nGroeten,\n{{senderName}}\n{{senderCompany}}`,
+      isGlobal: false,
     },
   });
 
-  await prisma.emailTemplate.create({
-    data: {
+  await prisma.emailTemplate.upsert({
+    where: { createdById_name: { createdById: admin.id, name: "Follow-up 1" } },
+    update: {
       name: "Follow-up 1",
       subject: "Re: {{previousSubject}}",
       body: `Beste {{contactName}},\n\nIk wilde even opvolgen op mijn vorige mail. Ik begrijp dat het druk kan zijn.\n\nKort samengevat: ik zag enkele concrete verbeterpunten voor {{companyName}} online en zou die graag even toelichten.\n\nPast het om deze week even kort te bellen?\n\nMet vriendelijke groeten,\n{{senderName}}\n{{senderCompany}}`,
-      isGlobal: true,
+      isGlobal: false,
+    },
+    create: {
+      createdById: admin.id,
+      name: "Follow-up 1",
+      subject: "Re: {{previousSubject}}",
+      body: `Beste {{contactName}},\n\nIk wilde even opvolgen op mijn vorige mail. Ik begrijp dat het druk kan zijn.\n\nKort samengevat: ik zag enkele concrete verbeterpunten voor {{companyName}} online en zou die graag even toelichten.\n\nPast het om deze week even kort te bellen?\n\nMet vriendelijke groeten,\n{{senderName}}\n{{senderCompany}}`,
+      isGlobal: false,
     },
   });
 
@@ -613,26 +682,26 @@ async function main() {
 
   // Create default settings
   const defaultSettings = [
-    { key: "branding.company_name", value: JSON.stringify("") },
-    { key: "branding.primary_color", value: JSON.stringify("#6366f1") },
-    { key: "branding.logo_url", value: JSON.stringify("") },
-    { key: "email.provider", value: JSON.stringify("smtp") },
-    { key: "email.from_name", value: JSON.stringify("") },
-    { key: "email.from_email", value: JSON.stringify("") },
-    { key: "email.daily_limit", value: JSON.stringify(50) },
-    { key: "email.send_window_start", value: JSON.stringify("09:00") },
-    { key: "email.send_window_end", value: JSON.stringify("17:00") },
-    { key: "openclaw.enabled", value: JSON.stringify(true) },
-    { key: "openclaw.model", value: JSON.stringify("claude-sonnet-4-20250514") },
-    { key: "openclaw.aggressiveness", value: JSON.stringify("balanced") },
-    { key: "openclaw.tone", value: JSON.stringify("professional") },
+    { key: "branding.company_name", value: "" },
+    { key: "branding.primary_color", value: "#f9ae5a" },
+    { key: "branding.logo_url", value: "" },
+    { key: "email.provider", value: "smtp" },
+    { key: "email.from_name", value: "" },
+    { key: "email.from_email", value: "" },
+    { key: "email.daily_limit", value: "50" },
+    { key: "email.send_window_start", value: "09:00" },
+    { key: "email.send_window_end", value: "17:00" },
+    { key: "openclaw.enabled", value: "true" },
+    { key: "openclaw.model", value: "claude-sonnet-4-20250514" },
+    { key: "openclaw.aggressiveness", value: "balanced" },
+    { key: "openclaw.tone", value: "professional" },
   ];
 
   for (const setting of defaultSettings) {
     await prisma.setting.upsert({
-      where: { key: setting.key },
+      where: { key: userSettingKey(admin.id, setting.key) },
       update: { value: setting.value },
-      create: setting,
+      create: { key: userSettingKey(admin.id, setting.key), value: setting.value },
     });
   }
 
@@ -641,6 +710,7 @@ async function main() {
   console.log(`  - ${stages.length} pipeline stages`);
   console.log(`  - ${weights.length} scoring weights`);
   console.log(`  - ${tags.length} tags`);
+  console.log(`  - 3 service catalog items`);
   console.log(`  - 3 campaigns`);
   console.log(`  - ${leads.length} leads`);
   console.log(`  - 3 email templates`);

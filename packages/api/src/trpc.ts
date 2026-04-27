@@ -1,6 +1,7 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { type PrismaClient } from "@digitify/db";
+import { ensureTenantSchemaCompatibility } from "./lib/tenant-schema-compat";
 
 export type Context = {
   db: PrismaClient;
@@ -13,7 +14,7 @@ export type Context = {
   requestId: string;
 };
 
-export type AppRole = "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
+export type AppRole = "OWNER" | "ADMIN" | "MODERATOR" | "MEMBER" | "TRIAL" | "TESTER" | "VIEWER";
 
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
@@ -89,10 +90,41 @@ const isAuthenticated = t.middleware(({ ctx, next }) => {
   return next({ ctx: { ...ctx, user: ctx.user } });
 });
 
+const enforceTrialAccess = t.middleware(async ({ ctx, next }) => {
+  if (!ctx.user || ctx.user.role !== "TRIAL") return next();
+  const user = await ctx.db.user.findUnique({
+    where: { id: ctx.user.id },
+    select: { createdAt: true },
+  });
+  if (!user) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "Account niet gevonden." });
+  }
+  const trialDays = 7;
+  const expiresAt = user.createdAt.getTime() + trialDays * 24 * 60 * 60 * 1000;
+  if (Date.now() > expiresAt) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Je Trial (7 dagen) is verlopen. Contacteer een eigenaar of admin om je rol te upgraden.",
+    });
+  }
+  return next();
+});
+
+const withTenantSchemaCompat = t.middleware(async ({ ctx, next }) => {
+  try {
+    await ensureTenantSchemaCompatibility(ctx.db);
+  } catch {
+    // Do not block request lifecycle when DB DDL permissions are restricted.
+  }
+  return next();
+});
+
 export const protectedProcedure = t.procedure
   .use(withLogging)
   .use(withRateLimit)
-  .use(isAuthenticated);
+  .use(isAuthenticated)
+  .use(enforceTrialAccess)
+  .use(withTenantSchemaCompat);
 
 // Stricter rate limit for AI/email endpoints (20 req/min)
 export const aiRateLimitedProcedure = t.procedure
@@ -102,7 +134,9 @@ export const aiRateLimitedProcedure = t.procedure
     checkRateLimit(`ai:${key}`, 20, 60_000);
     return next();
   }))
-  .use(isAuthenticated);
+  .use(isAuthenticated)
+  .use(enforceTrialAccess)
+  .use(withTenantSchemaCompat);
 
 const hasRole = (...roles: string[]) =>
   t.middleware(({ ctx, next }) => {
@@ -119,10 +153,14 @@ export const adminProcedure = t.procedure
   .use(withLogging)
   .use(withRateLimit)
   .use(isAuthenticated)
+  .use(enforceTrialAccess)
+  .use(withTenantSchemaCompat)
   .use(hasRole("OWNER", "ADMIN"));
 
 export const ownerProcedure = t.procedure
   .use(withLogging)
   .use(withRateLimit)
   .use(isAuthenticated)
+  .use(enforceTrialAccess)
+  .use(withTenantSchemaCompat)
   .use(hasRole("OWNER"));

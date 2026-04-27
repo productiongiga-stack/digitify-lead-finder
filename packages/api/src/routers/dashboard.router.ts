@@ -281,6 +281,7 @@ export const dashboardRouter = router({
   getPipelineOverview: protectedProcedure.query(async ({ ctx }) => {
     const [stages, leadCounts] = await Promise.all([
       ctx.db.pipelineStage.findMany({
+        where: { createdById: ctx.user.id },
         orderBy: { sortOrder: "asc" },
         select: { id: true, name: true, color: true },
       }),

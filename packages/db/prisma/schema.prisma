@@ -32,6 +32,10 @@ model User {
   reports        Report[]
   openclawLogs   OpenClawLog[]
   permissions    UserPermission[]
+  pipelineStages PipelineStage[]
+  tags           Tag[]
+  emailTemplates EmailTemplate[]
+  serviceCatalogEntries ServiceCatalog[]
   bookings       Booking[]
   domains        Domain[]
   reviewRequests ReviewRequest[]
@@ -102,7 +106,10 @@ enum FeedbackStatus {
 enum UserRole {
   OWNER
   ADMIN
+  MODERATOR
   MEMBER
+  TRIAL
+  TESTER
   VIEWER
 }
 
@@ -292,24 +299,32 @@ model LeadScoringFactor {
 // PIPELINE
 model PipelineStage {
   id        String  @id @default(cuid())
+  createdById String?
   name      String
   color     String  @default("#6366f1")
   sortOrder Int     @default(0)
   isDefault Boolean @default(false)
 
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
   leads Lead[]
 
+  @@index([createdById])
+  @@unique([createdById, name])
   @@map("pipeline_stages")
 }
 
 // TAGS
 model Tag {
-  id    String @id @default(cuid())
-  name  String @unique
-  color String @default("#6366f1")
+  id          String @id @default(cuid())
+  createdById String?
+  name        String
+  color       String @default("#6366f1")
 
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
   leads LeadTag[]
 
+  @@index([createdById])
+  @@unique([createdById, name])
   @@map("tags")
 }
 
@@ -409,18 +424,22 @@ model CampaignLead {
 
 // EMAIL / CONTACT
 model EmailTemplate {
-  id         String  @id @default(cuid())
-  name       String
-  subject    String
-  body       String  @db.Text
-  campaignId String?
-  isGlobal   Boolean @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id          String   @id @default(cuid())
+  createdById String?
+  name        String
+  subject     String
+  body        String   @db.Text
+  campaignId  String?
+  isGlobal    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  campaign Campaign? @relation(fields: [campaignId], references: [id])
-  drafts   EmailDraft[]
+  createdBy User?     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  campaign  Campaign? @relation(fields: [campaignId], references: [id])
+  drafts    EmailDraft[]
 
+  @@index([createdById])
+  @@unique([createdById, name])
   @@map("email_templates")
 }
 
@@ -841,6 +860,7 @@ model QuoteItem {
 // SERVICE CATALOG (for offerte configurator)
 model ServiceCatalog {
   id          String  @id @default(cuid())
+  createdById String?
   category    String  // webdesign, media, marketing, extras
   name        String
   description String?
@@ -850,6 +870,10 @@ model ServiceCatalog {
   sortOrder   Int     @default(0)
   metadata    Json?   // extra config like packages, included items
 
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([createdById])
+  @@unique([createdById, category, name])
   @@map("service_catalog")
 }
 

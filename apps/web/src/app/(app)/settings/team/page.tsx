@@ -56,7 +56,7 @@ export default function TeamSettingsPage() {
   const [inviteName, setInviteName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [invitePassword, setInvitePassword] = useState("");
-  const [inviteRole, setInviteRole] = useState<"ADMIN" | "MEMBER" | "VIEWER">("MEMBER");
+  const [inviteRole, setInviteRole] = useState<"ADMIN" | "MODERATOR" | "MEMBER" | "TRIAL" | "TESTER" | "VIEWER">("MEMBER");
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string | null } | null>(null);
 
@@ -116,10 +116,13 @@ export default function TeamSettingsPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="OWNER">Owner</SelectItem>
+                          <SelectItem value="OWNER">Eigenaar</SelectItem>
                           <SelectItem value="ADMIN">Admin</SelectItem>
+                          <SelectItem value="MODERATOR">Moderator</SelectItem>
                           <SelectItem value="MEMBER">Member</SelectItem>
-                          <SelectItem value="VIEWER">Viewer</SelectItem>
+                          <SelectItem value="TRIAL">Trial (7 days)</SelectItem>
+                          <SelectItem value="TESTER">Tester</SelectItem>
+                          <SelectItem value="VIEWER">Viewer (legacy)</SelectItem>
                         </SelectContent>
                       </Select>
                     ) : (
@@ -253,8 +256,11 @@ export default function TeamSettingsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ADMIN">Admin</SelectItem>
+                  <SelectItem value="MODERATOR">Moderator</SelectItem>
                   <SelectItem value="MEMBER">Member</SelectItem>
-                  <SelectItem value="VIEWER">Viewer</SelectItem>
+                  <SelectItem value="TRIAL">Trial (7 days)</SelectItem>
+                  <SelectItem value="TESTER">Tester</SelectItem>
+                  <SelectItem value="VIEWER">Viewer (legacy)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

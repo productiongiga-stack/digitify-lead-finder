@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma, revealSettingValue } from "@digitify/db";
+import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
 import { createHash } from "node:crypto";
 import { checkRateLimit } from "@/lib/rate-limit";
 
@@ -33,16 +34,6 @@ function userSettingKey(userId: string, key: string) {
 
 function tenantTag(userId: string) {
   return `tenant:${userId}`;
-}
-
-async function resolveTenantUserId(rawTenant: string | null | undefined) {
-  const candidate = rawTenant?.trim();
-  if (!candidate) return null;
-  const user = await prisma.user.findUnique({
-    where: { id: candidate },
-    select: { id: true },
-  });
-  return user?.id ?? null;
 }
 
 function getSetting(settings: Array<{ key: string; value: unknown }>, key: string, fallback: string) {
@@ -352,36 +343,32 @@ async function generateAiReply(args: {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const sessionId = url.searchParams.get("sessionId")?.trim();
-  const tenantUserId = await resolveTenantUserId(url.searchParams.get("tenant"));
+  const tenantUserId = await resolveUserIdFromPublicTenantToken(prisma, url.searchParams.get("tenant"));
 
   if (!sessionId) {
     return NextResponse.json({ error: "Sessie is verplicht." }, { status: 400 });
   }
+  if (!tenantUserId) {
+    return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
+  }
 
-  const session = tenantUserId
-    ? await prisma.chatSession.findFirst({
-        where: {
-          AND: [
-            { id: sessionId },
-            {
-              OR: [
-                { assignedToId: tenantUserId },
-                { tags: { has: tenantTag(tenantUserId) } },
-                { lead: { createdById: tenantUserId } },
-              ],
-            },
+  const session = await prisma.chatSession.findFirst({
+    where: {
+      AND: [
+        { id: sessionId },
+        {
+          OR: [
+            { assignedToId: tenantUserId },
+            { tags: { has: tenantTag(tenantUserId) } },
+            { lead: { createdById: tenantUserId } },
           ],
         },
-        include: {
-          messages: { orderBy: { createdAt: "asc" } },
-        },
-      })
-    : await prisma.chatSession.findUnique({
-        where: { id: sessionId },
-        include: {
-          messages: { orderBy: { createdAt: "asc" } },
-        },
-      });
+      ],
+    },
+    include: {
+      messages: { orderBy: { createdAt: "asc" } },
+    },
+  });
 
   if (!session) {
     return NextResponse.json({ error: "Sessie niet gevonden." }, { status: 404 });
@@ -421,10 +408,14 @@ export async function POST(request: Request) {
     const requestedSessionId = String(body.sessionId || "").trim();
     const requestedVisitorName = String(body.visitorName || "").trim();
     const pageUrl = String(body.pageUrl || "").trim();
-    const tenantUserId = await resolveTenantUserId(String(body.tenant || ""));
+    const tenantToken = String(body.tenant || "").trim();
+    const tenantUserId = await resolveUserIdFromPublicTenantToken(prisma, tenantToken);
 
     if (!message) {
       return NextResponse.json({ error: "Bericht is verplicht." }, { status: 400 });
+    }
+    if (!tenantUserId) {
+      return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
     }
     if (message.length > 4000) {
       return NextResponse.json({ error: "Bericht is te lang." }, { status: 400 });
@@ -434,7 +425,7 @@ export async function POST(request: Request) {
     }
 
     const dedupeKey = createHash("sha256")
-      .update(`${ip}|${requestedSessionId}|${message.toLowerCase()}`)
+      .update(`${ip}|${tenantUserId}|${requestedSessionId}|${message.toLowerCase()}`)
       .digest("hex");
     const now = Date.now();
     for (const [key, ts] of recentMessages.entries()) {
@@ -476,16 +467,14 @@ export async function POST(request: Request) {
     const settingsRows = await prisma.setting.findMany({
       where: {
         key: {
-          in: tenantUserId ? settingsKeys.map((key) => userSettingKey(tenantUserId, key)) : settingsKeys,
+          in: settingsKeys.map((key) => userSettingKey(tenantUserId, key)),
         },
       },
     });
-    const settings = tenantUserId
-      ? settingsRows.map((row) => ({
-          ...row,
-          key: row.key.replace(`user:${tenantUserId}:`, ""),
-        }))
-      : settingsRows;
+    const settings = settingsRows.map((row) => ({
+      ...row,
+      key: row.key.replace(`user:${tenantUserId}:`, ""),
+    }));
 
     const companyName =
       getSetting(settings, "chatbot.company_name", "") ||
@@ -510,40 +499,31 @@ export async function POST(request: Request) {
       "chatbot.offline_message",
       "We zijn momenteel offline. Laat een bericht achter en we nemen zo snel mogelijk contact met u op."
     );
+    const bookingUrl = `${getAppUrl()}/embed/bookings?tenant=${encodeURIComponent(tenantToken)}`;
 
     const extractedEmail = extractEmail(message);
     const extractedPhone = extractPhone(message);
     const existingSession = requestedSessionId
-      ? tenantUserId
-        ? await prisma.chatSession.findFirst({
-            where: {
-              AND: [
-                { id: requestedSessionId },
-                {
-                  OR: [
-                    { assignedToId: tenantUserId },
-                    { tags: { has: tenantTag(tenantUserId) } },
-                    { lead: { createdById: tenantUserId } },
-                  ],
-                },
-              ],
-            },
-            include: {
-              messages: {
-                orderBy: { createdAt: "desc" },
-                take: 12,
+      ? await prisma.chatSession.findFirst({
+          where: {
+            AND: [
+              { id: requestedSessionId },
+              {
+                OR: [
+                  { assignedToId: tenantUserId },
+                  { tags: { has: tenantTag(tenantUserId) } },
+                  { lead: { createdById: tenantUserId } },
+                ],
               },
+            ],
+          },
+          include: {
+            messages: {
+              orderBy: { createdAt: "desc" },
+              take: 12,
             },
-          })
-        : await prisma.chatSession.findUnique({
-            where: { id: requestedSessionId },
-            include: {
-              messages: {
-                orderBy: { createdAt: "desc" },
-                take: 12,
-              },
-            },
-          })
+          },
+        })
       : null;
 
     const visitorName = requestedVisitorName || existingSession?.visitorName || "";
@@ -557,7 +537,7 @@ export async function POST(request: Request) {
       website,
       email,
       phone,
-      bookingUrl: `${getAppUrl()}/embed/bookings`,
+      bookingUrl,
       offlineMessage,
       trainingNotes,
       enabled,
@@ -581,7 +561,7 @@ export async function POST(request: Request) {
               phone,
               address,
               niche,
-              bookingUrl: `${getAppUrl()}/embed/bookings`,
+              bookingUrl,
               trainingNotes,
               knowledgePages,
               responseStyle,
@@ -616,7 +596,7 @@ export async function POST(request: Request) {
       ? await prisma.chatSession.update({
           where: { id: existingSession.id },
           data: {
-            assignedToId: existingSession.assignedToId || tenantUserId || null,
+            assignedToId: existingSession.assignedToId || tenantUserId,
             updatedAt: new Date(),
             pageUrl: pageUrl || existingSession.pageUrl,
             isRead: false,
@@ -630,14 +610,14 @@ export async function POST(request: Request) {
               new Set([
                 ...(existingSession.tags || []),
                 ...intent.tags,
-                ...(tenantUserId ? [tenantTag(tenantUserId)] : []),
+                tenantTag(tenantUserId),
               ]),
             ),
           },
         })
       : await prisma.chatSession.create({
           data: {
-            assignedToId: tenantUserId || null,
+            assignedToId: tenantUserId,
             pageUrl: pageUrl || null,
             isRead: false,
             status: "OPEN",
@@ -649,7 +629,7 @@ export async function POST(request: Request) {
             tags: Array.from(
               new Set([
                 ...intent.tags,
-                ...(tenantUserId ? [tenantTag(tenantUserId)] : []),
+                tenantTag(tenantUserId),
               ]),
             ),
           },

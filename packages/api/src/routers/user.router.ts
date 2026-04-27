@@ -2,6 +2,7 @@ import { z } from "zod";
 import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
+import { ensureUserWorkspace } from "../lib/user-workspace";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -19,6 +20,7 @@ export function verifyPassword(password: string, storedHash: string): boolean {
 
 export const userRouter = router({
   getProfile: protectedProcedure.query(async ({ ctx }) => {
+    await ensureUserWorkspace(ctx.db, ctx.user.id, ctx.user.name);
     return ctx.db.user.findUnique({
       where: { id: ctx.user.id },
       select: {
@@ -47,7 +49,7 @@ export const userRouter = router({
   }),
 
   updateRole: ownerProcedure
-    .input(z.object({ userId: z.string(), role: z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"]) }))
+    .input(z.object({ userId: z.string(), role: z.enum(["OWNER", "ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER", "VIEWER"]) }))
     .mutation(async ({ ctx, input }) => {
       const target = await ctx.db.user.findUnique({
         where: { id: input.userId },
@@ -72,7 +74,7 @@ export const userRouter = router({
         name: z.string().min(1),
         email: z.string().email(),
         password: z.string().min(6),
-        role: z.enum(["ADMIN", "MEMBER", "VIEWER"]),
+        role: z.enum(["ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER", "VIEWER"]),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -81,7 +83,7 @@ export const userRouter = router({
         throw new TRPCError({ code: "CONFLICT", message: "Er bestaat al een gebruiker met dit e-mailadres." });
       }
 
-      return ctx.db.user.create({
+      const user = await ctx.db.user.create({
         data: {
           name: input.name,
           email: input.email,
@@ -89,6 +91,8 @@ export const userRouter = router({
           role: input.role,
         },
       });
+      await ensureUserWorkspace(ctx.db, user.id, user.name);
+      return user;
     }),
 
   deleteUser: ownerProcedure

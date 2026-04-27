@@ -1,20 +1,38 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
+import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
+import { getSession } from "@/lib/auth/session";
 import { checkRateLimit } from "@/lib/rate-limit";
 
 export async function POST(request: Request) {
   try {
+    const body = await request.json();
+    const session = await getSession();
+    const sessionEmail = session?.user?.email?.trim().toLowerCase() || "";
+    const sessionUser = sessionEmail
+      ? await prisma.user.findUnique({ where: { email: sessionEmail }, select: { id: true } })
+      : null;
+    const tenantUserId =
+      (await resolveUserIdFromPublicTenantToken(prisma, String(body.tenant || ""))) ||
+      sessionUser?.id ||
+      null;
+    if (!tenantUserId) {
+      return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
+    }
+
     const forwarded = request.headers.get("x-forwarded-for") || "";
     const ip = forwarded.split(",")[0]?.trim() || "unknown";
-    const limiter = checkRateLimit({ key: `public-quote:${ip}`, limit: 5, windowMs: 60 * 60 * 1000 });
+    const limiter = checkRateLimit({
+      key: `public-quote:${tenantUserId}:${ip}`,
+      limit: 5,
+      windowMs: 60 * 60 * 1000,
+    });
     if (!limiter.allowed) {
       return NextResponse.json(
         { error: "Te veel aanvragen. Probeer het later opnieuw." },
         { status: 429 }
       );
     }
-
-    const body = await request.json();
     const clientName = String(body.clientName || "").trim().slice(0, 200);
     const clientAddress = String(body.clientAddress || "").trim().slice(0, 500);
     const clientVat = String(body.clientVat || "").trim().slice(0, 50);
@@ -37,23 +55,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Ongeldig e-mailadres." }, { status: 400 });
     }
 
-    const creator = await prisma.user.findFirst({
-      orderBy: { createdAt: "asc" },
-      select: { id: true },
-    });
-
-    if (!creator) {
-      return NextResponse.json(
-        { error: "Geen interne gebruiker beschikbaar." },
-        { status: 500 }
-      );
-    }
-
     const year = new Date().getFullYear();
+    const numberPrefix = `OFF-${year}-${tenantUserId.slice(-4).toUpperCase()}-`;
     const count = await prisma.quote.count({
-      where: { quoteNumber: { startsWith: `OFF-${year}-` } },
+      where: { createdById: tenantUserId, quoteNumber: { startsWith: numberPrefix } },
     });
-    const quoteNumber = `OFF-${year}-${String(count + 1).padStart(4, "0")}`;
+    const quoteNumber = `${numberPrefix}${String(count + 1).padStart(4, "0")}`;
 
     const normalizedItems = items
       .map((item: any, index: number) => {
@@ -97,7 +104,7 @@ export async function POST(request: Request) {
         discount,
         vatAmount,
         total,
-        createdById: creator.id,
+        createdById: tenantUserId,
         items: {
           create: normalizedItems,
         },

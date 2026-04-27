@@ -6,6 +6,8 @@ import {
   upsertGoogleBookingEvent,
   upsertGoogleEventIdInNotes,
 } from "@digitify/api/src/lib/google-calendar";
+import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
+import { getSession } from "@/lib/auth/session";
 import { checkRateLimit } from "@/lib/rate-limit";
 
 function getSetting(settings: Array<{ key: string; value: unknown }>, key: string, fallback = "") {
@@ -22,6 +24,10 @@ function getSetting(settings: Array<{ key: string; value: unknown }>, key: strin
   } catch {
     return raw.trim() || fallback;
   }
+}
+
+function userSettingKey(userId: string, key: string) {
+  return `user:${userId}:${key.trim()}`;
 }
 
 type DaySchedule = { enabled: boolean; start: string; end: string };
@@ -64,10 +70,23 @@ function parseWeeklySchedule(
 
 export async function POST(request: Request) {
   try {
+    const body = await request.json();
     const forwarded = request.headers.get("x-forwarded-for") || "";
     const ip = forwarded.split(",")[0]?.trim() || "unknown";
+    const session = await getSession();
+    const sessionEmail = session?.user?.email?.trim().toLowerCase() || "";
+    const sessionUser = sessionEmail
+      ? await prisma.user.findUnique({ where: { email: sessionEmail }, select: { id: true } })
+      : null;
+    const tenantUserId =
+      (await resolveUserIdFromPublicTenantToken(prisma, String(body.tenant || ""))) ||
+      sessionUser?.id ||
+      null;
+    if (!tenantUserId) {
+      return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
+    }
     const limiter = checkRateLimit({
-      key: `public-booking:${ip}`,
+      key: `public-booking:${tenantUserId}:${ip}`,
       limit: 12,
       windowMs: 60 * 60 * 1000,
     });
@@ -77,8 +96,6 @@ export async function POST(request: Request) {
         { status: 429 },
       );
     }
-
-    const body = await request.json();
     const honeypot = String(body.website || "").trim();
     if (honeypot) {
       return NextResponse.json({ success: true });
@@ -102,10 +119,14 @@ export async function POST(request: Request) {
             "branding.company_name",
             "company.email",
             "email.from_email",
-          ],
+          ].map((key) => userSettingKey(tenantUserId, key)),
         },
       },
     });
+    const scopedSettings = settings.map((row) => ({
+      ...row,
+      key: row.key.replace(`user:${tenantUserId}:`, ""),
+    }));
 
     if (!clientName || !clientEmail || !date) {
       return NextResponse.json(
@@ -127,16 +148,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Ongeldige datum." }, { status: 400 });
     }
 
-    const startTime = getSetting(settings, "bookings.availability_start_time", "09:00");
-    const endTime = getSetting(settings, "bookings.availability_end_time", "17:00");
-    const slotMinutes = Number(getSetting(settings, "bookings.slot_minutes", "30"));
-    const availableDays = getSetting(settings, "bookings.available_days", "1,2,3,4,5")
+    const startTime = getSetting(scopedSettings, "bookings.availability_start_time", "09:00");
+    const endTime = getSetting(scopedSettings, "bookings.availability_end_time", "17:00");
+    const slotMinutes = Number(getSetting(scopedSettings, "bookings.slot_minutes", "30"));
+    const availableDays = getSetting(scopedSettings, "bookings.available_days", "1,2,3,4,5")
       .split(",")
       .map((value) => Number(value.trim()))
       .filter((value) => !Number.isNaN(value));
 
     const weeklySchedule = parseWeeklySchedule(
-      getSetting(settings, "bookings.weekly_hours", ""),
+      getSetting(scopedSettings, "bookings.weekly_hours", ""),
       startTime,
       endTime,
       availableDays
@@ -171,6 +192,7 @@ export async function POST(request: Request) {
     const googleAvailability = await isGoogleSlotAvailable(prisma, {
       start: bookingDate,
       end: bookingEnd,
+      userId: tenantUserId,
     });
     if (googleAvailability.enabled && !googleAvailability.available) {
       return NextResponse.json(
@@ -182,6 +204,7 @@ export async function POST(request: Request) {
     const existingBooking = await prisma.booking.findFirst({
       where: {
         date: bookingDate,
+        createdById: tenantUserId,
         status: { in: ["PENDING", "SCHEDULED", "CONFIRMED"] },
       },
       select: { id: true },
@@ -196,6 +219,7 @@ export async function POST(request: Request) {
       where: {
         createdAt: { gte: duplicateWindow },
         date: bookingDate,
+        createdById: tenantUserId,
         status: { in: ["PENDING", "SCHEDULED", "CONFIRMED"] },
         OR: clientEmail
           ? [
@@ -213,18 +237,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const creator = await prisma.user.findFirst({
-      orderBy: { createdAt: "asc" },
-      select: { id: true },
-    });
-
-    if (!creator) {
-      return NextResponse.json(
-        { error: "Geen interne gebruiker beschikbaar voor boekingen." },
-        { status: 500 }
-      );
-    }
-
     const booking = await prisma.booking.create({
       data: {
         clientName,
@@ -233,7 +245,7 @@ export async function POST(request: Request) {
         duration,
         notes: notes || "Aangemaakt via booking embed",
         status: "PENDING",
-        createdById: creator.id,
+        createdById: tenantUserId,
       },
     });
     try {
@@ -248,6 +260,7 @@ export async function POST(request: Request) {
           `Notities: ${booking.notes || "-"}`,
         ].join("\n"),
         attendeeEmail: booking.clientEmail || undefined,
+        userId: tenantUserId,
       });
 
       if (event.synced && event.eventId) {
@@ -266,8 +279,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const companyName = getSetting(settings, "branding.company_name", "Digitify");
-    const adminRecipient = getSetting(settings, "company.email") || getSetting(settings, "email.from_email");
+    const companyName = getSetting(scopedSettings, "branding.company_name", "Digitify");
+    const adminRecipient = getSetting(scopedSettings, "company.email") || getSetting(scopedSettings, "email.from_email");
     const bookingDateLabel = booking.date.toLocaleString("nl-BE", {
       day: "numeric",
       month: "long",
@@ -293,6 +306,7 @@ export async function POST(request: Request) {
           `We sturen u zo snel mogelijk een bevestiging.`,
         ].join("\n"),
         recipientCompany: clientName,
+        userId: tenantUserId,
       }).catch(() => null);
     }
 
@@ -310,6 +324,7 @@ export async function POST(request: Request) {
           `Notities: ${notesText}`,
         ].join("\n"),
         recipientCompany: companyName,
+        userId: tenantUserId,
       }).catch(() => null);
     }
 

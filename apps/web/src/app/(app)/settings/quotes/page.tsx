@@ -1214,15 +1214,20 @@ export default function QuoteSettingsPage() {
     );
   }, [servicesQuery.data]);
 
+  const tenantToken = useMemo(() => {
+    const value = settings?.["chatbot.public_tenant_token"];
+    return typeof value === "string" ? value.trim() : "";
+  }, [settings]);
+
   const embedCode = useMemo(
     () => `<iframe
-  src="${getAppUrl()}/embed/quotes"
+  src="${getAppUrl()}/embed/quotes${tenantToken ? `?tenant=${encodeURIComponent(tenantToken)}` : ""}"
   width="100%"
   height="900"
   style="border:0;border-radius:24px;overflow:hidden"
   loading="lazy"
 ></iframe>`,
-    []
+    [tenantToken]
   );
 
   const builderProductChoices = useMemo(

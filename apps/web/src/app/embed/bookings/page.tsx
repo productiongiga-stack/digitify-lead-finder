@@ -221,6 +221,7 @@ function BookingEmbedContent() {
   const meetingLocation = params.get("location") || "Google Meet";
   const timezone = params.get("timezone") || "Europe/Brussels";
   const defaultTimeMode = params.get("timeMode") === "12" ? "12" : "24";
+  const tenant = params.get("tenant") || "";
 
   const today = useMemo(() => new Date(), []);
   const todayKey = useMemo(() => formatDateKey(today), [today]);
@@ -282,6 +283,7 @@ function BookingEmbedContent() {
         duration,
         notes,
         website,
+        tenant: tenant || undefined,
       }),
     });
 

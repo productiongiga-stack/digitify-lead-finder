@@ -12,6 +12,10 @@ function sanitizeFilename(value: string) {
   return value.replace(/[^a-zA-Z0-9-_]/g, "-");
 }
 
+function userSettingPrefix(userId: string) {
+  return `user:${userId}:`;
+}
+
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const url = new URL(request.url);
@@ -31,8 +35,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "Offerte niet gevonden" }, { status: 404 });
   }
 
-  const settingsRows = await prisma.setting.findMany();
-  const settings = Object.fromEntries(settingsRows.map((row) => [row.key, row.value]));
+  const prefix = userSettingPrefix(quote.createdById);
+  const settingsRows = await prisma.setting.findMany({
+    where: { key: { startsWith: prefix } },
+  });
+  const settings = Object.fromEntries(
+    settingsRows.map((row) => [row.key.replace(prefix, ""), row.value]),
+  );
   const html = buildQuotePdfHtml({ quote, settings });
   const buffer = await renderQuotePdfBuffer(html);
 

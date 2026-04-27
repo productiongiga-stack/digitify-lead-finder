@@ -323,6 +323,8 @@ export default function BookingSettingsPage() {
     : googleServiceAccountEmail.trim()
       ? `Service account actief: ${googleServiceAccountEmail.trim()}`
       : "Nog geen Google Agenda verbinding";
+  const publicTenantToken = readSettingString(settings || {}, "chatbot.public_tenant_token", "");
+  const bookingPreviewUrl = `${getAppUrl()}/embed/bookings${publicTenantToken ? `?tenant=${encodeURIComponent(publicTenantToken)}` : ""}`;
 
   const embedCode = useMemo(() => {
     const url = new URL(`${getAppUrl()}/embed/bookings`);
@@ -342,6 +344,7 @@ export default function BookingSettingsPage() {
     url.searchParams.set("endTime", fallbackWindow.end);
     url.searchParams.set("availableDays", availableDaysCsv || "1,2,3,4,5");
     url.searchParams.set("weeklyHours", JSON.stringify(weeklyHours));
+    if (publicTenantToken) url.searchParams.set("tenant", publicTenantToken);
 
     return `<iframe
   src="${url.toString()}"
@@ -367,6 +370,7 @@ export default function BookingSettingsPage() {
     fallbackWindow.end,
     availableDaysCsv,
     weeklyHours,
+    publicTenantToken,
   ]);
 
   function updateDay(day: DayKey, patch: Partial<DaySchedule>) {
@@ -551,7 +555,7 @@ export default function BookingSettingsPage() {
                 Open Google tab
               </Button>
               <Button type="button" variant="outline" asChild>
-                <a href={`${getAppUrl()}/embed/bookings`} target="_blank" rel="noreferrer">
+                <a href={bookingPreviewUrl} target="_blank" rel="noreferrer">
                   <ExternalLink className="mr-2 h-4 w-4" />
                   Open live bookingpagina
                 </a>
@@ -787,7 +791,7 @@ export default function BookingSettingsPage() {
                       Controleer de compacte publieke flow rechtstreeks in de browser.
                     </p>
                     <Button className="mt-3" type="button" variant="outline" asChild>
-                      <a href={`${getAppUrl()}/embed/bookings`} target="_blank" rel="noreferrer">Open voorbeeld</a>
+                      <a href={bookingPreviewUrl} target="_blank" rel="noreferrer">Open voorbeeld</a>
                     </Button>
                   </div>
                   <div className="rounded-2xl border p-4">

@@ -7,12 +7,13 @@ import {
   redactSecretSettingValue,
   SECRET_REDACTION_MASK,
 } from "@digitify/db";
-import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
+import { router, publicProcedure, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
 import { loadEmailSettings } from "../lib/email-sender";
 import { formatSmtpErrorMessage, normalizeTlsOptions } from "../lib/email-utils";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadUserSettingRows, userSettingKey } from "../lib/user-settings";
 import { assertCanManageSettingKey, canReadSettingKey, filterReadableSettingsForRole } from "../lib/permissions";
+import { ensureUserWorkspace } from "../lib/user-workspace";
 
 /* ---------- helpers ---------- */
 
@@ -142,9 +143,70 @@ function buildSmtpDnsGuide(input: { smtpHost: string; smtpUser: string; fromEmai
 }
 
 export const settingsRouter = router({
+  getPublicMarketingFooter: publicProcedure.query(async ({ ctx }) => {
+    const owner = await ctx.db.user.findFirst({
+      where: { role: "OWNER" },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+
+    if (!owner) {
+      return {
+        brandName: "Digitify Lead Finder",
+        tagline: "Partner in Digital Solutions",
+        description: "Premium lead discovery en opvolging voor bedrijven die digitale groei praktisch willen organiseren.",
+        email: "hello@digitify.be",
+        phone: "+32 (0) 486 51 57 73",
+        location: "België",
+        websiteLabel: "www.digitify.be",
+        websiteUrl: "https://www.digitify.be",
+        legalLine: `© ${new Date().getFullYear()} Digitify`,
+        copyrightLine: `© ${new Date().getFullYear()} Digitify. Webdesign, media en marketing voor digitale groei.`,
+      };
+    }
+
+    const keys = [
+      "company.footer_brand_name",
+      "company.footer_tagline",
+      "company.footer_description",
+      "company.footer_email",
+      "company.footer_phone",
+      "company.footer_location",
+      "company.footer_website_label",
+      "company.footer_website_url",
+      "company.footer_legal_line",
+      "company.footer_copyright_line",
+    ];
+    const rows = await loadUserSettingRows(ctx.db, owner.id, keys);
+    const settings = settingsRowsToMap(rows);
+    const year = new Date().getFullYear();
+
+    return {
+      brandName: getSettingString(settings, "company.footer_brand_name", "Digitify Lead Finder"),
+      tagline: getSettingString(settings, "company.footer_tagline", "Partner in Digital Solutions"),
+      description: getSettingString(
+        settings,
+        "company.footer_description",
+        "Premium lead discovery en opvolging voor bedrijven die digitale groei praktisch willen organiseren.",
+      ),
+      email: getSettingString(settings, "company.footer_email", "hello@digitify.be"),
+      phone: getSettingString(settings, "company.footer_phone", "+32 (0) 486 51 57 73"),
+      location: getSettingString(settings, "company.footer_location", "België"),
+      websiteLabel: getSettingString(settings, "company.footer_website_label", "www.digitify.be"),
+      websiteUrl: getSettingString(settings, "company.footer_website_url", "https://www.digitify.be"),
+      legalLine: getSettingString(settings, "company.footer_legal_line", `© ${year} Digitify`),
+      copyrightLine: getSettingString(
+        settings,
+        "company.footer_copyright_line",
+        `© ${year} Digitify. Webdesign, media en marketing voor digitale groei.`,
+      ),
+    };
+  }),
+
   get: protectedProcedure
     .input(z.object({ key: z.string() }))
     .query(async ({ ctx, input }) => {
+      await ensureUserWorkspace(ctx.db, ctx.user.id, ctx.user.name);
       const setting = await ctx.db.setting.findUnique({ where: { key: userSettingKey(ctx.user.id, input.key) } });
       if (!canReadSettingKey(ctx.user.role, input.key)) return null;
       if (!setting) return null;
@@ -154,6 +216,7 @@ export const settingsRouter = router({
     }),
 
   getAll: protectedProcedure.query(async ({ ctx }) => {
+    await ensureUserWorkspace(ctx.db, ctx.user.id, ctx.user.name);
     const rows = await loadUserSettingRows(ctx.db, ctx.user.id);
     const map = settingsRowsToMap(rows);
     return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));

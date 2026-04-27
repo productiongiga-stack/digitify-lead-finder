@@ -5,7 +5,6 @@ import {
   Users,
   Target,
   SendHorizonal,
-  Inbox,
   FileText,
   Settings,
   Calendar,
@@ -32,27 +31,32 @@ export type NavItem = {
   activeMatch?: (pathname: string) => boolean;
 };
 
+export type QuickNavItem = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+};
+
 export const MAIN_NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/leads/search", label: "Lead Zoeken", icon: Search },
   {
     href: "/leads",
     label: "Leads",
     icon: Users,
-    activeMatch: (pathname) =>
-      pathname === "/leads" || (pathname.startsWith("/leads/") && !pathname.startsWith("/leads/search")),
+    activeMatch: (pathname) => {
+      if (pathname === "/leads" || (pathname.startsWith("/leads/") && !pathname.startsWith("/leads/search"))) return true;
+      return LEADS_WORKFLOW_ITEMS.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+    },
   },
+];
+
+export const LEADS_WORKFLOW_ITEMS: QuickNavItem[] = [
+  { href: "/leads/search", label: "Leads zoeken", icon: Search },
   { href: "/campaigns", label: "Campagnes", icon: Target },
-  { href: "/contacts/inbox", label: "Inbox", icon: Inbox },
-  {
-    href: "/contacts",
-    label: "Outbound",
-    icon: SendHorizonal,
-    activeMatch: (pathname) =>
-      pathname === "/contacts" || (pathname.startsWith("/contacts/") && !pathname.startsWith("/contacts/inbox")),
-  },
-  { href: "/reports", label: "Rapporten", icon: FileText },
+  { href: "/contacts", label: "Outbound", icon: SendHorizonal },
   { href: "/quotes", label: "Offertes", icon: Receipt },
+  { href: "/reports", label: "Rapporten", icon: FileText },
+  { href: "/crm", label: "CRM", icon: Building2 },
 ];
 
 export const TOOL_NAV_ITEMS: NavItem[] = [
@@ -83,12 +87,12 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/pipeline", title: "Pipeline Stages", description: "Beheer je sales pipeline stappen", icon: GitBranch, allowedRoles: ["OWNER", "ADMIN"] },
   { href: "/settings/ai", title: "AI Assistent", description: "Model, taal en tone of voice", icon: Bot, allowedRoles: ["OWNER"] },
   { href: "/settings/company", title: "Bedrijfsgegevens", description: "Naam, adres, BTW en KBO", icon: Building2, allowedRoles: ["OWNER"] },
-  { href: "/settings/bookings", title: "Booking Widget", description: "Beschikbaarheid en booking embed", icon: Calendar, allowedRoles: ["OWNER", "ADMIN"] },
-  { href: "/settings/reviews", title: "Review Widget", description: "Review links, embed en instellingen", icon: Star, allowedRoles: ["OWNER", "ADMIN"] },
-  { href: "/settings/quotes", title: "Offerte Configurator", description: "Template, teksten en flow", icon: Receipt, allowedRoles: ["OWNER", "ADMIN"] },
-  { href: "/settings/display", title: "Weergave", description: "UI dichtheid en mail/PDF typografie", icon: SlidersHorizontal, allowedRoles: ["OWNER", "ADMIN", "MEMBER", "VIEWER"] },
-  { href: "/settings/chatbot", title: "Chatbot Widget", description: "Widgetgedrag en trainingsinstellingen", icon: MessageSquare, allowedRoles: ["OWNER", "ADMIN"] },
-  { href: "/settings/feedback", title: "Feedback", description: "Bekijk en behandel feedback uit de app", icon: MessageSquareWarning, allowedRoles: ["OWNER", "ADMIN"] },
+  { href: "/settings/bookings", title: "Booking Widget", description: "Beschikbaarheid en booking embed", icon: Calendar, allowedRoles: ["OWNER", "ADMIN", "MEMBER"] },
+  { href: "/settings/reviews", title: "Review Widget", description: "Review links, embed en instellingen", icon: Star, allowedRoles: ["OWNER", "ADMIN", "MODERATOR", "MEMBER"] },
+  { href: "/settings/quotes", title: "Offerte Configurator", description: "Template, teksten en flow", icon: Receipt, allowedRoles: ["OWNER", "ADMIN", "MEMBER"] },
+  { href: "/settings/display", title: "Weergave", description: "UI dichtheid en mail/PDF typografie", icon: SlidersHorizontal, allowedRoles: ["OWNER", "ADMIN", "MODERATOR", "MEMBER", "TESTER", "TRIAL", "VIEWER"] },
+  { href: "/settings/chatbot", title: "Chatbot Widget", description: "Widgetgedrag en trainingsinstellingen", icon: MessageSquare, allowedRoles: ["OWNER", "ADMIN", "MODERATOR", "MEMBER"] },
+  { href: "/settings/feedback", title: "Feedback", description: "Bekijk en behandel feedback uit de app", icon: MessageSquareWarning, allowedRoles: ["OWNER", "ADMIN", "MODERATOR", "MEMBER"] },
 ];
 
 type PageTitleRoute = { path: string; title: string };
@@ -108,6 +112,7 @@ const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
   { path: "/quotes/new", title: "Nieuwe Offerte" },
   { path: "/quotes", title: "Offertes" },
   { path: "/reports", title: "Rapporten" },
+  { path: "/crm", title: "CRM" },
   { path: "/bookings", title: "Boekingen" },
   { path: "/domains", title: "Domeinen" },
   { path: "/reviews", title: "Reviews" },

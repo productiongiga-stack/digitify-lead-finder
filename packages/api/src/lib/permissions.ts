@@ -11,10 +11,19 @@ const VISUAL_SETTING_KEYS = new Set([
 
 const PERSONAL_SETTING_PREFIXES = ["ui.", "display."];
 const ADMIN_SETTING_PREFIXES = ["bookings.", "reviews.", "quotes.", "chatbot.", ...PERSONAL_SETTING_PREFIXES];
+const MEMBER_SETTING_PREFIXES = ["bookings.", "reviews.", "quotes.", "chatbot.", "pipeline.", "scoring.", ...PERSONAL_SETTING_PREFIXES];
 const OWNER_SETTING_PREFIXES = ["api.", "email.", "branding.", "company.", "openclaw."];
 
 export function normalizeRole(role: string | null | undefined): AppRole {
-  if (role === "OWNER" || role === "ADMIN" || role === "VIEWER") return role;
+  if (
+    role === "OWNER" ||
+    role === "ADMIN" ||
+    role === "MODERATOR" ||
+    role === "MEMBER" ||
+    role === "TRIAL" ||
+    role === "TESTER" ||
+    role === "VIEWER"
+  ) return role;
   return "MEMBER";
 }
 
@@ -27,6 +36,10 @@ export function canReadSettingKey(roleValue: string | null | undefined, key: str
   if (role === "OWNER") return true;
   if (VISUAL_SETTING_KEYS.has(key) || keyStartsWith(key, PERSONAL_SETTING_PREFIXES)) return true;
   if (role === "ADMIN") return keyStartsWith(key, ADMIN_SETTING_PREFIXES) && !keyStartsWith(key, OWNER_SETTING_PREFIXES);
+  if (role === "MEMBER") return keyStartsWith(key, MEMBER_SETTING_PREFIXES) && !keyStartsWith(key, OWNER_SETTING_PREFIXES);
+  if (role === "MODERATOR") return keyStartsWith(key, ["reviews.", "chatbot.", "quotes.", ...PERSONAL_SETTING_PREFIXES]);
+  if (role === "TESTER") return keyStartsWith(key, PERSONAL_SETTING_PREFIXES);
+  if (role === "TRIAL") return keyStartsWith(key, PERSONAL_SETTING_PREFIXES);
   return false;
 }
 
@@ -34,6 +47,10 @@ export function canManageSettingKey(roleValue: string | null | undefined, key: s
   const role = normalizeRole(roleValue);
   if (role === "OWNER") return true;
   if (role === "ADMIN") return keyStartsWith(key, ADMIN_SETTING_PREFIXES) && !keyStartsWith(key, OWNER_SETTING_PREFIXES);
+  if (role === "MEMBER") return keyStartsWith(key, MEMBER_SETTING_PREFIXES) && !keyStartsWith(key, OWNER_SETTING_PREFIXES);
+  if (role === "MODERATOR") return keyStartsWith(key, ["reviews.", "chatbot.", ...PERSONAL_SETTING_PREFIXES]);
+  if (role === "TESTER") return keyStartsWith(key, PERSONAL_SETTING_PREFIXES);
+  if (role === "TRIAL") return keyStartsWith(key, PERSONAL_SETTING_PREFIXES);
   return keyStartsWith(key, PERSONAL_SETTING_PREFIXES);
 }
 
@@ -55,6 +72,6 @@ export function filterReadableSettingsForRole<T>(role: string | null | undefined
 export function canApproveRole(approverRole: string | null | undefined, targetRole: AppRole) {
   const role = normalizeRole(approverRole);
   if (role === "OWNER") return true;
-  if (role === "ADMIN") return targetRole === "MEMBER" || targetRole === "VIEWER";
+  if (role === "ADMIN") return targetRole === "MEMBER" || targetRole === "TRIAL" || targetRole === "TESTER" || targetRole === "VIEWER";
   return false;
 }
