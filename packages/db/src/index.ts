@@ -1,17 +1,20 @@
 import { PrismaClient } from "@prisma/client";
 
-const pooledUrl = process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL;
-const directUrl = process.env.POSTGRES_URL_NON_POOLING || process.env.DIRECT_URL;
-
-// Prefer pooled connection URLs in production/serverless for lower latency and fewer connection churn issues.
-process.env.DATABASE_URL =
-  process.env.NODE_ENV === "production"
-    ? pooledUrl || process.env.DATABASE_URL
-    : process.env.DATABASE_URL || pooledUrl;
-
-if (!process.env.DIRECT_URL && directUrl) {
-  process.env.DIRECT_URL = directUrl;
+function nonEmpty(value: string | undefined | null): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }
+
+// Never override an explicitly provided DATABASE_URL.
+// Fallbacks are only used when DATABASE_URL is missing.
+process.env.DATABASE_URL =
+  nonEmpty(process.env.DATABASE_URL) ||
+  nonEmpty(process.env.POSTGRES_PRISMA_URL) ||
+  nonEmpty(process.env.POSTGRES_URL);
+
+process.env.DIRECT_URL =
+  nonEmpty(process.env.DIRECT_URL) ||
+  nonEmpty(process.env.POSTGRES_URL_NON_POOLING);
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
