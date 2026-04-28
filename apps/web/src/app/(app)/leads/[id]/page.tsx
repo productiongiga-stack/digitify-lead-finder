@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { getAppUrl } from "@/lib/config";
 import {
@@ -111,14 +111,18 @@ function AuditItem({ label, value }: { label: string; value: boolean | null | un
 
 /* ---------- main page ---------- */
 
-export default function LeadDetailPage() {
-  const params = useParams<{ id?: string | string[] }>();
-  const id = Array.isArray(params.id) ? params.id[0] : params.id;
-  const leadId = id ?? "";
+export default function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const leadId = id;
   const router = useRouter();
-  const { data: lead, isLoading } = trpc.lead.getById.useQuery(
+  const { data: lead, isError: leadIsError, isFetching, isLoading } = trpc.lead.getById.useQuery(
     { id: leadId },
-    { enabled: Boolean(leadId) }
+    {
+      enabled: Boolean(leadId),
+      refetchOnMount: "always",
+      refetchOnReconnect: true,
+      staleTime: 0,
+    }
   );
   const duplicateQuery = trpc.lead.findDuplicates.useQuery(
     { leadId },
@@ -171,7 +175,7 @@ export default function LeadDetailPage() {
   });
 
   /* loading skeleton */
-  if (isLoading) {
+  if (isLoading || isFetching) {
     return (
       <div className="space-y-5 p-1">
         <div className="flex items-center gap-4">
@@ -198,7 +202,7 @@ export default function LeadDetailPage() {
     );
   }
 
-  if (!id || !lead) {
+  if (!id || (leadIsError && !lead) || (!isLoading && !isFetching && !lead)) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="text-center">

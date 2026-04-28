@@ -10,11 +10,13 @@ const TENANT_SCHEMA_STATEMENTS = [
   `ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'MODERATOR'`,
   `ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'TRIAL'`,
   `ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'TESTER'`,
+  `DO $$ BEGIN CREATE TYPE "EmailType" AS ENUM ('LEAD_CONTACT', 'QUOTE', 'REPLY', 'FOLLOW_UP', 'REVIEW_REQUEST', 'TRANSACTIONAL'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 
   `ALTER TABLE "pipeline_stages" ADD COLUMN IF NOT EXISTS "createdById" TEXT`,
   `ALTER TABLE "tags" ADD COLUMN IF NOT EXISTS "createdById" TEXT`,
   `ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "createdById" TEXT`,
   `ALTER TABLE "service_catalog" ADD COLUMN IF NOT EXISTS "createdById" TEXT`,
+  `ALTER TABLE "email_drafts" ADD COLUMN IF NOT EXISTS "type" "EmailType" NOT NULL DEFAULT 'LEAD_CONTACT'`,
 
   `DROP INDEX IF EXISTS "pipeline_stages_name_key"`,
   `DROP INDEX IF EXISTS "tags_name_key"`,
@@ -51,6 +53,7 @@ const TENANT_SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS "activities_userId_createdAt_idx" ON "activities"("userId", "createdAt" DESC)`,
   `CREATE INDEX IF NOT EXISTS "email_drafts_authorId_idx" ON "email_drafts"("authorId")`,
   `CREATE INDEX IF NOT EXISTS "email_drafts_approverId_idx" ON "email_drafts"("approverId")`,
+  `CREATE INDEX IF NOT EXISTS "email_drafts_type_idx" ON "email_drafts"("type")`,
   `CREATE INDEX IF NOT EXISTS "chat_sessions_assignedToId_updatedAt_idx" ON "chat_sessions"("assignedToId", "updatedAt" DESC)`,
 ];
 
