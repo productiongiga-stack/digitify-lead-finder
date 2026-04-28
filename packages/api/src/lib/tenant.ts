@@ -1,13 +1,22 @@
 import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
 
+export function leadAccessWhere(userId: string) {
+  return {
+    OR: [
+      { createdById: userId },
+      { assignedToId: userId },
+    ],
+  };
+}
+
 export function ownedLeadWhere(userId: string, extra: Record<string, unknown> = {}) {
-  return { ...extra, createdById: userId };
+  return { AND: [leadAccessWhere(userId), extra] };
 }
 
 export async function assertLeadAccess(db: PrismaClient, userId: string, leadId: string) {
   const lead = await db.lead.findFirst({
-    where: { id: leadId, createdById: userId },
+    where: ownedLeadWhere(userId, { id: leadId }),
     select: { id: true },
   });
   if (!lead) {

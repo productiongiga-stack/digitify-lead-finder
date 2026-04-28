@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
-import { assertLeadAccess } from "../lib/tenant";
+import { assertLeadAccess, ownedLeadWhere } from "../lib/tenant";
 
 const DEMO_LEAD_NAMES = [
   "Bakkerij Van Damme",
@@ -112,7 +112,7 @@ export const leadRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const { filters, sortBy, sortDir, page, pageSize } = input;
-      const where: Record<string, unknown> = { createdById: ctx.user.id };
+      const where: Record<string, unknown> = ownedLeadWhere(ctx.user.id);
       const [ownedPipelineStageIds, ownedTagIds] = await Promise.all([
         filters?.pipelineStageIds?.length
           ? ctx.db.pipelineStage.findMany({
@@ -198,7 +198,7 @@ export const leadRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const lead = await ctx.db.lead.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: ownedLeadWhere(ctx.user.id, { id: input.id }),
         include: {
           tags: { include: { tag: true } },
           pipelineStage: true,
