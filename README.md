@@ -1,5 +1,7 @@
 # Digitify Lead Search
 
+**V1.0.0 ALPHA**
+
 Slimme lead generation en outreach tool voor Digitify. Zoek bedrijven, analyseer hun online zichtbaarheid, score op opportuniteit, en contacteer via e-mail - met AI-assistent OpenClaw.
 
 ## Quick Start
