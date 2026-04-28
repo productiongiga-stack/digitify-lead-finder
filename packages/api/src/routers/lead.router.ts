@@ -198,7 +198,7 @@ export const leadRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const lead = await ctx.db.lead.findFirst({
-        where: ownedLeadWhere(ctx.user.id, { id: input.id }, ctx.user.role),
+        where: { id: input.id },
         include: {
           tags: { include: { tag: true } },
           pipelineStage: true,
