@@ -1,31 +1,19 @@
 import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
 
-function hasGlobalLeadAccess(role: string | null | undefined) {
-  return role === "OWNER" || role === "ADMIN";
-}
-
-export function leadAccessWhere(userId: string, role?: string | null) {
-  if (hasGlobalLeadAccess(role)) return {};
+export function leadAccessWhere(userId: string) {
   return {
-    OR: [
-      { createdById: userId },
-      { assignedToId: userId },
-    ],
+    createdById: userId,
   };
 }
 
-export function ownedLeadWhere(userId: string, extra: Record<string, unknown> = {}, role?: string | null) {
-  return { AND: [leadAccessWhere(userId, role), extra] };
+export function ownedLeadWhere(userId: string, extra: Record<string, unknown> = {}) {
+  return { ...extra, ...leadAccessWhere(userId) };
 }
 
 export async function assertLeadAccess(db: PrismaClient, userId: string, leadId: string) {
-  const user = await db.user.findUnique({
-    where: { id: userId },
-    select: { role: true },
-  });
   const lead = await db.lead.findFirst({
-    where: ownedLeadWhere(userId, { id: leadId }, user?.role),
+    where: ownedLeadWhere(userId, { id: leadId }),
     select: { id: true },
   });
   if (!lead) {

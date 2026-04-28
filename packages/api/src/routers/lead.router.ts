@@ -112,7 +112,7 @@ export const leadRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const { filters, sortBy, sortDir, page, pageSize } = input;
-      const where: Record<string, unknown> = ownedLeadWhere(ctx.user.id, {}, ctx.user.role);
+      const where: Record<string, unknown> = ownedLeadWhere(ctx.user.id);
       const [ownedPipelineStageIds, ownedTagIds] = await Promise.all([
         filters?.pipelineStageIds?.length
           ? ctx.db.pipelineStage.findMany({
@@ -198,7 +198,7 @@ export const leadRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const lead = await ctx.db.lead.findFirst({
-        where: { id: input.id },
+        where: ownedLeadWhere(ctx.user.id, { id: input.id }),
         include: {
           tags: { include: { tag: true } },
           pipelineStage: true,
