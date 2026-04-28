@@ -3,6 +3,8 @@ import { TRPCError } from "@trpc/server";
 const KEY_PATTERN = /^[a-z0-9]+(?:\.[a-z0-9_]+)+$/;
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 const HOST_PATTERN = /^(?=.{1,255}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i;
+const DEFAULT_MAX_STRING_LENGTH = 10_000;
+const MAX_IMAGE_DATA_URL_LENGTH = 3_000_000;
 const LEGACY_KEY_PATTERN = /^[a-z0-9_]+$/;
 const LEGACY_SETTING_KEYS = new Set([
   "openclaw_language",
@@ -75,6 +77,10 @@ function isLikelyUrlKey(key: string) {
   return key.endsWith("_url") || key === "branding.logo_url" || key === "branding.favicon_url";
 }
 
+function isImageAssetKey(key: string) {
+  return key === "branding.logo_url" || key === "branding.favicon_url" || key === "chatbot.avatar_url";
+}
+
 function isWebsiteKey(key: string) {
   return key.endsWith(".website") || key.endsWith("_website") || key === "company.footer_website_url";
 }
@@ -84,8 +90,11 @@ function isLikelyHostKey(key: string) {
 }
 
 function validateStringValue(key: string, value: string) {
-  if (value.length > 10_000) {
-    invalid(`Instelling "${key}" is te lang (max 10000 tekens).`);
+  const maxLength = isImageAssetKey(key) && value.startsWith("data:image/")
+    ? MAX_IMAGE_DATA_URL_LENGTH
+    : DEFAULT_MAX_STRING_LENGTH;
+  if (value.length > maxLength) {
+    invalid(`Instelling "${key}" is te lang (max ${maxLength} tekens).`);
   }
 
   if (isLikelyEmailKey(key) && value) {

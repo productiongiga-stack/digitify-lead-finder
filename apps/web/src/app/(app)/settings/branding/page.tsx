@@ -106,8 +106,13 @@ export default function BrandingSettingsPage() {
         title: type === "logo" ? "Logo bijgewerkt" : "Favicon bijgewerkt",
         description: "De branding-afbeelding is opgeslagen.",
       });
-    } catch {
-      showToast({ title: "Upload mislukt", description: "Kon het bestand niet opslaan.", variant: "error" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      showToast({
+        title: "Upload mislukt",
+        description: message || "Kon het bestand niet opslaan.",
+        variant: "error",
+      });
     } finally {
       setUploading(null);
     }

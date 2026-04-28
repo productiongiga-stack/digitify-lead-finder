@@ -39,6 +39,12 @@ describe("setting value validation", () => {
     expect(() => validateSettingValue("branding.primary_color", "red")).toThrow(TRPCError);
   });
 
+  it("allows larger data image URLs for uploaded branding assets", () => {
+    const dataUrl = `data:image/png;base64,${"a".repeat(25_000)}`;
+    expect(validateSettingValue("branding.logo_url", dataUrl)).toBe(dataUrl);
+    expect(() => validateSettingValue("email.signature", dataUrl)).toThrow(TRPCError);
+  });
+
   it("accepts website fields with or without protocol and treats website labels as text", () => {
     expect(validateSettingValue("company.website", "www.digitify.be")).toBe("www.digitify.be");
     expect(validateSettingValue("branding.website", "https://digitify.be")).toBe("https://digitify.be");
