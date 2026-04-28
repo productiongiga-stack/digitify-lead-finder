@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui-store";
 import { useBranding } from "@/lib/branding";
-import { MAIN_NAV_ITEMS, TOOL_NAV_ITEMS, BOTTOM_NAV_ITEMS, LEADS_WORKFLOW_ITEMS, isNavItemActive } from "@/lib/navigation";
+import { MAIN_NAV_ITEMS, TOOL_NAV_ITEMS, BOTTOM_NAV_ITEMS, LEADS_MENU_ITEMS, isNavItemActive } from "@/lib/navigation";
 import { Button } from "@digitify/ui";
 import { ScrollArea } from "@digitify/ui";
 import { Separator } from "@digitify/ui";
@@ -25,7 +25,7 @@ export function Sidebar() {
   const router = useRouter();
   const { sidebarCollapsed, toggleSidebar, mobileSidebarOpen, setMobileSidebarOpen } = useUIStore();
   const { branding } = useBranding();
-  const hasLeadWorkflowMatch = LEADS_WORKFLOW_ITEMS.some(
+  const hasLeadWorkflowMatch = LEADS_MENU_ITEMS.some(
     (entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`)
   );
   const [leadWorkflowOpen, setLeadWorkflowOpen] = useState(hasLeadWorkflowMatch);
@@ -38,7 +38,7 @@ export function Sidebar() {
     // Warm common app routes so first navigation feels instant.
     const routes = [
       ...MAIN_NAV_ITEMS.map((item) => item.href),
-      ...LEADS_WORKFLOW_ITEMS.map((item) => item.href),
+      ...LEADS_MENU_ITEMS.map((item) => item.href),
       ...TOOL_NAV_ITEMS.map((item) => item.href),
       ...BOTTOM_NAV_ITEMS.map((item) => item.href),
     ];
@@ -118,9 +118,9 @@ export function Sidebar() {
         <nav className="space-y-1 px-2">
           {MAIN_NAV_ITEMS.map((item) => {
             const isActive = isNavItemActive(item, pathname);
-            const canShowLeadWorkflow = item.href === "/leads" && !collapsed;
+            const isLeadNavItem = item.href === "/leads";
 
-            if (canShowLeadWorkflow) {
+            if (isLeadNavItem) {
               return (
                 <div key={item.href} className="space-y-1">
                   <div
@@ -131,27 +131,36 @@ export function Sidebar() {
                         : "text-muted-foreground hover:bg-accent/80 hover:text-accent-foreground"
                     )}
                   >
-                    <Link
-                      href={item.href}
-                      onClick={() => setMobileSidebarOpen(false)}
-                      onMouseEnter={() => router.prefetch(item.href)}
-                      className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2.5 text-sm font-medium"
-                    >
-                      <item.icon className="h-4 w-4 shrink-0" />
-                      <span>{item.label}</span>
-                    </Link>
                     <button
                       type="button"
-                      className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/80 hover:text-accent-foreground"
-                      onClick={() => setLeadWorkflowOpen((prev) => !prev)}
-                      aria-label="Leads workflow tonen"
+                      onClick={() => {
+                        if (collapsed) {
+                          toggleSidebar();
+                          setLeadWorkflowOpen(true);
+                          return;
+                        }
+                        setLeadWorkflowOpen((prev) => !prev);
+                      }}
+                      className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2.5 text-left text-sm font-medium"
                     >
-                      <ChevronDown className={cn("h-4 w-4 transition-transform", leadWorkflowOpen && "rotate-180")} />
+                      <item.icon className="h-4 w-4 shrink-0" />
+                      {!collapsed && <span>{item.label}</span>}
                     </button>
+                    {!collapsed ? (
+                      <button
+                        type="button"
+                        className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/80 hover:text-accent-foreground"
+                        onClick={() => setLeadWorkflowOpen((prev) => !prev)}
+                        aria-label="Leads dropdown tonen"
+                        aria-expanded={leadWorkflowOpen}
+                      >
+                        <ChevronDown className={cn("h-4 w-4 transition-transform", leadWorkflowOpen && "rotate-180")} />
+                      </button>
+                    ) : null}
                   </div>
-                  {leadWorkflowOpen ? (
+                  {leadWorkflowOpen && !collapsed ? (
                     <div className="ml-6 space-y-1 border-l pl-2">
-                      {LEADS_WORKFLOW_ITEMS.map((entry) => {
+                      {LEADS_MENU_ITEMS.map((entry) => {
                         const workflowActive = pathname === entry.href || pathname.startsWith(`${entry.href}/`);
                         return (
                           <Link

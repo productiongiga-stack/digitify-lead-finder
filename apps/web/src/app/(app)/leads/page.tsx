@@ -54,7 +54,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { cn, formatScore, formatDate, safeExternalUrl } from "@/lib/utils";
-import { LEADS_WORKFLOW_ITEMS } from "@/lib/navigation";
+import { LEADS_MENU_ITEMS } from "@/lib/navigation";
 
 type Lead = {
   id: string;
@@ -482,7 +482,7 @@ export default function LeadsPage() {
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>Leads Dropdown</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {LEADS_WORKFLOW_ITEMS.map((item) => (
+              {LEADS_MENU_ITEMS.map((item) => (
                 <DropdownMenuItem key={item.href} asChild>
                   <Link href={item.href}>
                     <item.icon className="mr-2 h-4 w-4" />

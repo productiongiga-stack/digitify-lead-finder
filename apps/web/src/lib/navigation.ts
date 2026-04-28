@@ -60,6 +60,11 @@ export const LEADS_WORKFLOW_ITEMS: QuickNavItem[] = [
   { href: "/crm", label: "CRM", icon: Building2 },
 ];
 
+export const LEADS_MENU_ITEMS: QuickNavItem[] = [
+  { href: "/leads", label: "Leads", icon: Users },
+  ...LEADS_WORKFLOW_ITEMS,
+];
+
 export const TOOL_NAV_ITEMS: NavItem[] = [
   { href: "/bookings", label: "Boekingen", icon: Calendar },
   { href: "/domains", label: "Domeinen", icon: Globe2 },

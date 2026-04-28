@@ -1,8 +1,8 @@
 "use client";
 
-import { use, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { getAppUrl } from "@/lib/config";
 import {
@@ -111,10 +111,14 @@ function AuditItem({ label, value }: { label: string; value: boolean | null | un
 
 /* ---------- main page ---------- */
 
-export default function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function LeadDetailPage() {
+  const params = useParams<{ id?: string | string[] }>();
+  const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const router = useRouter();
-  const { data: lead, isLoading } = trpc.lead.getById.useQuery({ id });
+  const { data: lead, isLoading } = trpc.lead.getById.useQuery(
+    { id: id ?? "" },
+    { enabled: Boolean(id) }
+  );
   const { data: allTags } = trpc.tag.list.useQuery();
   const { data: pipelineStages } = trpc.pipeline.getStages.useQuery();
   const [noteText, setNoteText] = useState("");
