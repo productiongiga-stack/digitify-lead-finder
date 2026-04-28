@@ -369,7 +369,9 @@ export default function CampaignsPage() {
         submitLabel="Verwijderen"
         submitVariant="destructive"
         pending={deleteCampaign.isPending}
-        onSubmit={() => deleteId && deleteCampaign.mutate({ id: deleteId })}
+        onSubmit={() => {
+          if (deleteId) deleteCampaign.mutate({ id: deleteId });
+        }}
       >
         <p className="text-sm text-muted-foreground">
           Weet je zeker dat je &quot;{campaignToDelete?.name}&quot; wilt verwijderen? Alle

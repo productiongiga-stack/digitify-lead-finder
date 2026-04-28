@@ -115,7 +115,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const { id } = use(params);
   const leadId = id;
   const router = useRouter();
-  const { data: lead, isError: leadIsError, isFetching, isLoading } = trpc.lead.getById.useQuery(
+  const { data: leadData, isError: leadIsError, isFetching, isLoading } = trpc.lead.getById.useQuery(
     { id: leadId },
     {
       enabled: Boolean(leadId),
@@ -202,7 +202,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
     );
   }
 
-  if (!id || (leadIsError && !lead) || (!isLoading && !isFetching && !lead)) {
+  if (!id || (leadIsError && !leadData) || (!isLoading && !isFetching && !leadData)) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="text-center">
@@ -215,6 +215,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   }
 
   /* derived data */
+  const lead = leadData!;
   const scoreFactors = lead.scoringFactors ?? [];
   type ScoreFactor = (typeof scoreFactors)[number];
   type LeadActivity = (typeof lead.activities)[number];

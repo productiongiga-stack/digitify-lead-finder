@@ -44,10 +44,10 @@ import { useToast } from "@/components/feedback/toast-provider";
 import { buildUrl } from "@/lib/config";
 import { ReviewQrCodeCard } from "@/components/reviews/qr-code-card";
 
-const STATUS_MAP: Record<
-  string,
-  { label: string; variant: "warning" | "info" | "secondary" | "success" }
-> = {
+const REVIEW_STATUSES = ["PENDING", "SENT", "OPENED", "REVIEWED", "FEEDBACK"] as const;
+type ReviewStatus = (typeof REVIEW_STATUSES)[number];
+
+const STATUS_MAP: Record<ReviewStatus, { label: string; variant: "warning" | "info" | "secondary" | "success" }> = {
   PENDING: { label: "In Afwachting", variant: "warning" },
   SENT: { label: "Verstuurd", variant: "info" },
   OPENED: { label: "Geopend", variant: "secondary" },
@@ -55,7 +55,11 @@ const STATUS_MAP: Record<
   FEEDBACK: { label: "Interne Feedback", variant: "secondary" },
 };
 
-type ReviewStatus = keyof typeof STATUS_MAP;
+function getStatusInfo(status: string | null | undefined) {
+  return REVIEW_STATUSES.includes(status as ReviewStatus)
+    ? STATUS_MAP[status as ReviewStatus]
+    : STATUS_MAP.PENDING;
+}
 
 const PLATFORM_CONFIG: Record<
   string,
@@ -125,7 +129,7 @@ export default function ReviewsPage() {
   const utils = trpc.useUtils();
 
   const { data, isLoading } = trpc.review.list.useQuery(
-    statusFilter ? { status: statusFilter as ReviewStatus } : undefined,
+    statusFilter ? { status: statusFilter } : undefined,
   );
   const { data: stats } = trpc.review.getStats.useQuery();
 
@@ -260,7 +264,7 @@ export default function ReviewsPage() {
         id: "status",
         header: "Status",
         cell: (r) => {
-          const info = STATUS_MAP[r.status] ?? STATUS_MAP.PENDING;
+          const info = getStatusInfo(r.status);
           return <Badge variant={info.variant}>{info.label}</Badge>;
         },
       },
@@ -352,7 +356,7 @@ export default function ReviewsPage() {
   );
 
   const renderMobileCard = (r: Review) => {
-    const statusInfo = STATUS_MAP[r.status] ?? STATUS_MAP.PENDING;
+    const statusInfo = getStatusInfo(r.status);
     const platformInfo = PLATFORM_CONFIG[r.platform ?? "google"] ?? PLATFORM_CONFIG.google;
     return (
       <div className="rounded-xl border p-3">
@@ -599,7 +603,9 @@ export default function ReviewsPage() {
         submitLabel="Verwijderen"
         submitVariant="destructive"
         pending={deleteMutation.isPending}
-        onSubmit={() => deleteTarget && deleteMutation.mutate({ id: deleteTarget.id })}
+        onSubmit={() => {
+          if (deleteTarget) deleteMutation.mutate({ id: deleteTarget.id });
+        }}
       >
         <p className="text-sm text-muted-foreground">Verwijderde aanvragen zijn niet terug te halen.</p>
       </CreateModal>

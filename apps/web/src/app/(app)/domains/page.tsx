@@ -932,7 +932,9 @@ export default function DomainsPage() {
         submitLabel="Verwijderen"
         submitVariant="destructive"
         pending={deleteMutation.isPending}
-        onSubmit={() => deleteId && deleteMutation.mutate({ id: deleteId })}
+        onSubmit={() => {
+          if (deleteId) deleteMutation.mutate({ id: deleteId });
+        }}
       >
         <p className="text-sm text-muted-foreground">
           Weet je zeker dat je het domein &quot;{domainToDelete?.domainName}&quot; wilt

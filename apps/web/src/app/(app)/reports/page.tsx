@@ -269,7 +269,9 @@ export default function ReportsPage() {
         submitLabel="Verwijderen"
         submitVariant="destructive"
         pending={deleteMutation.isPending}
-        onSubmit={() => deleteId && deleteMutation.mutate({ id: deleteId })}
+        onSubmit={() => {
+          if (deleteId) deleteMutation.mutate({ id: deleteId });
+        }}
       >
         <p className="text-sm text-muted-foreground">
           Verwijderde rapporten zijn niet meer terug te halen.

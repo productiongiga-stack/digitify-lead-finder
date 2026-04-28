@@ -93,10 +93,10 @@ async function resolveRelatedLabels(
 
   return tasks.map((task) => {
     let relatedLabel: string | null = null;
-    if (task.relatedType === "LEAD" && task.relatedId) relatedLabel = leadMap.get(task.relatedId) || null;
-    if (task.relatedType === "QUOTE" && task.relatedId) relatedLabel = quoteMap.get(task.relatedId) || null;
-    if (task.relatedType === "BOOKING" && task.relatedId) relatedLabel = bookingMap.get(task.relatedId) || null;
-    if (task.relatedType === "CLIENT" && task.relatedId) relatedLabel = clientMap.get(task.relatedId) || null;
+    if (task.relatedType === "LEAD" && task.relatedId) relatedLabel = String(leadMap.get(task.relatedId) || "") || null;
+    if (task.relatedType === "QUOTE" && task.relatedId) relatedLabel = String(quoteMap.get(task.relatedId) || "") || null;
+    if (task.relatedType === "BOOKING" && task.relatedId) relatedLabel = String(bookingMap.get(task.relatedId) || "") || null;
+    if (task.relatedType === "CLIENT" && task.relatedId) relatedLabel = String(clientMap.get(task.relatedId) || "") || null;
     return { ...task, relatedLabel };
   });
 }

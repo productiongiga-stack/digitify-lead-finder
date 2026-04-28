@@ -568,14 +568,15 @@ function questionAnswerKey(productId: string, questionKey: string) {
   return `q:${productId}:${questionKey}`;
 }
 
-export function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }) {
+function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }) {
   const isPreviewRoute =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("preview") === "1";
   const isInternalMode =
     mode === "internal" ||
     (typeof window !== "undefined" &&
-      new URLSearchParams(window.location.search).get("internal") === "1");
+      (new URLSearchParams(window.location.search).get("internal") === "1" ||
+        window.location.pathname.startsWith("/quotes/new")));
   const tenantToken = useMemo(() => {
     if (typeof window === "undefined") return "";
     return new URLSearchParams(window.location.search).get("tenant")?.trim() || "";

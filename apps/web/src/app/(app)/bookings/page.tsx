@@ -877,7 +877,9 @@ export default function BookingsPage() {
         submitLabel="Verwijderen"
         submitVariant="destructive"
         pending={deleteMutation.isPending}
-        onSubmit={() => deleteTarget && deleteMutation.mutate({ id: deleteTarget.id })}
+        onSubmit={() => {
+          if (deleteTarget) deleteMutation.mutate({ id: deleteTarget.id });
+        }}
       >
         <p className="text-sm text-muted-foreground">
           Verwijderde boekingen zijn niet meer terug te halen.

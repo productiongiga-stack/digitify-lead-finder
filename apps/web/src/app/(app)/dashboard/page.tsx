@@ -804,6 +804,7 @@ function ExpiringDomains() {
   return (
     <div className="space-y-0.5">
       {domains.map((domain: NonNullable<typeof domains>[number]) => {
+        if (!domain.expiresAt) return null;
         const days = Math.max(
           0,
           Math.ceil(

@@ -10,7 +10,7 @@ import { MAIN_NAV_ITEMS, TOOL_NAV_ITEMS, BOTTOM_NAV_ITEMS, LEADS_MENU_ITEMS, isN
 import { Button } from "@digitify/ui";
 import { ScrollArea } from "@digitify/ui";
 import { Separator } from "@digitify/ui";
-import { Sheet, SheetClose, SheetContent } from "@digitify/ui";
+import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle } from "@digitify/ui";
 import {
   ChevronLeft,
   ChevronRight,
@@ -304,6 +304,8 @@ export function Sidebar() {
       <div className="fixed inset-y-0 left-0 z-30 hidden lg:block">{renderContent(false)}</div>
       <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
         <SheetContent side="left" className="w-[90vw] max-w-[340px] p-0 sm:max-w-[340px]">
+          <SheetTitle className="sr-only">Navigatie</SheetTitle>
+          <SheetDescription className="sr-only">Open het hoofdmenu en navigeer door Lead Finder.</SheetDescription>
           {renderContent(true)}
         </SheetContent>
       </Sheet>
