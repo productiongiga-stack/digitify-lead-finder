@@ -1,8 +1,17 @@
 # Digitify Lead Search
 
-**V1.0.0 ALPHA**
+**V1.0.1 ALPHA**
 
 Slimme lead generation en outreach tool voor Digitify. Zoek bedrijven, analyseer hun online zichtbaarheid, score op opportuniteit, en contacteer via e-mail - met AI-assistent OpenClaw.
+
+## Release Notes - V1.0.1 ALPHA
+
+Dit is de eerste Alpha versie van de Digitify Lead Finder app.
+
+- Gefixt: leads openen vanuit de Leads-pagina gaat nu naar de juiste lead detailinformatie.
+- Verbeterd: klikken op `Leads` in de linker navigatie opent nu de dropdown in plaats van direct te navigeren.
+- Toegevoegd: de dropdown onder `Leads` bevat nu een expliciete `Leads` link naar de volledige leadlijst.
+- Meegeleverd: eerste Alpha-bundel met dashboard, lead search, lead detail, campagnes, outbound, offertes, facturen, rapporten, CRM, taken, templates, audit en instellingen.
 
 ## Quick Start
 

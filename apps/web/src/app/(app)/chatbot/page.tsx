@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc/client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Button,
   Card,
@@ -44,6 +45,8 @@ import {
   StickyNote,
   ChevronDown,
   ChevronUp,
+  CalendarPlus,
+  FilePlus2,
 } from "lucide-react";
 
 /* ---------- Types ---------- */
@@ -101,6 +104,7 @@ function formatTimestamp(date: string | Date): string {
 /* ---------- Main component ---------- */
 
 export default function ChatbotInboxPage() {
+  const router = useRouter();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<SessionStatus | "ALL">(
     "ALL"
@@ -183,6 +187,20 @@ export default function ChatbotInboxPage() {
   });
 
   const convertToLead = trpc.chatbot.convertToLead.useMutation({
+    onSuccess: () => {
+      utils.chatbot.getSession.invalidate({ id: selectedId! });
+      utils.chatbot.listSessions.invalidate();
+    },
+  });
+
+  const convertToBooking = trpc.chatbot.convertToBooking.useMutation({
+    onSuccess: () => {
+      utils.chatbot.getSession.invalidate({ id: selectedId! });
+      utils.chatbot.listSessions.invalidate();
+    },
+  });
+
+  const startLiveTakeover = trpc.chatbot.startLiveTakeover.useMutation({
     onSuccess: () => {
       utils.chatbot.getSession.invalidate({ id: selectedId! });
       utils.chatbot.listSessions.invalidate();
@@ -571,6 +589,45 @@ export default function ChatbotInboxPage() {
                       </Button>
                     </>
                   )}
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => selectedId && router.push(`/quotes/new?chatSessionId=${selectedId}`)}
+                    disabled={!selectedId}
+                  >
+                    <FilePlus2 className="mr-1.5 h-3 w-3" />
+                    Naar offerte
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() =>
+                      convertToBooking.mutate({
+                        sessionId: selectedId!,
+                        date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+                        duration: 60,
+                      })
+                    }
+                    disabled={convertToBooking.isPending}
+                  >
+                    <CalendarPlus className="mr-1.5 h-3 w-3" />
+                    Naar boeking
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => startLiveTakeover.mutate({ sessionId: selectedId! })}
+                    disabled={startLiveTakeover.isPending}
+                  >
+                    <Headset className="mr-1.5 h-3 w-3" />
+                    Live takeover
+                  </Button>
 
                   {/* AI Summary */}
                   <Button

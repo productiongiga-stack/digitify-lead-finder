@@ -114,10 +114,19 @@ function AuditItem({ label, value }: { label: string; value: boolean | null | un
 export default function LeadDetailPage() {
   const params = useParams<{ id?: string | string[] }>();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
+  const leadId = id ?? "";
   const router = useRouter();
   const { data: lead, isLoading } = trpc.lead.getById.useQuery(
-    { id: id ?? "" },
-    { enabled: Boolean(id) }
+    { id: leadId },
+    { enabled: Boolean(leadId) }
+  );
+  const duplicateQuery = trpc.lead.findDuplicates.useQuery(
+    { leadId },
+    { enabled: Boolean(leadId) }
+  );
+  const explainValueQuery = trpc.lead.explainValue.useQuery(
+    { leadId },
+    { enabled: false, staleTime: 120_000 },
   );
   const { data: allTags } = trpc.tag.list.useQuery();
   const { data: pipelineStages } = trpc.pipeline.getStages.useQuery();
@@ -127,43 +136,37 @@ export default function LeadDetailPage() {
 
   /* mutations */
   const addNote = trpc.lead.addNote.useMutation({
-    onSuccess: () => { setNoteText(""); utils.lead.getById.invalidate({ id }); },
+    onSuccess: () => { setNoteText(""); utils.lead.getById.invalidate({ id: leadId }); },
   });
   const enrichLead = trpc.scoring.enrichLead.useMutation({
-    onSuccess: () => utils.lead.getById.invalidate({ id }),
+    onSuccess: () => utils.lead.getById.invalidate({ id: leadId }),
   });
   const computeScore = trpc.scoring.computeForLead.useMutation({
-    onSuccess: () => utils.lead.getById.invalidate({ id }),
+    onSuccess: () => utils.lead.getById.invalidate({ id: leadId }),
   });
   const analyzeLead = trpc.openclaw.analyzeLead.useMutation({
-    onSuccess: () => utils.lead.getById.invalidate({ id }),
+    onSuccess: () => utils.lead.getById.invalidate({ id: leadId }),
   });
   const draftEmail = trpc.openclaw.draftEmail.useMutation({
     onSuccess: (data) => {
-      utils.lead.getById.invalidate({ id });
+      utils.lead.getById.invalidate({ id: leadId });
       if (data?.draft?.id) {
         router.push(`/contacts/drafts/${data.draft.id}`);
       }
     },
   });
   const updateLead = trpc.lead.update.useMutation({
-    onSuccess: () => utils.lead.getById.invalidate({ id }),
+    onSuccess: () => utils.lead.getById.invalidate({ id: leadId }),
   });
   const addTag = trpc.tag.addToLead.useMutation({
-    onSuccess: () => utils.lead.getById.invalidate({ id }),
+    onSuccess: () => utils.lead.getById.invalidate({ id: leadId }),
   });
   const removeTag = trpc.tag.removeFromLead.useMutation({
-    onSuccess: () => utils.lead.getById.invalidate({ id }),
+    onSuccess: () => utils.lead.getById.invalidate({ id: leadId }),
   });
   const generateReport = trpc.report.generateLeadReport.useMutation({
     onSuccess: (data) => {
       window.open(`/reports/${data.id}/print`, "_blank");
-    },
-  });
-
-  const createQuote = trpc.quote.createFromLead.useMutation({
-    onSuccess: (data) => {
-      router.push(`/quotes/${data.id}`);
     },
   });
 
@@ -195,7 +198,7 @@ export default function LeadDetailPage() {
     );
   }
 
-  if (!lead) {
+  if (!id || !lead) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="text-center">
@@ -356,13 +359,20 @@ export default function LeadDetailPage() {
                 {generateReport.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <FileText className="mr-1.5 h-3.5 w-3.5" />}
                 {generateReport.isPending ? "Genereren..." : "Genereer Voorstel"}
               </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/quotes/new?leadId=${id}`}>
+                  <Receipt className="mr-1.5 h-3.5 w-3.5" />
+                  Maak Offerte
+                </Link>
+              </Button>
               <Button
-                variant="outline" size="sm"
-                onClick={() => createQuote.mutate({ leadId: id })}
-                disabled={createQuote.isPending}
+                variant="outline"
+                size="sm"
+                onClick={() => explainValueQuery.refetch()}
+                disabled={explainValueQuery.isFetching}
               >
-                {createQuote.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Receipt className="mr-1.5 h-3.5 w-3.5" />}
-                {createQuote.isPending ? "Aanmaken..." : "Maak Offerte"}
+                {explainValueQuery.isFetching ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Lightbulb className="mr-1.5 h-3.5 w-3.5" />}
+                Waarom waardevol?
               </Button>
               {primaryDomain ? (
                 <Button
@@ -395,6 +405,52 @@ export default function LeadDetailPage() {
 
           {/* ===== LEFT COLUMN ===== */}
           <div className="space-y-5">
+
+            {explainValueQuery.data ? (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Lightbulb className="h-4 w-4 text-amber-500" />
+                    AI Waarde-uitleg
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">{explainValueQuery.data.explanation}</p>
+                  <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+                    {explainValueQuery.data.bullets.map((item: string) => (
+                      <li key={item} className="flex items-start gap-2">
+                        <CircleDot className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {duplicateQuery.data && duplicateQuery.data.length > 0 ? (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Shield className="h-4 w-4 text-amber-500" />
+                    Mogelijke duplicaten
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {duplicateQuery.data.slice(0, 5).map((item) => (
+                    <div key={item.id} className="rounded-lg border p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <Link href={`/leads/${item.id}`} className="text-sm font-medium hover:text-primary">
+                          {item.companyName}
+                        </Link>
+                        <Badge variant="outline">{Math.round(item.confidence * 100)}%</Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">{item.reasons.join(" · ") || "Naamovereenkomst"}</p>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            ) : null}
 
             {/* --- Opportunity Score Card --- */}
             <Card>

@@ -48,6 +48,8 @@ import {
   ChevronLeft,
   ChevronRight,
   FolderPlus,
+  BookmarkPlus,
+  Trash2,
 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
 
@@ -178,6 +180,7 @@ export default function LeadSearchPage() {
   const [campaignDialogOpen, setCampaignDialogOpen] = useState(false);
   const [campaignLeadId, setCampaignLeadId] = useState<string | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
+  const [savedSearchName, setSavedSearchName] = useState("");
   const { showToast } = useToast();
 
   // Campaigns list
@@ -185,6 +188,7 @@ export default function LeadSearchPage() {
   const popularSearchesQuery = trpc.search.getPopularSearches.useQuery(undefined, {
     staleTime: 300_000,
   });
+  const savedSearchesQuery = trpc.search.listSavedSearches.useQuery();
 
   // Duplicate detection
   const placeIds = useMemo(() => results.map((r: SearchResult) => r.placeId), [results]);
@@ -272,6 +276,19 @@ export default function LeadSearchPage() {
       showToast({ title: "Toevoegen mislukt", description: error.message, variant: "error" }),
   });
 
+  const saveSearchMutation = trpc.search.saveSearch.useMutation({
+    onSuccess: () => {
+      savedSearchesQuery.refetch();
+      setSavedSearchName("");
+      showToast({ title: "Zoekopdracht opgeslagen", description: "Je kan deze nu in 1 klik opnieuw uitvoeren." });
+    },
+    onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
+  });
+
+  const deleteSavedSearchMutation = trpc.search.deleteSavedSearch.useMutation({
+    onSuccess: () => savedSearchesQuery.refetch(),
+  });
+
   const doSearch = useCallback(
     (params: { query: string; city: string; country: string; niche?: string; pageSize: number }) => {
       setLastSearchParams(params);
@@ -320,6 +337,40 @@ export default function LeadSearchPage() {
     doSearch({
       query: searchQuery,
       city: searchCity,
+      country,
+      niche: niche || undefined,
+      pageSize: parseInt(pageSize),
+    });
+  }
+
+  function handleApplySavedSearch(entry: {
+    query: string;
+    city: string;
+    country: string;
+    niche?: string;
+    pageSize: number;
+  }) {
+    setQuery(entry.query || "");
+    setCity(entry.city || "");
+    setCountry(entry.country || "België");
+    setNiche(entry.niche || "");
+    setPageSize(String(entry.pageSize || 20));
+    doSearch({
+      query: entry.query || "",
+      city: entry.city || "",
+      country: entry.country || "België",
+      niche: entry.niche || undefined,
+      pageSize: entry.pageSize || 20,
+    });
+  }
+
+  function handleSaveCurrentSearch() {
+    const name = savedSearchName.trim() || [query, niche, city].filter(Boolean).join(" • ");
+    if (!name) return;
+    saveSearchMutation.mutate({
+      name,
+      query,
+      city,
       country,
       niche: niche || undefined,
       pageSize: parseInt(pageSize),
@@ -591,6 +642,53 @@ export default function LeadSearchPage() {
               </Button>
             </div>
           ) : null}
+
+          <div className="mt-3 space-y-2 border-t pt-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Opgeslagen zoekopdrachten:</span>
+              <Input
+                value={savedSearchName}
+                onChange={(event) => setSavedSearchName(event.target.value)}
+                placeholder="Naam (optioneel)"
+                className="h-7 w-[180px] text-xs"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-xs"
+                onClick={handleSaveCurrentSearch}
+                disabled={saveSearchMutation.isPending || (!query.trim() && !niche.trim() && !city.trim())}
+              >
+                <BookmarkPlus className="mr-1 h-3 w-3" />
+                Opslaan
+              </Button>
+            </div>
+            {savedSearchesQuery.data && savedSearchesQuery.data.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {savedSearchesQuery.data.map((entry) => (
+                  <div key={entry.id} className="inline-flex items-center gap-1 rounded-full border bg-muted/30 px-2 py-1">
+                    <button
+                      type="button"
+                      className="text-xs hover:text-primary"
+                      onClick={() => handleApplySavedSearch(entry)}
+                    >
+                      {entry.name}
+                    </button>
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => deleteSavedSearchMutation.mutate({ id: entry.id })}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Nog geen opgeslagen zoekopdrachten.</p>
+            )}
+          </div>
         </CardContent>
       </Card>
 

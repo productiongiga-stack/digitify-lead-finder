@@ -31,6 +31,7 @@ import {
   FileText,
   AlertCircle,
   Activity,
+  Link2,
 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
 import { formatRelativeTime } from "@/lib/utils";
@@ -115,6 +116,7 @@ export default function QuoteDetailPage() {
   });
 
   const [internalNote, setInternalNote] = useState("");
+  const [portalLoading, setPortalLoading] = useState(false);
   const addNoteMutation = trpc.quote.addNote.useMutation({
     onSuccess: () => {
       setInternalNote("");
@@ -135,6 +137,29 @@ export default function QuoteDetailPage() {
   function handleAddNote() {
     if (!internalNote.trim()) return;
     addNoteMutation.mutate({ id, note: internalNote });
+  }
+
+  async function handleCopyPortalLink() {
+    setPortalLoading(true);
+    try {
+      const response = await fetch(`/api/quotes/${id}/portal-link`);
+      const payload = await response.json();
+      if (!response.ok || !payload.url) {
+        showToast({
+          title: "Portal-link mislukt",
+          description: payload.error || "Kon geen portal-link genereren.",
+          variant: "error",
+        });
+        return;
+      }
+      await navigator.clipboard.writeText(payload.url);
+      showToast({
+        title: "Portal-link gekopieerd",
+        description: "De klant kan nu quote, booking en bestanden beheren via de link.",
+      });
+    } finally {
+      setPortalLoading(false);
+    }
   }
 
   if (isLoading) {
@@ -189,6 +214,10 @@ export default function QuoteDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleCopyPortalLink} disabled={portalLoading}>
+            <Link2 className="mr-2 h-4 w-4" />
+            {portalLoading ? "Genereren..." : "Client Portal"}
+          </Button>
           <Link href={`/api/quotes/${id}/pdf`} target="_blank">
             <Button variant="outline" size="sm">
               <Printer className="mr-2 h-4 w-4" />

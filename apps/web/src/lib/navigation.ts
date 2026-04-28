@@ -22,6 +22,9 @@ import {
   Building2,
   SlidersHorizontal,
   Activity,
+  CheckSquare,
+  ScanSearch,
+  Library,
 } from "lucide-react";
 import type { AppRole } from "@/lib/permissions";
 
@@ -56,8 +59,11 @@ export const LEADS_WORKFLOW_ITEMS: QuickNavItem[] = [
   { href: "/campaigns", label: "Campagnes", icon: Target },
   { href: "/contacts", label: "Outbound", icon: SendHorizonal },
   { href: "/quotes", label: "Offertes", icon: Receipt },
+  { href: "/invoices", label: "Facturen", icon: Receipt },
   { href: "/reports", label: "Rapporten", icon: FileText },
   { href: "/crm", label: "CRM", icon: Building2 },
+  { href: "/tasks", label: "Taken", icon: CheckSquare },
+  { href: "/templates", label: "Templates", icon: Library },
 ];
 
 export const LEADS_MENU_ITEMS: QuickNavItem[] = [
@@ -70,6 +76,7 @@ export const TOOL_NAV_ITEMS: NavItem[] = [
   { href: "/domains", label: "Domeinen", icon: Globe2 },
   { href: "/reviews", label: "Reviews", icon: Star },
   { href: "/chatbot", label: "Chatbot", icon: MessageSquare },
+  { href: "/audit", label: "Website Audit", icon: ScanSearch },
 ];
 
 export const BOTTOM_NAV_ITEMS: NavItem[] = [
@@ -118,8 +125,12 @@ const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
   { path: "/contacts", title: "Outbound Center" },
   { path: "/quotes/new", title: "Nieuwe Offerte" },
   { path: "/quotes", title: "Offertes" },
+  { path: "/invoices", title: "Facturen" },
   { path: "/reports", title: "Rapporten" },
   { path: "/crm", title: "CRM" },
+  { path: "/tasks", title: "Taken" },
+  { path: "/templates", title: "Template Library" },
+  { path: "/audit", title: "Website Audit" },
   { path: "/bookings", title: "Boekingen" },
   { path: "/domains", title: "Domeinen" },
   { path: "/reviews", title: "Reviews" },

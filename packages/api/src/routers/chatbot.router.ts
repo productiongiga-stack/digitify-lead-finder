@@ -206,6 +206,138 @@ export const chatbotRouter = router({
       return lead;
     }),
 
+  // Convert chat to quote
+  convertToQuote: protectedProcedure
+    .input(z.object({ sessionId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const session = await ctx.db.chatSession.findFirst({
+        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
+      });
+      if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Sessie niet gevonden" });
+
+      let leadId = session.leadId;
+      if (!leadId) {
+        const lead = await ctx.db.lead.create({
+          data: {
+            companyName: session.visitorCompany || session.visitorName || "Chatbot Lead",
+            email: session.visitorEmail,
+            phone: session.visitorPhone,
+            source: "chatbot",
+            industry: session.intent || undefined,
+            createdById: ctx.user.id,
+          },
+          select: { id: true },
+        });
+        leadId = lead.id;
+        await ctx.db.chatSession.update({
+          where: { id: session.id },
+          data: { leadId },
+        });
+      }
+
+      const caller = await ctx.db.quote.count({ where: { createdById: ctx.user.id } });
+      const year = new Date().getFullYear();
+      const quoteNumber = `OFF-${year}-${ctx.user.id.slice(-4).toUpperCase()}-${String(caller + 1).padStart(4, "0")}`;
+      const quote = await ctx.db.quote.create({
+        data: {
+          quoteNumber,
+          leadId,
+          clientName: session.visitorName || session.visitorCompany || "Nieuwe aanvraag",
+          clientEmail: session.visitorEmail || null,
+          clientPhone: session.visitorPhone || null,
+          clientCompany: session.visitorCompany || null,
+          notes: `Aangemaakt vanuit chatsessie ${session.id}`,
+          vatRate: 21,
+          subtotal: 0,
+          vatAmount: 0,
+          total: 0,
+          createdById: ctx.user.id,
+        },
+        select: { id: true, quoteNumber: true },
+      });
+
+      await ctx.db.chatMessage.create({
+        data: {
+          sessionId: session.id,
+          role: "AGENT",
+          content: `Ik heb een offerte-dossier opgestart (${quote.quoteNumber}).`,
+          metadata: { action: "convert_to_quote", quoteId: quote.id },
+        },
+      });
+      return quote;
+    }),
+
+  // Convert chat to booking
+  convertToBooking: protectedProcedure
+    .input(
+      z.object({
+        sessionId: z.string(),
+        date: z.string().datetime(),
+        duration: z.number().min(15).max(240).default(60),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const session = await ctx.db.chatSession.findFirst({
+        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
+      });
+      if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Sessie niet gevonden" });
+      const booking = await ctx.db.booking.create({
+        data: {
+          clientName: session.visitorName || session.visitorCompany || "Chatbot bezoeker",
+          clientEmail: session.visitorEmail || null,
+          date: new Date(input.date),
+          duration: input.duration,
+          notes: `Aangemaakt vanuit chatsessie ${session.id}`,
+          status: "PENDING",
+          leadId: session.leadId || null,
+          createdById: ctx.user.id,
+        },
+        select: { id: true, date: true, status: true },
+      });
+      await ctx.db.chatMessage.create({
+        data: {
+          sessionId: session.id,
+          role: "AGENT",
+          content: `Ik heb een boeking aangemaakt voor ${new Date(booking.date).toLocaleString("nl-BE")}.`,
+          metadata: { action: "convert_to_booking", bookingId: booking.id },
+        },
+      });
+      return booking;
+    }),
+
+  // Live takeover by admin/agent
+  startLiveTakeover: protectedProcedure
+    .input(z.object({ sessionId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const session = await ctx.db.chatSession.findFirst({
+        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
+        select: { id: true, tags: true },
+      });
+      if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Sessie niet gevonden" });
+      const tags = Array.isArray(session.tags) ? session.tags : [];
+      const withoutPreviousTakeover = tags.filter((tag) => !tag.startsWith("takeover:"));
+      const nextTags = Array.from(new Set([...withoutPreviousTakeover, `takeover:${ctx.user.id}`]));
+
+      await ctx.db.chatSession.update({
+        where: { id: session.id },
+        data: {
+          assignedToId: ctx.user.id,
+          status: "WAITING",
+          tags: nextTags,
+          isRead: false,
+        },
+      });
+      await ctx.db.chatMessage.create({
+        data: {
+          sessionId: session.id,
+          role: "AGENT",
+          content: "Live takeover gestart door een medewerker.",
+          metadata: { action: "live_takeover_started", userId: ctx.user.id },
+        },
+      });
+      return { success: true };
+    }),
+
   // Link session to existing lead
   linkToLead: protectedProcedure
     .input(z.object({ sessionId: z.string(), leadId: z.string() }))

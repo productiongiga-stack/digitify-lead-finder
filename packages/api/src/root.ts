@@ -19,6 +19,10 @@ import { quoteRouter } from "./routers/quote.router";
 import { chatbotRouter } from "./routers/chatbot.router";
 import { registrationRouter } from "./routers/registration.router";
 import { crmRouter } from "./routers/crm.router";
+import { taskRouter } from "./routers/task.router";
+import { invoiceRouter } from "./routers/invoice.router";
+import { auditRouter } from "./routers/audit.router";
+import { templateRouter } from "./routers/template.router";
 
 export const appRouter = router({
   dashboard: dashboardRouter,
@@ -41,6 +45,10 @@ export const appRouter = router({
   chatbot: chatbotRouter,
   registration: registrationRouter,
   crm: crmRouter,
+  task: taskRouter,
+  invoice: invoiceRouter,
+  audit: auditRouter,
+  template: templateRouter,
 });
 
 export type AppRouter = typeof appRouter;

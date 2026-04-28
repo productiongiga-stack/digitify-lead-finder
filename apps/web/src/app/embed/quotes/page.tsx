@@ -44,6 +44,17 @@ type RemotePayload = {
     detailsTitle: string;
     productSpecsJson: string;
   };
+  prefill?: {
+    leadId?: string | null;
+    chatSessionId?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    company?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    address?: string | null;
+    vatNumber?: string | null;
+  };
   studio?: {
     viewport?: "desktop" | "tablet" | "mobile";
     syncBuilderWithPreview?: boolean;
@@ -56,6 +67,8 @@ type RemotePayload = {
   };
   services: Service[];
 };
+
+type QuoteConfiguratorMode = "public" | "internal";
 
 type CartEntry = {
   serviceId: string;
@@ -555,13 +568,25 @@ function questionAnswerKey(productId: string, questionKey: string) {
   return `q:${productId}:${questionKey}`;
 }
 
-export default function QuoteEmbedPage() {
+export function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }) {
   const isPreviewRoute =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("preview") === "1";
+  const isInternalMode =
+    mode === "internal" ||
+    (typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("internal") === "1");
   const tenantToken = useMemo(() => {
     if (typeof window === "undefined") return "";
     return new URLSearchParams(window.location.search).get("tenant")?.trim() || "";
+  }, []);
+  const leadIdParam = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("leadId")?.trim() || "";
+  }, []);
+  const chatSessionIdParam = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("chatSessionId")?.trim() || "";
   }, []);
   const [payload, setPayload] = useState<RemotePayload | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
@@ -611,9 +636,14 @@ export default function QuoteEmbedPage() {
   useEffect(() => {
     if (isPreviewRoute) return;
     let active = true;
-    const servicesUrl = tenantToken
-      ? `/api/public/quotes/services?tenant=${encodeURIComponent(tenantToken)}`
-      : "/api/public/quotes/services";
+    const internalParams = new URLSearchParams();
+    if (leadIdParam) internalParams.set("leadId", leadIdParam);
+    if (chatSessionIdParam) internalParams.set("chatSessionId", chatSessionIdParam);
+    const servicesUrl = isInternalMode
+      ? `/api/quotes/configurator/services${internalParams.toString() ? `?${internalParams.toString()}` : ""}`
+      : tenantToken
+        ? `/api/public/quotes/services?tenant=${encodeURIComponent(tenantToken)}`
+        : "/api/public/quotes/services";
     fetch(servicesUrl)
       .then((response) => {
         if (!response.ok) throw new Error("Configuratie ophalen mislukt.");
@@ -624,6 +654,15 @@ export default function QuoteEmbedPage() {
         setPayload(data);
         const firstCategory = data.services[0]?.category || "";
         setSelectedCategory(firstCategory);
+        if (data.prefill) {
+          setFirstName(data.prefill.firstName || "");
+          setLastName(data.prefill.lastName || "");
+          setCompany(data.prefill.company || "");
+          setEmail(data.prefill.email || "");
+          setPhone(data.prefill.phone || "");
+          setAddress(data.prefill.address || "");
+          setVatNumber(data.prefill.vatNumber || "");
+        }
       })
       .catch(() => {
         if (!active) return;
@@ -633,7 +672,7 @@ export default function QuoteEmbedPage() {
     return () => {
       active = false;
     };
-  }, [isPreviewRoute, tenantToken]);
+  }, [chatSessionIdParam, isInternalMode, isPreviewRoute, leadIdParam, tenantToken]);
 
   useEffect(() => {
     if (!isPreviewRoute) return;
@@ -1100,7 +1139,12 @@ export default function QuoteEmbedPage() {
     1: Boolean(selectedCategory),
     2: Boolean(selectedProductId),
     3: cartItems.length > 0 && requiredQuestionsComplete && hasConfirmedProducts,
-    4: hasConfirmedProducts && firstName.trim().length > 0 && lastName.trim().length > 0 && isValidEmail(email),
+    4:
+      hasConfirmedProducts &&
+      isValidEmail(email) &&
+      (isInternalMode
+        ? firstName.trim().length > 0 || company.trim().length > 0
+        : firstName.trim().length > 0 && lastName.trim().length > 0),
   };
 
   function sendPreviewAction(payload: Record<string, unknown>) {
@@ -1131,7 +1175,7 @@ export default function QuoteEmbedPage() {
     setSubmitting(true);
     setStatus(null);
 
-    const name = `${firstName.trim()} ${lastName.trim()}`.trim();
+    const name = `${firstName.trim()} ${lastName.trim()}`.trim() || company.trim();
     const questionSummary =
       selectedProduct && activeSpecs?.questions?.length
         ? activeSpecs.questions
@@ -1165,7 +1209,9 @@ export default function QuoteEmbedPage() {
       unitPrice: item.unitPrice,
     }));
 
-    const response = await fetch("/api/public/quotes/request", {
+    const response = await fetch(
+      isInternalMode ? "/api/quotes/configurator/request" : "/api/public/quotes/request",
+      {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1179,9 +1225,14 @@ export default function QuoteEmbedPage() {
         vatRate,
         discount,
         items: itemsPayload,
-        tenant: tenantToken || undefined,
+        tenant: isInternalMode ? undefined : tenantToken || undefined,
+        leadId: isInternalMode ? payload?.prefill?.leadId || leadIdParam || undefined : undefined,
+        chatSessionId: isInternalMode
+          ? payload?.prefill?.chatSessionId || chatSessionIdParam || undefined
+          : undefined,
       }),
-    });
+      },
+    );
 
     const data = await response.json();
     setSubmitting(false);
@@ -1192,6 +1243,9 @@ export default function QuoteEmbedPage() {
     }
 
     setStatus({ type: "success", message: `${data.message} Referentie: ${data.quoteNumber}.` });
+    if (isInternalMode && data.quoteId) {
+      window.location.href = `/quotes/${encodeURIComponent(data.quoteId)}`;
+    }
   }
 
   if (remoteError) {
@@ -2792,4 +2846,8 @@ export default function QuoteEmbedPage() {
       </div>
     </div>
   );
+}
+
+export default function QuoteEmbedPage() {
+  return <QuoteConfigurator mode="public" />;
 }

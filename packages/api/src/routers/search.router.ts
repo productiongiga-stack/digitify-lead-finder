@@ -5,6 +5,7 @@ import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadUserSettingRows } from "../lib/user-settings";
 import { checkRateLimit } from "../lib/rate-limit-bucket";
 import { log } from "../lib/logger";
+import { readUserJsonSetting, writeUserJsonSetting } from "../lib/user-json-setting";
 
 const searchStringSchema = z
   .string()
@@ -23,6 +24,31 @@ const searchResultSchema = z.object({
   types: z.array(z.string()).optional(),
   primaryType: z.string().optional(),
 });
+
+const SAVED_SEARCHES_KEY = "search.saved_searches_json";
+
+const savedSearchSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  query: z.string().default(""),
+  city: z.string().default(""),
+  country: z.string().default("België"),
+  niche: z.string().default(""),
+  pageSize: z.number().min(5).max(80).default(20),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+type SavedSearchItem = z.infer<typeof savedSearchSchema>;
+
+async function loadSavedSearches(db: any, userId: string): Promise<SavedSearchItem[]> {
+  const raw = await readUserJsonSetting<unknown[]>(db, userId, SAVED_SEARCHES_KEY, []);
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => savedSearchSchema.safeParse(item))
+    .filter((item) => item.success)
+    .map((item) => item.data);
+}
 
 function extractCity(formattedAddress: string | undefined): string | undefined {
   if (!formattedAddress) return undefined;
@@ -281,6 +307,62 @@ export const searchRouter = router({
     const merged = Array.from(new Set([...dynamic, ...fallback]));
     return merged.slice(0, 24);
   }),
+
+  listSavedSearches: protectedProcedure.query(async ({ ctx }) => {
+    const items = await loadSavedSearches(ctx.db, ctx.user.id);
+    return items.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }),
+
+  saveSearch: protectedProcedure
+    .input(
+      z.object({
+        id: z.string().optional(),
+        name: z.string().min(1).max(120),
+        query: searchStringSchema,
+        city: searchStringSchema,
+        country: z.string().trim().default("België"),
+        niche: searchStringSchema.optional(),
+        pageSize: z.number().min(5).max(80).default(20),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const items = await loadSavedSearches(ctx.db, ctx.user.id);
+      const now = new Date().toISOString();
+      const nextItem: SavedSearchItem = {
+        id: input.id || `search_${Math.random().toString(36).slice(2, 10)}`,
+        name: input.name.trim(),
+        query: input.query || "",
+        city: input.city || "",
+        country: input.country || "België",
+        niche: input.niche || "",
+        pageSize: input.pageSize,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const existingIndex = items.findIndex((item) => item.id === nextItem.id);
+      if (existingIndex >= 0) {
+        const current = items[existingIndex];
+        items[existingIndex] = {
+          ...current!,
+          ...nextItem,
+          createdAt: current!.createdAt,
+        };
+      } else {
+        items.unshift(nextItem);
+      }
+      await writeUserJsonSetting(ctx.db, ctx.user.id, SAVED_SEARCHES_KEY, items.slice(0, 100));
+      return nextItem;
+    }),
+
+  deleteSavedSearch: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const items = await loadSavedSearches(ctx.db, ctx.user.id);
+      const filtered = items.filter((item) => item.id !== input.id);
+      await writeUserJsonSetting(ctx.db, ctx.user.id, SAVED_SEARCHES_KEY, filtered);
+      return { success: true };
+    }),
 
   checkExistingLeads: protectedProcedure
     .input(z.object({ placeIds: z.array(z.string()) }))

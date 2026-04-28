@@ -121,6 +121,7 @@ function buildBookingSnapshot(input: {
   theme: string;
   brandName: string;
   meetingName: string;
+  serviceName: string;
   meetingLocation: string;
   submitText: string;
   timeMode: string;
@@ -164,6 +165,7 @@ export default function BookingSettingsPage() {
   const [theme, setTheme] = useState("light");
   const [brandName, setBrandName] = useState("Digitify");
   const [meetingName, setMeetingName] = useState("Kennismaking");
+  const [serviceName, setServiceName] = useState("");
   const [meetingLocation, setMeetingLocation] = useState("Google Meet");
   const [submitText, setSubmitText] = useState("Boeking aanvragen");
   const [timeMode, setTimeMode] = useState("24");
@@ -194,6 +196,7 @@ export default function BookingSettingsPage() {
       readSettingString(settings, "branding.company_name", "Digitify")
     );
     const nextMeetingName = readSettingString(settings, "bookings.embed_meeting_name", "Kennismaking");
+    const nextServiceName = readSettingString(settings, "bookings.embed_service_name", "");
     const nextMeetingLocation = readSettingString(settings, "bookings.embed_location_label", "Google Meet");
     const nextSubmitText = readSettingString(settings, "bookings.embed_submit_text", "Boeking aanvragen");
     const nextTimeMode = readSettingString(settings, "bookings.embed_time_mode", "24");
@@ -217,6 +220,7 @@ export default function BookingSettingsPage() {
     setTheme(nextTheme);
     setBrandName(nextBrandName);
     setMeetingName(nextMeetingName);
+    setServiceName(nextServiceName);
     setMeetingLocation(nextMeetingLocation);
     setSubmitText(nextSubmitText);
     setTimeMode(nextTimeMode);
@@ -236,6 +240,7 @@ export default function BookingSettingsPage() {
         theme: nextTheme,
         brandName: nextBrandName,
         meetingName: nextMeetingName,
+        serviceName: nextServiceName,
         meetingLocation: nextMeetingLocation,
         submitText: nextSubmitText,
         timeMode: nextTimeMode,
@@ -275,6 +280,7 @@ export default function BookingSettingsPage() {
         theme,
         brandName,
         meetingName,
+        serviceName,
         meetingLocation,
         submitText,
         timeMode,
@@ -294,6 +300,7 @@ export default function BookingSettingsPage() {
       theme,
       brandName,
       meetingName,
+      serviceName,
       meetingLocation,
       submitText,
       timeMode,
@@ -334,6 +341,7 @@ export default function BookingSettingsPage() {
     url.searchParams.set("theme", theme);
     url.searchParams.set("brandName", brandName);
     url.searchParams.set("meetingName", meetingName);
+    if (serviceName.trim()) url.searchParams.set("service", serviceName.trim());
     url.searchParams.set("location", meetingLocation);
     url.searchParams.set("timezone", googleTimezone || "Europe/Brussels");
     url.searchParams.set("submitText", submitText);
@@ -360,6 +368,7 @@ export default function BookingSettingsPage() {
     theme,
     brandName,
     meetingName,
+    serviceName,
     meetingLocation,
     googleTimezone,
     submitText,
@@ -391,6 +400,7 @@ export default function BookingSettingsPage() {
       { key: "bookings.embed_theme", value: theme },
       { key: "bookings.embed_brand_name", value: brandName.trim() },
       { key: "bookings.embed_meeting_name", value: meetingName.trim() },
+      { key: "bookings.embed_service_name", value: serviceName.trim() },
       { key: "bookings.embed_location_label", value: meetingLocation.trim() },
       { key: "bookings.embed_submit_text", value: submitText },
       { key: "bookings.embed_time_mode", value: timeMode },
@@ -576,7 +586,7 @@ export default function BookingSettingsPage() {
                     Branding, compacte layout en microcopy voor de publiek gedeelde boekingspagina.
                   </p>
                 </div>
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className="grid gap-4 lg:grid-cols-3">
                   <div className="space-y-2">
                     <Label>Merknaam</Label>
                     <Input value={brandName} onChange={(event) => setBrandName(event.target.value)} />
@@ -584,6 +594,14 @@ export default function BookingSettingsPage() {
                   <div className="space-y-2">
                     <Label>Meetingnaam</Label>
                     <Input value={meetingName} onChange={(event) => setMeetingName(event.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Service voor embed (optioneel)</Label>
+                    <Input
+                      value={serviceName}
+                      onChange={(event) => setServiceName(event.target.value)}
+                      placeholder="Bijv. Website intake"
+                    />
                   </div>
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">

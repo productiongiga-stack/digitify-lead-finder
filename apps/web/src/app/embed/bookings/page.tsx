@@ -219,6 +219,7 @@ function BookingEmbedContent() {
   const brandName = params.get("brandName") || "Digitify";
   const meetingName = params.get("meetingName") || title;
   const meetingLocation = params.get("location") || "Google Meet";
+  const serviceName = params.get("service") || "";
   const timezone = params.get("timezone") || "Europe/Brussels";
   const defaultTimeMode = params.get("timeMode") === "12" ? "12" : "24";
   const tenant = params.get("tenant") || "";
@@ -282,6 +283,7 @@ function BookingEmbedContent() {
         localTime: selectedTime,
         duration,
         notes,
+        service: serviceName || undefined,
         website,
         tenant: tenant || undefined,
       }),
@@ -400,6 +402,9 @@ function BookingEmbedContent() {
                 <span className={themeClasses.muted}> / {duration} min</span>
               </h1>
               <p className={`mt-5 max-w-sm text-base leading-7 ${themeClasses.muted}`}>{description}</p>
+              {serviceName ? (
+                <p className={`mt-2 text-xs font-medium ${themeClasses.muted}`}>Service: {serviceName}</p>
+              ) : null}
             </div>
 
             <div className="space-y-5 pt-2 text-lg">

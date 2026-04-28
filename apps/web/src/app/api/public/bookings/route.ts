@@ -102,6 +102,7 @@ export async function POST(request: Request) {
     const localTime = String(body.localTime || "").trim();
     const duration = Number(body.duration || 60);
     const notes = String(body.notes || "").trim();
+    const service = String(body.service || "").trim().slice(0, 140);
     const settings = await prisma.setting.findMany({
       where: {
         key: {
@@ -238,7 +239,9 @@ export async function POST(request: Request) {
         clientEmail: clientEmail || null,
         date: bookingDate,
         duration,
-        notes: notes || "Aangemaakt via booking embed",
+        notes: [service ? `Service: ${service}` : "", notes || "Aangemaakt via booking embed"]
+          .filter(Boolean)
+          .join("\n"),
         status: "PENDING",
         createdById: tenantUserId,
       },
@@ -284,6 +287,7 @@ export async function POST(request: Request) {
       minute: "2-digit",
     });
     const notesText = booking.notes || "Geen extra notities.";
+    const serviceText = service ? `Service: ${service}` : null;
 
     if (clientEmail) {
       const result = await sendBrandedEmail(prisma, {
@@ -295,6 +299,7 @@ export async function POST(request: Request) {
           `Bedankt voor uw aanvraag. We hebben uw boeking goed ontvangen.`,
           `Datum: ${bookingDateLabel}`,
           `Duur: ${booking.duration} minuten`,
+          serviceText,
           ``,
           `Extra info: ${notesText}`,
           ``,
@@ -324,6 +329,7 @@ export async function POST(request: Request) {
           `E-mail: ${clientEmail || "-"}`,
           `Datum: ${bookingDateLabel}`,
           `Duur: ${booking.duration} minuten`,
+          serviceText,
           `Notities: ${notesText}`,
         ].join("\n"),
         recipientCompany: companyName,

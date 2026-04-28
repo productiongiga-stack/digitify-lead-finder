@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
@@ -52,9 +52,11 @@ import {
   Target,
   X,
   ChevronDown,
+  FileDown,
+  FileUp,
 } from "lucide-react";
 import { cn, formatScore, formatDate, safeExternalUrl } from "@/lib/utils";
-import { LEADS_MENU_ITEMS } from "@/lib/navigation";
+import { LEADS_WORKFLOW_ITEMS } from "@/lib/navigation";
 
 type Lead = {
   id: string;
@@ -135,6 +137,7 @@ export default function LeadsPage() {
     (typeof LEAD_STATUS_OPTIONS)[number]["value"] | ""
   >("");
   const [bulkTagId, setBulkTagId] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pageSize = 25;
 
   const utils = trpc.useUtils();
@@ -194,6 +197,12 @@ export default function LeadsPage() {
     },
   });
 
+  const importCsv = trpc.lead.importCsv.useMutation({
+    onSuccess: () => {
+      utils.lead.list.invalidate();
+    },
+  });
+
   const items = (data?.items ?? []) as Lead[];
   const total = data?.total ?? 0;
   const totalPages = data?.totalPages ?? 1;
@@ -208,6 +217,35 @@ export default function LeadsPage() {
     setPriorityFilter("");
     setPage(1);
     router.replace("/leads");
+  }
+
+  async function handleExportCsv() {
+    const result = await utils.lead.exportCsv.fetch({
+      ids: selectedIds.size > 0 ? Array.from(selectedIds) : undefined,
+      filters: {
+        search: search || undefined,
+        status: statusFilter ? [statusFilter] : undefined,
+        scorePriority: priorityFilter || undefined,
+      },
+    });
+    const blob = new Blob([result.csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleExportPdf() {
+    const ids = selectedIds.size > 0 ? Array.from(selectedIds).join(",") : "";
+    const url = ids ? `/api/leads/export/pdf?ids=${encodeURIComponent(ids)}` : "/api/leads/export/pdf";
+    window.open(url, "_blank");
+  }
+
+  async function handleImportFile(file: File) {
+    const text = await file.text();
+    importCsv.mutate({ csv: text, source: "ui_csv_import" });
   }
 
   const columns = useMemo<DataTableColumn<Lead>[]>(
@@ -472,6 +510,30 @@ export default function LeadsPage() {
           <p className="app-page-subtitle">{total} leads gevonden</p>
         </div>
         <div className="app-page-actions">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              handleImportFile(file);
+              event.currentTarget.value = "";
+            }}
+          />
+          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+            <FileUp className="mr-2 h-4 w-4" />
+            CSV import
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleExportCsv}>
+            <FileDown className="mr-2 h-4 w-4" />
+            CSV export
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleExportPdf}>
+            <FileDown className="mr-2 h-4 w-4" />
+            PDF export
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
@@ -482,7 +544,7 @@ export default function LeadsPage() {
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>Leads Dropdown</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {LEADS_MENU_ITEMS.map((item) => (
+              {LEADS_WORKFLOW_ITEMS.map((item) => (
                 <DropdownMenuItem key={item.href} asChild>
                   <Link href={item.href}>
                     <item.icon className="mr-2 h-4 w-4" />
@@ -582,6 +644,11 @@ export default function LeadsPage() {
                   {recomputeScores.data.failed > 0
                     ? ` · ${recomputeScores.data.failed} fouten`
                     : ""}
+                </span>
+              ) : null}
+              {importCsv.data ? (
+                <span className="text-xs text-muted-foreground">
+                  CSV: {importCsv.data.created} toegevoegd · {importCsv.data.skipped} overgeslagen
                 </span>
               ) : null}
             </div>
