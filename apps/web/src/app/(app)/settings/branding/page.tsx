@@ -14,14 +14,20 @@ export default function BrandingSettingsPage() {
 
   const updateSetting = trpc.settings.update.useMutation({
     onSuccess: () => utils.settings.getAll.invalidate(),
+    onError: (error) =>
+      showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
   });
 
   const batchUpdate = trpc.settings.batchUpdate.useMutation({
     onSuccess: () => {
       utils.settings.getAll.invalidate();
+      setInitialValues({ companyName, companySlogan, primaryColor, fromName, fromEmail });
       setShowSuccess(true);
+      showToast({ title: "Branding opgeslagen", description: "Je branding is bijgewerkt voor dit account." });
       setTimeout(() => setShowSuccess(false), 3000);
     },
+    onError: (error) =>
+      showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
   });
 
   const [companyName, setCompanyName] = useState("");

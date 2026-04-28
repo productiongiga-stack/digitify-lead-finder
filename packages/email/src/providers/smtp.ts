@@ -9,8 +9,8 @@ function formatProviderSmtpError(error: unknown) {
   if (/auth|login|invalid credentials|username|password/i.test(message)) {
     return "authenticatie geweigerd; controleer gebruikersnaam, wachtwoord of app-password";
   }
-  if (/timeout|ENOTFOUND|ECONNREFUSED|EAI_AGAIN/i.test(message)) {
-    return "verbinding met de mailserver mislukt; controleer host, poort, firewall en DNS";
+  if (/timeout|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|EHOSTUNREACH|EAI_AGAIN/i.test(message)) {
+    return "verbinding met de mailserver mislukt; controleer host, poort, firewall, DNS en of de SMTP-server verbindingen vanaf Vercel toestaat";
   }
   return message;
 }
@@ -32,6 +32,9 @@ export class SmtpProvider implements EmailProvider {
       port: config.port,
       secure: config.secure ?? config.port === 465,
       auth: { user: config.user, pass: config.pass },
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
       tls: {
         rejectUnauthorized: config.tls?.rejectUnauthorized ?? true,
         ...(config.tls?.servername ? { servername: config.tls.servername } : {}),

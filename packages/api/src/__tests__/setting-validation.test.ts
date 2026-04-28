@@ -39,6 +39,15 @@ describe("setting value validation", () => {
     expect(() => validateSettingValue("branding.primary_color", "red")).toThrow(TRPCError);
   });
 
+  it("accepts website fields with or without protocol and treats website labels as text", () => {
+    expect(validateSettingValue("company.website", "www.digitify.be")).toBe("www.digitify.be");
+    expect(validateSettingValue("branding.website", "https://digitify.be")).toBe("https://digitify.be");
+    expect(validateSettingValue("quotes.embed_footer_website", "digitify.be/contact")).toBe("digitify.be/contact");
+    expect(validateSettingValue("company.footer_website_label", "www.digitify.be")).toBe("www.digitify.be");
+
+    expect(() => validateSettingValue("company.website", "not a website")).toThrow(TRPCError);
+  });
+
   it("allows object values only for *_json keys", () => {
     expect(validateSettingValue("quotes.embed_product_specs_json", { productA: ["x"] })).toEqual({
       productA: ["x"],

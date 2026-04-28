@@ -72,7 +72,11 @@ function isLikelyEmailKey(key: string) {
 }
 
 function isLikelyUrlKey(key: string) {
-  return key.endsWith("_url") || key.includes(".website") || key === "branding.logo_url" || key === "branding.favicon_url";
+  return key.endsWith("_url") || key === "branding.logo_url" || key === "branding.favicon_url";
+}
+
+function isWebsiteKey(key: string) {
+  return key.endsWith(".website") || key.endsWith("_website") || key === "company.footer_website_url";
 }
 
 function isLikelyHostKey(key: string) {
@@ -93,7 +97,26 @@ function validateStringValue(key: string, value: string) {
     invalid(`Instelling "${key}" bevat een ongeldig host-formaat.`);
   }
 
-  if (isLikelyUrlKey(key) && value) {
+  if (isWebsiteKey(key) && value) {
+    const isHttpUrl = /^https?:\/\//i.test(value);
+    if (isHttpUrl) {
+      try {
+        const parsed = new URL(value);
+        if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname) {
+          invalid(`Instelling "${key}" gebruikt een ongeldig website-adres.`);
+        }
+      } catch {
+        invalid(`Instelling "${key}" bevat een ongeldig website-formaat.`);
+      }
+    } else {
+      const hostname = value.split("/")[0]?.trim() || "";
+      if (!HOST_PATTERN.test(hostname)) {
+        invalid(`Instelling "${key}" bevat een ongeldig website-formaat.`);
+      }
+    }
+  }
+
+  if (isLikelyUrlKey(key) && !isWebsiteKey(key) && value) {
     const isDataImageUrl = /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i.test(value);
     const isHttpUrl = /^https?:\/\//i.test(value);
     if (!isDataImageUrl && !isHttpUrl) {

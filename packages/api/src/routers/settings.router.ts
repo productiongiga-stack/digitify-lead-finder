@@ -469,6 +469,9 @@ export const settingsRouter = router({
           port,
           secure: port === 465,
           auth: { user, pass },
+          connectionTimeout: 10_000,
+          greetingTimeout: 10_000,
+          socketTimeout: 20_000,
           tls: normalizeTlsOptions({
             host,
             explicitServername: cfg.smtpServername,

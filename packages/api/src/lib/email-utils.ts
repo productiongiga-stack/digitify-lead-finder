@@ -41,8 +41,8 @@ export function formatSmtpErrorMessage(err: unknown) {
   if (/auth|login|invalid credentials|username|password/i.test(message)) {
     return "SMTP mislukt: authenticatie geweigerd. Controleer gebruikersnaam, wachtwoord of app-password, en kijk na of SMTP-auth is toegestaan.";
   }
-  if (/timeout|ENOTFOUND|ECONNREFUSED|EAI_AGAIN/i.test(message)) {
-    return "SMTP mislukt: netwerkverbinding met de mailserver faalt. Controleer host, poort, firewall en DNS.";
+  if (/timeout|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|EHOSTUNREACH|EAI_AGAIN/i.test(message)) {
+    return "SMTP mislukt: de mailserver is niet bereikbaar vanaf de app. Controleer host, poort, firewall/DNS en of je mailprovider SMTP-verkeer vanaf Vercel/cloudservers toestaat.";
   }
   return `SMTP mislukt: ${message}`;
 }

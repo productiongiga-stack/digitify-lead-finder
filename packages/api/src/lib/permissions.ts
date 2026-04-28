@@ -10,9 +10,10 @@ const VISUAL_SETTING_KEYS = new Set([
 ]);
 
 const PERSONAL_SETTING_PREFIXES = ["ui.", "display."];
+const ACCOUNT_SETTING_PREFIXES = ["branding.", "company.", "email."];
 const ADMIN_SETTING_PREFIXES = ["bookings.", "reviews.", "quotes.", "chatbot.", ...PERSONAL_SETTING_PREFIXES];
 const MEMBER_SETTING_PREFIXES = ["bookings.", "reviews.", "quotes.", "chatbot.", "pipeline.", "scoring.", ...PERSONAL_SETTING_PREFIXES];
-const OWNER_SETTING_PREFIXES = ["api.", "email.", "branding.", "company.", "openclaw."];
+const OWNER_SETTING_PREFIXES = ["api.", "openclaw."];
 
 export function normalizeRole(role: string | null | undefined): AppRole {
   if (
@@ -34,6 +35,7 @@ function keyStartsWith(key: string, prefixes: string[]) {
 export function canReadSettingKey(roleValue: string | null | undefined, key: string) {
   const role = normalizeRole(roleValue);
   if (role === "OWNER") return true;
+  if (role !== "VIEWER" && keyStartsWith(key, ACCOUNT_SETTING_PREFIXES)) return true;
   if (VISUAL_SETTING_KEYS.has(key) || keyStartsWith(key, PERSONAL_SETTING_PREFIXES)) return true;
   if (role === "ADMIN") return keyStartsWith(key, ADMIN_SETTING_PREFIXES) && !keyStartsWith(key, OWNER_SETTING_PREFIXES);
   if (role === "MEMBER") return keyStartsWith(key, MEMBER_SETTING_PREFIXES) && !keyStartsWith(key, OWNER_SETTING_PREFIXES);
@@ -46,6 +48,7 @@ export function canReadSettingKey(roleValue: string | null | undefined, key: str
 export function canManageSettingKey(roleValue: string | null | undefined, key: string) {
   const role = normalizeRole(roleValue);
   if (role === "OWNER") return true;
+  if (role !== "VIEWER" && keyStartsWith(key, ACCOUNT_SETTING_PREFIXES)) return true;
   if (role === "ADMIN") return keyStartsWith(key, ADMIN_SETTING_PREFIXES) && !keyStartsWith(key, OWNER_SETTING_PREFIXES);
   if (role === "MEMBER") return keyStartsWith(key, MEMBER_SETTING_PREFIXES) && !keyStartsWith(key, OWNER_SETTING_PREFIXES);
   if (role === "MODERATOR") return keyStartsWith(key, ["reviews.", "chatbot.", ...PERSONAL_SETTING_PREFIXES]);

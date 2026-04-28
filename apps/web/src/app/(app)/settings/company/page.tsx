@@ -5,6 +5,7 @@ import { trpc } from "@/lib/trpc/client";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Textarea, Skeleton } from "@digitify/ui";
 import { ArrowLeft, Save, Loader2, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
+import { useToast } from "@/components/feedback/toast-provider";
 
 function isValidEmail(email: string): boolean {
   if (!email) return true; // empty is ok
@@ -19,13 +20,17 @@ function isValidPhone(phone: string): boolean {
 export default function CompanySettingsPage() {
   const { data: settings, isLoading } = trpc.settings.getAll.useQuery();
   const utils = trpc.useUtils();
+  const { showToast } = useToast();
 
   const batchUpdate = trpc.settings.batchUpdate.useMutation({
     onSuccess: () => {
       utils.settings.getAll.invalidate();
       setShowSuccess(true);
+      showToast({ title: "Bedrijfsgegevens opgeslagen", description: "Deze gegevens zijn bijgewerkt voor dit account." });
       setTimeout(() => setShowSuccess(false), 3000);
     },
+    onError: (error) =>
+      showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
   });
 
   const [companyName, setCompanyName] = useState("");
