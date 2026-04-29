@@ -1,8 +1,8 @@
 "use client";
 
-import { use, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { getAppUrl } from "@/lib/config";
 import {
@@ -111,9 +111,10 @@ function AuditItem({ label, value }: { label: string; value: boolean | null | un
 
 /* ---------- main page ---------- */
 
-export default function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-  const leadId = id;
+export default function LeadDetailPage() {
+  const params = useParams<{ id?: string | string[] }>();
+  const leadId = (Array.isArray(params.id) ? params.id[0] : params.id) ?? "";
+  const id = leadId;
   const router = useRouter();
   const { data: leadData, isError: leadIsError, isFetching, isLoading } = trpc.lead.getById.useQuery(
     { id: leadId },

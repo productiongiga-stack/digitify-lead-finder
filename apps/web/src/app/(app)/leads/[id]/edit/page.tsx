@@ -1,7 +1,7 @@
 "use client";
 
-import { use, useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import {
@@ -31,8 +31,9 @@ const STATUS_OPTIONS = [
   { value: "ARCHIVED", label: "Gearchiveerd" },
 ];
 
-export default function LeadEditPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function LeadEditPage() {
+  const params = useParams<{ id?: string | string[] }>();
+  const id = (Array.isArray(params.id) ? params.id[0] : params.id) ?? "";
   const router = useRouter();
   const utils = trpc.useUtils();
 
