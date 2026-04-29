@@ -7,7 +7,6 @@ import { trpc } from "@/lib/trpc/client";
 import {
   Button, Card, CardContent, CardHeader, CardTitle,
   Input, Label, Textarea, Skeleton, Switch,
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
   Separator,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger,
 } from "@digitify/ui";
@@ -230,16 +229,16 @@ export default function LeadEditPage() {
           </div>
           <div className="space-y-2">
             <Label>Sector / Industry</Label>
-            <Select value={form.industry} onValueChange={(v) => setField("industry", v)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Kies sector..." />
-              </SelectTrigger>
-              <SelectContent>
-                {INDUSTRIES.map((ind) => (
-                  <SelectItem key={ind} value={ind}>{ind}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <select
+              value={form.industry}
+              onChange={(event) => setField("industry", event.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <option value="">Kies sector...</option>
+              {INDUSTRIES.map((ind) => (
+                <option key={ind} value={ind}>{ind}</option>
+              ))}
+            </select>
           </div>
           <div className="space-y-2 sm:col-span-2">
             <Label>Adres</Label>
@@ -317,53 +316,44 @@ export default function LeadEditPage() {
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label>Status</Label>
-            <Select value={form.status} onValueChange={(v) => setField("status", v)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map((s) => (
-                  <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <select
+              value={form.status}
+              onChange={(event) => setField("status", event.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              {STATUS_OPTIONS.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
           </div>
           <div className="space-y-2">
             <Label>Pipeline fase</Label>
-            <Select
-              value={form.pipelineStageId || "__none__"}
-              onValueChange={(v) => setField("pipelineStageId", v === "__none__" ? "" : v)}
+            <select
+              value={form.pipelineStageId}
+              onChange={(event) => setField("pipelineStageId", event.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              <SelectTrigger>
-                <SelectValue placeholder="Geen fase" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">Geen fase</SelectItem>
-                {pipelineStages?.map((stage: NonNullable<typeof pipelineStages>[number]) => (
-                  <SelectItem key={stage.id} value={stage.id}>{stage.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              <option value="">Geen fase</option>
+              {pipelineStages?.map((stage: NonNullable<typeof pipelineStages>[number]) => (
+                <option key={stage.id} value={stage.id}>{stage.name}</option>
+              ))}
+            </select>
           </div>
           <div className="space-y-2">
             <Label>Toegewezen aan</Label>
             {usersError ? (
               <p className="text-xs text-muted-foreground">Geen toegang tot gebruikerslijst</p>
             ) : (
-              <Select
-                value={form.assignedToId || "__none__"}
-                onValueChange={(v) => setField("assignedToId", v === "__none__" ? "" : v)}
+              <select
+                value={form.assignedToId}
+                onChange={(event) => setField("assignedToId", event.target.value)}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Niemand" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Niemand</SelectItem>
-                  {users?.map((user: NonNullable<typeof users>[number]) => (
-                    <SelectItem key={user.id} value={user.id}>{user.name || user.email}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <option value="">Niemand</option>
+                {users?.map((user: NonNullable<typeof users>[number]) => (
+                  <option key={user.id} value={user.id}>{user.name || user.email}</option>
+                ))}
+              </select>
             )}
           </div>
           <div className="flex items-center gap-3 pt-6">
