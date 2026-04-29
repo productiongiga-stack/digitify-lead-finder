@@ -194,13 +194,13 @@ export function Topbar() {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <Link href="/settings/account">
+              <Link href="/settings/account?tab=profile">
                 <UserCircle className="mr-2 h-4 w-4" />
                 Account & profiel
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href="/settings/account">
+              <Link href="/settings/account?tab=security">
                 <KeyRound className="mr-2 h-4 w-4" />
                 Wachtwoord wijzigen
               </Link>

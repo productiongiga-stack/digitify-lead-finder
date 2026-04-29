@@ -4,10 +4,12 @@ const required = [
   "NEXTAUTH_SECRET",
 ] as const;
 
-const missing = required.filter((key) => !process.env[key]);
+export function assertServerEnv() {
+  const missing = required.filter((key) => !process.env[key]);
 
-if (missing.length > 0 && process.env.NODE_ENV !== "test") {
-  throw new Error(
-    `Ontbrekende verplichte omgevingsvariabelen:\n${missing.map((k) => `  • ${k}`).join("\n")}\n\nKopieer .env.example naar .env.local en vul de waarden in.`
-  );
+  if (missing.length > 0 && process.env.NODE_ENV !== "test") {
+    throw new Error(
+      `Ontbrekende verplichte omgevingsvariabelen:\n${missing.map((k) => `  - ${k}`).join("\n")}\n\nKopieer .env.example naar .env.local en vul de waarden in.`
+    );
+  }
 }

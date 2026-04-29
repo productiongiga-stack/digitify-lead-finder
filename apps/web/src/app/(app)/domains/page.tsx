@@ -2,19 +2,16 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
-import { getAppUrl } from "@/lib/config";
 import {
-  Card, CardContent, CardHeader, CardTitle, Badge, Button, Skeleton,
+  Card, CardContent, Badge, Button, Skeleton,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
   Input, Label, Textarea,
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
   CreateModal, EmptyState,
 } from "@digitify/ui";
 import {
   Globe2, Plus, Shield, ShieldAlert, ShieldOff, ShieldQuestion,
-  ExternalLink, Search, Calendar, Building2, Loader2, Trash2,
-  CheckCircle2, XCircle, Smartphone, FileText, Hash, Share2,
-  Cpu, AlertTriangle, Clock, Pencil, Copy, ChevronRight,
+  ExternalLink, Search, Loader2, Trash2,
+  Pencil, ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
@@ -40,15 +37,6 @@ function formatDate(d: Date | string | null | undefined) {
     month: "short",
     year: "numeric",
   });
-}
-
-function daysRemaining(d: Date | string | null | undefined): string | null {
-  if (!d) return null;
-  const now = new Date();
-  const exp = new Date(d);
-  const diff = Math.ceil((exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  if (diff < 0) return `${Math.abs(diff)} dagen verlopen`;
-  return `${diff} dagen resterend`;
 }
 
 type AnalysisResult = {
@@ -116,19 +104,6 @@ type TrackerData = {
     browser: string;
   }>;
 };
-
-function AnalysisCheck({ ok, label }: { ok: boolean; label: string }) {
-  return (
-    <div className="flex items-center gap-2 text-sm">
-      {ok ? (
-        <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-      ) : (
-        <XCircle className="h-4 w-4 text-red-500 shrink-0" />
-      )}
-      <span>{label}</span>
-    </div>
-  );
-}
 
 export default function DomainsPage() {
   const [open, setOpen] = useState(false);
@@ -243,15 +218,6 @@ export default function DomainsPage() {
     } catch {
       showToast({ title: "Analyse mislukt", description: "De website kon niet geanalyseerd worden.", variant: "error" });
     }
-  }
-
-  async function copyTrackerCode(domainId: string) {
-    const embedCode = `<script async src="${getAppUrl()}/tracker.js?domain=${domainId}"></script>`;
-    await navigator.clipboard.writeText(embedCode);
-    showToast({
-      title: "Tracker code gekopieerd",
-      description: "De website tracker embed staat nu op je klembord.",
-    });
   }
 
   const domainToDelete = domains.find((domain: NonNullable<typeof domains>[number]) => domain.id === deleteId);

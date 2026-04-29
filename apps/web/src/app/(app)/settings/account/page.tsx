@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { trpc } from "@/lib/trpc/client";
 import { Avatar, AvatarFallback, AvatarImage, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Tabs, TabsContent, TabsList, TabsTrigger } from "@digitify/ui";
@@ -19,6 +20,7 @@ function initials(name?: string | null, email?: string | null) {
 }
 
 export default function AccountSettingsPage() {
+  const searchParams = useSearchParams();
   const { showToast } = useToast();
   const utils = trpc.useUtils();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -29,6 +31,11 @@ export default function AccountSettingsPage() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [activeTab, setActiveTab] = useState("profile");
+
+  useEffect(() => {
+    setActiveTab(searchParams.get("tab") === "security" ? "security" : "profile");
+  }, [searchParams]);
 
   useEffect(() => {
     if (!profile) return;
@@ -120,7 +127,7 @@ export default function AccountSettingsPage() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="profile" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="grid w-full max-w-md grid-cols-2">
           <TabsTrigger value="profile">Profiel</TabsTrigger>
           <TabsTrigger value="security">Beveiliging</TabsTrigger>

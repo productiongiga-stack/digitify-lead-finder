@@ -31,7 +31,7 @@ function resolveAuthBaseUrl(): string {
 }
 
 // Guard against empty env values (for example VERCEL_URL="") that cause next-auth URL parsing to crash at build time.
-process.env.NEXTAUTH_URL = resolveAuthBaseUrl();
+Object.assign(process.env, { NEXTAUTH_URL: resolveAuthBaseUrl() });
 
 function verifyPassword(password: string, storedHash: string): boolean {
   if (storedHash.includes(":")) {

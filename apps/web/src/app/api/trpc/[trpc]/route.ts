@@ -7,7 +7,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
 import { randomUUID } from "crypto";
 import { log } from "@digitify/api/src/lib/logger";
-import "@/lib/env";
+import { assertServerEnv } from "@/lib/env";
 
 let compatScheduled = false;
 
@@ -19,6 +19,7 @@ function scheduleSchemaCompat() {
 }
 
 const handler = async (req: Request) => {
+  assertServerEnv();
   scheduleSchemaCompat();
   const requestId = randomUUID();
   const session = await getServerSession(authOptions);
