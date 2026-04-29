@@ -175,13 +175,34 @@ export default function DomainsPage() {
   const domains = data?.domains ?? [];
 
   // Stats
-  const totalDomains = domains.length;
-  const activeDomains = domains.filter((domain: NonNullable<typeof domains>[number]) => domain.status === "ACTIVE").length;
-  const expiringDomains = domains.filter((domain: NonNullable<typeof domains>[number]) => domain.status === "EXPIRING").length;
-  const sslValid = domains.filter((domain: NonNullable<typeof domains>[number]) => domain.sslStatus === "VALID").length;
-  const sslExpired = domains.filter(
-    (domain: NonNullable<typeof domains>[number]) => domain.sslStatus === "EXPIRED" || domain.sslStatus === "NONE",
-  ).length;
+  const domainSummaries = domains.map((domain: NonNullable<typeof domains>[number]) => {
+    const analysis = analysisResults[domain.domainName];
+    const storedAnalysis = domain.lead?.enrichmentData?.find(
+      (item: NonNullable<typeof domain.lead>["enrichmentData"][number]) => item.source === "domain_analysis"
+    )?.data as AnalysisResult | undefined;
+    const trackerData = domain.lead?.enrichmentData?.find(
+      (item: NonNullable<typeof domain.lead>["enrichmentData"][number]) => item.source === `website_tracker:${domain.id}`
+    )?.data as TrackerData | undefined;
+    const effectiveAnalysis = analysis || storedAnalysis;
+    const online =
+      effectiveAnalysis?.statusCode !== undefined &&
+      effectiveAnalysis.statusCode >= 200 &&
+      effectiveAnalysis.statusCode < 400;
+    return {
+      domain,
+      effectiveAnalysis,
+      trackerData,
+      visitors: trackerData?.summary.uniqueVisitors ?? 0,
+      pageviews: trackerData?.summary.pageviews ?? 0,
+      lastSeen: trackerData?.summary.lastSeen ?? null,
+      statusCode: effectiveAnalysis?.statusCode ?? null,
+      online,
+      known: effectiveAnalysis?.statusCode !== undefined,
+    };
+  });
+  const totalVisitors = domainSummaries.reduce((sum, item) => sum + item.visitors, 0);
+  const onlineDomains = domainSummaries.filter((item) => item.online).length;
+  const offlineDomains = domainSummaries.filter((item) => item.known && !item.online).length;
 
   function handleCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -241,7 +262,7 @@ export default function DomainsPage() {
         <div className="app-page-heading">
           <h1 className="app-page-title">Domeinen</h1>
           <p className="app-page-subtitle">
-            Beheer domeinnamen, SSL-certificaten en website-analyse
+            Monitor websites op bereikbaarheid en bezoekers. Klik door voor analyse, tracker en acties.
           </p>
         </div>
         <div className="app-page-actions">
@@ -275,74 +296,31 @@ export default function DomainsPage() {
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-primary/10 p-2">
-                <Globe2 className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{isLoading ? "-" : totalDomains}</p>
-                <p className="text-xs text-muted-foreground">Totaal Domeinen</p>
-              </div>
+      <Card className="overflow-hidden border-border/60 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-xl">
+        <CardContent className="p-5">
+          <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr_0.8fr]">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/50">Website monitor</p>
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight">Rustige cockpit, diepe analyse op detailniveau.</h2>
+              <p className="mt-2 max-w-2xl text-sm text-white/65">
+                De hoofdpagina toont alleen wat je meteen wil weten: hoeveel bezoekers er zijn en of de website online is.
+              </p>
             </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-emerald-500/10 p-2">
-                <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{isLoading ? "-" : activeDomains}</p>
-                <p className="text-xs text-muted-foreground">Actief</p>
-              </div>
+            <div className="rounded-2xl border border-white/10 bg-white/8 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-white/45">Bezoekers</p>
+              <p className="mt-2 text-3xl font-semibold">{isLoading ? "-" : totalVisitors}</p>
+              <p className="mt-1 text-xs text-white/50">Unieke bezoekers uit geplaatste trackers</p>
             </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-amber-500/10 p-2">
-                <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{isLoading ? "-" : expiringDomains}</p>
-                <p className="text-xs text-muted-foreground">Verlopend</p>
-              </div>
+            <div className="rounded-2xl border border-white/10 bg-white/8 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-white/45">Online</p>
+              <p className="mt-2 text-3xl font-semibold">{isLoading ? "-" : onlineDomains}</p>
+              <p className="mt-1 text-xs text-white/50">
+                {offlineDomains > 0 ? `${offlineDomains} website${offlineDomains !== 1 ? "s" : ""} met issue` : "Geen bekende outages"}
+              </p>
             </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-emerald-500/10 p-2">
-                <Shield className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{isLoading ? "-" : sslValid}</p>
-                <p className="text-xs text-muted-foreground">SSL Geldig</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-red-500/10 p-2">
-                <ShieldAlert className="h-5 w-5 text-red-600 dark:text-red-400" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{isLoading ? "-" : sslExpired}</p>
-                <p className="text-xs text-muted-foreground">SSL Verlopen</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Domain Cards */}
       {isLoading ? (
@@ -368,107 +346,64 @@ export default function DomainsPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {domains.map((domain: NonNullable<typeof domains>[number]) => {
+        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+          {domainSummaries.map(({ domain, effectiveAnalysis, trackerData, visitors, pageviews, lastSeen, statusCode, online, known }) => {
             const statusInfo = STATUS_MAP[domain.status] ?? STATUS_MAP.ACTIVE;
             const sslInfo = SSL_MAP[domain.sslStatus ?? "UNKNOWN"] ?? SSL_MAP.UNKNOWN;
             const SslIcon = sslInfo.icon;
-            const days = daysRemaining(domain.expiresAt);
-            const analysis = analysisResults[domain.domainName];
-            const storedAnalysis = domain.lead?.enrichmentData?.find(
-              (item: NonNullable<typeof domain.lead>["enrichmentData"][number]) => item.source === "domain_analysis"
-            )?.data as AnalysisResult | undefined;
-            const trackerData = domain.lead?.enrichmentData?.find(
-              (item: NonNullable<typeof domain.lead>["enrichmentData"][number]) => item.source === `website_tracker:${domain.id}`
-            )?.data as TrackerData | undefined;
-            const effectiveAnalysis = analysis || storedAnalysis;
-            const isExpanded = expandedAnalysis === domain.domainName;
-            const isAnalyzing = analyzeMutation.isPending && expandedAnalysis === domain.domainName && !analysis;
-            const websiteIsOnline =
-              effectiveAnalysis?.statusCode !== undefined &&
-              effectiveAnalysis.statusCode >= 200 &&
-              effectiveAnalysis.statusCode < 400;
+            const isAnalyzing = analyzeMutation.isPending && expandedAnalysis === domain.domainName;
 
             return (
-              <Card key={domain.id} className="flex flex-col">
-                <CardContent className="p-5 flex-1 space-y-3">
-                  {/* Header */}
-                  <div className="flex items-start justify-between gap-2">
+              <Card key={domain.id} className="group overflow-hidden border-border/60 bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                      <a
-                        href={`https://${domain.domainName}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-lg font-semibold hover:text-primary flex items-center gap-1.5 truncate"
-                      >
+                      <Link href={`/domains/${domain.id}`} className="block truncate text-base font-semibold tracking-tight hover:text-primary">
                         {domain.domainName}
-                        <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      </a>
+                      </Link>
+                      <p className="mt-1 truncate text-xs text-muted-foreground">
+                        {domain.lead?.companyName || domain.registrar || "Geen lead gekoppeld"}
+                      </p>
                     </div>
                     <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                   </div>
 
-                  {/* SSL Status */}
-                  <div className="flex items-center gap-1.5">
-                    <SslIcon className={`h-4 w-4 ${sslInfo.color}`} />
-                    <span className="text-sm">{sslInfo.label}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={`h-2.5 w-2.5 rounded-full ${
-                        effectiveAnalysis
-                          ? websiteIsOnline
-                            ? "bg-emerald-500"
-                            : "bg-red-500"
-                          : "bg-slate-300"
-                      }`}
-                    />
-                    <span className="text-sm text-muted-foreground">
-                      Website {effectiveAnalysis ? (websiteIsOnline ? "online" : "offline") : "onbekend"}
-                    </span>
-                    {effectiveAnalysis?.statusCode ? (
-                      <span className="text-xs text-muted-foreground">HTTP {effectiveAnalysis.statusCode}</span>
-                    ) : null}
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl border bg-muted/20 p-3">
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2.5 w-2.5 rounded-full ${known ? (online ? "bg-emerald-500" : "bg-red-500") : "bg-slate-300"}`} />
+                        <p className="text-xs font-medium text-muted-foreground">Website</p>
+                      </div>
+                      <p className="mt-2 text-lg font-semibold">
+                        {known ? (online ? "Online" : "Offline") : "Onbekend"}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {statusCode ? `HTTP ${statusCode}` : "Nog niet gecheckt"}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border bg-muted/20 p-3">
+                      <p className="text-xs font-medium text-muted-foreground">Bezoekers</p>
+                      <p className="mt-2 text-lg font-semibold">{visitors}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{pageviews} pageviews</p>
+                    </div>
                   </div>
 
-                  {/* Details */}
-                  <div className="space-y-1.5 text-sm text-muted-foreground">
-                    {domain.registrar && (
-                      <div className="flex items-center gap-2">
-                        <Building2 className="h-3.5 w-3.5 shrink-0" />
-                        <span>{domain.registrar}</span>
-                      </div>
-                    )}
-                    {domain.expiresAt && (
-                      <div className="flex items-center gap-2">
-                        <Calendar className="h-3.5 w-3.5 shrink-0" />
-                        <span>{formatDate(domain.expiresAt)}</span>
-                        {days && (
-                          <span className={`text-xs ${days.includes("verlopen") ? "text-red-600" : "text-muted-foreground"}`}>
-                            ({days})
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    {domain.lead && (
-                      <div className="flex items-center gap-2">
-                        <Building2 className="h-3.5 w-3.5 shrink-0" />
-                        <Link
-                          href={`/leads/${domain.lead.id}`}
-                          className="text-primary hover:underline"
-                        >
-                          {domain.lead.companyName}
-                        </Link>
-                      </div>
-                    )}
+                  <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border bg-background/80 p-3">
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">Laatste bezoek</p>
+                      <p className="truncate text-sm font-medium">{lastSeen ? formatDate(lastSeen) : "Nog geen data"}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <SslIcon className={`h-4 w-4 ${sslInfo.color}`} />
+                      <span className="text-xs text-muted-foreground">{sslInfo.label}</span>
+                    </div>
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex flex-wrap items-center gap-2 border-t pt-2">
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
                     <Button
                       variant="outline"
                       size="sm"
-                      className="text-xs"
+                      className="h-8 text-xs"
                       disabled={isAnalyzing}
                       onClick={() => handleAnalyze(domain.domainName)}
                     >
@@ -477,276 +412,33 @@ export default function DomainsPage() {
                       ) : (
                         <Search className="mr-1.5 h-3 w-3" />
                       )}
-                      Analyseer
+                      Check live
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-xs"
-                      onClick={() => setEditDomain(domain)}
-                    >
+                    <Button asChild size="sm" className="h-8 text-xs">
+                      <Link href={`/domains/${domain.id}`}>
+                      Open details
+                      <ChevronRight className="ml-1 h-3.5 w-3.5" />
+                      </Link>
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setEditDomain(domain)}>
                       <Pencil className="mr-1.5 h-3 w-3" />
                       Bewerk
                     </Button>
-                    <Link
-                      href={`/domains/${domain.id}`}
-                      className="inline-flex h-9 items-center rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                    >
-                      Details
-                      <ChevronRight className="ml-1 h-3.5 w-3.5" />
-                    </Link>
+                    <Button asChild variant="ghost" size="sm" className="h-8 text-xs">
+                      <a href={`https://${domain.domainName}`} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="mr-1.5 h-3 w-3" />
+                        Website
+                      </a>
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="text-xs text-destructive hover:text-destructive"
+                      className="h-8 text-xs text-destructive hover:text-destructive"
                       onClick={() => setDeleteId(domain.id)}
                     >
                       <Trash2 className="h-3 w-3" />
                     </Button>
                   </div>
-
-                  {/* Analysis Results */}
-                  {isExpanded && effectiveAnalysis && (
-                    <div className="space-y-3 pt-3 border-t">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        Analyse Resultaten
-                      </p>
-                      <div className="grid gap-2">
-                        <AnalysisCheck
-                          ok={effectiveAnalysis.hasSSL}
-                          label={`SSL: ${effectiveAnalysis.hasSSL ? "Geldig" : "Niet gevonden"}`}
-                        />
-                        <div className="flex items-center gap-2 text-sm">
-                          <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
-                          <span>Laadtijd: {effectiveAnalysis.loadTimeMs}ms</span>
-                        </div>
-                        <AnalysisCheck
-                          ok={effectiveAnalysis.isMobileFriendly}
-                          label={`Mobiel vriendelijk: ${effectiveAnalysis.isMobileFriendly ? "Ja" : "Nee"}`}
-                        />
-                        <AnalysisCheck
-                          ok={effectiveAnalysis.hasMetaTitle}
-                          label={`Meta titel: ${effectiveAnalysis.hasMetaTitle ? "Aanwezig" : "Ontbreekt"}`}
-                        />
-                        {effectiveAnalysis.metaTitle ? (
-                          <div className="flex items-start gap-2 text-sm">
-                            <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                            <span className="line-clamp-2">Titel: {effectiveAnalysis.metaTitle}</span>
-                          </div>
-                        ) : null}
-                        <AnalysisCheck
-                          ok={effectiveAnalysis.hasMetaDescription}
-                          label={`Meta beschrijving: ${effectiveAnalysis.hasMetaDescription ? "Aanwezig" : "Ontbreekt"}`}
-                        />
-                        <AnalysisCheck
-                          ok={effectiveAnalysis.hasH1}
-                          label={`H1 tag: ${effectiveAnalysis.hasH1 ? "Aanwezig" : "Ontbreekt"}`}
-                        />
-                        {effectiveAnalysis.h1Text ? (
-                          <div className="flex items-start gap-2 text-sm">
-                            <Hash className="h-4 w-4 shrink-0 text-muted-foreground" />
-                            <span className="line-clamp-2">H1: {effectiveAnalysis.h1Text}</span>
-                          </div>
-                        ) : null}
-                        <AnalysisCheck
-                          ok={effectiveAnalysis.hasCTA}
-                          label={`Contactformulier/CTA: ${effectiveAnalysis.hasCTA ? "Gevonden" : "Niet gevonden"}`}
-                        />
-                        <div className="flex items-center gap-2 text-sm">
-                          <Smartphone className="h-4 w-4 text-muted-foreground shrink-0" />
-                          <span>Content lengte: {effectiveAnalysis.contentLength} tekens</span>
-                        </div>
-                        {effectiveAnalysis.lastModified ? (
-                          <div className="flex items-center gap-2 text-sm">
-                            <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
-                            <span>Laatst gewijzigd: {formatDate(effectiveAnalysis.lastModified)}</span>
-                          </div>
-                        ) : null}
-                        {effectiveAnalysis.contactInfo.emails.length > 0 && (
-                          <div className="flex items-start gap-2 text-sm">
-                            <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-                            <span>E-mails: {effectiveAnalysis.contactInfo.emails.join(", ")}</span>
-                          </div>
-                        )}
-                        {effectiveAnalysis.contactInfo.phones.length > 0 && (
-                          <div className="flex items-start gap-2 text-sm">
-                            <Smartphone className="h-4 w-4 text-muted-foreground shrink-0" />
-                            <span>Telefoons: {effectiveAnalysis.contactInfo.phones.join(", ")}</span>
-                          </div>
-                        )}
-                        {Object.entries(effectiveAnalysis.socialLinks).some(([, v]) => v) && (
-                          <div className="flex items-center gap-2 text-sm">
-                            <Share2 className="h-4 w-4 text-muted-foreground shrink-0" />
-                            <span>
-                              Socials:{" "}
-                              {Object.entries(effectiveAnalysis.socialLinks)
-                                .filter(([, v]) => v)
-                                .map(([k]) => k)
-                                .join(", ")}
-                            </span>
-                          </div>
-                        )}
-                        {effectiveAnalysis.technologies.length > 0 && (
-                          <div className="flex items-center gap-2 text-sm">
-                            <Cpu className="h-4 w-4 text-muted-foreground shrink-0" />
-                            <span>Tech: {effectiveAnalysis.technologies.join(", ")}</span>
-                          </div>
-                        )}
-                        {effectiveAnalysis.errors.length > 0 && (
-                          <div className="flex items-start gap-2 text-sm text-red-600">
-                            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                            <span>{effectiveAnalysis.errors.join("; ")}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  {isExpanded && (
-                    <div className="space-y-3 pt-3 border-t">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                            Website Tracker
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            Plaats deze embed op de website om bezoekers en paginaweergaven te registreren.
-                          </p>
-                        </div>
-                        <Button variant="outline" size="sm" onClick={() => void copyTrackerCode(domain.id)}>
-                          <Copy className="mr-2 h-3.5 w-3.5" />
-                          Kopieer code
-                        </Button>
-                      </div>
-
-                      <div className="rounded-lg border bg-muted/40 p-3 text-xs font-mono break-all">
-                        {`<script async src="${getAppUrl()}/tracker.js?domain=${domain.id}"></script>`}
-                      </div>
-
-                      {!domain.lead ? (
-                        <p className="text-sm text-muted-foreground">
-                          Koppel dit domein eerst aan een lead. De tracker slaat bezoekersdata per gekoppelde website op.
-                        </p>
-                      ) : trackerData ? (
-                        <div className="grid gap-3">
-                          <div className="grid gap-3 sm:grid-cols-3">
-                            <div className="rounded-lg border p-3">
-                              <p className="text-xs text-muted-foreground">Pageviews</p>
-                              <p className="text-lg font-semibold">{trackerData.summary.pageviews}</p>
-                            </div>
-                            <div className="rounded-lg border p-3">
-                              <p className="text-xs text-muted-foreground">Bezoekers</p>
-                              <p className="text-lg font-semibold">{trackerData.summary.uniqueVisitors}</p>
-                            </div>
-                            <div className="rounded-lg border p-3">
-                              <p className="text-xs text-muted-foreground">Laatste hit</p>
-                              <p className="text-sm font-medium">
-                                {trackerData.summary.lastSeen ? formatDate(trackerData.summary.lastSeen) : "-"}
-                              </p>
-                            </div>
-                          </div>
-
-                          {trackerData.pages.length > 0 && (
-                            <div className="space-y-2">
-                              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Populaire pagina's</p>
-                              {trackerData.pages.slice(0, 3).map((page) => (
-                                <div key={page.url} className="rounded-lg border p-3 text-sm">
-                                  <div className="flex items-center justify-between gap-3">
-                                    <span className="truncate font-medium">{page.title || page.url}</span>
-                                    <span className="text-muted-foreground">{page.count} views</span>
-                                  </div>
-                                  <p className="mt-1 truncate text-xs text-muted-foreground">{page.url}</p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {trackerData.referrers.length > 0 && (
-                            <div className="space-y-2">
-                              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Referrers</p>
-                              <div className="flex flex-wrap gap-2">
-                                {trackerData.referrers.slice(0, 4).map((referrer) => (
-                                  <Badge key={referrer.source} variant="outline">
-                                    {referrer.source}: {referrer.count}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {trackerData.devices?.length > 0 && (
-                            <div className="space-y-2">
-                              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Devices</p>
-                              <div className="flex flex-wrap gap-2">
-                                {trackerData.devices.map((device) => (
-                                  <Badge key={device.type} variant="outline">
-                                    {device.type}: {device.count}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {trackerData.browsers?.length > 0 && (
-                            <div className="space-y-2">
-                              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Browsers</p>
-                              <div className="flex flex-wrap gap-2">
-                                {trackerData.browsers.map((browser) => (
-                                  <Badge key={browser.name} variant="outline">
-                                    {browser.name}: {browser.count}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {trackerData.campaigns?.length > 0 && (
-                            <div className="space-y-2">
-                              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Campagnes</p>
-                              {trackerData.campaigns.slice(0, 4).map((campaign) => (
-                                <div key={`${campaign.source}-${campaign.medium}-${campaign.campaign}`} className="rounded-lg border p-3 text-sm">
-                                  <div className="flex items-center justify-between gap-3">
-                                    <span className="font-medium">
-                                      {campaign.source} / {campaign.medium}
-                                    </span>
-                                    <span className="text-muted-foreground">{campaign.count} hits</span>
-                                  </div>
-                                  <p className="mt-1 text-xs text-muted-foreground">{campaign.campaign}</p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {trackerData.visitors?.length > 0 && (
-                            <div className="space-y-2">
-                              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Recente bezoekers</p>
-                              {trackerData.visitors.slice(0, 4).map((visitor) => (
-                                <div key={visitor.id} className="rounded-lg border p-3 text-sm">
-                                  <div className="flex items-center justify-between gap-3">
-                                    <span className="font-medium">{visitor.deviceType} / {visitor.browser}</span>
-                                    <span className="text-muted-foreground">{visitor.count} views</span>
-                                  </div>
-                                  <p className="mt-1 truncate text-xs text-muted-foreground">{visitor.pageUrl}</p>
-                                  <p className="mt-1 text-xs text-muted-foreground">
-                                    {visitor.language || "onbekende taal"} · {visitor.timezone || "onbekende timezone"}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          Nog geen bezoekersdata ontvangen. Na het plaatsen van de embedcode blijven deze statistieken bewaard, ook wanneer je de website opnieuw analyseert.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  {isExpanded && isAnalyzing && (
-                    <div className="flex items-center justify-center py-4">
-                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                      <span className="ml-2 text-sm text-muted-foreground">Website analyseren...</span>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
             );

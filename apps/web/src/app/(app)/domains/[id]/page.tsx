@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Activity, ArrowLeft, Copy, ExternalLink, Gauge, Globe2, Lightbulb, Mail, Phone, RefreshCcw, Shield, ShieldOff, TimerReset } from "lucide-react";
-import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Skeleton } from "@digitify/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from "@digitify/ui";
 import { trpc } from "@/lib/trpc/client";
 import { getAppUrl } from "@/lib/config";
 import { useToast } from "@/components/feedback/toast-provider";
@@ -233,6 +233,14 @@ export default function DomainDetailPage() {
         </Card>
       </div>
 
+      <Tabs defaultValue="analysis" className="space-y-4">
+        <TabsList className="grid w-full max-w-lg grid-cols-3">
+          <TabsTrigger value="analysis">Analyse</TabsTrigger>
+          <TabsTrigger value="traffic">Verkeer</TabsTrigger>
+          <TabsTrigger value="actions">Acties</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="analysis" className="space-y-4">
       <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <Card>
           <CardHeader>
@@ -407,6 +415,126 @@ export default function DomainDetailPage() {
           </Card>
         </div>
       </div>
+        </TabsContent>
+
+        <TabsContent value="traffic" className="space-y-4">
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Card>
+              <CardContent className="p-5">
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">Unieke bezoekers</p>
+                <p className="mt-2 text-3xl font-semibold">{tracker?.summary?.uniqueVisitors ?? 0}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{tracker?.summary?.pageviews ?? 0} pageviews totaal</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-5">
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">Laatste bezoek</p>
+                <p className="mt-2 text-lg font-semibold">{formatDate(tracker?.summary?.lastSeen)}</p>
+                <p className="mt-1 text-sm text-muted-foreground">Realtime zodra de tracker geplaatst is</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-5">
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">Gezondheid</p>
+                <p className="mt-2 text-3xl font-semibold">{healthScore}/100</p>
+                <p className="mt-1 text-sm text-muted-foreground">Combineert uptime, SEO, snelheid en basics</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Populaire pagina's</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {tracker?.pages?.length ? (
+                  tracker.pages.slice(0, 8).map((page) => (
+                    <div key={page.url} className="rounded-xl border p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="truncate text-sm font-medium">{page.title || page.url}</p>
+                        <Badge variant="outline">{page.count} views</Badge>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-muted-foreground">{page.url}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">Nog geen paginaweergaven gemeten.</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Recente bezoekers</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {tracker?.visitors?.length ? (
+                  tracker.visitors.slice(0, 8).map((visitor) => (
+                    <div key={visitor.id} className="rounded-xl border p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium">{visitor.deviceType || "device"} / {visitor.browser || "browser"}</p>
+                        <span className="text-xs text-muted-foreground">{visitor.count} views</span>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-muted-foreground">{visitor.pageUrl}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">Nog geen bezoekers gemeten.</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="actions" className="space-y-4">
+          <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Tracker installeren</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Plaats deze code vlak voor de sluitende head-tag of via de tag manager van de website. Daarna verschijnen bezoekers op de hoofdpagina.
+                </p>
+                <div className="rounded-2xl border bg-muted/30 p-4 text-xs font-mono break-all">
+                  {trackerCode}
+                </div>
+                <Button onClick={copyTrackerCode}>
+                  <Copy className="mr-2 h-4 w-4" />
+                  Kopieer tracker
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Aanbevolen volgende stappen</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-2">
+                <Button variant="outline" className="justify-between" onClick={() => analyzeMutation.mutate({ domainName: data.domainName })} disabled={analyzeMutation.isPending}>
+                  Website opnieuw analyseren
+                  <RefreshCcw className={`h-4 w-4 ${analyzeMutation.isPending ? "animate-spin" : ""}`} />
+                </Button>
+                <Button asChild variant="outline" className="justify-between">
+                  <a href={`https://${data.domainName}`} target="_blank" rel="noopener noreferrer">
+                    Website openen
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                </Button>
+                {data.lead ? (
+                  <Button asChild variant="outline" className="justify-between">
+                    <Link href={`/leads/${data.lead.id}`}>
+                      Gekoppelde lead openen
+                      <ArrowLeft className="h-4 w-4 rotate-180" />
+                    </Link>
+                  </Button>
+                ) : null}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
