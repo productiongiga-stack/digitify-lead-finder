@@ -674,31 +674,40 @@ function buildEditingQuoteState(
   };
 }
 
+function readQuoteConfiguratorUrlState() {
+  if (typeof window === "undefined") {
+    return {
+      ready: false,
+      preview: false,
+      internal: false,
+      pathname: "",
+      tenantToken: "",
+      leadId: "",
+      chatSessionId: "",
+      quoteId: "",
+    };
+  }
+  const params = new URLSearchParams(window.location.search);
+  return {
+    ready: true,
+    preview: params.get("preview") === "1",
+    internal: params.get("internal") === "1" || window.location.pathname.startsWith("/quotes/new"),
+    pathname: window.location.pathname,
+    tenantToken: params.get("tenant")?.trim() || "",
+    leadId: params.get("leadId")?.trim() || "",
+    chatSessionId: params.get("chatSessionId")?.trim() || "",
+    quoteId: params.get("quoteId")?.trim() || "",
+  };
+}
+
 function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }) {
-  const isPreviewRoute =
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).get("preview") === "1";
-  const isInternalMode =
-    mode === "internal" ||
-    (typeof window !== "undefined" &&
-      (new URLSearchParams(window.location.search).get("internal") === "1" ||
-        window.location.pathname.startsWith("/quotes/new")));
-  const tenantToken = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    return new URLSearchParams(window.location.search).get("tenant")?.trim() || "";
-  }, []);
-  const leadIdParam = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    return new URLSearchParams(window.location.search).get("leadId")?.trim() || "";
-  }, []);
-  const chatSessionIdParam = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    return new URLSearchParams(window.location.search).get("chatSessionId")?.trim() || "";
-  }, []);
-  const quoteIdParam = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    return new URLSearchParams(window.location.search).get("quoteId")?.trim() || "";
-  }, []);
+  const [urlState, setUrlState] = useState(readQuoteConfiguratorUrlState);
+  const isPreviewRoute = urlState.preview;
+  const isInternalMode = mode === "internal" || urlState.internal;
+  const tenantToken = urlState.tenantToken;
+  const leadIdParam = urlState.leadId;
+  const chatSessionIdParam = urlState.chatSessionId;
+  const quoteIdParam = urlState.quoteId;
   const [payload, setPayload] = useState<RemotePayload | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [isLivePreview, setIsLivePreview] = useState(false);
@@ -735,6 +744,10 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
   const [newProductEmoji, setNewProductEmoji] = useState("");
 
   useEffect(() => {
+    setUrlState(readQuoteConfiguratorUrlState());
+  }, []);
+
+  useEffect(() => {
     setConfirmedProducts((current) => {
       const next: Record<string, boolean> = {};
       Object.keys(current).forEach((productId) => {
@@ -745,6 +758,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
   }, [cart]);
 
   useEffect(() => {
+    if (!urlState.ready) return;
     if (isPreviewRoute) return;
     let active = true;
     const internalParams = new URLSearchParams();
@@ -805,7 +819,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
     return () => {
       active = false;
     };
-  }, [chatSessionIdParam, isInternalMode, isPreviewRoute, leadIdParam, quoteIdParam, tenantToken]);
+  }, [chatSessionIdParam, isInternalMode, isPreviewRoute, leadIdParam, quoteIdParam, tenantToken, urlState.ready]);
 
   useEffect(() => {
     if (!isPreviewRoute) return;
