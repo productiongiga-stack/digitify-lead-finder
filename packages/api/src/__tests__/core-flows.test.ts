@@ -102,9 +102,9 @@ describe("booking flow", () => {
         date: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
         duration: 60,
       }),
-    ).rejects.toMatchObject<Partial<TRPCError>>({
+    ).rejects.toMatchObject({
       code: "BAD_REQUEST",
-    });
+    } satisfies Partial<TRPCError>);
   });
 });
 

@@ -539,7 +539,7 @@ export default function InboxPage() {
               })}
             </div>
           </ScrollArea>
-          <div className="grid min-h-[22rem] h-[calc(100vh-12rem)] grid-cols-1 gap-2.5 md:grid-cols-[280px_1fr]">
+          <div className="grid min-h-[22rem] h-[calc(100vh-12rem)] grid-cols-1 gap-2.5 md:grid-cols-[340px_1fr] xl:grid-cols-[380px_1fr]">
 
           {/* Email list */}
           <Card className="flex flex-col overflow-hidden">

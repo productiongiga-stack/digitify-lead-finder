@@ -21,11 +21,13 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
+  Input,
+  Checkbox,
 } from "@digitify/ui";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
 import { EmptyState } from "@digitify/ui";
-import { Mail, FileText, CheckCircle, Eye, Send, Inbox, ArrowRight, PenSquare } from "lucide-react";
+import { Mail, FileText, CheckCircle, Eye, Send, Inbox, ArrowRight, PenSquare, Trash2, X } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { EmailPreview } from "@/components/email/preview";
 import { extractEmailTemplateMetadata } from "@/lib/email-content";
@@ -40,11 +42,14 @@ export default function ContactsPage() {
   const searchParams = useSearchParams();
   const leadIdFilter = searchParams.get("leadId") || undefined;
   const [statusFilter, setStatusFilter] = useState("");
+  const [searchFilter, setSearchFilter] = useState("");
+  const [selectedDraftIds, setSelectedDraftIds] = useState<string[]>([]);
   const [sendingDraftId, setSendingDraftId] = useState<string | null>(null);
   const utils = trpc.useUtils();
 
   const { data, isLoading } = trpc.contact.listDrafts.useQuery({
     status: statusFilter || undefined,
+    search: searchFilter.trim() || undefined,
     leadId: leadIdFilter,
     page: 1,
     pageSize: 50,
@@ -72,8 +77,34 @@ export default function ContactsPage() {
       utils.contact.listDrafts.invalidate();
     },
   });
+  const deleteDraft = trpc.contact.deleteDraft.useMutation({
+    onSuccess: (_data, variables) => {
+      setSelectedDraftIds((current) => current.filter((id) => id !== variables.id));
+      utils.contact.listDrafts.invalidate();
+      utils.contact.getTopbarStats.invalidate();
+    },
+  });
+  const bulkDeleteDrafts = trpc.contact.bulkDeleteDrafts.useMutation({
+    onSuccess: () => {
+      setSelectedDraftIds([]);
+      utils.contact.listDrafts.invalidate();
+      utils.contact.getTopbarStats.invalidate();
+    },
+  });
+  const bulkSendDrafts = trpc.contact.bulkSendDrafts.useMutation({
+    onSuccess: () => {
+      setSelectedDraftIds([]);
+      utils.contact.listDrafts.invalidate();
+      utils.contact.getTopbarStats.invalidate();
+    },
+  });
 
   const drafts = data?.items ?? [];
+  const selectedSet = new Set(selectedDraftIds);
+  const selectableDrafts = drafts.filter((draft) => draft.status !== "SENDING");
+  const selectedDrafts = drafts.filter((draft) => selectedSet.has(draft.id));
+  const allVisibleSelected = selectableDrafts.length > 0 && selectableDrafts.every((draft) => selectedSet.has(draft.id));
+  const sendableSelectedCount = selectedDrafts.filter((draft) => canSendOutboundDraft(draft.status)).length;
   const stats = {
     draft: drafts.filter((item) => item.status === "DRAFT").length,
     pending: drafts.filter((item) => item.status === "PENDING_APPROVAL").length,
@@ -81,12 +112,43 @@ export default function ContactsPage() {
     sent: drafts.filter((item) => item.status === "SENT").length,
     failed: drafts.filter((item) => item.status === "FAILED").length,
   };
-  const activeFilterCount = statusFilter ? 1 : 0;
+  const activeFilterCount = (statusFilter ? 1 : 0) + (searchFilter.trim() ? 1 : 0);
   const nextActionHref =
     stats.pending > 0 ? "/contacts/approval" : stats.failed > 0 ? "/contacts" : "/contacts/compose";
   const nextActionLabel =
     stats.pending > 0 ? "Werk eerst de goedkeuringswachtrij af." : stats.failed > 0 ? "Los mislukte mails eerst op." : "Er is ruimte om nieuwe outreach op te starten.";
   const followUpItems = followUpQueue?.items ?? [];
+
+  function toggleDraftSelection(id: string, checked: boolean) {
+    setSelectedDraftIds((current) =>
+      checked ? Array.from(new Set([...current, id])) : current.filter((draftId) => draftId !== id),
+    );
+  }
+
+  function toggleAllVisible(checked: boolean) {
+    if (!checked) {
+      setSelectedDraftIds((current) => current.filter((id) => !selectableDrafts.some((draft) => draft.id === id)));
+      return;
+    }
+    setSelectedDraftIds((current) => Array.from(new Set([...current, ...selectableDrafts.map((draft) => draft.id)])));
+  }
+
+  function handleDeleteDraft(id: string) {
+    if (!window.confirm("Wil je deze outbound e-mail verwijderen?")) return;
+    deleteDraft.mutate({ id });
+  }
+
+  function handleBulkDelete() {
+    if (selectedDraftIds.length === 0) return;
+    if (!window.confirm(`${selectedDraftIds.length} outbound e-mail(s) verwijderen?`)) return;
+    bulkDeleteDrafts.mutate({ ids: selectedDraftIds });
+  }
+
+  function handleBulkSend() {
+    const ids = selectedDrafts.filter((draft) => canSendOutboundDraft(draft.status)).map((draft) => draft.id);
+    if (ids.length === 0) return;
+    bulkSendDrafts.mutate({ ids });
+  }
 
   return (
     <div className="app-page">
@@ -128,6 +190,12 @@ export default function ContactsPage() {
         <TabsContent value="overview" className="space-y-4">
       <Card className="p-3">
         <div className="flex flex-wrap items-center gap-3">
+          <Input
+            value={searchFilter}
+            onChange={(event) => setSearchFilter(event.target.value)}
+            placeholder="Zoek op lead, onderwerp of e-mail..."
+            className="w-full sm:w-[280px]"
+          />
           <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v === "all" ? "" : v)}>
             <SelectTrigger className="w-full sm:w-[190px]">
               <SelectValue placeholder="Filter op status" />
@@ -148,9 +216,17 @@ export default function ContactsPage() {
             </Button>
           </Link>
           {activeFilterCount > 0 ? (
-            <Badge variant="outline" className="h-9 px-3">
-              Filter: {OUTBOUND_STATUS_LABELS[statusFilter] || statusFilter}
-            </Badge>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setStatusFilter("");
+                setSearchFilter("");
+              }}
+            >
+              <X className="mr-1.5 h-3.5 w-3.5" />
+              Filters wissen
+            </Button>
           ) : null}
           {leadIdFilter ? (
             <>
@@ -164,6 +240,41 @@ export default function ContactsPage() {
           ) : null}
         </div>
       </Card>
+
+      {selectedDraftIds.length > 0 ? (
+        <Card className="border-primary/30 bg-primary/5 p-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm">
+              <span className="font-semibold">{selectedDraftIds.length}</span> e-mail(s) geselecteerd
+              {sendableSelectedCount > 0 ? (
+                <span className="ml-2 text-muted-foreground">{sendableSelectedCount} klaar om te verzenden</span>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={handleBulkSend}
+                disabled={bulkSendDrafts.isPending || sendableSelectedCount === 0}
+              >
+                <Send className="mr-1.5 h-3.5 w-3.5" />
+                Bulk verzenden
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={handleBulkDelete}
+                disabled={bulkDeleteDrafts.isPending}
+              >
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                Bulk verwijderen
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelectedDraftIds([])}>
+                Selectie wissen
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-6">
         <Card>
@@ -310,13 +421,20 @@ export default function ContactsPage() {
             (data?.items ?? []).map((draft: NonNullable<typeof data>["items"][number]) => (
               <div key={draft.id} className="rounded-xl border p-3">
                 <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
+                  <div className="flex min-w-0 gap-2">
+                    <Checkbox
+                      checked={selectedSet.has(draft.id)}
+                      onCheckedChange={(checked) => toggleDraftSelection(draft.id, Boolean(checked))}
+                      className="mt-0.5"
+                    />
+                    <div className="min-w-0">
                     <Link href={`/leads/${draft.lead.id}`} className="text-sm font-semibold hover:text-primary">
                       {draft.lead.companyName}
                     </Link>
                     <Link href={`/contacts/drafts/${draft.id}`} className="mt-1 block truncate text-xs text-muted-foreground hover:text-primary">
                       {draft.subject}
                     </Link>
+                    </div>
                   </div>
                   <Badge variant={OUTBOUND_STATUS_VARIANTS[draft.status] || "secondary"}>
                     {OUTBOUND_STATUS_LABELS[draft.status] || draft.status}
@@ -357,6 +475,16 @@ export default function ContactsPage() {
                           : "Verzenden"}
                     </Button>
                   ) : null}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive"
+                    disabled={deleteDraft.isPending}
+                    onClick={() => handleDeleteDraft(draft.id)}
+                  >
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                    Verwijder
+                  </Button>
                 </div>
               </div>
             ))
@@ -367,6 +495,9 @@ export default function ContactsPage() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-[42px]">
+                <Checkbox checked={allVisibleSelected} onCheckedChange={(checked) => toggleAllVisible(Boolean(checked))} />
+              </TableHead>
               <TableHead>Lead</TableHead>
               <TableHead>Onderwerp</TableHead>
               <TableHead>Status</TableHead>
@@ -379,20 +510,26 @@ export default function ContactsPage() {
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 6 }).map((_, j) => (
+                  {Array.from({ length: 7 }).map((_, j) => (
                     <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                   ))}
                 </TableRow>
               ))
             ) : data?.items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-32 text-center">
+                <TableCell colSpan={7} className="h-32 text-center">
                   <EmptyState icon={<Mail />} title="Nog geen e-mail drafts" size="sm" />
                 </TableCell>
               </TableRow>
             ) : (
               data?.items.map((draft: NonNullable<typeof data>["items"][number]) => (
                 <TableRow key={draft.id}>
+                  <TableCell>
+                    <Checkbox
+                      checked={selectedSet.has(draft.id)}
+                      onCheckedChange={(checked) => toggleDraftSelection(draft.id, Boolean(checked))}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Link href={`/leads/${draft.lead.id}`} className="font-medium hover:text-primary">
                       {draft.lead.companyName}
@@ -466,6 +603,16 @@ export default function ContactsPage() {
                               : "Verzenden"}
                         </Button>
                       )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive"
+                        disabled={deleteDraft.isPending}
+                        onClick={() => handleDeleteDraft(draft.id)}
+                      >
+                        <Trash2 className="mr-1 h-3.5 w-3.5" />
+                        Verwijder
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>

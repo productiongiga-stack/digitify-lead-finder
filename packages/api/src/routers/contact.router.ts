@@ -157,6 +157,7 @@ export const contactRouter = router({
       z.object({
         status: z.string().optional(),
         leadId: z.string().optional(),
+        search: z.string().optional(),
         page: z.number().min(1).default(1),
         pageSize: z.number().min(1).max(100).default(25),
       })
@@ -169,6 +170,14 @@ export const contactRouter = router({
       if (input.leadId) {
         await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
         where.leadId = input.leadId;
+      }
+      const search = input.search?.trim();
+      if (search) {
+        where.OR = [
+          { subject: { contains: search, mode: "insensitive" } },
+          { toEmail: { contains: search, mode: "insensitive" } },
+          { lead: { companyName: { contains: search, mode: "insensitive" }, createdById: ctx.user.id } },
+        ];
       }
 
       const [items, total] = await Promise.all([
@@ -187,6 +196,84 @@ export const contactRouter = router({
       ]);
 
       return { items, total, page: input.page, pageSize: input.pageSize, totalPages: Math.ceil(total / input.pageSize) };
+    }),
+
+  deleteDraft: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const draft = await ctx.db.emailDraft.findFirst({
+        where: { id: input.id, lead: { createdById: ctx.user.id } },
+        select: { id: true, leadId: true, subject: true },
+      });
+      if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "E-mail niet gevonden." });
+
+      await ctx.db.emailDraft.delete({ where: { id: draft.id } });
+      await ctx.db.activity.create({
+        data: {
+          leadId: draft.leadId,
+          userId: ctx.user.id,
+          type: "LEAD_UPDATED",
+          title: `Outbound e-mail verwijderd: ${draft.subject}`,
+          metadata: { draftId: draft.id, source: "contact.deleteDraft" },
+        },
+      }).catch(() => null);
+
+      return { success: true };
+    }),
+
+  bulkDeleteDrafts: protectedProcedure
+    .input(z.object({ ids: z.array(z.string()).min(1).max(100) }))
+    .mutation(async ({ ctx, input }) => {
+      const drafts = await ctx.db.emailDraft.findMany({
+        where: { id: { in: input.ids }, lead: { createdById: ctx.user.id } },
+        select: { id: true },
+      });
+      const ids = drafts.map((draft) => draft.id);
+      if (ids.length === 0) throw new TRPCError({ code: "NOT_FOUND", message: "Geen e-mails gevonden." });
+      const result = await ctx.db.emailDraft.deleteMany({ where: { id: { in: ids } } });
+      return { success: true, deleted: result.count };
+    }),
+
+  bulkSendDrafts: protectedProcedure
+    .input(z.object({ ids: z.array(z.string()).min(1).max(25) }))
+    .mutation(async ({ ctx, input }) => {
+      const drafts = await ctx.db.emailDraft.findMany({
+        where: {
+          id: { in: input.ids },
+          lead: { createdById: ctx.user.id },
+          status: { in: ["APPROVED", "FAILED"] },
+        },
+        select: { id: true },
+        orderBy: { createdAt: "asc" },
+      });
+      if (drafts.length === 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Selecteer minstens één goedgekeurde of mislukte e-mail.",
+        });
+      }
+
+      const results: Array<{ id: string; success: boolean; error?: string }> = [];
+      const caller = contactRouter.createCaller(ctx);
+      for (const draft of drafts) {
+        try {
+          await caller.sendEmail({ id: draft.id });
+          results.push({ id: draft.id, success: true });
+        } catch (error) {
+          results.push({
+            id: draft.id,
+            success: false,
+            error: error instanceof Error ? error.message : "Verzenden mislukt",
+          });
+        }
+      }
+
+      return {
+        success: true,
+        sent: results.filter((item) => item.success).length,
+        failed: results.filter((item) => !item.success).length,
+        results,
+      };
     }),
 
   getFollowUpQueue: protectedProcedure.query(async ({ ctx }) => {

@@ -589,6 +589,91 @@ function questionAnswerKey(productId: string, questionKey: string) {
   return `q:${productId}:${questionKey}`;
 }
 
+function normalizeComparable(value: string | null | undefined) {
+  return (value || "").trim().toLowerCase();
+}
+
+function buildEditingQuoteState(
+  editingQuote: NonNullable<RemotePayload["editingQuote"]>,
+  services: Service[],
+  settings: RemotePayload["settings"],
+) {
+  const specsMap = parseProductSpecs(settings.productSpecsJson || "{}");
+  const cartEntries: Record<string, CartEntry> = {};
+  const confirmedEntries: Record<string, boolean> = {};
+  const initializedEntries: Record<string, boolean> = {};
+  let firstMatchedProductId = "";
+  let firstMatchedCategory = "";
+
+  editingQuote.items.forEach((item, index) => {
+    const itemCategory = normalizeComparable(item.category);
+    const itemName = normalizeComparable(item.name);
+    const matchingService = services
+      .filter((service) => !itemCategory || normalizeComparable(service.category) === itemCategory)
+      .sort((left, right) => right.name.length - left.name.length)
+      .find((service) => {
+        const serviceName = normalizeComparable(service.name);
+        return itemName === serviceName || itemName.startsWith(`${serviceName} -`);
+      });
+
+    if (matchingService) {
+      const siblingExtras = services.filter(
+        (service) => service.category === matchingService.category && service.id !== matchingService.id,
+      );
+      const specs = resolveProductSpecs(matchingService, specsMap) || buildFallbackSpecs(matchingService, siblingExtras);
+      const rawPackageLabel = item.name
+        .slice(matchingService.name.length)
+        .replace(/^\s*[-:]\s*/, "")
+        .trim();
+      const packageMatch = (specs.packages || []).find((option) => {
+        const labelMatches = rawPackageLabel && normalizeComparable(option.label) === normalizeComparable(rawPackageLabel);
+        const priceMatches = Math.abs((option.price || 0) - item.unitPrice) < 0.01;
+        return labelMatches || priceMatches;
+      });
+
+      cartEntries[matchingService.id] = {
+        serviceId: matchingService.id,
+        source: "product",
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        packageKey: packageMatch?.key || "custom",
+        packageLabel: packageMatch?.label || rawPackageLabel || "Aangepast",
+        customName: matchingService.name,
+        customCategory: matchingService.category,
+        customDescription: item.description || matchingService.description || "",
+      };
+      confirmedEntries[matchingService.id] = true;
+      initializedEntries[matchingService.id] = true;
+      firstMatchedProductId ||= matchingService.id;
+      firstMatchedCategory ||= matchingService.category;
+      return;
+    }
+
+    const key = `quote:${item.id || index}`;
+    cartEntries[key] = {
+      serviceId: key,
+      source: "option",
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      packageKey: "custom",
+      packageLabel: "Bestaande offerte",
+      customName: item.name,
+      customCategory: item.category || "Offerte",
+      customDescription: item.description || "",
+    };
+    confirmedEntries[key] = true;
+    initializedEntries[key] = true;
+  });
+
+  return {
+    cartEntries,
+    confirmedEntries,
+    initializedEntries,
+    firstMatchedProductId,
+    firstMatchedCategory,
+  };
+}
+
 function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }) {
   const isPreviewRoute =
     typeof window !== "undefined" &&
@@ -691,6 +776,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
           setVatNumber(data.prefill.vatNumber || "");
         }
         if (data.editingQuote) {
+          const editingState = buildEditingQuoteState(data.editingQuote, data.services, data.settings);
           const nameParts = (data.editingQuote.clientName || "").trim().split(/\s+/).filter(Boolean);
           setFirstName(nameParts.length > 1 ? nameParts.slice(0, -1).join(" ") : nameParts[0] || "");
           setLastName(nameParts.length > 1 ? nameParts.at(-1) || "" : "");
@@ -703,28 +789,12 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
           setVatRate(data.editingQuote.vatRate || 21);
           setDiscountMode("amount");
           setDiscountInput(String(data.editingQuote.discount || 0));
-          setCart(
-            Object.fromEntries(
-              data.editingQuote.items.map((item, index) => [
-                `quote:${item.id || index}`,
-                {
-                  serviceId: "",
-                  source: "option" as const,
-                  quantity: item.quantity,
-                  unitPrice: item.unitPrice,
-                  packageKey: "custom",
-                  packageLabel: "Bestaande offerte",
-                  customName: item.name,
-                  customCategory: item.category || "Offerte",
-                  customDescription: item.description || "",
-                },
-              ]),
-            ),
-          );
-          setConfirmedProducts(
-            Object.fromEntries(data.editingQuote.items.map((item, index) => [`quote:${item.id || index}`, true])),
-          );
-          setCurrentStep(4);
+          setCart(editingState.cartEntries);
+          setConfirmedProducts(editingState.confirmedEntries);
+          setInitializedProducts(editingState.initializedEntries);
+          if (editingState.firstMatchedCategory) setSelectedCategory(editingState.firstMatchedCategory);
+          if (editingState.firstMatchedProductId) setSelectedProductId(editingState.firstMatchedProductId);
+          setCurrentStep(editingState.firstMatchedProductId ? 3 : 4);
         }
       })
       .catch(() => {
