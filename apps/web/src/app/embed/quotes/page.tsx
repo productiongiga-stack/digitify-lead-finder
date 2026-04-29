@@ -55,6 +55,27 @@ type RemotePayload = {
     address?: string | null;
     vatNumber?: string | null;
   };
+  editingQuote?: {
+    id: string;
+    quoteNumber: string;
+    clientName: string;
+    clientEmail?: string | null;
+    clientCompany?: string | null;
+    clientPhone?: string | null;
+    clientAddress?: string | null;
+    clientVat?: string | null;
+    notes?: string | null;
+    vatRate: number;
+    discount: number;
+    items: {
+      id: string;
+      category?: string | null;
+      name: string;
+      description?: string | null;
+      quantity: number;
+      unitPrice: number;
+    }[];
+  };
   studio?: {
     viewport?: "desktop" | "tablet" | "mobile";
     syncBuilderWithPreview?: boolean;
@@ -589,6 +610,10 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
     if (typeof window === "undefined") return "";
     return new URLSearchParams(window.location.search).get("chatSessionId")?.trim() || "";
   }, []);
+  const quoteIdParam = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("quoteId")?.trim() || "";
+  }, []);
   const [payload, setPayload] = useState<RemotePayload | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [isLivePreview, setIsLivePreview] = useState(false);
@@ -640,6 +665,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
     const internalParams = new URLSearchParams();
     if (leadIdParam) internalParams.set("leadId", leadIdParam);
     if (chatSessionIdParam) internalParams.set("chatSessionId", chatSessionIdParam);
+    if (quoteIdParam) internalParams.set("quoteId", quoteIdParam);
     const servicesUrl = isInternalMode
       ? `/api/quotes/configurator/services${internalParams.toString() ? `?${internalParams.toString()}` : ""}`
       : tenantToken
@@ -664,6 +690,42 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
           setAddress(data.prefill.address || "");
           setVatNumber(data.prefill.vatNumber || "");
         }
+        if (data.editingQuote) {
+          const nameParts = (data.editingQuote.clientName || "").trim().split(/\s+/).filter(Boolean);
+          setFirstName(nameParts.length > 1 ? nameParts.slice(0, -1).join(" ") : nameParts[0] || "");
+          setLastName(nameParts.length > 1 ? nameParts.at(-1) || "" : "");
+          setCompany(data.editingQuote.clientCompany || "");
+          setEmail(data.editingQuote.clientEmail || "");
+          setPhone(data.editingQuote.clientPhone || "");
+          setAddress(data.editingQuote.clientAddress || "");
+          setVatNumber(data.editingQuote.clientVat || "");
+          setRemarks(data.editingQuote.notes || "");
+          setVatRate(data.editingQuote.vatRate || 21);
+          setDiscountMode("amount");
+          setDiscountInput(String(data.editingQuote.discount || 0));
+          setCart(
+            Object.fromEntries(
+              data.editingQuote.items.map((item, index) => [
+                `quote:${item.id || index}`,
+                {
+                  serviceId: "",
+                  source: "option" as const,
+                  quantity: item.quantity,
+                  unitPrice: item.unitPrice,
+                  packageKey: "custom",
+                  packageLabel: "Bestaande offerte",
+                  customName: item.name,
+                  customCategory: item.category || "Offerte",
+                  customDescription: item.description || "",
+                },
+              ]),
+            ),
+          );
+          setConfirmedProducts(
+            Object.fromEntries(data.editingQuote.items.map((item, index) => [`quote:${item.id || index}`, true])),
+          );
+          setCurrentStep(4);
+        }
       })
       .catch(() => {
         if (!active) return;
@@ -673,7 +735,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
     return () => {
       active = false;
     };
-  }, [chatSessionIdParam, isInternalMode, isPreviewRoute, leadIdParam, tenantToken]);
+  }, [chatSessionIdParam, isInternalMode, isPreviewRoute, leadIdParam, quoteIdParam, tenantToken]);
 
   useEffect(() => {
     if (!isPreviewRoute) return;
@@ -1131,8 +1193,9 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
 
   const hasConfirmedProducts = useMemo(() => {
     if (isPreviewRoute) return cartItems.some((item) => item.source === "product");
+    if (payload?.editingQuote) return cartItems.length > 0;
     return cartItems.some((item) => item.source === "product" && Boolean(confirmedProducts[item.cartKey]));
-  }, [cartItems, confirmedProducts, isPreviewRoute]);
+  }, [cartItems, confirmedProducts, isPreviewRoute, payload?.editingQuote]);
 
   const currentProductConfirmed = Boolean(selectedProduct && confirmedProducts[selectedProduct.id]);
 
@@ -1225,6 +1288,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
         notes: noteParts.join("\n"),
         vatRate,
         discount,
+        quoteId: isInternalMode ? payload?.editingQuote?.id || quoteIdParam || undefined : undefined,
         items: itemsPayload,
         tenant: isInternalMode ? undefined : tenantToken || undefined,
         leadId: isInternalMode ? payload?.prefill?.leadId || leadIdParam || undefined : undefined,
@@ -1413,6 +1477,11 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
         {isLivePreview ? (
           <div className="border-b border-[#eadfca] bg-[#fbf6ea] px-3 py-2 text-xs text-[#6e6249] sm:px-6">
             Live preview vanuit instellingen: wijzigingen worden direct getoond, maar niet verstuurd.
+          </div>
+        ) : null}
+        {payload.editingQuote ? (
+          <div className="border-b border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 sm:px-6">
+            Bewerken: {payload.editingQuote.quoteNumber}. De bestaande items zijn geladen en worden bijgewerkt in dezelfde offerte.
           </div>
         ) : null}
 

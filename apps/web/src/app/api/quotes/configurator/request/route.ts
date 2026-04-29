@@ -96,6 +96,7 @@ export async function POST(request: Request) {
     const notes = String(body.notes || "").trim().slice(0, 3000);
     const leadId = String(body.leadId || "").trim();
     const chatSessionId = String(body.chatSessionId || "").trim();
+    const quoteId = String(body.quoteId || "").trim();
     const discountRaw = Number(body.discount || 0);
     const vatRateRaw = Number(body.vatRate || 21);
     const items = Array.isArray(body.items) ? body.items.slice(0, 50) : [];
@@ -153,6 +154,81 @@ export async function POST(request: Request) {
       clientName,
       clientPhone,
     });
+
+    if (quoteId) {
+      const existingQuote = await prisma.quote.findFirst({
+        where: { id: quoteId, createdById: user.id },
+        select: { id: true, quoteNumber: true, leadId: true },
+      });
+
+      if (!existingQuote) {
+        return NextResponse.json({ error: "Offerte niet gevonden." }, { status: 404 });
+      }
+
+      const quote = await prisma.$transaction(async (tx) => {
+        await tx.quoteItem.deleteMany({ where: { quoteId: existingQuote.id } });
+        await tx.quoteItem.createMany({
+          data: normalizedItems.map((item: any) => ({
+            ...item,
+            quoteId: existingQuote.id,
+          })),
+        });
+
+        const updated = await tx.quote.update({
+          where: { id: existingQuote.id },
+          data: {
+            leadId: resolvedLeadId || existingQuote.leadId,
+            clientName,
+            clientEmail,
+            clientCompany: clientCompany || null,
+            clientPhone: clientPhone || null,
+            clientAddress: clientAddress || null,
+            clientVat: clientVat || null,
+            notes: notes || "Bijgewerkt via interne offerte-configurator.",
+            subtotal,
+            vatRate,
+            discount,
+            vatAmount,
+            total,
+          },
+          select: { id: true, quoteNumber: true, leadId: true },
+        });
+
+        await tx.activity.create({
+          data: {
+            leadId: updated.leadId,
+            userId: user.id,
+            type: "LEAD_UPDATED",
+            title: `Offerte ${updated.quoteNumber} bijgewerkt via configurator`,
+            metadata: {
+              quoteId: updated.id,
+              total,
+              itemCount: normalizedItems.length,
+              source: "configurator.update",
+            },
+          },
+        });
+
+        return updated;
+      });
+
+      if (chatSessionId) {
+        await prisma.chatMessage.create({
+          data: {
+            sessionId: chatSessionId,
+            role: "AGENT",
+            content: `Offerte ${quote.quoteNumber} bijgewerkt via configurator.`,
+          },
+        }).catch(() => null);
+      }
+
+      return NextResponse.json({
+        success: true,
+        quoteId: quote.id,
+        quoteNumber: quote.quoteNumber,
+        message: "De offerte is bijgewerkt.",
+      });
+    }
 
     const year = new Date().getFullYear();
     const numberPrefix = `OFF-${year}-${user.id.slice(-4).toUpperCase()}-`;

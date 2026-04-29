@@ -28,6 +28,7 @@ import {
   Send,
   Clock,
   XCircle,
+  Pencil,
 } from "lucide-react";
 
 type QuoteStatus = "DRAFT" | "SENT" | "VIEWED" | "ACCEPTED" | "REJECTED" | "EXPIRED";
@@ -186,14 +187,25 @@ export default function QuotesPage() {
         header: "",
         stopPropagation: true,
         cell: (q) => (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={() => router.push(`/quotes/${q.id}`)}
-          >
-            Bekijken
-          </Button>
+          <div className="flex items-center justify-end gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => router.push(`/quotes/new?quoteId=${q.id}`)}
+            >
+              <Pencil className="mr-1 h-3.5 w-3.5" />
+              Bewerk
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => router.push(`/quotes/${q.id}`)}
+            >
+              Bekijken
+            </Button>
+          </div>
         ),
       },
     ],

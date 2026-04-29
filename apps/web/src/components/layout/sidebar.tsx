@@ -117,8 +117,15 @@ export function Sidebar() {
         )}
         <nav className="space-y-1 px-2">
           {MAIN_NAV_ITEMS.map((item) => {
-            const isActive = isNavItemActive(item, pathname);
             const isLeadNavItem = item.href === "/leads";
+            const activeLeadMenuHref = isLeadNavItem
+              ? LEADS_MENU_ITEMS
+                  .filter((entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`))
+                  .sort((left, right) => right.href.length - left.href.length)[0]?.href
+              : undefined;
+            const isActive = isLeadNavItem
+              ? activeLeadMenuHref === "/leads"
+              : isNavItemActive(item, pathname);
 
             if (isLeadNavItem) {
               return (
@@ -161,7 +168,7 @@ export function Sidebar() {
                   {leadWorkflowOpen && !collapsed ? (
                     <div className="ml-6 space-y-1 border-l pl-2">
                       {LEADS_MENU_ITEMS.map((entry) => {
-                        const workflowActive = pathname === entry.href || pathname.startsWith(`${entry.href}/`);
+                        const workflowActive = activeLeadMenuHref === entry.href;
                         return (
                           <Link
                             key={entry.href}

@@ -32,6 +32,7 @@ import {
   AlertCircle,
   Activity,
   Link2,
+  Pencil,
 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
 import { formatRelativeTime } from "@/lib/utils";
@@ -214,6 +215,12 @@ export default function QuoteDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Link href={`/quotes/new?quoteId=${encodeURIComponent(id)}`}>
+            <Button variant="default" size="sm">
+              <Pencil className="mr-2 h-4 w-4" />
+              Bewerken
+            </Button>
+          </Link>
           <Button variant="outline" size="sm" onClick={handleCopyPortalLink} disabled={portalLoading}>
             <Link2 className="mr-2 h-4 w-4" />
             {portalLoading ? "Genereren..." : "Client Portal"}
@@ -473,7 +480,7 @@ export default function QuoteDetailPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Activity className="h-4 w-4" />
-                Activiteit & Audit Trail
+                Aanpassingen & Audit Trail
               </CardTitle>
             </CardHeader>
             <CardContent>

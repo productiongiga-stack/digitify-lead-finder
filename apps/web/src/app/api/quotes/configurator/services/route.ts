@@ -60,8 +60,9 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const leadId = url.searchParams.get("leadId")?.trim() || "";
   const chatSessionId = url.searchParams.get("chatSessionId")?.trim() || "";
+  const quoteId = url.searchParams.get("quoteId")?.trim() || "";
 
-  const [services, settings, lead, chatSession] = await Promise.all([
+  const [services, settings, lead, chatSession, editingQuote] = await Promise.all([
     prisma.serviceCatalog.findMany({
       where: { isActive: true, createdById: user.id },
       orderBy: [{ category: "asc" }, { sortOrder: "asc" }],
@@ -104,6 +105,35 @@ export async function GET(request: Request) {
           },
         })
       : null,
+    quoteId
+      ? prisma.quote.findFirst({
+          where: { id: quoteId, createdById: user.id },
+          select: {
+            id: true,
+            quoteNumber: true,
+            clientName: true,
+            clientEmail: true,
+            clientCompany: true,
+            clientPhone: true,
+            clientAddress: true,
+            clientVat: true,
+            notes: true,
+            vatRate: true,
+            discount: true,
+            items: {
+              orderBy: { sortOrder: "asc" },
+              select: {
+                id: true,
+                category: true,
+                name: true,
+                description: true,
+                quantity: true,
+                unitPrice: true,
+              },
+            },
+          },
+        })
+      : null,
   ]);
 
   const map = Object.fromEntries(
@@ -129,7 +159,7 @@ export async function GET(request: Request) {
       disclaimer:
         map["quotes.embed_disclaimer"] ||
         "Interne flow: de offerte wordt als concept opgeslagen en kan daarna worden verstuurd.",
-      ctaLabel: map["quotes.embed_cta_label"] || "Offerte aanmaken",
+      ctaLabel: editingQuote ? "Offerte bijwerken" : map["quotes.embed_cta_label"] || "Offerte aanmaken",
       embedMode: map["quotes.embed_mode"] === "advanced" ? "advanced" : "simple",
       darkColor: map["quotes.embed_dark_color"] || "#14171d",
       bgColor: map["quotes.embed_bg_color"] || "#f3f2ec",
@@ -163,6 +193,11 @@ export async function GET(request: Request) {
       categoryIconsJson: map["quotes.embed_category_icons_json"] || "{}",
       productIconsJson: map["quotes.embed_product_icons_json"] || "{}",
     },
+    editingQuote: editingQuote
+      ? {
+          ...editingQuote,
+        }
+      : undefined,
     prefill: lead
       ? {
           leadId: lead.id,

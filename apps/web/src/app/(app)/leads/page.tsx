@@ -43,17 +43,21 @@ import {
   Star,
   Globe,
   Mail as MailIcon,
+  MapPin,
+  Phone,
   Tag,
   Trash2,
   RefreshCw,
   Eye,
   SearchX,
   Send,
-  Target,
   X,
   ChevronDown,
   FileDown,
   FileUp,
+  Sparkles,
+  ListChecks,
+  MousePointerClick,
 } from "lucide-react";
 import { cn, formatScore, formatDate, safeExternalUrl } from "@/lib/utils";
 import { LEADS_WORKFLOW_ITEMS } from "@/lib/navigation";
@@ -70,6 +74,8 @@ type Lead = {
   website: string | null;
   email: string | null;
   phone: string | null;
+  address: string | null;
+  zipCode: string | null;
   gmbRating: number | null;
   gmbReviewCount: number | null;
   facebookUrl: string | null;
@@ -79,45 +85,26 @@ type Lead = {
   tags: { tag: { id: string; name: string; color: string } }[];
 };
 
-function getOpportunityMetrics(lead: Lead) {
-  const digitalPresencePoints =
-    (lead.website ? 35 : 0) +
-    (lead.facebookUrl ? 10 : 0) +
-    (lead.instagramUrl ? 10 : 0) +
-    (lead.linkedinUrl ? 10 : 0) +
-    (lead.email ? 20 : 0) +
-    (lead.phone ? 15 : 0);
-  const contactability =
-    (lead.email ? 45 : 0) + (lead.phone ? 35 : 0) + (lead.website ? 20 : 0);
-
-  let reputationRisk = 50;
-  if (lead.gmbRating != null) {
-    if (lead.gmbRating >= 4.5) reputationRisk -= 25;
-    else if (lead.gmbRating >= 4.0) reputationRisk -= 10;
-    else if (lead.gmbRating < 3.5) reputationRisk += 25;
-    else reputationRisk += 10;
-  } else {
-    reputationRisk += 15;
-  }
-  if (lead.gmbReviewCount != null) {
-    if (lead.gmbReviewCount === 0) reputationRisk += 20;
-    else if (lead.gmbReviewCount < 10) reputationRisk += 10;
-    else if (lead.gmbReviewCount > 80) reputationRisk -= 10;
-  }
-
-  return {
-    fitScore: Math.round(lead.overallScore ?? 0),
-    digitalGap: Math.min(100, Math.max(0, 100 - digitalPresencePoints)),
-    contactability: Math.min(100, Math.max(0, contactability)),
-    reputationRisk: Math.min(100, Math.max(0, reputationRisk)),
-  };
-}
-
 function scoreClass(score: number | null) {
   if (!score) return "text-muted-foreground";
   if (score >= 80) return "text-red-600 dark:text-red-400";
   if (score >= 60) return "text-amber-600 dark:text-amber-400";
   return "text-muted-foreground";
+}
+
+function truncateLeadName(value: string) {
+  return value.length > 25 ? `${value.slice(0, 25).trimEnd()}...` : value;
+}
+
+function formatLeadLocation(lead: Lead) {
+  const address = [lead.address, lead.zipCode, lead.city].filter(Boolean).join(", ");
+  if (address) return address;
+  return [lead.city, lead.country].filter(Boolean).join(", ") || "Locatie onbekend";
+}
+
+function formatLeadContact(lead: Lead) {
+  if (lead.email && lead.phone) return `${lead.email} · ${lead.phone}`;
+  return lead.email || lead.phone || "Geen contactgegevens";
 }
 
 export default function LeadsPage() {
@@ -255,10 +242,12 @@ export default function LeadsPage() {
         header: "Bedrijf",
         sortKey: "companyName",
         cell: (lead) => (
-          <div className="min-w-0">
-            <p className="truncate font-medium hover:text-primary">{lead.companyName}</p>
+          <div className="min-w-0 py-0.5">
+            <p className="truncate text-sm font-semibold hover:text-primary" title={lead.companyName}>
+              {truncateLeadName(lead.companyName)}
+            </p>
             {lead.tags.length > 0 ? (
-              <div className="mt-1 flex flex-wrap gap-1">
+              <div className="mt-0.5 flex flex-wrap gap-1">
                 {lead.tags.slice(0, 2).map((lt) => (
                   <Badge
                     key={lt.tag.id}
@@ -284,9 +273,32 @@ export default function LeadsPage() {
         header: "Locatie",
         hideBelow: "lg",
         cell: (lead) => (
-          <span className="text-sm text-muted-foreground">
-            {[lead.city, lead.country].filter(Boolean).join(", ") || "—"}
-          </span>
+          <div className="flex max-w-[220px] items-start gap-1.5 text-xs text-muted-foreground">
+            <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span className="line-clamp-2">{formatLeadLocation(lead)}</span>
+          </div>
+        ),
+      },
+      {
+        id: "contact",
+        header: "Contact",
+        hideBelow: "lg",
+        cell: (lead) => (
+          <div className="max-w-[230px] space-y-0.5 text-xs text-muted-foreground">
+            {lead.email ? (
+              <div className="flex min-w-0 items-center gap-1.5">
+                <MailIcon className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{lead.email}</span>
+              </div>
+            ) : null}
+            {lead.phone ? (
+              <div className="flex min-w-0 items-center gap-1.5">
+                <Phone className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{lead.phone}</span>
+              </div>
+            ) : null}
+            {!lead.email && !lead.phone ? <span>Geen contactgegevens</span> : null}
+          </div>
         ),
       },
       {
@@ -344,27 +356,6 @@ export default function LeadsPage() {
           ),
       },
       {
-        id: "opportunity",
-        header: "Opportunity",
-        hideBelow: "lg",
-        cell: (lead) => {
-          const o = getOpportunityMetrics(lead);
-          return (
-            <div className="space-y-0.5 text-[11px] text-muted-foreground">
-              <div className="flex items-center gap-1.5">
-                <Target className="h-3 w-3 text-primary" /> Fit {o.fitScore}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <MailIcon className="h-3 w-3 text-emerald-500" /> Contact {o.contactability}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Globe className="h-3 w-3 text-amber-500" /> Gap {o.digitalGap}
-              </div>
-            </div>
-          );
-        },
-      },
-      {
         id: "actions",
         header: "Acties",
         stopPropagation: true,
@@ -415,9 +406,8 @@ export default function LeadsPage() {
   );
 
   const renderMobileCard = (lead: Lead) => {
-    const o = getOpportunityMetrics(lead);
     return (
-      <div className="rounded-xl border p-3">
+      <div className="rounded-xl border bg-card p-3 shadow-sm">
         <button
           type="button"
           className="w-full text-left"
@@ -425,9 +415,14 @@ export default function LeadsPage() {
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="truncate font-medium">{lead.companyName}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {[lead.city, lead.country].filter(Boolean).join(", ") || "Locatie onbekend"}
+              <p className="truncate font-semibold" title={lead.companyName}>
+                {truncateLeadName(lead.companyName)}
+              </p>
+              <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+                {formatLeadLocation(lead)}
+              </p>
+              <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+                {formatLeadContact(lead)}
               </p>
             </div>
             <span className={cn("text-base font-semibold", scoreClass(lead.overallScore))}>
@@ -450,11 +445,6 @@ export default function LeadsPage() {
               {lead.gmbRating} ({lead.gmbReviewCount})
             </Badge>
           ) : null}
-        </div>
-        <div className="mt-2.5 grid grid-cols-3 gap-1.5 text-[11px] text-muted-foreground">
-          <div className="rounded-md border bg-muted/20 px-2 py-1">Fit {o.fitScore}</div>
-          <div className="rounded-md border bg-muted/20 px-2 py-1">Contact {o.contactability}</div>
-          <div className="rounded-md border bg-muted/20 px-2 py-1">Gap {o.digitalGap}</div>
         </div>
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           <Button size="sm" variant="outline" onClick={() => router.push(`/leads/${lead.id}`)}>
@@ -735,6 +725,50 @@ export default function LeadsPage() {
         </TabsContent>
 
         <TabsContent value="info" className="space-y-3">
+          <div className="grid gap-3 xl:grid-cols-3">
+            <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
+              <div className="p-3">
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Snelle workflow
+                </p>
+                <p className="mt-1.5 text-sm font-medium">
+                  Gebruik deze lijst als je compacte sales cockpit: scan score, locatie en contact in één rij.
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Klik op een lead voor details, notities, activiteiten, offertes en opvolging.
+                </p>
+              </div>
+            </Card>
+            <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
+              <div className="p-3">
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">
+                  <ListChecks className="h-3.5 w-3.5" />
+                  Datakwaliteit
+                </p>
+                <p className="mt-1.5 text-sm font-medium">
+                  Locatie toont eerst adres, daarna postcode/stad. Ontbreekt dat, dan valt de lijst terug op regio.
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Contactgegevens staan apart zodat ontbrekende e-mail of telefoon meteen zichtbaar is.
+                </p>
+              </div>
+            </Card>
+            <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
+              <div className="p-3">
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                  <MousePointerClick className="h-3.5 w-3.5" />
+                  Aanbevolen volgorde
+                </p>
+                <p className="mt-1.5 text-sm font-medium">
+                  Filter eerst op status of prioriteit, open de beste lead, maak daarna mail of offerte vanuit de detailpagina.
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Zo blijft elke actie gekoppeld aan jouw account en leadhistorie.
+                </p>
+              </div>
+            </Card>
+          </div>
           <div className="grid gap-2 md:grid-cols-3">
             <button
               type="button"
