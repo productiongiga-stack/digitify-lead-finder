@@ -1055,6 +1055,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
       ...current,
       [selectedProduct.id]: true,
     }));
+    setCurrentStep(1);
   }
 
   function updatePackage(option: PackageOption) {
@@ -1084,28 +1085,6 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
         [cartKey]: {
           ...existing,
           quantity: nextQuantity,
-        },
-      };
-    });
-  }
-
-  function updateCartEntry(cartKey: string, changes: Partial<Pick<CartEntry, "customName" | "unitPrice" | "quantity">>) {
-    setCart((current) => {
-      const existing = current[cartKey];
-      if (!existing) return current;
-      return {
-        ...current,
-        [cartKey]: {
-          ...existing,
-          ...changes,
-          quantity:
-            changes.quantity !== undefined
-              ? Math.max(1, Math.round(Number(changes.quantity) || 1))
-              : existing.quantity,
-          unitPrice:
-            changes.unitPrice !== undefined
-              ? Math.max(0, Math.round((Number(changes.unitPrice) || 0) * 100) / 100)
-              : existing.unitPrice,
         },
       };
     });
@@ -1440,8 +1419,8 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
   }
 
   return (
-    <div className="min-h-screen px-2 py-2 text-[#17181c] sm:px-4" style={{ backgroundColor: bgColor }}>
-      <div className="mx-auto max-w-[1500px] overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_20px_60px_rgba(0,0,0,0.12)]">
+    <div className="h-screen overflow-hidden px-2 py-2 text-[#17181c] sm:px-4" style={{ backgroundColor: bgColor }}>
+      <div className="mx-auto flex h-[calc(100vh-1rem)] max-w-[1500px] flex-col overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_20px_60px_rgba(0,0,0,0.12)]">
         {isPreviewRoute ? (
           <div className="border-b border-[#e4dcc8] bg-[#f6f0df] px-3 py-2 text-[11px] text-[#5d5648] sm:px-5">
             <div className="flex flex-wrap items-center gap-2">
@@ -1559,7 +1538,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
             </div>
           </div>
         ) : null}
-        <header className="px-3 py-3 text-white sm:px-5 sm:py-4" style={{ background: `linear-gradient(135deg, ${darkColor} 0%, #1f2228 100%)` }}>
+        <header className="px-3 py-2 text-white sm:px-5" style={{ background: `linear-gradient(135deg, ${darkColor} 0%, #1f2228 100%)` }}>
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               {settings.logoUrl ? (
@@ -1591,7 +1570,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
           </div>
         ) : null}
 
-        <div className="border-b border-black/10 bg-[#fbfaf7] px-3 py-3 sm:px-6 sm:py-4">
+        <div className="border-b border-black/10 bg-[#fbfaf7] px-3 py-2 sm:px-6">
           <div className="grid grid-cols-4 items-center gap-3">
             {[
               { n: 1, label: stepLabels.service },
@@ -1625,8 +1604,8 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
           </div>
         </div>
 
-        <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <section className="min-h-[620px] border-r border-black/10 px-3 py-4 sm:px-6 sm:py-5">
+        <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_360px]">
+          <section className="min-h-0 overflow-y-auto border-r border-black/10 px-3 py-3 sm:px-6">
             {currentStep === 1 ? (
               <div className="space-y-4 sm:space-y-5">
                 <div>
@@ -1845,6 +1824,14 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                   </button>
                   <button
                     type="button"
+                    onClick={() => setCurrentStep(4)}
+                    disabled={!hasConfirmedProducts}
+                    className="rounded-xl border px-3 py-2 text-xs font-semibold text-[#616671] disabled:opacity-50 sm:px-4 sm:text-sm"
+                  >
+                    Naar gegevens
+                  </button>
+                  <button
+                    type="button"
                     onClick={nextStep}
                     disabled={!stepReady[1]}
                     className="rounded-xl px-3 py-2 text-xs font-semibold text-[#15171c] disabled:opacity-50 sm:px-4 sm:text-sm"
@@ -2018,6 +2005,14 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={prevStep} className="rounded-xl border px-3 py-2 text-xs text-[#616671] sm:px-4 sm:text-sm">
                     Terug
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentStep(4)}
+                    disabled={!hasConfirmedProducts}
+                    className="rounded-xl border px-3 py-2 text-xs font-semibold text-[#616671] disabled:opacity-50 sm:px-4 sm:text-sm"
+                  >
+                    Naar gegevens
                   </button>
                   <button
                     type="button"
@@ -2927,69 +2922,51 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
             ) : null}
           </section>
 
-          <aside className="bg-[#f4f1e8] px-3 py-4 sm:px-5 sm:py-5">
+          <aside className="min-h-0 overflow-y-auto bg-[#f4f1e8] px-3 py-3 sm:px-4">
             <div className="rounded-[14px] border border-black/10 bg-white shadow-sm">
-              <div className="rounded-t-[14px] px-3 py-2 text-sm font-semibold text-white" style={{ background: `linear-gradient(135deg, ${darkColor} 0%, #1f2228 100%)` }}>
+              <div className="rounded-t-[14px] px-3 py-2 text-xs font-semibold text-white" style={{ background: `linear-gradient(135deg, ${darkColor} 0%, #1f2228 100%)` }}>
                 Offerte-items ({cartItems.length}) {isPreviewRoute ? "" : `· ${Object.keys(confirmedProducts).length} bevestigd`}
               </div>
-              <div className="max-h-[260px] space-y-1 overflow-auto p-2">
+              <div className="max-h-[34vh] space-y-1 overflow-auto p-1.5">
                 {cartItems.length === 0 ? (
                   <div className="rounded-lg border border-dashed p-3 text-xs text-[#767c87]">Nog geen items geselecteerd.</div>
                 ) : (
                   cartItems.map((item) => (
-                    <div key={item.cartKey} className="rounded-lg border px-2 py-2">
-                      <div className="flex items-start justify-between gap-2">
+                    <div key={item.cartKey} className="rounded-lg border bg-white px-2 py-1.5">
+                      <div className="grid grid-cols-[1fr_auto] gap-2">
                         <div className="min-w-0">
-                          {payload.editingQuote ? (
-                            <input
-                              value={item.name}
-                              onChange={(event) => updateCartEntry(item.cartKey, { customName: event.target.value })}
-                              className="h-8 w-full rounded-md border border-[#d8dbe2] px-2 text-sm font-semibold"
-                              aria-label="Itemnaam"
-                            />
-                          ) : (
-                            <p className="truncate text-sm font-semibold">{item.name}</p>
-                          )}
-                          <p className="text-xs text-[#7b818c]">
+                          <p className="truncate text-xs font-semibold">{item.name}</p>
+                          <p className="truncate text-[11px] text-[#7b818c]">
                             {item.packageLabel} · {item.quantity}x
                             {item.source === "product" && !isPreviewRoute && !confirmedProducts[item.cartKey]
                               ? " · niet bevestigd"
                               : ""}
                           </p>
                         </div>
-                        <button type="button" onClick={() => removeFromCart(item.cartKey)} className="text-xs text-[#8a909b] hover:text-[#272a30]">✕</button>
-                      </div>
-                      <div className="mt-1 flex items-center justify-between">
-                        {payload.editingQuote ? (
-                          <label className="flex items-center gap-1 text-xs text-[#7b818c]">
-                            Prijs
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={item.unitPrice}
-                              onChange={(event) => updateCartEntry(item.cartKey, { unitPrice: Number(event.target.value) })}
-                              className="h-7 w-24 rounded-md border border-[#d8dbe2] px-2 text-xs"
-                            />
-                          </label>
-                        ) : (
-                          <span className="text-xs text-[#7b818c]">{formatCurrency(item.unitPrice)}</span>
-                        )}
-                        <span className="text-sm font-semibold" style={{ color: "#c9811b" }}>{formatCurrency(item.total)}</span>
-                      </div>
-                      {item.source === "product" || payload.editingQuote ? (
-                        <div className="mt-2 flex items-center gap-1">
-                          <button type="button" onClick={() => adjustQuantity(item.cartKey, -1)} className="h-6 w-6 rounded border text-xs">-</button>
-                          <span className="min-w-6 text-center text-xs">{item.quantity}</span>
-                          <button type="button" onClick={() => adjustQuantity(item.cartKey, 1)} className="h-6 w-6 rounded border text-xs">+</button>
+                        <div className="text-right">
+                          <button type="button" onClick={() => removeFromCart(item.cartKey)} className="text-[11px] text-[#8a909b] hover:text-[#272a30]">✕</button>
+                          <p className="mt-0.5 text-xs font-semibold" style={{ color: "#c9811b" }}>{formatCurrency(item.total)}</p>
                         </div>
-                      ) : null}
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <span className="truncate text-[11px] text-[#7b818c]">
+                          {item.quantity > 1 ? `${formatCurrency(item.unitPrice)} / stuk` : formatCurrency(item.unitPrice)}
+                        </span>
+                        {(item.source === "product" || payload.editingQuote) ? (
+                          <div className="flex items-center overflow-hidden rounded-md border">
+                            <button type="button" onClick={() => adjustQuantity(item.cartKey, -1)} className="h-5 w-6 text-xs">-</button>
+                            <span className="min-w-6 border-x px-1 text-center text-[11px]">{item.quantity}</span>
+                            <button type="button" onClick={() => adjustQuantity(item.cartKey, 1)} className="h-5 w-6 text-xs">+</button>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   ))
                 )}
               </div>
-              <div className="border-t px-3 py-2 text-sm font-semibold">
-                Totaal offerte (incl. BTW) <span className="float-right">{formatCurrency(total)}</span>
+              <div className="flex items-center justify-between border-t px-3 py-2 text-xs font-semibold">
+                <span>Totaal incl. BTW</span>
+                <span>{formatCurrency(total)}</span>
               </div>
             </div>
 
