@@ -286,6 +286,18 @@ function getServiceIcon(service: Service, productIcons: Record<string, string>) 
   return "🧩";
 }
 
+function isImageIcon(value: string) {
+  const trimmed = value.trim();
+  return /^https?:\/\//i.test(trimmed) || trimmed.startsWith("data:image/") || trimmed.startsWith("/uploads/");
+}
+
+function renderConfiguratorIcon(value: string, label: string) {
+  if (isImageIcon(value)) {
+    return <img src={value} alt={label} className="h-full w-full rounded-lg object-cover" />;
+  }
+  return <span aria-hidden="true">{value}</span>;
+}
+
 function buildPackageOptions(service: Service): PackageOption[] {
   const base = Math.max(1, service.basePrice);
   const description = (service.description || "").trim();
@@ -1636,7 +1648,9 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                           style={{ borderColor: selected ? accentColor : "#e2e3e7", boxShadow: selected ? `0 0 0 2px ${accentColor}33 inset` : "none" }}
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#f5f6f8] text-lg">{getCategoryIcon(group.category, categoryIconsMap)}</div>
+                            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-[#f5f6f8] text-lg">
+                              {renderConfiguratorIcon(getCategoryIcon(group.category, categoryIconsMap), group.category)}
+                            </div>
                             {selected ? (
                               <div className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: accentColor, color: darkColor }}>
                                 ✓
@@ -1666,7 +1680,9 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                           className="w-full text-left"
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#f5f6f8] text-lg">{getCategoryIcon(group.category, categoryIconsMap)}</div>
+                            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-[#f5f6f8] text-lg">
+                              {renderConfiguratorIcon(getCategoryIcon(group.category, categoryIconsMap), group.category)}
+                            </div>
                             {selected ? (
                               <div className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: accentColor, color: darkColor }}>
                                 ✓
@@ -1679,7 +1695,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                             Vanaf {formatCurrency(group.minPrice)}
                           </p>
                         </button>
-                        <div className="mt-3 grid grid-cols-[70px_1fr] gap-2">
+                        <div className="mt-3">
                           <select
                             value={categoryIconsMap[group.category] || ""}
                             onChange={(event) =>
@@ -1689,7 +1705,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                 emoji: event.target.value,
                               })
                             }
-                            className="h-8 rounded border px-2 text-xs"
+                            className="h-8 w-full rounded border px-2 text-xs"
                           >
                             <option value="">Geen</option>
                             {[...new Set([categoryIconsMap[group.category] || "", ...EMOJI_DROPDOWN_OPTIONS])]
@@ -1700,20 +1716,6 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                 </option>
                               ))}
                           </select>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              sendPreviewAction({
-                                action: "add-product",
-                                category: group.category,
-                                name: "Nieuw product",
-                              })
-                            }
-                            className="rounded border px-2 py-1 text-xs font-semibold"
-                            style={{ borderColor: `${accentColor}80` }}
-                          >
-                            + Product in dienst
-                          </button>
                         </div>
                         <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
                           <input
@@ -1875,7 +1877,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                               onClick={() => setProduct(service)}
                               className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#f5f6f8] text-xl"
                             >
-                              {getServiceIcon(service, productIconsMap)}
+                              {renderConfiguratorIcon(getServiceIcon(service, productIconsMap), service.name)}
                             </button>
                             <button
                               type="button"
@@ -1979,7 +1981,9 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                         className="rounded-[18px] border bg-white p-3 text-left transition hover:shadow-sm sm:p-4"
                         style={{ borderColor: isSelected ? accentColor : "#e2e3e7", boxShadow: isSelected ? `0 0 0 2px ${accentColor}33 inset` : "none" }}
                       >
-                        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#f5f6f8] text-xl">{getServiceIcon(service, productIconsMap)}</div>
+                        <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-[#f5f6f8] text-xl">
+                          {renderConfiguratorIcon(getServiceIcon(service, productIconsMap), service.name)}
+                        </div>
                         <p className="mt-4 text-base font-semibold sm:text-lg">{service.name}</p>
                         <p className="mt-1 line-clamp-2 text-sm text-[#7b818c]">{service.description || "Selecteer om verder te configureren."}</p>
                         <p className="mt-3 text-sm font-semibold" style={{ color: accentColor }}>

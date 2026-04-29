@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowDown, ArrowLeft, ArrowUp, Check, Copy, GripVertical, Plus, Receipt, Save, Settings2, Sparkles, Trash2 } from "lucide-react";
 import {
@@ -15,6 +15,7 @@ import {
   Skeleton,
   Switch,
   Tabs,
+  TabsContent,
   TabsList,
   TabsTrigger,
   Textarea,
@@ -101,6 +102,7 @@ type BuilderSpecsMap = Record<string, BuilderSpec>;
 type ReusableBlockTemplateType = "web" | "media" | "marketing" | "addons";
 type PreviewViewport = "desktop" | "tablet" | "mobile";
 type SettingsTab = "studio" | "config" | "catalog" | "all";
+type ConfiguratorInfoTab = "general" | "branding" | "colors" | "steps" | "icons";
 type PreviewSelectionState = {
   currentStep: number;
   selectedCategory: string;
@@ -1007,6 +1009,7 @@ export default function QuoteSettingsPage() {
   const [activeBuilderKey, setActiveBuilderKey] = useState("");
   const [selectedReusableTemplate, setSelectedReusableTemplate] = useState<ReusableBlockTemplateType>("web");
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("studio");
+  const [configInfoTab, setConfigInfoTab] = useState<ConfiguratorInfoTab>("general");
   const [previewViewport, setPreviewViewport] = useState<PreviewViewport>("desktop");
   const [previewFrameReady, setPreviewFrameReady] = useState(0);
   const [syncBuilderWithPreview, setSyncBuilderWithPreview] = useState(true);
@@ -1027,6 +1030,8 @@ export default function QuoteSettingsPage() {
   const [publishedSnapshot, setPublishedSnapshot] = useState<StudioSnapshot | null>(null);
   const [hasUnpublishedChanges, setHasUnpublishedChanges] = useState(false);
   const [lastPublishedAt, setLastPublishedAt] = useState<string | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const applyingHistoryRef = useRef(false);
   const lastSnapshotRef = useRef<string>("");
@@ -2106,6 +2111,40 @@ export default function QuoteSettingsPage() {
       return key && productId.startsWith(`${key}-`);
     });
     return prefixed ? getBuilderProductKey(prefixed) : "";
+  }
+
+  async function handleConfiguratorLogoUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      showToast({ title: "Upload mislukt", description: "Kies een PNG, JPG, SVG, ICO of WebP bestand.", variant: "error" });
+      return;
+    }
+
+    setLogoUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const payload = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
+      if (!response.ok || !payload.url) {
+        throw new Error(payload.error || "Kon het logo niet uploaden.");
+      }
+      setLogoUrl(payload.url);
+      showToast({ title: "Logo geupload", description: "Het configurator-logo is klaar om te publiceren." });
+    } catch (error) {
+      showToast({
+        title: "Upload mislukt",
+        description: error instanceof Error ? error.message : "Kon het bestand niet opslaan.",
+        variant: "error",
+      });
+    } finally {
+      setLogoUploading(false);
+    }
   }
 
   function setCategoryIcon(category: string, emoji: string) {
@@ -4825,64 +4864,201 @@ export default function QuoteSettingsPage() {
           </div>
 
           <div className="rounded-xl border p-3">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Studio instellingen
-            </p>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Titel</Label>
-                <Input value={title} onChange={(event) => setTitle(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Beschrijving</Label>
-                <Input value={description} onChange={(event) => setDescription(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Badge</Label>
-                <Input value={badge} onChange={(event) => setBadge(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">CTA</Label>
-                <Input value={ctaLabel} onChange={(event) => setCtaLabel(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Bedrijfsnaam</Label>
-                <Input value={companyName} onChange={(event) => setCompanyName(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Tagline</Label>
-                <Input value={companyTagline} onChange={(event) => setCompanyTagline(event.target.value)} />
-              </div>
+            <div className="mb-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Configurator instellingen
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Pas de publieke configurator per onderdeel aan. Publiceer bovenaan wanneer alles klopt.
+              </p>
             </div>
-            <div className="mt-2 grid gap-2 sm:grid-cols-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Accent</Label>
-                <input
-                  type="color"
-                  value={isHexColor(color) ? color : "#E6A94A"}
-                  onChange={(event) => updateColorValue(event.target.value, "accent")}
-                  className="h-10 w-full rounded border"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Donker</Label>
-                <input
-                  type="color"
-                  value={isHexColor(darkColor) ? darkColor : "#14171D"}
-                  onChange={(event) => updateColorValue(event.target.value, "dark")}
-                  className="h-10 w-full rounded border"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Achtergrond</Label>
-                <input
-                  type="color"
-                  value={isHexColor(bgColor) ? bgColor : "#F3F2EC"}
-                  onChange={(event) => updateColorValue(event.target.value, "bg")}
-                  className="h-10 w-full rounded border"
-                />
-              </div>
-            </div>
+            <Tabs value={configInfoTab} onValueChange={(value) => setConfigInfoTab(value as ConfiguratorInfoTab)}>
+              <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-xl bg-muted/50 p-1 sm:grid-cols-5">
+                <TabsTrigger value="general">Info</TabsTrigger>
+                <TabsTrigger value="branding">Branding</TabsTrigger>
+                <TabsTrigger value="colors">Kleuren</TabsTrigger>
+                <TabsTrigger value="steps">Stappen</TabsTrigger>
+                <TabsTrigger value="icons">Iconen</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="general" className="mt-3">
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Titel</Label>
+                    <Input value={title} onChange={(event) => setTitle(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Badge</Label>
+                    <Input value={badge} onChange={(event) => setBadge(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">CTA</Label>
+                    <Input value={ctaLabel} onChange={(event) => setCtaLabel(event.target.value)} />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2 lg:col-span-3">
+                    <Label className="text-xs">Beschrijving</Label>
+                    <Textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2 lg:col-span-3">
+                    <Label className="text-xs">Disclaimer / interne melding</Label>
+                    <Textarea value={disclaimer} onChange={(event) => setDisclaimer(event.target.value)} rows={2} />
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="branding" className="mt-3">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Bedrijfsnaam</Label>
+                      <Input value={companyName} onChange={(event) => setCompanyName(event.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Tagline</Label>
+                      <Input value={companyTagline} onChange={(event) => setCompanyTagline(event.target.value)} />
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label className="text-xs">Logo URL of upload</Label>
+                      <Input value={logoUrl} onChange={(event) => setLogoUrl(event.target.value)} placeholder="https://... of upload hieronder" />
+                    </div>
+                    <div className="flex flex-wrap gap-2 sm:col-span-2">
+                      <input
+                        ref={logoInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/svg+xml,image/webp,image/x-icon,image/vnd.microsoft.icon"
+                        className="hidden"
+                        onChange={(event) => void handleConfiguratorLogoUpload(event)}
+                      />
+                      <Button type="button" variant="outline" size="sm" onClick={() => logoInputRef.current?.click()} disabled={logoUploading}>
+                        {logoUploading ? "Uploaden..." : "Logo uploaden"}
+                      </Button>
+                      {logoUrl ? (
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setLogoUrl("")}>
+                          Logo verwijderen
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preview</p>
+                    {logoUrl ? (
+                      <img src={logoUrl} alt="Configurator logo preview" className="max-h-20 max-w-full rounded-lg object-contain" />
+                    ) : (
+                      <div className="flex h-20 items-center justify-center rounded-lg border border-dashed text-xs text-muted-foreground">
+                        Nog geen logo
+                      </div>
+                    )}
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Uploads worden als compacte afbeelding opgeslagen en mee gepubliceerd in de configurator.
+                    </p>
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="colors" className="mt-3">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Accent</Label>
+                    <input
+                      type="color"
+                      value={isHexColor(color) ? color : "#E6A94A"}
+                      onChange={(event) => updateColorValue(event.target.value, "accent")}
+                      className="h-10 w-full rounded border"
+                    />
+                    <Input value={color} onChange={(event) => updateColorValue(event.target.value, "accent")} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Donker</Label>
+                    <input
+                      type="color"
+                      value={isHexColor(darkColor) ? darkColor : "#14171D"}
+                      onChange={(event) => updateColorValue(event.target.value, "dark")}
+                      className="h-10 w-full rounded border"
+                    />
+                    <Input value={darkColor} onChange={(event) => updateColorValue(event.target.value, "dark")} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Achtergrond</Label>
+                    <input
+                      type="color"
+                      value={isHexColor(bgColor) ? bgColor : "#F3F2EC"}
+                      onChange={(event) => updateColorValue(event.target.value, "bg")}
+                      className="h-10 w-full rounded border"
+                    />
+                    <Input value={bgColor} onChange={(event) => updateColorValue(event.target.value, "bg")} />
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="steps" className="mt-3">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Stap 1 label</Label>
+                    <Input value={stepServiceLabel} onChange={(event) => setStepServiceLabel(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Stap 2 label</Label>
+                    <Input value={stepProductLabel} onChange={(event) => setStepProductLabel(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Stap 3 label</Label>
+                    <Input value={stepSpecsLabel} onChange={(event) => setStepSpecsLabel(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Stap 4 label</Label>
+                    <Input value={stepDetailsLabel} onChange={(event) => setStepDetailsLabel(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Stap 1 uitleg</Label>
+                    <Textarea value={stepServiceHint} onChange={(event) => setStepServiceHint(event.target.value)} rows={2} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Stap 2 uitleg</Label>
+                    <Textarea value={stepProductHint} onChange={(event) => setStepProductHint(event.target.value)} rows={2} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Stap 3 uitleg</Label>
+                    <Textarea value={stepSpecsHint} onChange={(event) => setStepSpecsHint(event.target.value)} rows={2} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Stap 4 uitleg</Label>
+                    <Textarea value={stepDetailsHint} onChange={(event) => setStepDetailsHint(event.target.value)} rows={2} />
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="icons" className="mt-3">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Dienst titel</Label>
+                    <Input value={serviceTitle} onChange={(event) => setServiceTitle(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Product titel</Label>
+                    <Input value={productTitle} onChange={(event) => setProductTitle(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Specificaties titel</Label>
+                    <Input value={specsTitle} onChange={(event) => setSpecsTitle(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Gegevens titel</Label>
+                    <Input value={detailsTitle} onChange={(event) => setDetailsTitle(event.target.value)} />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label className="text-xs">Categorie iconen JSON</Label>
+                    <Textarea value={categoryIconsJson} onChange={(event) => setCategoryIconsJson(event.target.value)} rows={4} className="font-mono text-xs" />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label className="text-xs">Product iconen JSON</Label>
+                    <Textarea value={productIconsJson} onChange={(event) => setProductIconsJson(event.target.value)} rows={4} className="font-mono text-xs" />
+                    <p className="text-xs text-muted-foreground">
+                      Gebruik emoji, of een afbeeldings-URL/data-URL als icoon. Voorbeelden: {`{ "Webdesign": "💻" }`} of {`{ "SEO": "https://..." }`}.
+                    </p>
+                  </div>
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
 
           <div className="rounded-xl border p-3">
