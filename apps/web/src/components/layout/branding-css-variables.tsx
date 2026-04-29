@@ -48,7 +48,12 @@ function hexToHslString(hex: string) {
 export function BrandingCssVariables() {
   const pathname = usePathname();
   const isPublicMarketingPath = ["/", "/product", "/oplossingen", "/over-ons", "/contact"].includes(pathname);
-  const { branding } = useBranding(!isPublicMarketingPath);
+  const isPublicRuntimePath =
+    isPublicMarketingPath ||
+    pathname.startsWith("/embed") ||
+    pathname.startsWith("/review/") ||
+    pathname.startsWith("/client-portal/");
+  const { branding } = useBranding(!isPublicRuntimePath);
 
   useEffect(() => {
     const primary = hexToHslString(branding.primaryColor);

@@ -703,6 +703,14 @@ function BookingEmbedFallback() {
 }
 
 export default function BookingEmbedPage() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return <BookingEmbedFallback />;
+
   return (
     <Suspense fallback={<BookingEmbedFallback />}>
       <BookingEmbedContent />

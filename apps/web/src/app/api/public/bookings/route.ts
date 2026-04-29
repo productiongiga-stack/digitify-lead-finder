@@ -7,7 +7,7 @@ import {
   upsertGoogleBookingEvent,
   upsertGoogleEventIdInNotes,
 } from "@digitify/api/src/lib/google-calendar";
-import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
+import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
 function getSetting(settings: Array<{ key: string; value: unknown }>, key: string, fallback = "") {
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const ip = getClientIp(request);
-    const tenantUserId = await resolveUserIdFromPublicTenantToken(prisma, String(body.tenant || ""));
+    const tenantUserId = await resolvePublicTenantUserId(prisma, String(body.tenant || ""));
     if (!tenantUserId) {
       log.security.warn("Public booking rejected: invalid tenant token", { ip });
       return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });

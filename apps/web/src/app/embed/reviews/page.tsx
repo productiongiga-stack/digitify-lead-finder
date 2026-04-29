@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getReviewTextDefault } from "@/lib/review-text";
 
@@ -283,6 +283,14 @@ function ReviewEmbedFallback() {
 }
 
 export default function ReviewEmbedPage() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return <ReviewEmbedFallback />;
+
   return (
     <Suspense fallback={<ReviewEmbedFallback />}>
       <ReviewEmbedContent />

@@ -311,6 +311,14 @@ function ChatbotEmbedFallback() {
 }
 
 export default function ChatbotEmbedPage() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return <ChatbotEmbedFallback />;
+
   return (
     <Suspense fallback={<ChatbotEmbedFallback />}>
       <ChatbotEmbedContent />

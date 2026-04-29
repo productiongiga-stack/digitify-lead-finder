@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma, revealSettingValue } from "@digitify/db";
-import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
+import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { log } from "@digitify/api/src/lib/logger";
 import { createHash } from "node:crypto";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
@@ -344,7 +344,7 @@ async function generateAiReply(args: {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const sessionId = url.searchParams.get("sessionId")?.trim();
-  const tenantUserId = await resolveUserIdFromPublicTenantToken(prisma, url.searchParams.get("tenant"));
+  const tenantUserId = await resolvePublicTenantUserId(prisma, url.searchParams.get("tenant"));
   const ip = getClientIp(request);
 
   if (!sessionId) {
@@ -407,7 +407,7 @@ export async function POST(request: Request) {
     const requestedVisitorName = String(body.visitorName || "").trim();
     const pageUrl = String(body.pageUrl || "").trim();
     const tenantToken = String(body.tenant || "").trim();
-    const tenantUserId = await resolveUserIdFromPublicTenantToken(prisma, tenantToken);
+    const tenantUserId = await resolvePublicTenantUserId(prisma, tenantToken);
 
     if (!message) {
       return NextResponse.json({ error: "Bericht is verplicht." }, { status: 400 });

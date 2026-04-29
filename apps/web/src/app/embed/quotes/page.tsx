@@ -298,6 +298,18 @@ function renderConfiguratorIcon(value: string, label: string) {
   return <span aria-hidden="true">{value}</span>;
 }
 
+function QuoteEmbedFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#f3f2ec] p-6 text-[#1f2228]">
+      <div className="w-full max-w-md rounded-[28px] border border-black/10 bg-white p-6 text-center shadow-[0_24px_80px_rgba(15,23,42,0.12)]">
+        <div className="mx-auto mb-4 h-12 w-12 animate-pulse rounded-2xl bg-[#f5b04c]/30" />
+        <p className="text-sm font-semibold">Configurator laden...</p>
+        <p className="mt-1 text-xs text-[#7b818c]">We zetten de offerteflow klaar.</p>
+      </div>
+    </div>
+  );
+}
+
 function buildPackageOptions(service: Service): PackageOption[] {
   const base = Math.max(1, service.basePrice);
   const description = (service.description || "").trim();
@@ -3031,5 +3043,13 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
 }
 
 export default function QuoteEmbedPage() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return <QuoteEmbedFallback />;
+
   return <QuoteConfigurator mode="public" />;
 }

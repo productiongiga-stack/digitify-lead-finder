@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
+import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { log } from "@digitify/api/src/lib/logger";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
@@ -11,7 +11,7 @@ function userSettingKey(userId: string, key: string) {
 export async function GET(request: Request) {
   try {
     const tenantToken = new URL(request.url).searchParams.get("tenant")?.trim() || "";
-    const tenantUserId = await resolveUserIdFromPublicTenantToken(prisma, tenantToken);
+    const tenantUserId = await resolvePublicTenantUserId(prisma, tenantToken);
     if (!tenantUserId) {
       log.security.warn("Public chatbot settings rejected: invalid tenant token");
       return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });

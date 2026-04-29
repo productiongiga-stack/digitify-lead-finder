@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
+import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { log } from "@digitify/api/src/lib/logger";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const tenantUserId = await resolveUserIdFromPublicTenantToken(prisma, String(body.tenant || ""));
+    const tenantUserId = await resolvePublicTenantUserId(prisma, String(body.tenant || ""));
     if (!tenantUserId) {
       log.security.warn("Public quote request rejected: invalid tenant token");
       return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });

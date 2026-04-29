@@ -85,3 +85,28 @@ export async function resolveUserIdFromPublicTenantToken(
 
   return extractUserIdFromScopedSettingKey(row.key);
 }
+
+export async function resolveDefaultPublicTenantUserId(db: PrismaClient) {
+  const owner = await db.user.findFirst({
+    where: { role: "OWNER" },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  if (owner?.id) return owner.id;
+
+  const admin = await db.user.findFirst({
+    where: { role: "ADMIN" },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  return admin?.id || null;
+}
+
+export async function resolvePublicTenantUserId(
+  db: PrismaClient,
+  rawTenant: string | null | undefined,
+) {
+  const token = normalizePublicTenantToken(rawTenant);
+  if (token) return resolveUserIdFromPublicTenantToken(db, token);
+  return resolveDefaultPublicTenantUserId(db);
+}

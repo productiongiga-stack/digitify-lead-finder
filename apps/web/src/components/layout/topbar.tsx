@@ -137,19 +137,19 @@ export function Topbar() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Link href="/contacts/approval" className="relative">
-          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" aria-label="Goedkeuringswachtrij">
+        <Button asChild variant="ghost" size="icon" className="relative h-8 w-8 rounded-lg" aria-label="Goedkeuringswachtrij">
+          <Link href="/contacts/approval">
             <Bell className="h-4 w-4" />
-          </Button>
-          {(topbarStats?.pendingDrafts ?? 0) > 0 ? (
-            <Badge
-              variant="destructive"
-              className="absolute -right-1.5 -top-1.5 h-5 min-w-5 justify-center rounded-full px-1 text-[10px]"
-            >
-              {topbarStats?.pendingDrafts}
-            </Badge>
-          ) : null}
-        </Link>
+            {(topbarStats?.pendingDrafts ?? 0) > 0 ? (
+              <Badge
+                variant="destructive"
+                className="absolute -right-1.5 -top-1.5 h-5 min-w-5 justify-center rounded-full px-1 text-[10px]"
+              >
+                {topbarStats?.pendingDrafts}
+              </Badge>
+            ) : null}
+          </Link>
+        </Button>
 
         <Button variant="ghost" size="icon" className="hidden h-8 w-8 rounded-lg md:inline-flex" onClick={toggleOpenClaw}>
           <Bot className="h-4 w-4" />

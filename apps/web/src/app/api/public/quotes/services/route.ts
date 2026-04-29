@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { resolveUserIdFromPublicTenantToken } from "@digitify/api/src/lib/public-tenant";
+import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { log } from "@digitify/api/src/lib/logger";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
@@ -9,7 +9,7 @@ function userSettingKey(userId: string, key: string) {
 }
 
 export async function GET(request: Request) {
-  const tenantUserId = await resolveUserIdFromPublicTenantToken(
+  const tenantUserId = await resolvePublicTenantUserId(
     prisma,
     new URL(request.url).searchParams.get("tenant"),
   );
