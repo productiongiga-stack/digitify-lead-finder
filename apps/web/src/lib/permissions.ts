@@ -22,6 +22,7 @@ export function canAccessSettingsPath(roleValue: string | null | undefined, path
   const path = pathname.replace(/\/$/, "") || "/settings";
 
   if (path === "/settings") return true;
+  if (path === "/settings/account") return true;
   if (role === "OWNER") return path.startsWith("/settings/");
 
   const adminPaths = new Set([

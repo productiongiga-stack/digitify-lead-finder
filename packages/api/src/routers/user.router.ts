@@ -12,6 +12,10 @@ function hashPassword(password: string): string {
 }
 
 export function verifyPassword(password: string, storedHash: string): boolean {
+  if (!storedHash.includes(":")) {
+    const { createHash } = require("crypto");
+    return createHash("sha256").update(password).digest("hex") === storedHash;
+  }
   const [salt, hash] = storedHash.split(":");
   if (!salt || !hash) return false;
   const hashBuffer = Buffer.from(hash, "hex");
@@ -34,6 +38,58 @@ export const userRouter = router({
       },
     });
   }),
+
+  updateProfile: protectedProcedure
+    .input(
+      z.object({
+        name: z.string().trim().min(1, "Naam is verplicht.").max(120),
+        image: z.string().max(3_000_000).optional().nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const user = await ctx.db.user.update({
+        where: { id: ctx.user.id },
+        data: {
+          name: input.name,
+          image: input.image || null,
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          image: true,
+          role: true,
+          createdAt: true,
+        },
+      });
+      await ensureUserWorkspace(ctx.db, user.id, user.name);
+      return user;
+    }),
+
+  changePassword: protectedProcedure
+    .input(
+      z.object({
+        currentPassword: z.string().min(1, "Huidig wachtwoord is verplicht."),
+        newPassword: passwordPolicySchema,
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const user = await ctx.db.user.findUnique({
+        where: { id: ctx.user.id },
+        select: { id: true, passwordHash: true },
+      });
+      if (!user?.passwordHash) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Dit account heeft geen lokaal wachtwoord." });
+      }
+      if (!verifyPassword(input.currentPassword, user.passwordHash)) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Huidig wachtwoord klopt niet." });
+      }
+      await ctx.db.user.update({
+        where: { id: ctx.user.id },
+        data: { passwordHash: hashPassword(input.newPassword) },
+      });
+      return { success: true };
+    }),
 
   list: adminProcedure.query(async ({ ctx }) => {
     return ctx.db.user.findMany({

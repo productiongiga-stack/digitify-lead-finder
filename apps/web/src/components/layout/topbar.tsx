@@ -4,7 +4,7 @@ import { useSession, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Button } from "@digitify/ui";
-import { Avatar, AvatarFallback } from "@digitify/ui";
+import { Avatar, AvatarFallback, AvatarImage } from "@digitify/ui";
 import { Badge } from "@digitify/ui";
 import {
   DropdownMenu,
@@ -14,10 +14,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@digitify/ui";
-import { Moon, Sun, Bot, Menu, Bell, Plus } from "lucide-react";
+import { Moon, Sun, Bot, Menu, Bell, Plus, Building2, KeyRound, LogOut, Mail, Palette, Settings, ShieldCheck, UserCircle } from "lucide-react";
 import { useUIStore } from "@/stores/ui-store";
 import { useBranding } from "@/lib/branding";
 import { resolvePageTitle } from "@/lib/navigation";
+import { canAccessSettingsPath } from "@/lib/permissions";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 
@@ -32,15 +33,23 @@ export function Topbar() {
     refetchInterval: 60_000,
     refetchOnWindowFocus: false,
   });
+  const { data: profile } = trpc.user.getProfile.useQuery(undefined, {
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
 
-  const initials = session?.user?.name
+  const displayName = profile?.name || session?.user?.name || "";
+  const displayEmail = profile?.email || session?.user?.email || "";
+  const initials = displayName
     ?.split(" ")
     .map((n) => n[0])
     .join("")
-    .toUpperCase() ?? "U";
+    .toUpperCase() || displayEmail.slice(0, 1).toUpperCase() || "U";
 
   const pageTitle = resolvePageTitle(pathname, branding.companyName);
   const followUpCount = topbarStats?.followUpCount ?? 0;
+  const role = (session?.user as { role?: string } | undefined)?.role;
+  const canOpen = (href: string) => canAccessSettingsPath(role, href);
 
   return (
     <header className="sticky top-0 z-20 flex h-12 items-center justify-between border-b bg-background/90 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/65 sm:px-4">
@@ -160,19 +169,84 @@ export function Topbar() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="relative h-8 w-8 rounded-full">
               <Avatar className="h-8 w-8">
+                {profile?.image ? <AvatarImage src={profile.image} alt={displayName || displayEmail || "Account"} /> : null}
                 <AvatarFallback className="text-xs">{initials}</AvatarFallback>
               </Avatar>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuContent align="end" className="w-72">
             <DropdownMenuLabel>
-              <div className="flex flex-col space-y-1">
-                <p className="text-sm font-medium">{session?.user?.name}</p>
-                <p className="text-xs text-muted-foreground">{session?.user?.email}</p>
+              <div className="flex items-center gap-3">
+                <Avatar className="h-10 w-10">
+                  {profile?.image ? <AvatarImage src={profile.image} alt={displayName || displayEmail || "Account"} /> : null}
+                  <AvatarFallback className="text-xs">{initials}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{displayName || "Gebruiker"}</p>
+                  <p className="truncate text-xs text-muted-foreground">{displayEmail}</p>
+                  {profile?.role ? (
+                    <Badge variant="outline" className="mt-1 h-5 px-1.5 text-[10px]">
+                      {profile.role}
+                    </Badge>
+                  ) : null}
+                </div>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => signOut({ callbackUrl: "/login" })}>
+            <DropdownMenuItem asChild>
+              <Link href="/settings/account">
+                <UserCircle className="mr-2 h-4 w-4" />
+                Account & profiel
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/settings/account">
+                <KeyRound className="mr-2 h-4 w-4" />
+                Wachtwoord wijzigen
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {canOpen("/settings/company") ? (
+              <DropdownMenuItem asChild>
+                <Link href="/settings/company">
+                  <Building2 className="mr-2 h-4 w-4" />
+                  Bedrijfsgegevens
+                </Link>
+              </DropdownMenuItem>
+            ) : null}
+            {canOpen("/settings/branding") ? (
+              <DropdownMenuItem asChild>
+                <Link href="/settings/branding">
+                  <Palette className="mr-2 h-4 w-4" />
+                  Branding
+                </Link>
+              </DropdownMenuItem>
+            ) : null}
+            {canOpen("/settings/email") ? (
+              <DropdownMenuItem asChild>
+                <Link href="/settings/email">
+                  <Mail className="mr-2 h-4 w-4" />
+                  E-mail instellingen
+                </Link>
+              </DropdownMenuItem>
+            ) : null}
+            {canOpen("/settings/integrations") ? (
+              <DropdownMenuItem asChild>
+                <Link href="/settings/integrations">
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  Integraties & API keys
+                </Link>
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuItem asChild>
+              <Link href="/settings">
+                <Settings className="mr-2 h-4 w-4" />
+                Alle instellingen
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => signOut({ callbackUrl: "/login" })} className="text-destructive focus:text-destructive">
+              <LogOut className="mr-2 h-4 w-4" />
               Uitloggen
             </DropdownMenuItem>
           </DropdownMenuContent>

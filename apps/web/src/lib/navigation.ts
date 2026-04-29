@@ -25,6 +25,7 @@ import {
   CheckSquare,
   ScanSearch,
   Library,
+  UserCircle,
 } from "lucide-react";
 import type { AppRole } from "@/lib/permissions";
 
@@ -92,6 +93,7 @@ export type SettingsSection = {
 };
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
+  { href: "/settings/account", title: "Account & Profiel", description: "Naam, profielfoto en wachtwoord", icon: UserCircle, allowedRoles: ["OWNER", "ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER", "VIEWER"] },
   { href: "/settings/integrations", title: "Integraties & API Keys", description: "SMTP/IMAP + externe API verbindingen", icon: Key, allowedRoles: ["OWNER"] },
   { href: "/settings/branding", title: "Branding", description: "Logo, kleuren en huisstijl", icon: Palette, allowedRoles: ["OWNER"] },
   { href: "/settings/scoring", title: "Scoring Configuratie", description: "Pas scoring gewichten en factoren aan", icon: Gauge, allowedRoles: ["OWNER", "ADMIN"] },
@@ -137,6 +139,7 @@ const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
   { path: "/chatbot/settings", title: "Chatbot Instellingen" },
   { path: "/chatbot", title: "Chatbot" },
   { path: "/settings/integrations", title: "Integraties & API Keys" },
+  { path: "/settings/account", title: "Account & Profiel" },
   { path: "/settings/branding", title: "Branding" },
   { path: "/settings/scoring", title: "Scoring Configuratie" },
   { path: "/settings/team", title: "Team & Rollen" },
