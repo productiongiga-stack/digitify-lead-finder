@@ -313,12 +313,12 @@ function BookingEmbedContent() {
   const themeClasses = {
     page:
       themeMode === "dark"
-        ? "min-h-screen bg-[#121212] p-4 text-white"
-        : "min-h-screen bg-[#f3f1ee] p-4 text-slate-950",
+        ? "min-h-screen bg-[#121212] p-2 text-white sm:p-3"
+        : "min-h-screen bg-[#f3f1ee] p-2 text-slate-950 sm:p-3",
     shell:
       themeMode === "dark"
-        ? "mx-auto min-h-[880px] max-w-[1600px] overflow-hidden rounded-[32px] border border-white/8 bg-[#171717] shadow-[0_30px_120px_rgba(0,0,0,0.45)]"
-        : "mx-auto min-h-[880px] max-w-[1600px] overflow-hidden rounded-[32px] border border-black/8 bg-white shadow-[0_30px_120px_rgba(15,23,42,0.12)]",
+        ? "mx-auto max-w-[1180px] overflow-hidden rounded-[24px] border border-white/8 bg-[#171717] shadow-[0_24px_80px_rgba(0,0,0,0.38)]"
+        : "mx-auto max-w-[1180px] overflow-hidden rounded-[24px] border border-black/8 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.10)]",
     panelBorder:
       themeMode === "dark" ? "border-white/8" : "border-black/8",
     muted:
@@ -342,9 +342,9 @@ function BookingEmbedContent() {
   if (status?.type === "success" && selectedDateObject) {
     return (
       <div className={themeClasses.page} style={{ colorScheme: themeMode }}>
-        <div className={`${themeClasses.shell} flex items-center justify-center px-6 py-10`}>
+        <div className={`${themeClasses.shell} flex items-center justify-center px-4 py-8`}>
           <div
-            className={`w-full max-w-2xl rounded-[32px] border p-8 text-center sm:p-12 ${themeClasses.card}`}
+            className={`w-full max-w-xl rounded-[24px] border p-6 text-center sm:p-8 ${themeClasses.card}`}
           >
             <div
               className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full text-slate-950"
@@ -353,7 +353,7 @@ function BookingEmbedContent() {
               <CheckCircle2 className="h-8 w-8" />
             </div>
             <p className={`text-sm font-medium uppercase tracking-[0.28em] ${themeClasses.muted}`}>Boeking ontvangen</p>
-            <h1 className="mt-3 text-4xl font-semibold tracking-tight">Bedankt voor uw aanvraag</h1>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight">Bedankt voor uw aanvraag</h1>
             <p className={`mx-auto mt-4 max-w-xl text-base leading-7 ${themeClasses.muted}`}>{status.message}</p>
             <div className={`mx-auto mt-8 grid max-w-xl gap-3 rounded-[28px] border p-5 text-left ${themeClasses.card}`}>
               <div className="flex items-center justify-between gap-3">
@@ -384,45 +384,45 @@ function BookingEmbedContent() {
   return (
     <div className={themeClasses.page} style={{ colorScheme: themeMode }}>
       <div className={themeClasses.shell}>
-        <div className="grid min-h-[880px] lg:grid-cols-[320px_minmax(0,1fr)_360px]">
-          <aside className={`flex flex-col gap-6 border-b p-6 sm:p-8 lg:border-b-0 lg:border-r ${themeClasses.panelBorder}`}>
+        <div className="grid lg:grid-cols-[260px_minmax(0,1fr)_310px]">
+          <aside className={`flex flex-col gap-4 border-b p-4 sm:p-5 lg:border-b-0 lg:border-r ${themeClasses.panelBorder}`}>
             <div
-              className="flex h-16 w-16 items-center justify-center rounded-full border shadow-sm"
+              className="flex h-12 w-12 items-center justify-center rounded-full border shadow-sm"
               style={{
                 backgroundColor: color,
                 borderColor: themeMode === "dark" ? "rgba(255,255,255,0.12)" : "rgba(15,23,42,0.08)",
               }}
             >
-              <Play className="h-8 w-8 fill-current text-white" />
+              <Play className="h-6 w-6 fill-current text-white" />
             </div>
             <div>
-              <p className={`text-lg font-semibold ${themeClasses.muted}`}>{brandName}</p>
-              <h1 className="mt-5 text-[clamp(2.2rem,4vw,3.6rem)] font-semibold tracking-tight">
+              <p className={`text-sm font-semibold ${themeClasses.muted}`}>{brandName}</p>
+              <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
                 {meetingName}
                 <span className={themeClasses.muted}> / {duration} min</span>
               </h1>
-              <p className={`mt-5 max-w-sm text-base leading-7 ${themeClasses.muted}`}>{description}</p>
+              <p className={`mt-3 max-w-sm text-sm leading-6 ${themeClasses.muted}`}>{description}</p>
               {serviceName ? (
                 <p className={`mt-2 text-xs font-medium ${themeClasses.muted}`}>Service: {serviceName}</p>
               ) : null}
             </div>
 
-            <div className="space-y-5 pt-2 text-lg">
-              <div className="flex items-center gap-4">
-                <Clock3 className="h-6 w-6 shrink-0" />
+            <div className="space-y-3 pt-1 text-sm">
+              <div className="flex items-center gap-3">
+                <Clock3 className="h-4 w-4 shrink-0" />
                 <span>{duration}m</span>
               </div>
-              <div className="flex items-center gap-4">
-                <Video className="h-6 w-6 shrink-0" />
+              <div className="flex items-center gap-3">
+                <Video className="h-4 w-4 shrink-0" />
                 <span>{meetingLocation}</span>
               </div>
-              <div className="flex items-center gap-4">
-                <Globe2 className="h-6 w-6 shrink-0" />
+              <div className="flex items-center gap-3">
+                <Globe2 className="h-4 w-4 shrink-0" />
                 <span>{timezone}</span>
               </div>
             </div>
 
-            <div className={`mt-auto rounded-[28px] border p-5 ${themeClasses.card}`}>
+            <div className={`mt-auto rounded-[20px] border p-4 ${themeClasses.card}`}>
               <p className="text-sm font-medium uppercase tracking-[0.22em]" style={{ color }}>
                 Samenvatting
               </p>
@@ -449,30 +449,30 @@ function BookingEmbedContent() {
             </div>
           </aside>
 
-          <section className={`border-b p-6 sm:p-8 lg:border-b-0 lg:border-r ${themeClasses.panelBorder}`}>
+          <section className={`border-b p-4 sm:p-5 lg:border-b-0 lg:border-r ${themeClasses.panelBorder}`}>
             <div className="flex items-center justify-between gap-4">
-              <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">{formatMonthTitle(currentMonth)}</h2>
-              <div className="flex items-center gap-3">
+              <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">{formatMonthTitle(currentMonth)}</h2>
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setCurrentMonth((current) => addMonths(current, -1))}
-                  className={`flex h-12 w-12 items-center justify-center rounded-full border transition ${themeClasses.slot}`}
+                  className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${themeClasses.slot}`}
                   aria-label="Vorige maand"
                 >
-                  <ChevronLeft className="h-6 w-6" />
+                  <ChevronLeft className="h-5 w-5" />
                 </button>
                 <button
                   type="button"
                   onClick={() => setCurrentMonth((current) => addMonths(current, 1))}
-                  className={`flex h-12 w-12 items-center justify-center rounded-full border transition ${themeClasses.slot}`}
+                  className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${themeClasses.slot}`}
                   aria-label="Volgende maand"
                 >
-                  <ChevronRight className="h-6 w-6" />
+                  <ChevronRight className="h-5 w-5" />
                 </button>
               </div>
             </div>
 
-            <div className="mt-10 grid grid-cols-7 gap-y-4 text-center text-xl font-medium tracking-wide sm:text-2xl">
+            <div className="mt-6 grid grid-cols-7 gap-y-3 text-center text-sm font-semibold tracking-wide">
               {DAY_LABELS.slice(1).concat(DAY_LABELS.slice(0, 1)).map((label) => (
                 <div key={label} className={themeClasses.muted}>
                   {label}
@@ -480,7 +480,7 @@ function BookingEmbedContent() {
               ))}
             </div>
 
-            <div className="mt-8 grid grid-cols-7 gap-x-3 gap-y-5">
+            <div className="mt-4 grid grid-cols-7 gap-2">
               {monthDays.map((day) => {
                 const dateKey = formatDateKey(day);
                 const inCurrentMonth = day.getMonth() === currentMonth.getMonth();
@@ -500,7 +500,7 @@ function BookingEmbedContent() {
                       setCurrentMonth(getMonthStart(day));
                     }}
                     disabled={!isAvailable}
-                    className={`relative flex aspect-square min-h-[68px] items-center justify-center rounded-[24px] border text-2xl font-medium transition sm:min-h-[94px] sm:text-[2rem] ${
+                    className={`relative flex aspect-square min-h-[48px] items-center justify-center rounded-[16px] border text-base font-semibold transition sm:min-h-[64px] sm:text-xl ${
                       isAvailable ? "" : "cursor-not-allowed opacity-50"
                     } ${
                       isSelected
@@ -526,19 +526,19 @@ function BookingEmbedContent() {
             </div>
           </section>
 
-          <section className="p-6 sm:p-8">
+          <section className="p-4 sm:p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">{selectedDayLabel.toLowerCase()}</h2>
+                <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">{selectedDayLabel.toLowerCase()}</h2>
                 <p className={`mt-2 text-sm ${themeClasses.muted}`}>
                   {selectedDate ? formatLongDate(selectedDate) : "Kies eerst een datum"}
                 </p>
               </div>
-              <div className={`inline-flex rounded-[20px] p-1 ${themeClasses.softStrong}`}>
+              <div className={`inline-flex rounded-[16px] p-1 ${themeClasses.softStrong}`}>
                 <button
                   type="button"
                   onClick={() => setTimeMode("12")}
-                  className={`rounded-[18px] px-5 py-2 text-lg transition ${
+                  className={`rounded-[14px] px-3 py-1.5 text-sm transition ${
                     timeMode === "12" ? (themeMode === "dark" ? "bg-black text-white" : "bg-white text-slate-950 shadow-sm") : themeClasses.muted
                   }`}
                 >
@@ -547,7 +547,7 @@ function BookingEmbedContent() {
                 <button
                   type="button"
                   onClick={() => setTimeMode("24")}
-                  className={`rounded-[18px] px-5 py-2 text-lg transition ${
+                  className={`rounded-[14px] px-3 py-1.5 text-sm transition ${
                     timeMode === "24" ? (themeMode === "dark" ? "bg-black text-white" : "bg-white text-slate-950 shadow-sm") : themeClasses.muted
                   }`}
                 >
@@ -556,7 +556,7 @@ function BookingEmbedContent() {
               </div>
             </div>
 
-            <div className="mt-8 space-y-4">
+            <div className="mt-5 space-y-2">
               {selectedSlots.length ? (
                 selectedSlots.map((slot) => {
                   const active = selectedTime === slot;
@@ -565,12 +565,12 @@ function BookingEmbedContent() {
                       key={slot}
                       type="button"
                       onClick={() => setSelectedTime(slot)}
-                      className={`flex w-full items-center justify-center gap-4 rounded-[22px] border px-6 py-6 text-3xl font-medium transition ${
+                      className={`flex w-full items-center justify-center gap-3 rounded-[16px] border px-4 py-3 text-lg font-semibold transition ${
                         active ? "border-transparent text-slate-950 shadow-[0_18px_40px_rgba(245,176,76,0.22)]" : themeClasses.slot
                       }`}
                       style={{ backgroundColor: active ? color : undefined }}
                     >
-                      <span className={`h-4 w-4 rounded-full ${active ? "bg-slate-950" : ""}`} style={!active ? { backgroundColor: "#22c55e" } : undefined} />
+                      <span className={`h-2.5 w-2.5 rounded-full ${active ? "bg-slate-950" : ""}`} style={!active ? { backgroundColor: "#22c55e" } : undefined} />
                       {formatTimeDisplay(slot, timeMode)}
                     </button>
                   );
@@ -585,7 +585,7 @@ function BookingEmbedContent() {
               )}
             </div>
 
-            <div className={`mt-6 rounded-[28px] border p-5 ${themeClasses.card}`}>
+            <div className={`mt-4 rounded-[20px] border p-4 ${themeClasses.card}`}>
               <div className="flex items-center gap-3">
                 {themeMode === "dark" ? <MoonStar className="h-5 w-5" /> : <SunMedium className="h-5 w-5" />}
                 <div>
@@ -598,7 +598,7 @@ function BookingEmbedContent() {
             </div>
 
             {isReadyForForm ? (
-              <form onSubmit={handleSubmit} className={`mt-6 rounded-[28px] border p-5 ${themeClasses.card}`}>
+              <form onSubmit={handleSubmit} className={`mt-4 rounded-[20px] border p-4 ${themeClasses.card}`}>
                 <div className="flex items-center gap-3">
                   <CalendarDays className="h-5 w-5" />
                   <div>

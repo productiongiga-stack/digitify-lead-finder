@@ -8,7 +8,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
   Input, Label, Textarea, Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-  CreateModal, EmptyState,
+  CreateModal, EmptyState, Tabs, TabsContent, TabsList, TabsTrigger,
 } from "@digitify/ui";
 import {
   Calendar, Plus, Clock, CheckCircle2, XCircle, Trash2, Pencil,
@@ -236,6 +236,13 @@ export default function BookingsPage() {
         </div>
       </div>
 
+      <Tabs defaultValue="overview" className="space-y-3">
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="overview">Overzicht</TabsTrigger>
+          <TabsTrigger value="info">Info</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-3">
       {/* Filter tabs */}
       <div className="-mx-1 overflow-x-auto px-1 pb-1">
         <div className="flex min-w-max gap-2">
@@ -731,6 +738,104 @@ export default function BookingsPage() {
           )}
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="info" className="space-y-3">
+          <div className="grid gap-3 xl:grid-cols-3">
+            <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Planning flow</p>
+                <p className="mt-2 text-sm font-medium">
+                  Start met pending aanvragen, bevestig wat klopt en werk afgeronde afspraken meteen af.
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Zo blijft je dashboard schoon en weet je welke boekingen nog actie vragen.
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Embed compact</p>
+                <p className="mt-2 text-sm font-medium">
+                  De publieke booking embed is compacter gemaakt zodat hij beter werkt in iframes en op mobiel.
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Kalender, tijdsloten en formulier blijven in één duidelijke flow.
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Koppelingen</p>
+                <p className="mt-2 text-sm font-medium">
+                  Google Agenda en lead-koppeling blijven de belangrijkste plekken om dubbele opvolging te vermijden.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button asChild size="sm" variant="outline">
+                    <Link href="/settings/bookings">Instellingen</Link>
+                  </Button>
+                  <Button asChild size="sm" variant="ghost">
+                    <Link href="/embed/bookings">Embed bekijken</Link>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card className="border-border/60 shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-base">Booking reminders</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {bookingReminderItems.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Geen booking-reminders op dit moment. Nieuwe aanvragen en bijna-startende afspraken verschijnen hier automatisch.
+                  </p>
+                ) : (
+                  bookingReminderItems.map((item) => (
+                    <Link
+                      key={item.id}
+                      href={item.href}
+                      className="flex items-center justify-between gap-3 rounded-xl border p-3 transition-colors hover:bg-muted/40"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{item.title}</p>
+                        <p className="truncate text-xs text-muted-foreground">{item.subtitle}</p>
+                      </div>
+                      <Button size="sm" variant="outline">Open</Button>
+                    </Link>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/60 shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Activity className="h-4 w-4" />
+                  Recente booking activiteit
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {bookingActivities.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Nog geen recente bookingactiviteit gevonden.</p>
+                ) : (
+                  bookingActivities.map((activity) => (
+                    <div key={activity.id} className="rounded-xl border p-3">
+                      <p className="text-sm font-medium">{activity.title}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {activity.user?.name ? `${activity.user.name} · ` : ""}
+                        {formatDateNice(activity.createdAt)}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
 
       {/* Create Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>

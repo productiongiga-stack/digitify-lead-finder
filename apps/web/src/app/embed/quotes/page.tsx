@@ -1005,6 +1005,28 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
     });
   }
 
+  function updateCartEntry(cartKey: string, changes: Partial<Pick<CartEntry, "customName" | "unitPrice" | "quantity">>) {
+    setCart((current) => {
+      const existing = current[cartKey];
+      if (!existing) return current;
+      return {
+        ...current,
+        [cartKey]: {
+          ...existing,
+          ...changes,
+          quantity:
+            changes.quantity !== undefined
+              ? Math.max(1, Math.round(Number(changes.quantity) || 1))
+              : existing.quantity,
+          unitPrice:
+            changes.unitPrice !== undefined
+              ? Math.max(0, Math.round((Number(changes.unitPrice) || 0) * 100) / 100)
+              : existing.unitPrice,
+        },
+      };
+    });
+  }
+
   function toggleSpecOption(section: SpecOptionSection, option: SpecOption) {
     if (!selectedProduct) return;
     const key = optionCartKey(selectedProduct.id, option.key);
@@ -2760,11 +2782,13 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                 <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
                   <div>
                     <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">Voornaam *</label>
-                    <input value={firstName} onChange={(event) => setFirstName(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" required />
+                    <input value={firstName} onChange={(event) => setFirstName(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" required={!isInternalMode} />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">Achternaam *</label>
-                    <input value={lastName} onChange={(event) => setLastName(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" required />
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">
+                      Achternaam {isInternalMode ? "" : "*"}
+                    </label>
+                    <input value={lastName} onChange={(event) => setLastName(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" required={!isInternalMode} />
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">E-mailadres *</label>
@@ -2832,7 +2856,16 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                     <div key={item.cartKey} className="rounded-lg border px-2 py-2">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold">{item.name}</p>
+                          {payload.editingQuote ? (
+                            <input
+                              value={item.name}
+                              onChange={(event) => updateCartEntry(item.cartKey, { customName: event.target.value })}
+                              className="h-8 w-full rounded-md border border-[#d8dbe2] px-2 text-sm font-semibold"
+                              aria-label="Itemnaam"
+                            />
+                          ) : (
+                            <p className="truncate text-sm font-semibold">{item.name}</p>
+                          )}
                           <p className="text-xs text-[#7b818c]">
                             {item.packageLabel} · {item.quantity}x
                             {item.source === "product" && !isPreviewRoute && !confirmedProducts[item.cartKey]
@@ -2843,10 +2876,24 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                         <button type="button" onClick={() => removeFromCart(item.cartKey)} className="text-xs text-[#8a909b] hover:text-[#272a30]">✕</button>
                       </div>
                       <div className="mt-1 flex items-center justify-between">
-                        <span className="text-xs text-[#7b818c]">{formatCurrency(item.unitPrice)}</span>
+                        {payload.editingQuote ? (
+                          <label className="flex items-center gap-1 text-xs text-[#7b818c]">
+                            Prijs
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={item.unitPrice}
+                              onChange={(event) => updateCartEntry(item.cartKey, { unitPrice: Number(event.target.value) })}
+                              className="h-7 w-24 rounded-md border border-[#d8dbe2] px-2 text-xs"
+                            />
+                          </label>
+                        ) : (
+                          <span className="text-xs text-[#7b818c]">{formatCurrency(item.unitPrice)}</span>
+                        )}
                         <span className="text-sm font-semibold" style={{ color: "#c9811b" }}>{formatCurrency(item.total)}</span>
                       </div>
-                      {item.source === "product" ? (
+                      {item.source === "product" || payload.editingQuote ? (
                         <div className="mt-2 flex items-center gap-1">
                           <button type="button" onClick={() => adjustQuantity(item.cartKey, -1)} className="h-6 w-6 rounded border text-xs">-</button>
                           <span className="min-w-6 text-center text-xs">{item.quantity}</span>
