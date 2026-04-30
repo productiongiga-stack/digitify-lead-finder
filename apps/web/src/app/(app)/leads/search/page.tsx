@@ -444,7 +444,7 @@ export default function LeadSearchPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-bold tracking-tight">Lead Zoeken</h1>
+        <h1 className="text-xl font-bold tracking-tight">Leads Zoeken</h1>
         <p className="text-sm text-muted-foreground">
           Zoek nieuwe leads op basis van niche, locatie en zoekwoorden via Google Places
         </p>

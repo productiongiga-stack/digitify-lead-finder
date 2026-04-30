@@ -203,6 +203,8 @@ export const dashboardRouter = router({
     const emailThreshold = new Date(Date.now() - followupDays * 24 * 60 * 60 * 1000);
     const quoteThreshold = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
     const quoteValidThreshold = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+    const now = new Date();
+    const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
     const [drafts, pendingBookings, staleQuotes, leadFollowUps] = await Promise.all([
       ctx.db.emailDraft.findMany({
@@ -234,7 +236,7 @@ export const dashboardRouter = router({
             { status: "PENDING" },
             {
               status: { in: ["SCHEDULED", "CONFIRMED"] },
-              date: { lte: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+              date: { gte: now, lte: next24Hours },
             },
           ],
         },

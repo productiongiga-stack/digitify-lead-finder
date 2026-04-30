@@ -117,7 +117,7 @@ type PageTitleRoute = { path: string; title: string };
 
 const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
   { path: "/dashboard", title: "Dashboard" },
-  { path: "/leads/search", title: "Lead Zoeken" },
+  { path: "/leads/search", title: "Leads Zoeken" },
   { path: "/leads/new", title: "Nieuwe Lead" },
   { path: "/leads", title: "Leads" },
   { path: "/campaigns/new", title: "Nieuwe Campagne" },
