@@ -72,14 +72,14 @@ function QuickActions() {
         <Link
           key={action.href}
           href={action.href}
-          className="group flex flex-col items-center gap-1.5 rounded-lg border border-border/50 bg-card p-2.5 text-center transition-all hover:border-primary/30 hover:bg-primary/5 hover:shadow-sm"
+          className="group flex min-w-0 items-center gap-2 rounded-lg border border-border/50 bg-card p-2 text-left transition-all hover:border-primary/30 hover:bg-primary/5 hover:shadow-sm sm:flex-col sm:gap-1.5 sm:p-2.5 sm:text-center"
         >
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 transition-colors group-hover:bg-primary/20">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 transition-colors group-hover:bg-primary/20 sm:h-8 sm:w-8">
             <action.icon className="h-4 w-4 text-primary" />
           </div>
-          <div>
-            <p className="text-xs font-semibold leading-tight">{action.label}</p>
-            <p className="text-[10px] text-muted-foreground">{action.description}</p>
+          <div className="min-w-0">
+            <p className="truncate text-xs font-semibold leading-tight">{action.label}</p>
+            <p className="hidden truncate text-[10px] text-muted-foreground sm:block">{action.description}</p>
           </div>
         </Link>
       ))}
@@ -333,6 +333,18 @@ function getActivityHref(activity: { lead?: { id: string } | null; metadata?: un
 
 function ActivityFeed() {
   const { data: activities, isLoading } = trpc.dashboard.getRecentActivity.useQuery();
+  const compactActivities = useMemo(() => {
+    const seenSettingsBursts = new Set<string>();
+    return (activities ?? [])
+      .filter((activity) => {
+        if (!activity.title.includes("instellingen gewijzigd")) return true;
+        const key = `${activity.title}:${formatRelativeTime(activity.createdAt)}`;
+        if (seenSettingsBursts.has(key)) return false;
+        seenSettingsBursts.add(key);
+        return true;
+      })
+      .slice(0, 6);
+  }, [activities]);
 
   if (isLoading) {
     return (
@@ -357,26 +369,30 @@ function ActivityFeed() {
 
   return (
     <div className="space-y-0.5">
-      {activities.slice(0, 10).map((activity: NonNullable<typeof activities>[number]) => {
+      {compactActivities.map((activity: NonNullable<typeof activities>[number]) => {
         const Icon = getActivityIcon(activity.type);
         const href = getActivityHref(activity);
         return (
           <Link
             key={activity.id}
             href={href || "#"}
-            className={`flex items-center gap-2.5 rounded-md p-1.5 text-sm transition-colors hover:bg-muted/50 ${!href ? "pointer-events-none" : ""}`}
+            className={`flex min-w-0 items-start gap-2.5 rounded-md p-1.5 text-sm transition-colors hover:bg-muted/50 sm:items-center ${!href ? "pointer-events-none" : ""}`}
           >
             <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
               <Icon className="h-3 w-3 text-muted-foreground" />
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-medium">{activity.title}</p>
-              <p className="truncate text-[11px] text-muted-foreground">
+              <p className="truncate text-[11px] text-muted-foreground sm:hidden">
+                {activity.user?.name ? `${activity.user.name} · ` : ""}
+                {formatRelativeTime(activity.createdAt)}
+              </p>
+              <p className="hidden truncate text-[11px] text-muted-foreground sm:block">
                 {activity.user?.name ? `${activity.user.name} · ` : ""}
                 {activity.lead?.companyName || "Systeemactiviteit"}
               </p>
             </div>
-            <span className="shrink-0 text-[11px] text-muted-foreground">
+            <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">
               {formatRelativeTime(activity.createdAt)}
             </span>
           </Link>
@@ -484,6 +500,30 @@ function PipelineOverview() {
 
   if (!stages || stages.length === 0) {
     return <EmptyState icon={<Target />} title="Geen pipeline data" size="sm" />;
+  }
+
+  if (total === 0) {
+    return (
+      <div className="grid grid-cols-2 gap-2">
+        {stages.map((stage: NonNullable<typeof stages>[number]) => (
+          <div
+            key={stage.id}
+            className="flex min-w-0 items-center justify-between gap-2 rounded-lg bg-muted/40 px-2.5 py-2"
+          >
+            <div className="flex min-w-0 items-center gap-1.5">
+              <div
+                className="h-2 w-2 shrink-0 rounded-full"
+                style={{ backgroundColor: stage.color }}
+              />
+              <span className="truncate text-xs font-medium">{stage.name}</span>
+            </div>
+            <span className="text-xs font-semibold tabular-nums text-muted-foreground">
+              {stage.count}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
   }
 
   return (
