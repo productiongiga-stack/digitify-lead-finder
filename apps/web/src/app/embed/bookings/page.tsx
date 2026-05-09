@@ -41,6 +41,18 @@ type PublicEventType = {
   questions: PublicQuestion[];
 };
 type AvailabilitySlot = { time: string; start: string; end: string; available: boolean; hostUserId: string | null };
+type BookingStep = 1 | 2;
+type EmbedRuntimeOverrides = {
+  tenant?: string;
+  eventTypeSlug?: string;
+  title?: string;
+  description?: string;
+  brandName?: string;
+  meetingName?: string;
+  location?: string;
+  service?: string;
+  submitText?: string;
+};
 
 const DEFAULT_WEEKLY_HOURS: WeeklyHours = {
   0: { enabled: false, start: "09:00", end: "17:00" },
@@ -243,8 +255,13 @@ function BookingEmbedContent() {
   const serviceName = params.get("service") || "";
   const timezone = params.get("timezone") || "Europe/Brussels";
   const defaultTimeMode = params.get("timeMode") === "12" ? "12" : "24";
-  const tenant = params.get("tenant") || "";
-  const eventTypeSlug = params.get("eventType") || params.get("type") || "";
+  const paramTenant = params.get("tenant") || "";
+  const paramEventTypeSlug = params.get("eventType") || params.get("type") || "";
+  const [runtimeOverrides, setRuntimeOverrides] = useState<EmbedRuntimeOverrides>({});
+  const tenant = runtimeOverrides.tenant || paramTenant;
+  const eventTypeSlug = runtimeOverrides.eventTypeSlug || paramEventTypeSlug;
+  const [step, setStep] = useState<BookingStep>(1);
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
 
   const today = useMemo(() => new Date(), []);
   const todayKey = useMemo(() => formatDateKey(today), [today]);
@@ -273,9 +290,12 @@ function BookingEmbedContent() {
   const effectiveDuration = eventType?.duration || duration;
   const effectiveSlotMinutes = eventType?.slotMinutes || slotMinutes;
   const effectiveColor = eventType?.color || color;
-  const effectiveMeetingName = eventType?.name || meetingName;
-  const effectiveDescription = eventType?.description || description;
-  const effectiveLocation = eventType?.location || meetingLocation;
+  const effectiveMeetingName = eventType?.name || runtimeOverrides.meetingName || meetingName || runtimeOverrides.title || title;
+  const effectiveDescription = eventType?.description || runtimeOverrides.description || description;
+  const effectiveLocation = eventType?.location || runtimeOverrides.location || meetingLocation;
+  const effectiveBrandName = runtimeOverrides.brandName || brandName;
+  const effectiveServiceName = runtimeOverrides.service || serviceName;
+  const effectiveSubmitText = runtimeOverrides.submitText || submitText;
 
   const selectedSlots = useMemo(() => {
     const remoteSlots = availability[selectedDate]?.filter((slot) => slot.available).map((slot) => slot.time) || [];
@@ -285,6 +305,29 @@ function BookingEmbedContent() {
   useEffect(() => {
     const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (detected) setVisitorTimezone(detected);
+  }, []);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const raw = event.data as { type?: string; payload?: unknown } | null;
+      if (!raw || raw.type !== "digitify-booking-config") return;
+      const payload = (raw.payload || {}) as Record<string, unknown>;
+      setRuntimeOverrides((current) => ({
+        ...current,
+        tenant: typeof payload.tenant === "string" ? payload.tenant : current.tenant,
+        eventTypeSlug: typeof payload.eventType === "string" ? payload.eventType : current.eventTypeSlug,
+        title: typeof payload.title === "string" ? payload.title : current.title,
+        description: typeof payload.description === "string" ? payload.description : current.description,
+        brandName: typeof payload.brandName === "string" ? payload.brandName : current.brandName,
+        meetingName: typeof payload.meetingName === "string" ? payload.meetingName : current.meetingName,
+        location: typeof payload.location === "string" ? payload.location : current.location,
+        service: typeof payload.service === "string" ? payload.service : current.service,
+        submitText: typeof payload.submitText === "string" ? payload.submitText : current.submitText,
+      }));
+    };
+
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
   }, []);
 
   useEffect(() => {
@@ -329,6 +372,23 @@ function BookingEmbedContent() {
       setSelectedTime(selectedSlots[0] || "");
     }
   }, [selectedSlots, selectedTime]);
+
+  useEffect(() => {
+    window.parent?.postMessage(
+      {
+        type: "digitify-booking-state",
+        payload: {
+          step,
+          selectedDate,
+          selectedTime,
+          timezone: visitorTimezone,
+          tenant,
+          eventType: eventType?.slug || eventTypeSlug || null,
+        },
+      },
+      "*",
+    );
+  }, [step, selectedDate, selectedTime, visitorTimezone, tenant, eventType?.slug, eventTypeSlug]);
 
   const monthDays = useMemo(() => createMonthGrid(currentMonth), [currentMonth]);
   const selectedDateObject = selectedDate ? parseDateKey(selectedDate) : null;
@@ -380,6 +440,15 @@ function BookingEmbedContent() {
       } as const;
       setStatus(nextStatus);
       setResultModal(nextStatus);
+      setStep(1);
+      setDetailsModalOpen(false);
+      window.parent?.postMessage(
+        {
+          type: "digitify-booking-submit",
+          payload: { success: true, bookingId: data.bookingId || null, selectedDate, selectedTime },
+        },
+        "*",
+      );
       return;
     }
 
@@ -389,6 +458,13 @@ function BookingEmbedContent() {
     } as const;
     setStatus(nextStatus);
     setResultModal(nextStatus);
+    window.parent?.postMessage(
+      {
+        type: "digitify-booking-submit",
+        payload: { success: false, error: nextStatus.message, selectedDate, selectedTime },
+      },
+      "*",
+    );
   }
 
   const themeClasses = {
@@ -423,8 +499,8 @@ function BookingEmbedContent() {
   return (
     <div className={themeClasses.page} style={{ colorScheme: themeMode }}>
       <div className={themeClasses.shell}>
-        <div className="grid lg:grid-cols-[260px_minmax(0,1fr)_310px]">
-          <aside className={`flex flex-col gap-4 border-b p-4 sm:p-5 lg:border-b-0 lg:border-r ${themeClasses.panelBorder}`}>
+        <div className="grid lg:grid-cols-[240px_minmax(0,1fr)_300px]">
+          <aside className={`flex flex-col gap-4 border-b p-4 sm:p-4 lg:border-b-0 lg:border-r ${themeClasses.panelBorder}`}>
             <div
               className="flex h-12 w-12 items-center justify-center rounded-full border shadow-sm"
               style={{
@@ -435,14 +511,14 @@ function BookingEmbedContent() {
               <Play className="h-6 w-6 fill-current text-white" />
             </div>
             <div>
-              <p className={`text-sm font-semibold ${themeClasses.muted}`}>{brandName}</p>
+              <p className={`text-sm font-semibold ${themeClasses.muted}`}>{effectiveBrandName}</p>
               <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
                 {effectiveMeetingName}
                 <span className={themeClasses.muted}> / {effectiveDuration} min</span>
               </h1>
               <p className={`mt-3 max-w-sm text-sm leading-6 ${themeClasses.muted}`}>{effectiveDescription}</p>
-              {serviceName ? (
-                <p className={`mt-2 text-xs font-medium ${themeClasses.muted}`}>Service: {serviceName}</p>
+              {effectiveServiceName ? (
+                <p className={`mt-2 text-xs font-medium ${themeClasses.muted}`}>Service: {effectiveServiceName}</p>
               ) : null}
             </div>
 
@@ -481,7 +557,7 @@ function BookingEmbedContent() {
                 <div>
                   <p className={themeClasses.muted}>Stap 3</p>
                   <p className="mt-1 font-medium">
-                    {isReadyForForm ? "Vul uw gegevens in" : "Na tijdslotkeuze verschijnt het formulier"}
+                    {isReadyForForm ? "Gegevens invullen en versturen" : "Na tijdslotkeuze kunt u verder"}
                   </p>
                 </div>
               </div>
@@ -598,7 +674,7 @@ function BookingEmbedContent() {
 
             <div className="mt-5">
               {selectedSlots.length ? (
-                <div className="grid max-h-[272px] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">
+                <div className="grid max-h-[220px] grid-cols-3 gap-2 overflow-y-auto pr-1 sm:grid-cols-4">
                   {selectedSlots.map((slot) => {
                     const active = selectedTime === slot;
                     return (
@@ -606,7 +682,7 @@ function BookingEmbedContent() {
                         key={slot}
                         type="button"
                         onClick={() => setSelectedTime(slot)}
-                        className={`flex h-11 items-center justify-center rounded-[14px] border px-3 text-sm font-semibold transition ${
+                        className={`flex h-10 items-center justify-center rounded-[12px] border px-2 text-sm font-semibold transition-all duration-200 ${
                           active ? "border-transparent text-slate-950 shadow-[0_14px_30px_rgba(245,176,76,0.22)]" : themeClasses.slot
                         }`}
                         style={{ backgroundColor: active ? effectiveColor : undefined }}
@@ -639,7 +715,7 @@ function BookingEmbedContent() {
             </div>
 
             {isReadyForForm ? (
-              <form onSubmit={handleSubmit} className={`mt-4 rounded-[20px] border p-4 ${themeClasses.card}`}>
+              <div className={`mt-4 rounded-[20px] border p-4 ${themeClasses.card}`}>
                 <div className="flex items-center gap-3">
                   <CalendarDays className="h-5 w-5" />
                   <div>
@@ -649,8 +725,50 @@ function BookingEmbedContent() {
                     </p>
                   </div>
                 </div>
+                <div className="mt-4 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep(2);
+                      setDetailsModalOpen(true);
+                    }}
+                    className="h-11 rounded-full px-5 text-sm font-semibold text-slate-950 transition-all duration-200 hover:scale-[1.01]"
+                    style={{ backgroundColor: effectiveColor }}
+                  >
+                    Ga verder met gegevens
+                  </button>
+                  <span className={`text-xs ${themeClasses.muted}`}>Boeking blijft in afwachting tot interne goedkeuring.</span>
+                </div>
+              </div>
+            ) : null}
 
-                <div className="mt-5 space-y-4">
+            <div className={`mt-6 text-sm ${themeClasses.muted}`}>
+              Na verzending blijft de afspraak eerst in aanvraag. U ontvangt een e-mail zodra uw booking is goedgekeurd.
+            </div>
+          </section>
+        </div>
+        {detailsModalOpen ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
+            <form
+              onSubmit={handleSubmit}
+              className={`w-full max-w-lg rounded-[20px] border p-5 shadow-2xl transition-all duration-200 ${themeClasses.card}`}
+            >
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <p className="text-base font-semibold">Stap 2: uw gegevens</p>
+                  <p className={`text-sm ${themeClasses.muted}`}>
+                    {formatLongDate(selectedDate)} om {formatTimeDisplay(selectedTime, timeMode)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDetailsModalOpen(false)}
+                  className={`rounded-full border px-3 py-1 text-xs ${themeClasses.slot}`}
+                >
+                  Sluiten
+                </button>
+              </div>
+              <div className="space-y-4">
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Naam</label>
                     <input
@@ -730,50 +848,48 @@ function BookingEmbedContent() {
                       <span className={themeClasses.muted}>{eventType.privacyText}</span>
                     </label>
                   ) : null}
-                </div>
+              </div>
 
-                <input
-                  tabIndex={-1}
-                  autoComplete="off"
-                  aria-hidden="true"
-                  value={website}
-                  onChange={(event) => setWebsite(event.target.value)}
-                  className="hidden"
-                  name="website"
-                />
+              <input
+                tabIndex={-1}
+                autoComplete="off"
+                aria-hidden="true"
+                value={website}
+                onChange={(event) => setWebsite(event.target.value)}
+                className="hidden"
+                name="website"
+              />
 
-                {status ? (
-                  <div
-                    className={`mt-4 rounded-2xl px-4 py-3 text-sm ${
-                      status.type === "success"
-                        ? themeMode === "dark"
-                          ? "bg-emerald-500/15 text-emerald-200"
-                          : "bg-emerald-50 text-emerald-700"
-                        : themeMode === "dark"
-                          ? "bg-red-500/15 text-red-200"
-                          : "bg-red-50 text-red-700"
-                    }`}
-                  >
-                    {status.message}
-                  </div>
-                ) : null}
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="mt-5 h-12 w-full rounded-full px-5 text-sm font-semibold text-slate-950 transition disabled:opacity-50"
-                  style={{ backgroundColor: effectiveColor }}
+              {status ? (
+                <div
+                  className={`mt-4 rounded-2xl px-4 py-3 text-sm ${
+                    status.type === "success"
+                      ? themeMode === "dark"
+                        ? "bg-emerald-500/15 text-emerald-200"
+                        : "bg-emerald-50 text-emerald-700"
+                      : themeMode === "dark"
+                        ? "bg-red-500/15 text-red-200"
+                        : "bg-red-50 text-red-700"
+                  }`}
                 >
-                  {loading ? "Bezig..." : submitText}
-                </button>
-              </form>
-            ) : null}
+                  {status.message}
+                </div>
+              ) : null}
 
-            <div className={`mt-6 text-sm ${themeClasses.muted}`}>
-              Door te boeken gaat u akkoord dat we een bevestiging sturen voor dit gekozen moment.
-            </div>
-          </section>
-        </div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-5 h-12 w-full rounded-full px-5 text-sm font-semibold text-slate-950 transition-all duration-200 disabled:opacity-50"
+                style={{ backgroundColor: effectiveColor }}
+              >
+                {loading ? "Bezig..." : effectiveSubmitText}
+              </button>
+              <p className={`mt-3 text-xs ${themeClasses.muted}`}>
+                Stap 3: na verzending krijgt u direct success/fout feedback en nadien een e-mail zodra de afspraak is goedgekeurd.
+              </p>
+            </form>
+          </div>
+        ) : null}
         {resultModal ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
             <div className={`w-full max-w-md rounded-[20px] border p-5 shadow-2xl ${themeClasses.card}`}>
@@ -791,7 +907,11 @@ function BookingEmbedContent() {
                   <p className="text-base font-semibold">
                     {resultModal.type === "success" ? "Aanvraag verstuurd" : "Verzenden mislukt"}
                   </p>
-                  <p className={`text-sm ${themeClasses.muted}`}>{resultModal.message}</p>
+                  <p className={`text-sm ${themeClasses.muted}`}>
+                    {resultModal.type === "success"
+                      ? "Uw booking staat nu in afwachting. U krijgt een e-mail zodra we deze goedkeuren."
+                      : resultModal.message}
+                  </p>
                 </div>
               </div>
               <div className="mt-4 flex justify-end">
