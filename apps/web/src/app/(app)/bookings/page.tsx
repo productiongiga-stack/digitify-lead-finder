@@ -67,6 +67,10 @@ export default function BookingsPage() {
     id: string; clientName: string; clientEmail: string; date: string; time: string; duration: number; notes: string;
   } | null>(null);
   const [statusFilter, setStatusFilter] = useState<BookingStatus | undefined>(undefined);
+  const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [eventTypeFilter, setEventTypeFilter] = useState("__all");
   const [createDuration, setCreateDuration] = useState("60");
   const [editDuration, setEditDuration] = useState("60");
   const [createLeadId, setCreateLeadId] = useState("__none");
@@ -74,9 +78,16 @@ export default function BookingsPage() {
   const utils = trpc.useUtils();
 
   const { data, isLoading } = trpc.booking.list.useQuery(
-    statusFilter ? { status: statusFilter as "PENDING" | "SCHEDULED" | "CONFIRMED" | "COMPLETED" | "CANCELLED" | "REJECTED" | "NO_SHOW" } : undefined
+    {
+      ...(statusFilter ? { status: statusFilter as "PENDING" | "SCHEDULED" | "CONFIRMED" | "COMPLETED" | "CANCELLED" | "REJECTED" | "NO_SHOW" } : {}),
+      ...(search.trim() ? { search: search.trim() } : {}),
+      ...(dateFrom ? { dateFrom } : {}),
+      ...(dateTo ? { dateTo } : {}),
+      ...(eventTypeFilter !== "__all" ? { eventTypeId: eventTypeFilter } : {}),
+    }
   );
   const { data: stats } = trpc.booking.getStats.useQuery();
+  const { data: eventTypes } = trpc.booking.listEventTypes.useQuery();
   const { data: unifiedReminders } = trpc.dashboard.getUnifiedReminders.useQuery(undefined, {
     staleTime: 60_000,
   });
@@ -101,6 +112,22 @@ export default function BookingsPage() {
       showToast({ title: "Boeking bijgewerkt", description: "De boeking is succesvol aangepast." });
     },
     onError: (error) => showToast({ title: "Bijwerken mislukt", description: error.message, variant: "error" }),
+  });
+  const confirmMutation = trpc.booking.confirm.useMutation({
+    onSuccess: () => {
+      utils.booking.list.invalidate();
+      utils.booking.getStats.invalidate();
+      showToast({ title: "Boeking bevestigd", description: "De klant kreeg een bevestiging met kalenderbestand." });
+    },
+    onError: (error) => showToast({ title: "Bevestigen mislukt", description: error.message, variant: "error" }),
+  });
+  const rejectMutation = trpc.booking.reject.useMutation({
+    onSuccess: () => {
+      utils.booking.list.invalidate();
+      utils.booking.getStats.invalidate();
+      showToast({ title: "Boeking afgewezen", description: "De klant kreeg een update." });
+    },
+    onError: (error) => showToast({ title: "Afwijzen mislukt", description: error.message, variant: "error" }),
   });
   const deleteMutation = trpc.booking.delete.useMutation({
     onSuccess: () => {
@@ -244,6 +271,24 @@ export default function BookingsPage() {
 
         <TabsContent value="overview" className="space-y-3">
       {/* Filter tabs */}
+      <Card className="border-border/60 shadow-sm">
+        <CardContent className="grid gap-3 p-4 md:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,0.8fr))]">
+          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Zoek op klant, e-mail of notitie..." />
+          <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+          <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+          <Select value={eventTypeFilter} onValueChange={setEventTypeFilter}>
+            <SelectTrigger>
+              <SelectValue placeholder="Bookingtype" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all">Alle bookingtypes</SelectItem>
+              {eventTypes?.map((item: NonNullable<typeof eventTypes>[number]) => (
+                <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
       <div className="-mx-1 overflow-x-auto px-1 pb-1">
         <div className="flex min-w-max gap-2">
           {filterTabs.map((tab) => (
@@ -550,7 +595,7 @@ export default function BookingsPage() {
                           variant="outline"
                           size="sm"
                           className="border-emerald-200 text-emerald-700 hover:bg-emerald-50"
-                          onClick={() => updateMutation.mutate({ id: booking.id, status: "CONFIRMED" })}
+                          onClick={() => confirmMutation.mutate({ id: booking.id })}
                         >
                           <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
                           Bevestig
@@ -668,9 +713,7 @@ export default function BookingsPage() {
                                   variant="ghost"
                                   size="sm"
                                   className="h-7 px-2 text-xs text-blue-700 hover:text-blue-800 hover:bg-blue-50"
-                                  onClick={() =>
-                                    updateMutation.mutate({ id: booking.id, status: "CONFIRMED" })
-                                  }
+                                  onClick={() => confirmMutation.mutate({ id: booking.id })}
                                   title="Bevestigen"
                                 >
                                   <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
@@ -682,9 +725,7 @@ export default function BookingsPage() {
                                   variant="ghost"
                                   size="sm"
                                   className="h-7 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                                  onClick={() =>
-                                    updateMutation.mutate({ id: booking.id, status: "REJECTED" })
-                                  }
+                                  onClick={() => rejectMutation.mutate({ id: booking.id })}
                                   title="Afwijzen"
                                 >
                                   <XCircle className="mr-1 h-3.5 w-3.5" />

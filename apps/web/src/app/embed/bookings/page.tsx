@@ -20,6 +20,27 @@ type DaySchedule = { enabled: boolean; start: string; end: string };
 type WeeklyHours = Record<number, DaySchedule>;
 type ThemeMode = "light" | "dark";
 type TimeMode = "12" | "24";
+type PublicQuestion = {
+  id: string;
+  label: string;
+  type: "text" | "textarea" | "email" | "phone" | "select" | "checkbox";
+  required: boolean;
+  options?: unknown;
+};
+type PublicEventType = {
+  slug: string;
+  name: string;
+  description?: string | null;
+  duration: number;
+  slotMinutes: number;
+  color: string;
+  location?: string | null;
+  timezone: string;
+  privacyText?: string | null;
+  requireConsent: boolean;
+  questions: PublicQuestion[];
+};
+type AvailabilitySlot = { time: string; start: string; end: string; available: boolean; hostUserId: string | null };
 
 const DEFAULT_WEEKLY_HOURS: WeeklyHours = {
   0: { enabled: false, start: "09:00", end: "17:00" },
@@ -223,6 +244,7 @@ function BookingEmbedContent() {
   const timezone = params.get("timezone") || "Europe/Brussels";
   const defaultTimeMode = params.get("timeMode") === "12" ? "12" : "24";
   const tenant = params.get("tenant") || "";
+  const eventTypeSlug = params.get("eventType") || params.get("type") || "";
 
   const today = useMemo(() => new Date(), []);
   const todayKey = useMemo(() => formatDateKey(today), [today]);
@@ -241,11 +263,61 @@ function BookingEmbedContent() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [timeMode, setTimeMode] = useState<TimeMode>(defaultTimeMode);
+  const [visitorTimezone, setVisitorTimezone] = useState(timezone);
+  const [eventType, setEventType] = useState<PublicEventType | null>(null);
+  const [availability, setAvailability] = useState<Record<string, AvailabilitySlot[]>>({});
+  const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
+  const [consentAccepted, setConsentAccepted] = useState(false);
 
-  const selectedSlots = useMemo(
-    () => buildSlotsForDate(selectedDate, weeklyHours, duration, slotMinutes),
-    [selectedDate, weeklyHours, duration, slotMinutes]
-  );
+  const effectiveDuration = eventType?.duration || duration;
+  const effectiveSlotMinutes = eventType?.slotMinutes || slotMinutes;
+  const effectiveColor = eventType?.color || color;
+  const effectiveMeetingName = eventType?.name || meetingName;
+  const effectiveDescription = eventType?.description || description;
+  const effectiveLocation = eventType?.location || meetingLocation;
+
+  const selectedSlots = useMemo(() => {
+    const remoteSlots = availability[selectedDate]?.filter((slot) => slot.available).map((slot) => slot.time) || [];
+    return remoteSlots.length ? remoteSlots : buildSlotsForDate(selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes);
+  }, [availability, selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes]);
+
+  useEffect(() => {
+    const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (detected) setVisitorTimezone(detected);
+  }, []);
+
+  useEffect(() => {
+    if (!tenant) return;
+    const url = new URL("/api/public/bookings/event-type", window.location.origin);
+    url.searchParams.set("tenant", tenant);
+    if (eventTypeSlug) url.searchParams.set("eventType", eventTypeSlug);
+    fetch(url)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (data) setEventType(data);
+      })
+      .catch(() => null);
+  }, [tenant, eventTypeSlug]);
+
+  useEffect(() => {
+    if (!tenant) return;
+    const toDate = addMonths(currentMonth, 1);
+    toDate.setDate(0);
+    const url = new URL("/api/public/bookings/availability", window.location.origin);
+    url.searchParams.set("tenant", tenant);
+    if (eventType?.slug || eventTypeSlug) url.searchParams.set("eventType", eventType?.slug || eventTypeSlug);
+    url.searchParams.set("from", formatDateKey(currentMonth));
+    url.searchParams.set("to", formatDateKey(toDate));
+    url.searchParams.set("timezone", visitorTimezone);
+    fetch(url)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (data?.days) {
+          setAvailability(Object.fromEntries(data.days.map((day: { date: string; slots: AvailabilitySlot[] }) => [day.date, day.slots])));
+        }
+      })
+      .catch(() => null);
+  }, [tenant, eventType?.slug, eventTypeSlug, currentMonth, visitorTimezone]);
 
   useEffect(() => {
     if (!selectedSlots.length) {
@@ -281,9 +353,13 @@ function BookingEmbedContent() {
         date: toIsoDateTime(selectedDate, selectedTime),
         localDate: selectedDate,
         localTime: selectedTime,
-        duration,
+        duration: effectiveDuration,
         notes,
         service: serviceName || undefined,
+        eventType: eventType?.slug || eventTypeSlug || undefined,
+        timezone: visitorTimezone,
+        answers: Object.entries(questionAnswers).map(([questionId, value]) => ({ questionId, value })),
+        consentAccepted,
         website,
         tenant: tenant || undefined,
       }),
@@ -348,7 +424,7 @@ function BookingEmbedContent() {
           >
             <div
               className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full text-slate-950"
-              style={{ backgroundColor: color }}
+              style={{ backgroundColor: effectiveColor }}
             >
               <CheckCircle2 className="h-8 w-8" />
             </div>
@@ -358,7 +434,7 @@ function BookingEmbedContent() {
             <div className={`mx-auto mt-8 grid max-w-xl gap-3 rounded-[28px] border p-5 text-left ${themeClasses.card}`}>
               <div className="flex items-center justify-between gap-3">
                 <span className={themeClasses.muted}>Afspraak</span>
-                <span className="font-medium">{meetingName}</span>
+                <span className="font-medium">{effectiveMeetingName}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className={themeClasses.muted}>Moment</span>
@@ -368,11 +444,11 @@ function BookingEmbedContent() {
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className={themeClasses.muted}>Duur</span>
-                <span className="font-medium">{duration} min</span>
+                <span className="font-medium">{effectiveDuration} min</span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className={themeClasses.muted}>Tijdzone</span>
-                <span className="font-medium">{timezone}</span>
+                <span className="font-medium">{visitorTimezone}</span>
               </div>
             </div>
           </div>
@@ -389,7 +465,7 @@ function BookingEmbedContent() {
             <div
               className="flex h-12 w-12 items-center justify-center rounded-full border shadow-sm"
               style={{
-                backgroundColor: color,
+                backgroundColor: effectiveColor,
                 borderColor: themeMode === "dark" ? "rgba(255,255,255,0.12)" : "rgba(15,23,42,0.08)",
               }}
             >
@@ -398,10 +474,10 @@ function BookingEmbedContent() {
             <div>
               <p className={`text-sm font-semibold ${themeClasses.muted}`}>{brandName}</p>
               <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-                {meetingName}
-                <span className={themeClasses.muted}> / {duration} min</span>
+                {effectiveMeetingName}
+                <span className={themeClasses.muted}> / {effectiveDuration} min</span>
               </h1>
-              <p className={`mt-3 max-w-sm text-sm leading-6 ${themeClasses.muted}`}>{description}</p>
+              <p className={`mt-3 max-w-sm text-sm leading-6 ${themeClasses.muted}`}>{effectiveDescription}</p>
               {serviceName ? (
                 <p className={`mt-2 text-xs font-medium ${themeClasses.muted}`}>Service: {serviceName}</p>
               ) : null}
@@ -410,20 +486,20 @@ function BookingEmbedContent() {
             <div className="space-y-3 pt-1 text-sm">
               <div className="flex items-center gap-3">
                 <Clock3 className="h-4 w-4 shrink-0" />
-                <span>{duration}m</span>
+                <span>{effectiveDuration}m</span>
               </div>
               <div className="flex items-center gap-3">
                 <Video className="h-4 w-4 shrink-0" />
-                <span>{meetingLocation}</span>
+                <span>{effectiveLocation}</span>
               </div>
               <div className="flex items-center gap-3">
                 <Globe2 className="h-4 w-4 shrink-0" />
-                <span>{timezone}</span>
+                <span>{visitorTimezone}</span>
               </div>
             </div>
 
             <div className={`mt-auto rounded-[20px] border p-4 ${themeClasses.card}`}>
-              <p className="text-sm font-medium uppercase tracking-[0.22em]" style={{ color }}>
+              <p className="text-sm font-medium uppercase tracking-[0.22em]" style={{ color: effectiveColor }}>
                 Samenvatting
               </p>
               <div className="mt-4 space-y-3 text-sm">
@@ -485,7 +561,8 @@ function BookingEmbedContent() {
                 const dateKey = formatDateKey(day);
                 const inCurrentMonth = day.getMonth() === currentMonth.getMonth();
                 const isPast = dateKey < todayKey;
-                const slots = buildSlotsForDate(dateKey, weeklyHours, duration, slotMinutes);
+                const remoteSlots = availability[dateKey]?.filter((slot) => slot.available).map((slot) => slot.time) || [];
+                const slots = remoteSlots.length ? remoteSlots : buildSlotsForDate(dateKey, weeklyHours, effectiveDuration, effectiveSlotMinutes);
                 const isAvailable = !isPast && slots.length > 0;
                 const isSelected = selectedDateObject ? isSameDay(day, selectedDateObject) : false;
                 const isToday = isSameDay(day, today);
@@ -510,14 +587,14 @@ function BookingEmbedContent() {
                           : `${themeClasses.slot} opacity-55`
                     }`}
                     style={{
-                      backgroundColor: isSelected ? color : undefined,
+                      backgroundColor: isSelected ? effectiveColor : undefined,
                     }}
                   >
                     <span>{day.getDate()}</span>
                     {isToday && !isSelected ? (
                       <span
                         className="absolute bottom-3 h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: color }}
+                        style={{ backgroundColor: effectiveColor }}
                       />
                     ) : null}
                   </button>
@@ -568,7 +645,7 @@ function BookingEmbedContent() {
                       className={`flex w-full items-center justify-center gap-3 rounded-[16px] border px-4 py-3 text-lg font-semibold transition ${
                         active ? "border-transparent text-slate-950 shadow-[0_18px_40px_rgba(245,176,76,0.22)]" : themeClasses.slot
                       }`}
-                      style={{ backgroundColor: active ? color : undefined }}
+                      style={{ backgroundColor: active ? effectiveColor : undefined }}
                     >
                       <span className={`h-2.5 w-2.5 rounded-full ${active ? "bg-slate-950" : ""}`} style={!active ? { backgroundColor: "#22c55e" } : undefined} />
                       {formatTimeDisplay(slot, timeMode)}
@@ -639,6 +716,56 @@ function BookingEmbedContent() {
                       className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition focus:border-slate-400 ${themeClasses.input}`}
                     />
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Tijdzone</label>
+                    <input
+                      value={visitorTimezone}
+                      onChange={(event) => setVisitorTimezone(event.target.value)}
+                      className={`h-12 w-full rounded-2xl border px-4 text-sm outline-none transition focus:border-slate-400 ${themeClasses.input}`}
+                    />
+                  </div>
+                  {eventType?.questions.map((question) => (
+                    <div key={question.id} className="space-y-2">
+                      <label className="text-sm font-medium">
+                        {question.label}{question.required ? " *" : ""}
+                      </label>
+                      {question.type === "textarea" ? (
+                        <textarea
+                          required={question.required}
+                          rows={3}
+                          value={questionAnswers[question.id] || ""}
+                          onChange={(event) => setQuestionAnswers((current) => ({ ...current, [question.id]: event.target.value }))}
+                          className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition focus:border-slate-400 ${themeClasses.input}`}
+                        />
+                      ) : (
+                        <input
+                          required={question.required}
+                          type={question.type === "checkbox" ? "checkbox" : question.type === "phone" ? "tel" : question.type}
+                          checked={question.type === "checkbox" ? questionAnswers[question.id] === "yes" : undefined}
+                          value={question.type === "checkbox" ? "yes" : questionAnswers[question.id] || ""}
+                          onChange={(event) =>
+                            setQuestionAnswers((current) => ({
+                              ...current,
+                              [question.id]: question.type === "checkbox" ? (event.target.checked ? "yes" : "") : event.target.value,
+                            }))
+                          }
+                          className={question.type === "checkbox" ? "h-5 w-5" : `h-12 w-full rounded-2xl border px-4 text-sm outline-none transition focus:border-slate-400 ${themeClasses.input}`}
+                        />
+                      )}
+                    </div>
+                  ))}
+                  {eventType?.privacyText ? (
+                    <label className={`flex gap-3 rounded-2xl border p-3 text-sm ${themeClasses.card}`}>
+                      <input
+                        type="checkbox"
+                        required={eventType.requireConsent}
+                        checked={consentAccepted}
+                        onChange={(event) => setConsentAccepted(event.target.checked)}
+                        className="mt-1 h-4 w-4"
+                      />
+                      <span className={themeClasses.muted}>{eventType.privacyText}</span>
+                    </label>
+                  ) : null}
                 </div>
 
                 <input
@@ -671,7 +798,7 @@ function BookingEmbedContent() {
                   type="submit"
                   disabled={loading}
                   className="mt-5 h-12 w-full rounded-full px-5 text-sm font-semibold text-slate-950 transition disabled:opacity-50"
-                  style={{ backgroundColor: color }}
+                  style={{ backgroundColor: effectiveColor }}
                 >
                   {loading ? "Bezig..." : submitText}
                 </button>

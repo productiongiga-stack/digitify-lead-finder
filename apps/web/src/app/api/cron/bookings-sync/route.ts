@@ -2,11 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { loadEmailSettings, sendBrandedEmail } from "@digitify/api/src/lib/email-sender";
 import { log } from "@digitify/api/src/lib/logger";
-import {
-  extractGoogleEventId,
-  getGoogleBookingEvent,
-  upsertGoogleEventIdInNotes,
-} from "@digitify/api/src/lib/google-calendar";
+import { getGoogleBookingEvent } from "@digitify/api/src/lib/google-calendar";
+import { buildIcsAttachment, getStoredGoogleEventId, removeLegacyGoogleEventId } from "@digitify/api/src/lib/booking-utils";
 
 function isAuthorized(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -89,17 +86,10 @@ async function runBookingsSync(request: Request) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const emailCfg = await loadEmailSettings(prisma).catch((error) => {
-    log.integration.error("Bookings sync failed to load email settings", undefined, error);
-    return null;
-  });
-  const companyName = emailCfg?.companyName || emailCfg?.fromName || "Digitify";
-  const adminRecipient = emailCfg?.fromEmail || emailCfg?.smtpUser || "";
-
   const bookings = await prisma.booking.findMany({
     where: {
       date: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-      notes: { contains: "[[GCAL_EVENT_ID=" },
+      OR: [{ googleEventId: { not: null } }, { notes: { contains: "[[GCAL_EVENT_ID=" } }],
       status: { in: ["PENDING", "SCHEDULED", "CONFIRMED"] },
     },
     orderBy: { date: "asc" },
@@ -109,25 +99,27 @@ async function runBookingsSync(request: Request) {
   let changed = 0;
   let cancelled = 0;
   let failed = 0;
+  let skipped = 0;
+  let reminders = 0;
 
   log.job.info("Bookings sync cron started", { bookings: bookings.length });
 
   for (const booking of bookings) {
-    const eventId = extractGoogleEventId(booking.notes);
-    if (!eventId) continue;
+    const eventId = getStoredGoogleEventId(booking);
+    if (!eventId) {
+      skipped += 1;
+      continue;
+    }
+    const userId = booking.hostUserId || booking.createdById;
+    const emailCfg = await loadEmailSettings(prisma, booking.createdById).catch(() => null);
+    const companyName = emailCfg?.companyName || emailCfg?.fromName || "Digitify";
+    const adminRecipient = emailCfg?.fromEmail || emailCfg?.smtpUser || "";
 
     try {
-      const remote = await getGoogleBookingEvent(prisma, eventId);
+      const remote = await getGoogleBookingEvent(prisma, eventId, userId);
       if (!remote.enabled) {
-        return NextResponse.json({
-          success: true,
-          checked,
-          changed,
-          cancelled,
-          failed,
-          skipped: bookings.length - checked,
-          message: "Google sync staat uit of mist configuratie.",
-        });
+        skipped += 1;
+        continue;
       }
 
       checked += 1;
@@ -137,7 +129,9 @@ async function runBookingsSync(request: Request) {
           where: { id: booking.id },
           data: {
             status: "CANCELLED",
-            notes: upsertGoogleEventIdInNotes(booking.notes, null),
+            googleEventId: null,
+            googleHtmlLink: null,
+            notes: removeLegacyGoogleEventId(booking.notes),
           },
         });
 
@@ -177,7 +171,8 @@ async function runBookingsSync(request: Request) {
           date: remote.start,
           duration: remoteDuration,
           clientEmail: emailCandidate || booking.clientEmail,
-          notes: upsertGoogleEventIdInNotes(booking.notes, remote.eventId),
+          googleEventId: remote.eventId,
+          notes: removeLegacyGoogleEventId(booking.notes),
         },
       });
 
@@ -197,8 +192,62 @@ async function runBookingsSync(request: Request) {
     }
   }
 
-  log.job.info("Bookings sync cron completed", { checked, changed, cancelled, failed });
-  return NextResponse.json({ success: true, checked, changed, cancelled, failed });
+  const reminderCandidates = await prisma.booking.findMany({
+    where: {
+      status: "CONFIRMED",
+      date: {
+        gte: new Date(),
+        lte: new Date(Date.now() + 25 * 60 * 60_000),
+      },
+      clientEmail: { not: null },
+    },
+    orderBy: { date: "asc" },
+    take: 200,
+  });
+
+  for (const booking of reminderCandidates) {
+    const msUntil = booking.date.getTime() - Date.now();
+    const due24h = msUntil <= 24 * 60 * 60_000 && !booking.reminder24hSentAt;
+    const due1h = msUntil <= 60 * 60_000 && !booking.reminder1hSentAt;
+    if (!due24h && !due1h) continue;
+    const emailCfg = await loadEmailSettings(prisma, booking.createdById).catch(() => null);
+    const companyName = emailCfg?.companyName || emailCfg?.fromName || "Digitify";
+    const title = due1h ? `Herinnering: uw afspraak start bijna` : `Herinnering: uw afspraak bij ${companyName}`;
+    await sendBrandedEmail(prisma, {
+      toEmail: booking.clientEmail || "",
+      subject: title,
+      body: [
+        `Beste ${booking.clientName},`,
+        "",
+        due1h ? "Uw afspraak start binnen ongeveer een uur." : "Dit is een herinnering voor uw afspraak.",
+        `Datum: ${formatBookingDate(booking.date)}`,
+        `Duur: ${booking.duration} minuten`,
+        booking.location ? `Locatie: ${booking.location}` : "",
+      ].filter(Boolean).join("\n"),
+      recipientCompany: booking.clientName,
+      userId: booking.createdById,
+      attachments: [
+        buildIcsAttachment({
+          bookingId: booking.id,
+          method: "REQUEST",
+          start: booking.date,
+          end: new Date(booking.date.getTime() + booking.duration * 60_000),
+          summary: `Afspraak met ${booking.clientName}`,
+          description: booking.notes || undefined,
+          location: booking.location || undefined,
+          attendeeEmail: booking.clientEmail,
+        }),
+      ],
+    }).catch(() => null);
+    await prisma.booking.update({
+      where: { id: booking.id },
+      data: due1h ? { reminder1hSentAt: new Date() } : { reminder24hSentAt: new Date() },
+    });
+    reminders += 1;
+  }
+
+  log.job.info("Bookings sync cron completed", { checked, changed, cancelled, failed, skipped, reminders });
+  return NextResponse.json({ success: true, checked, changed, cancelled, failed, skipped, reminders });
 }
 
 export const dynamic = "force-dynamic";

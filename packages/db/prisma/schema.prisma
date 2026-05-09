@@ -37,6 +37,8 @@ model User {
   emailTemplates EmailTemplate[]
   serviceCatalogEntries ServiceCatalog[]
   bookings       Booking[]
+  hostedBookings Booking[] @relation("BookingHost")
+  bookingEventTypes BookingEventType[]
   domains        Domain[]
   reviewRequests ReviewRequest[]
   quotes       Quote[]
@@ -757,16 +759,138 @@ model Booking {
   duration    Int      @default(60)
   status      String   @default("SCHEDULED") // SCHEDULED, COMPLETED, CANCELLED
   notes       String?
+  timezone    String?  @default("Europe/Brussels")
+  location    String?
+  googleEventId String?
+  googleHtmlLink String?
+  hostUserId  String?
+  hostUser    User?    @relation("BookingHost", fields: [hostUserId], references: [id])
+  eventTypeId String?
+  eventType   BookingEventType? @relation(fields: [eventTypeId], references: [id])
+  cancelTokenHash String?
+  rescheduleTokenHash String?
+  cancelledAt DateTime?
+  rescheduledAt DateTime?
+  reminder24hSentAt DateTime?
+  reminder1hSentAt DateTime?
+  consentText String?
+  consentedAt DateTime?
   leadId      String?
   lead        Lead?    @relation(fields: [leadId], references: [id])
   createdById String
   createdBy   User     @relation(fields: [createdById], references: [id])
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  questionAnswers BookingQuestionAnswer[]
 
   @@index([createdById])
+  @@index([hostUserId])
+  @@index([eventTypeId])
   @@index([createdById, date])
+  @@index([createdById, status])
+  @@index([googleEventId])
   @@map("bookings")
+}
+
+model BookingEventType {
+  id                 String   @id @default(cuid())
+  createdById        String
+  createdBy          User     @relation(fields: [createdById], references: [id])
+  slug               String
+  name               String
+  description        String?  @db.Text
+  duration           Int      @default(60)
+  slotMinutes        Int      @default(30)
+  color              String   @default("#f9ae5a")
+  location           String?  @default("Google Meet")
+  meetingProvider    String?  @default("manual")
+  approvalMode       String   @default("manual")
+  timezone           String   @default("Europe/Brussels")
+  bufferBefore       Int      @default(0)
+  bufferAfter        Int      @default(0)
+  minimumNoticeHours Int      @default(4)
+  maximumHorizonDays Int      @default(60)
+  privacyText        String?  @db.Text
+  requireConsent     Boolean  @default(false)
+  isDefault          Boolean  @default(false)
+  isActive           Boolean  @default(true)
+  hostUserIds        Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  availabilityRules  BookingAvailabilityRule[]
+  questions          BookingQuestion[]
+  bookings           Booking[]
+  analyticsEvents    BookingAnalyticsEvent[]
+
+  @@unique([createdById, slug])
+  @@index([createdById, isActive])
+  @@map("booking_event_types")
+}
+
+model BookingAvailabilityRule {
+  id          String   @id @default(cuid())
+  eventTypeId String
+  eventType   BookingEventType @relation(fields: [eventTypeId], references: [id], onDelete: Cascade)
+  hostUserId  String?
+  weekday     Int
+  enabled     Boolean @default(true)
+  startTime   String  @default("09:00")
+  endTime     String  @default("17:00")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([eventTypeId, weekday])
+  @@index([hostUserId])
+  @@map("booking_availability_rules")
+}
+
+model BookingQuestion {
+  id          String   @id @default(cuid())
+  eventTypeId String
+  eventType   BookingEventType @relation(fields: [eventTypeId], references: [id], onDelete: Cascade)
+  label       String
+  type        String   @default("text")
+  required    Boolean  @default(false)
+  options     Json?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  answers     BookingQuestionAnswer[]
+
+  @@index([eventTypeId, sortOrder])
+  @@map("booking_questions")
+}
+
+model BookingQuestionAnswer {
+  id         String   @id @default(cuid())
+  bookingId  String
+  booking    Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  questionId String?
+  question   BookingQuestion? @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  label      String
+  value      String   @db.Text
+  createdAt  DateTime @default(now())
+
+  @@index([bookingId])
+  @@index([questionId])
+  @@map("booking_question_answers")
+}
+
+model BookingAnalyticsEvent {
+  id          String   @id @default(cuid())
+  createdById String
+  eventTypeId String?
+  eventType   BookingEventType? @relation(fields: [eventTypeId], references: [id], onDelete: SetNull)
+  bookingId   String?
+  type        String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([createdById, createdAt])
+  @@index([eventTypeId, type])
+  @@map("booking_analytics_events")
 }
 
 // DOMAINS

@@ -156,6 +156,17 @@ export default function BookingSettingsPage() {
     onError: (mutationError) =>
       showToast({ title: "Opslaan mislukt", description: mutationError.message, variant: "error" }),
   });
+  const testGoogleSync = trpc.booking.testGoogleSync.useMutation({
+    onSuccess: (result) =>
+      showToast({
+        title: result.enabled ? "Google sync getest" : "Google sync staat nog uit",
+        description: result.enabled
+          ? `Kalendercheck gelukt. Slotstatus: ${result.available ? "vrij" : "bezet"}.`
+          : "Koppel Google Agenda en activeer synchronisatie om slots live te controleren.",
+      }),
+    onError: (mutationError) =>
+      showToast({ title: "Google sync test mislukt", description: mutationError.message, variant: "error" }),
+  });
 
   const [title, setTitle] = useState("Plan een afspraak");
   const [description, setDescription] = useState(
@@ -553,7 +564,7 @@ export default function BookingSettingsPage() {
               <Button type="button" variant="outline" asChild>
                 <a href="/api/integrations/google-calendar/connect">
                   <Globe2 className="mr-2 h-4 w-4" />
-                  {googleOauthEmail ? "Google Agenda opnieuw koppelen" : "Google Agenda koppelen"}
+                  {googleOauthEmail ? "Google Agenda opnieuw koppelen en auto-sync inschakelen" : "Google Agenda koppelen en auto-sync inschakelen"}
                 </a>
               </Button>
               <Button
@@ -749,8 +760,12 @@ export default function BookingSettingsPage() {
                       <Button type="button" variant="outline" asChild>
                         <a href="/api/integrations/google-calendar/connect">
                           <Globe2 className="mr-2 h-4 w-4" />
-                          {googleOauthEmail ? "Opnieuw verbinden" : "Verbind via Google"}
+                          {googleOauthEmail ? "Opnieuw verbinden en auto-sync aanzetten" : "Verbind via Google en zet auto-sync aan"}
                         </a>
+                      </Button>
+                      <Button type="button" variant="outline" onClick={() => testGoogleSync.mutate()} disabled={testGoogleSync.isPending}>
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        {testGoogleSync.isPending ? "Testen..." : "Test synchronisatie"}
                       </Button>
                       <Badge variant={googleOauthEmail ? "success" : "secondary"}>
                         {googleOauthEmail ? "OAuth actief" : "Niet verbonden"}
