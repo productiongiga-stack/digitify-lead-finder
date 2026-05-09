@@ -90,8 +90,8 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     const overlap = await hasBookingOverlap(prisma, {
       ownerUserId: booking.createdById,
       hostUserId: booking.hostUserId || booking.createdById,
-      start: nextDate,
-      end: nextEnd,
+      start: new Date(nextDate.getTime() - (booking.eventType?.bufferBefore || 0) * 60_000),
+      end: new Date(nextEnd.getTime() + (booking.eventType?.bufferAfter || 0) * 60_000),
       ignoreBookingId: booking.id,
     });
     if (overlap) return NextResponse.json({ error: "Dit tijdslot is niet meer beschikbaar." }, { status: 409 });

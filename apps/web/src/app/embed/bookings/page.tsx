@@ -268,6 +268,7 @@ function BookingEmbedContent() {
   const [availability, setAvailability] = useState<Record<string, AvailabilitySlot[]>>({});
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
   const [consentAccepted, setConsentAccepted] = useState(false);
+  const [resultModal, setResultModal] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const effectiveDuration = eventType?.duration || duration;
   const effectiveSlotMinutes = eventType?.slotMinutes || slotMinutes;
@@ -373,17 +374,21 @@ function BookingEmbedContent() {
       setClientEmail("");
       setNotes("");
       setWebsite("");
-      setStatus({
+      const nextStatus = {
         type: "success",
         message: "Uw afspraak is aangevraagd. U ontvangt snel een bevestiging per e-mail.",
-      });
+      } as const;
+      setStatus(nextStatus);
+      setResultModal(nextStatus);
       return;
     }
 
-    setStatus({
+    const nextStatus = {
       type: "error",
       message: data.error || "Boeking aanvragen mislukt.",
-    });
+    } as const;
+    setStatus(nextStatus);
+    setResultModal(nextStatus);
   }
 
   const themeClasses = {
@@ -414,48 +419,6 @@ function BookingEmbedContent() {
     card:
       themeMode === "dark" ? "border-white/10 bg-white/4" : "border-slate-200 bg-white",
   };
-
-  if (status?.type === "success" && selectedDateObject) {
-    return (
-      <div className={themeClasses.page} style={{ colorScheme: themeMode }}>
-        <div className={`${themeClasses.shell} flex items-center justify-center px-4 py-8`}>
-          <div
-            className={`w-full max-w-xl rounded-[24px] border p-6 text-center sm:p-8 ${themeClasses.card}`}
-          >
-            <div
-              className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full text-slate-950"
-              style={{ backgroundColor: effectiveColor }}
-            >
-              <CheckCircle2 className="h-8 w-8" />
-            </div>
-            <p className={`text-sm font-medium uppercase tracking-[0.28em] ${themeClasses.muted}`}>Boeking ontvangen</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">Bedankt voor uw aanvraag</h1>
-            <p className={`mx-auto mt-4 max-w-xl text-base leading-7 ${themeClasses.muted}`}>{status.message}</p>
-            <div className={`mx-auto mt-8 grid max-w-xl gap-3 rounded-[28px] border p-5 text-left ${themeClasses.card}`}>
-              <div className="flex items-center justify-between gap-3">
-                <span className={themeClasses.muted}>Afspraak</span>
-                <span className="font-medium">{effectiveMeetingName}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className={themeClasses.muted}>Moment</span>
-                <span className="font-medium">
-                  {formatLongDate(selectedDate)} om {formatTimeDisplay(selectedTime, timeMode)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className={themeClasses.muted}>Duur</span>
-                <span className="font-medium">{effectiveDuration} min</span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className={themeClasses.muted}>Tijdzone</span>
-                <span className="font-medium">{visitorTimezone}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className={themeClasses.page} style={{ colorScheme: themeMode }}>
@@ -633,25 +596,26 @@ function BookingEmbedContent() {
               </div>
             </div>
 
-            <div className="mt-5 space-y-2">
+            <div className="mt-5">
               {selectedSlots.length ? (
-                selectedSlots.map((slot) => {
-                  const active = selectedTime === slot;
-                  return (
-                    <button
-                      key={slot}
-                      type="button"
-                      onClick={() => setSelectedTime(slot)}
-                      className={`flex w-full items-center justify-center gap-3 rounded-[16px] border px-4 py-3 text-lg font-semibold transition ${
-                        active ? "border-transparent text-slate-950 shadow-[0_18px_40px_rgba(245,176,76,0.22)]" : themeClasses.slot
-                      }`}
-                      style={{ backgroundColor: active ? effectiveColor : undefined }}
-                    >
-                      <span className={`h-2.5 w-2.5 rounded-full ${active ? "bg-slate-950" : ""}`} style={!active ? { backgroundColor: "#22c55e" } : undefined} />
-                      {formatTimeDisplay(slot, timeMode)}
-                    </button>
-                  );
-                })
+                <div className="grid max-h-[272px] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">
+                  {selectedSlots.map((slot) => {
+                    const active = selectedTime === slot;
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        onClick={() => setSelectedTime(slot)}
+                        className={`flex h-11 items-center justify-center rounded-[14px] border px-3 text-sm font-semibold transition ${
+                          active ? "border-transparent text-slate-950 shadow-[0_14px_30px_rgba(245,176,76,0.22)]" : themeClasses.slot
+                        }`}
+                        style={{ backgroundColor: active ? effectiveColor : undefined }}
+                      >
+                        {formatTimeDisplay(slot, timeMode)}
+                      </button>
+                    );
+                  })}
+                </div>
               ) : (
                 <div className={`rounded-[28px] border px-6 py-8 ${themeClasses.card}`}>
                   <p className="text-lg font-medium">Geen beschikbare slots op deze dag</p>
@@ -810,6 +774,39 @@ function BookingEmbedContent() {
             </div>
           </section>
         </div>
+        {resultModal ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
+            <div className={`w-full max-w-md rounded-[20px] border p-5 shadow-2xl ${themeClasses.card}`}>
+              <div className="flex items-center gap-3">
+                <div
+                  className={`flex h-11 w-11 items-center justify-center rounded-full ${
+                    resultModal.type === "success"
+                      ? "bg-emerald-500/15 text-emerald-500"
+                      : "bg-red-500/15 text-red-500"
+                  }`}
+                >
+                  <CheckCircle2 className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="text-base font-semibold">
+                    {resultModal.type === "success" ? "Aanvraag verstuurd" : "Verzenden mislukt"}
+                  </p>
+                  <p className={`text-sm ${themeClasses.muted}`}>{resultModal.message}</p>
+                </div>
+              </div>
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setResultModal(null)}
+                  className="h-10 rounded-full px-4 text-sm font-semibold text-slate-950"
+                  style={{ backgroundColor: effectiveColor }}
+                >
+                  Sluiten
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

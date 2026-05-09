@@ -48,6 +48,13 @@ function getBookingEndDate(booking: { date: Date; duration: number }) {
   return new Date(booking.date.getTime() + booking.duration * 60 * 1000);
 }
 
+const BOOKING_SYNC_RETRY_DELAY_MS = 5 * 60 * 1000;
+
+function normalizeSyncError(error: unknown) {
+  if (error instanceof Error) return error.message.slice(0, 400);
+  return String(error || "Onbekende syncfout").slice(0, 400);
+}
+
 function resolveAppUrl() {
   const candidates = [
     process.env.NEXT_PUBLIC_APP_URL,
@@ -103,6 +110,10 @@ async function syncBookingCalendarEvent(
     googleEventId?: string | null;
     googleHtmlLink?: string | null;
     googleMeetLink?: string | null;
+    googleSyncState?: string | null;
+    googleSyncError?: string | null;
+    googleSyncLastAttemptAt?: Date | null;
+    googleSyncRetryAt?: Date | null;
     location?: string | null;
     status: string;
     leadId?: string | null;
@@ -113,43 +124,96 @@ async function syncBookingCalendarEvent(
 ) {
   const existingEventId = getStoredGoogleEventId(booking);
   const shouldDelete = booking.status === "REJECTED" || booking.status === "CANCELLED";
-  if (shouldDelete) {
-    if (!existingEventId) return booking;
-    await deleteGoogleBookingEvent(db, existingEventId, userId).catch(() => null);
+  const attemptedAt = new Date();
+  try {
+    if (shouldDelete) {
+      if (!existingEventId) {
+        return db.booking.update({
+          where: { id: booking.id },
+          data: {
+            googleSyncState: "SYNCED",
+            googleSyncError: null,
+            googleSyncLastAttemptAt: attemptedAt,
+            googleSyncRetryAt: null,
+          },
+        });
+      }
+      await deleteGoogleBookingEvent(db, existingEventId, userId);
+      return db.booking.update({
+        where: { id: booking.id },
+        data: {
+          googleEventId: null,
+          googleHtmlLink: null,
+          googleMeetLink: null,
+          notes: removeLegacyGoogleEventId(booking.notes),
+          googleSyncState: "SYNCED",
+          googleSyncError: null,
+          googleSyncLastAttemptAt: attemptedAt,
+          googleSyncRetryAt: null,
+        },
+      });
+    }
+
+    const event = await upsertGoogleBookingEvent(db, {
+      start: booking.date,
+      bookingId: booking.id,
+      end: getBookingEndDate(booking),
+      summary: `Afspraak met ${booking.clientName}`,
+      description: [
+        `Booking status: ${booking.status}`,
+        `Klant: ${booking.clientName}`,
+        `E-mail: ${booking.clientEmail || "-"}`,
+        `Notities: ${booking.notes || "-"}`,
+        `Bedrijf: ${companyName}`,
+      ].filter(Boolean).join("\n"),
+      attendeeEmail: booking.clientEmail || undefined,
+      location: booking.location || undefined,
+      existingEventId,
+      userId,
+    });
+    if (!event.synced || !event.eventId) {
+      return db.booking.update({
+        where: { id: booking.id },
+        data: {
+          googleSyncState: "DISABLED",
+          googleSyncError: null,
+          googleSyncLastAttemptAt: attemptedAt,
+          googleSyncRetryAt: null,
+        },
+      });
+    }
+
     return db.booking.update({
       where: { id: booking.id },
-      data: { googleEventId: null, googleHtmlLink: null, googleMeetLink: null, notes: removeLegacyGoogleEventId(booking.notes) },
+      data: {
+        googleEventId: event.eventId,
+        googleHtmlLink: event.htmlLink || booking.googleHtmlLink || null,
+        googleMeetLink: event.meetLink || booking.googleMeetLink || null,
+        notes: removeLegacyGoogleEventId(booking.notes),
+        googleSyncState: "SYNCED",
+        googleSyncError: null,
+        googleSyncLastAttemptAt: attemptedAt,
+        googleSyncRetryAt: null,
+      },
+    });
+  } catch (error) {
+    const syncError = normalizeSyncError(error);
+    const retryAt = new Date(attemptedAt.getTime() + BOOKING_SYNC_RETRY_DELAY_MS);
+    log.integration.error(
+      "Booking Google sync failed",
+      { bookingId: booking.id, userId, status: booking.status, existingEventId },
+      error,
+    );
+    return db.booking.update({
+      where: { id: booking.id },
+      data: {
+        googleSyncState: "RETRYING",
+        googleSyncError: syncError,
+        googleSyncLastAttemptAt: attemptedAt,
+        googleSyncRetryAt: retryAt,
+      },
     });
   }
-
-  const event = await upsertGoogleBookingEvent(db, {
-    start: booking.date,
-    bookingId: booking.id,
-    end: getBookingEndDate(booking),
-    summary: `Afspraak met ${booking.clientName}`,
-    description: [
-      `Booking status: ${booking.status}`,
-      `Klant: ${booking.clientName}`,
-      `E-mail: ${booking.clientEmail || "-"}`,
-      `Notities: ${booking.notes || "-"}`,
-      `Bedrijf: ${companyName}`,
-    ].filter(Boolean).join("\n"),
-    attendeeEmail: booking.clientEmail || undefined,
-    location: booking.location || undefined,
-    existingEventId,
-    userId,
-  });
-  if (!event.synced || !event.eventId) return booking;
-
-  return db.booking.update({
-    where: { id: booking.id },
-    data: {
-      googleEventId: event.eventId,
-      googleHtmlLink: event.htmlLink || booking.googleHtmlLink || null,
-      googleMeetLink: event.meetLink || booking.googleMeetLink || null,
-      notes: removeLegacyGoogleEventId(booking.notes),
-    },
-  });
 }
 
 async function sendBookingChangeEmails(params: {
@@ -369,8 +433,8 @@ export const bookingRouter = router({
       const localOverlap = await hasBookingOverlap(ctx.db, {
         ownerUserId: ctx.user.id,
         hostUserId,
-        start: bookingDate,
-        end: bookingEnd,
+        start: new Date(bookingDate.getTime() - (eventType?.bufferBefore || 0) * 60_000),
+        end: new Date(bookingEnd.getTime() + (eventType?.bufferAfter || 0) * 60_000),
       });
       if (localOverlap) {
         throw new TRPCError({ code: "CONFLICT", message: "Dit tijdslot overlapt met een bestaande booking." });
@@ -555,11 +619,15 @@ export const bookingRouter = router({
       const nextDuration = data.duration !== undefined ? data.duration : existing.duration;
       const nextStatus = data.status !== undefined ? data.status : existing.status;
       const nextHostUserId = data.hostUserId !== undefined ? data.hostUserId || ctx.user.id : existing.hostUserId || ctx.user.id;
+      const nextEventTypeId = data.eventTypeId !== undefined ? data.eventTypeId || null : existing.eventTypeId || null;
+      const nextEventType = nextEventTypeId
+        ? await ctx.db.bookingEventType.findFirst({ where: { id: nextEventTypeId, createdById: ctx.user.id } })
+        : null;
       const localOverlap = await hasBookingOverlap(ctx.db, {
         ownerUserId: ctx.user.id,
         hostUserId: nextHostUserId,
-        start: nextDate,
-        end: new Date(nextDate.getTime() + nextDuration * 60 * 1000),
+        start: new Date(nextDate.getTime() - (nextEventType?.bufferBefore || 0) * 60_000),
+        end: new Date(nextDate.getTime() + nextDuration * 60 * 1000 + (nextEventType?.bufferAfter || 0) * 60_000),
         ignoreBookingId: existing.id,
       });
       if (localOverlap && nextStatus !== "REJECTED" && nextStatus !== "CANCELLED") {

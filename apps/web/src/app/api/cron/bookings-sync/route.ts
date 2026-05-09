@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { loadEmailSettings, sendBrandedEmail } from "@digitify/api/src/lib/email-sender";
 import { log } from "@digitify/api/src/lib/logger";
-import { getGoogleBookingEvent } from "@digitify/api/src/lib/google-calendar";
+import { deleteGoogleBookingEvent, getGoogleBookingEvent, upsertGoogleBookingEvent } from "@digitify/api/src/lib/google-calendar";
 import { buildIcsAttachment, getStoredGoogleEventId, removeLegacyGoogleEventId } from "@digitify/api/src/lib/booking-utils";
 
 function isAuthorized(request: Request) {
@@ -101,6 +101,7 @@ async function runBookingsSync(request: Request) {
   let failed = 0;
   let skipped = 0;
   let reminders = 0;
+  let retriesProcessed = 0;
 
   log.job.info("Bookings sync cron started", { bookings: bookings.length });
 
@@ -119,6 +120,15 @@ async function runBookingsSync(request: Request) {
       const remote = await getGoogleBookingEvent(prisma, eventId, userId);
       if (!remote.enabled) {
         skipped += 1;
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            googleSyncState: "DISABLED",
+            googleSyncError: null,
+            googleSyncLastAttemptAt: new Date(),
+            googleSyncRetryAt: null,
+          },
+        }).catch(() => null);
         continue;
       }
 
@@ -132,6 +142,10 @@ async function runBookingsSync(request: Request) {
             googleEventId: null,
             googleHtmlLink: null,
             googleMeetLink: null,
+            googleSyncState: "SYNCED",
+            googleSyncError: null,
+            googleSyncLastAttemptAt: new Date(),
+            googleSyncRetryAt: null,
             notes: removeLegacyGoogleEventId(booking.notes),
           },
         });
@@ -175,6 +189,10 @@ async function runBookingsSync(request: Request) {
           googleEventId: remote.eventId,
           googleHtmlLink: remote.htmlLink || booking.googleHtmlLink,
           googleMeetLink: remote.meetLink || booking.googleMeetLink,
+          googleSyncState: "SYNCED",
+          googleSyncError: null,
+          googleSyncLastAttemptAt: new Date(),
+          googleSyncRetryAt: null,
           notes: removeLegacyGoogleEventId(booking.notes),
         },
       });
@@ -191,7 +209,111 @@ async function runBookingsSync(request: Request) {
       });
     } catch (error) {
       failed += 1;
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: {
+          googleSyncState: "RETRYING",
+          googleSyncError: error instanceof Error ? error.message.slice(0, 400) : String(error).slice(0, 400),
+          googleSyncLastAttemptAt: new Date(),
+          googleSyncRetryAt: new Date(Date.now() + 5 * 60_000),
+        },
+      }).catch(() => null);
       log.integration.error("Bookings sync item failed", { bookingId: booking.id, eventId }, error);
+    }
+  }
+
+  const retryCandidates = await prisma.booking.findMany({
+    where: {
+      status: { in: ["PENDING", "SCHEDULED", "CONFIRMED", "CANCELLED", "REJECTED"] },
+      googleSyncState: { in: ["RETRYING", "ERROR"] },
+      OR: [{ googleSyncRetryAt: null }, { googleSyncRetryAt: { lte: new Date() } }],
+    },
+    orderBy: { googleSyncLastAttemptAt: "asc" },
+    take: 100,
+  });
+
+  for (const booking of retryCandidates) {
+    const userId = booking.hostUserId || booking.createdById;
+    const attemptedAt = new Date();
+    try {
+      const shouldDelete = booking.status === "CANCELLED" || booking.status === "REJECTED";
+      const eventId = getStoredGoogleEventId(booking);
+      if (shouldDelete) {
+        if (eventId) await deleteGoogleBookingEvent(prisma, eventId, userId);
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            googleEventId: null,
+            googleHtmlLink: null,
+            googleMeetLink: null,
+            notes: removeLegacyGoogleEventId(booking.notes),
+            googleSyncState: "SYNCED",
+            googleSyncError: null,
+            googleSyncLastAttemptAt: attemptedAt,
+            googleSyncRetryAt: null,
+          },
+        });
+        retriesProcessed += 1;
+        continue;
+      }
+
+      const event = await upsertGoogleBookingEvent(prisma, {
+        start: booking.date,
+        bookingId: booking.id,
+        end: new Date(booking.date.getTime() + booking.duration * 60_000),
+        summary: `Afspraak met ${booking.clientName}`,
+        description: [
+          `Booking status: ${booking.status}`,
+          `Klant: ${booking.clientName}`,
+          `E-mail: ${booking.clientEmail || "-"}`,
+          `Notities: ${booking.notes || "-"}`,
+        ].join("\n"),
+        attendeeEmail: booking.clientEmail || undefined,
+        location: booking.location || undefined,
+        existingEventId: eventId,
+        userId,
+      });
+
+      if (!event.synced || !event.eventId) {
+        await prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            googleSyncState: "DISABLED",
+            googleSyncError: null,
+            googleSyncLastAttemptAt: attemptedAt,
+            googleSyncRetryAt: null,
+          },
+        });
+        retriesProcessed += 1;
+        continue;
+      }
+
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: {
+          googleEventId: event.eventId,
+          googleHtmlLink: event.htmlLink || booking.googleHtmlLink,
+          googleMeetLink: event.meetLink || booking.googleMeetLink,
+          notes: removeLegacyGoogleEventId(booking.notes),
+          googleSyncState: "SYNCED",
+          googleSyncError: null,
+          googleSyncLastAttemptAt: attemptedAt,
+          googleSyncRetryAt: null,
+        },
+      });
+      retriesProcessed += 1;
+    } catch (error) {
+      failed += 1;
+      await prisma.booking.update({
+        where: { id: booking.id },
+        data: {
+          googleSyncState: "RETRYING",
+          googleSyncError: error instanceof Error ? error.message.slice(0, 400) : String(error).slice(0, 400),
+          googleSyncLastAttemptAt: attemptedAt,
+          googleSyncRetryAt: new Date(Date.now() + 5 * 60_000),
+        },
+      }).catch(() => null);
+      log.integration.error("Bookings retry sync failed", { bookingId: booking.id }, error);
     }
   }
 
@@ -250,8 +372,8 @@ async function runBookingsSync(request: Request) {
     reminders += 1;
   }
 
-  log.job.info("Bookings sync cron completed", { checked, changed, cancelled, failed, skipped, reminders });
-  return NextResponse.json({ success: true, checked, changed, cancelled, failed, skipped, reminders });
+  log.job.info("Bookings sync cron completed", { checked, changed, cancelled, failed, skipped, reminders, retriesProcessed });
+  return NextResponse.json({ success: true, checked, changed, cancelled, failed, skipped, reminders, retriesProcessed });
 }
 
 export const dynamic = "force-dynamic";

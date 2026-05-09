@@ -9,18 +9,9 @@ import { randomUUID } from "crypto";
 import { log } from "@digitify/api/src/lib/logger";
 import { assertServerEnv } from "@/lib/env";
 
-let compatScheduled = false;
-
-function scheduleSchemaCompat() {
-  if (compatScheduled) return;
-  compatScheduled = true;
-  // Fire-and-forget, only once per runtime instance.
-  void ensureTenantSchemaCompatibility(prisma).catch(() => {});
-}
-
 const handler = async (req: Request) => {
   assertServerEnv();
-  scheduleSchemaCompat();
+  await ensureTenantSchemaCompatibility(prisma);
   const requestId = randomUUID();
   const session = await getServerSession(authOptions);
   const sessionUserId = typeof (session?.user as any)?.id === "string" ? (session?.user as any).id : "";

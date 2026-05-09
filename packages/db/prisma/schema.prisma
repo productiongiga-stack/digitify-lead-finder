@@ -764,6 +764,10 @@ model Booking {
   googleEventId String?
   googleHtmlLink String?
   googleMeetLink String?
+  googleSyncState String? @default("DISABLED")
+  googleSyncError String?
+  googleSyncLastAttemptAt DateTime?
+  googleSyncRetryAt DateTime?
   hostUserId  String?
   hostUser    User?    @relation("BookingHost", fields: [hostUserId], references: [id])
   eventTypeId String?
@@ -790,6 +794,7 @@ model Booking {
   @@index([createdById, date])
   @@index([createdById, status])
   @@index([googleEventId])
+  @@index([googleSyncState, googleSyncRetryAt])
   @@map("bookings")
 }
 

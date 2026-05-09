@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { cn } from "@/lib/utils";
+import { readSettingBoolean } from "@/lib/settings";
 import {
   Card, CardContent, CardHeader, CardTitle, Badge, Button, Skeleton,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -58,6 +59,13 @@ function isSameCalendarDay(left: Date, right: Date) {
   );
 }
 
+function getSyncBadge(state: string | null | undefined) {
+  if (state === "SYNCED") return { label: "Synced", variant: "success" as const };
+  if (state === "RETRYING") return { label: "Retrying", variant: "warning" as const };
+  if (state === "ERROR") return { label: "Sync fout", variant: "destructive" as const };
+  return { label: "Sync uit", variant: "secondary" as const };
+}
+
 export default function BookingsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -74,6 +82,15 @@ export default function BookingsPage() {
   const [createDuration, setCreateDuration] = useState("60");
   const [editDuration, setEditDuration] = useState("60");
   const [createLeadId, setCreateLeadId] = useState("__none");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmStep, setConfirmStep] = useState<1 | 2>(1);
+  const [confirmTargetId, setConfirmTargetId] = useState<string | null>(null);
+  const [confirmClientName, setConfirmClientName] = useState("");
+  const [confirmClientEmail, setConfirmClientEmail] = useState("");
+  const [confirmLocation, setConfirmLocation] = useState("");
+  const [confirmNotes, setConfirmNotes] = useState("");
+  const [confirmSubmitting, setConfirmSubmitting] = useState(false);
+  const [compactMode, setCompactMode] = useState(false);
   const { showToast } = useToast();
   const utils = trpc.useUtils();
 
@@ -87,6 +104,7 @@ export default function BookingsPage() {
     }
   );
   const { data: stats } = trpc.booking.getStats.useQuery();
+  const { data: settingsData } = trpc.settings.getAll.useQuery();
   const { data: eventTypes } = trpc.booking.listEventTypes.useQuery();
   const { data: unifiedReminders } = trpc.dashboard.getUnifiedReminders.useQuery(undefined, {
     staleTime: 60_000,
@@ -96,36 +114,40 @@ export default function BookingsPage() {
   });
 
   const createMutation = trpc.booking.create.useMutation({
-    onSuccess: () => {
+    onSuccess: (result) => {
       utils.booking.list.invalidate();
       utils.booking.getStats.invalidate();
       setCreateOpen(false);
-      showToast({ title: "Boeking opgeslagen", description: "De boeking is succesvol toegevoegd." });
+      const sync = getSyncBadge((result as any)?.googleSyncState);
+      showToast({ title: "Boeking opgeslagen", description: sync.label === "Synced" ? "De boeking is succesvol toegevoegd." : `Boeking opgeslagen. Google sync: ${sync.label}.` });
     },
     onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
   });
   const updateMutation = trpc.booking.update.useMutation({
-    onSuccess: () => {
+    onSuccess: (result) => {
       utils.booking.list.invalidate();
       utils.booking.getStats.invalidate();
       setEditOpen(false);
-      showToast({ title: "Boeking bijgewerkt", description: "De boeking is succesvol aangepast." });
+      const sync = getSyncBadge((result as any)?.googleSyncState);
+      showToast({ title: "Boeking bijgewerkt", description: sync.label === "Synced" ? "De boeking is succesvol aangepast." : `Boeking aangepast. Google sync: ${sync.label}.` });
     },
     onError: (error) => showToast({ title: "Bijwerken mislukt", description: error.message, variant: "error" }),
   });
   const confirmMutation = trpc.booking.confirm.useMutation({
-    onSuccess: () => {
+    onSuccess: (result) => {
       utils.booking.list.invalidate();
       utils.booking.getStats.invalidate();
-      showToast({ title: "Boeking bevestigd", description: "De klant kreeg een bevestiging met kalenderbestand." });
+      const sync = getSyncBadge((result as any)?.googleSyncState);
+      showToast({ title: "Boeking bevestigd", description: sync.label === "Synced" ? "De klant kreeg een bevestiging met kalenderbestand." : `Bevestigd. Google sync: ${sync.label}.` });
     },
     onError: (error) => showToast({ title: "Bevestigen mislukt", description: error.message, variant: "error" }),
   });
   const rejectMutation = trpc.booking.reject.useMutation({
-    onSuccess: () => {
+    onSuccess: (result) => {
       utils.booking.list.invalidate();
       utils.booking.getStats.invalidate();
-      showToast({ title: "Boeking afgewezen", description: "De klant kreeg een update." });
+      const sync = getSyncBadge((result as any)?.googleSyncState);
+      showToast({ title: "Boeking afgewezen", description: `De klant kreeg een update. Google sync: ${sync.label}.` });
     },
     onError: (error) => showToast({ title: "Afwijzen mislukt", description: error.message, variant: "error" }),
   });
@@ -138,6 +160,10 @@ export default function BookingsPage() {
       showToast({ title: "Boeking verwijderd", description: "De boeking is verwijderd." });
     },
     onError: (error) => showToast({ title: "Verwijderen mislukt", description: error.message, variant: "error" }),
+  });
+  const settingsUpdateMutation = trpc.settings.update.useMutation({
+    onSuccess: () => utils.settings.getAll.invalidate(),
+    onError: (error) => showToast({ title: "Compact modus opslaan mislukt", description: error.message, variant: "error" }),
   });
 
   // Fetch leads for linking
@@ -202,6 +228,39 @@ export default function BookingsPage() {
     setDeleteOpen(true);
   }
 
+  function openConfirmWizard(booking: NonNullable<typeof data>["bookings"][number]) {
+    setConfirmTargetId(booking.id);
+    setConfirmClientName(booking.clientName || "");
+    setConfirmClientEmail(booking.clientEmail || "");
+    setConfirmLocation((booking as any).location || "");
+    setConfirmNotes(booking.notes || "");
+    setConfirmStep(1);
+    setConfirmOpen(true);
+  }
+
+  async function submitConfirmWizard() {
+    if (!confirmTargetId) return;
+    setConfirmSubmitting(true);
+    try {
+      await updateMutation.mutateAsync({
+        id: confirmTargetId,
+        clientName: confirmClientName,
+        clientEmail: confirmClientEmail || undefined,
+        notes: confirmNotes || undefined,
+        location: confirmLocation || undefined,
+      });
+      await confirmMutation.mutateAsync({ id: confirmTargetId });
+      setConfirmOpen(false);
+      setConfirmStep(1);
+      setConfirmTargetId(null);
+      showToast({ title: "Afspraak bevestigd", description: "De afspraak is bevestigd en verzonden." });
+    } catch (error: any) {
+      showToast({ title: "Bevestigen mislukt", description: error?.message || "Onbekende fout", variant: "error" });
+    } finally {
+      setConfirmSubmitting(false);
+    }
+  }
+
   // Sort bookings: upcoming first (closest date on top for SCHEDULED)
   const sortedBookings = data?.bookings
     ? [...data.bookings].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
@@ -233,6 +292,8 @@ export default function BookingsPage() {
     const metadata = (item.metadata ?? {}) as Record<string, unknown>;
     return typeof metadata.bookingId === "string";
   }).slice(0, 5);
+  const compactFromSettings = readSettingBoolean(settingsData, "ui.bookings_compact", false);
+  const effectiveCompactMode = compactMode || compactFromSettings;
 
   return (
     <div className="app-page">
@@ -244,6 +305,17 @@ export default function BookingsPage() {
           </p>
         </div>
         <div className="app-page-actions">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const next = !effectiveCompactMode;
+              setCompactMode(next);
+              settingsUpdateMutation.mutate({ key: "ui.bookings_compact", value: String(next) });
+            }}
+          >
+            {effectiveCompactMode ? "Compact: aan" : "Compact: uit"}
+          </Button>
           <Link href="/settings/bookings#google-agenda">
             <Button variant="outline" size="sm">
               <Calendar className="mr-2 h-4 w-4" />
@@ -263,11 +335,82 @@ export default function BookingsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-3">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+      <Tabs defaultValue="list" className="space-y-3">
+        <TabsList className="grid w-full max-w-xl grid-cols-3">
+          <TabsTrigger value="list">Lijst</TabsTrigger>
           <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="info">Info</TabsTrigger>
+          <TabsTrigger value="automations">Automations</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="list" className="space-y-3">
+          <Card className="border-border/60 shadow-sm">
+            <CardContent className={cn("grid gap-3 md:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,0.8fr))]", effectiveCompactMode ? "p-3" : "p-4")}>
+              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Zoek op klant, e-mail of notitie..." />
+              <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+              <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+              <Select value={eventTypeFilter} onValueChange={setEventTypeFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Bookingtype" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all">Alle bookingtypes</SelectItem>
+                  {eventTypes?.map((item: NonNullable<typeof eventTypes>[number]) => (
+                    <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+          <div className="-mx-1 overflow-x-auto px-1 pb-1">
+            <div className="flex min-w-max gap-2">
+              {filterTabs.map((tab) => (
+                <Button key={tab.label} variant={statusFilter === tab.key ? "default" : "outline"} size="sm" className="whitespace-nowrap" onClick={() => setStatusFilter(tab.key)}>
+                  {tab.label}
+                  {tab.count !== undefined && <Badge variant="secondary" className="ml-1.5 h-5 min-w-5 px-1 text-xs">{tab.count}</Badge>}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <Card className="border-border/50 shadow-sm">
+            <CardContent className="p-0">
+              {isLoading ? (
+                <div className="space-y-3 p-6">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+              ) : !sortedBookings.length ? (
+                <EmptyState icon={<Calendar />} title="Geen boekingen gevonden" description="Maak een nieuwe boeking aan om te beginnen." />
+              ) : (
+                <div className={cn("grid gap-3", effectiveCompactMode ? "p-3" : "p-4")}>
+                  {sortedBookings.map((booking) => {
+                    const statusInfo = STATUS_MAP[booking.status] ?? { label: booking.status, variant: "secondary" as const };
+                    const syncInfo = getSyncBadge((booking as any).googleSyncState);
+                    const bookingDate = new Date(booking.date);
+                    return (
+                      <div key={booking.id} className={cn("rounded-2xl border", effectiveCompactMode ? "p-3" : "p-4")}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-semibold">{booking.clientName}</p>
+                              <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                              <Badge variant={syncInfo.variant}>{syncInfo.label}</Badge>
+                            </div>
+                            {booking.clientEmail ? <p className="text-xs text-muted-foreground">{booking.clientEmail}</p> : null}
+                          </div>
+                          <p className="text-xs text-muted-foreground">{formatDateNice(bookingDate)}</p>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" onClick={() => openEdit(booking)}><Pencil className="mr-2 h-3.5 w-3.5" />Bewerk</Button>
+                          {booking.status === "PENDING" ? <Button variant="outline" size="sm" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => openConfirmWizard(booking)}><CheckCircle2 className="mr-2 h-3.5 w-3.5" />Bevestig</Button> : null}
+                          {booking.status === "PENDING" ? <Button variant="outline" size="sm" className="border-red-200 text-red-700 hover:bg-red-50" onClick={() => rejectMutation.mutate({ id: booking.id })}><XCircle className="mr-2 h-3.5 w-3.5" />Afwijzen</Button> : null}
+                          {(booking.status === "PENDING" || booking.status === "SCHEDULED") ? <Button variant="outline" size="sm" className="border-blue-200 text-blue-700 hover:bg-blue-50" onClick={() => updateMutation.mutate({ id: booking.id, status: "COMPLETED" })}><CalendarCheck className="mr-2 h-3.5 w-3.5" />Voltooi</Button> : null}
+                          <Button variant="outline" size="sm" className="text-destructive" onClick={() => openDelete(booking.id, booking.clientName)}><Trash2 className="mr-2 h-3.5 w-3.5" />Verwijder</Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="overview" className="space-y-3">
       {/* Filter tabs */}
@@ -595,7 +738,7 @@ export default function BookingsPage() {
                           variant="outline"
                           size="sm"
                           className="border-emerald-200 text-emerald-700 hover:bg-emerald-50"
-                          onClick={() => confirmMutation.mutate({ id: booking.id })}
+                          onClick={() => openConfirmWizard(booking)}
                         >
                           <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
                           Bevestig
@@ -713,7 +856,7 @@ export default function BookingsPage() {
                                   variant="ghost"
                                   size="sm"
                                   className="h-7 px-2 text-xs text-blue-700 hover:text-blue-800 hover:bg-blue-50"
-                                  onClick={() => confirmMutation.mutate({ id: booking.id })}
+                                  onClick={() => openConfirmWizard(booking)}
                                   title="Bevestigen"
                                 >
                                   <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
@@ -781,7 +924,7 @@ export default function BookingsPage() {
       </Card>
         </TabsContent>
 
-        <TabsContent value="info" className="space-y-3">
+        <TabsContent value="automations" className="space-y-3">
           <div className="grid gap-3 xl:grid-cols-3">
             <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
               <CardContent className="p-4">
@@ -948,6 +1091,69 @@ export default function BookingsPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Afspraak bevestigen</DialogTitle>
+            <DialogDescription>
+              Werk in stappen: controleer eerst de gegevens en verzend daarna de bevestiging.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Badge variant={confirmStep === 1 ? "default" : "secondary"}>1. Gegevens</Badge>
+              <Badge variant={confirmStep === 2 ? "default" : "secondary"}>2. Controle & verzenden</Badge>
+            </div>
+
+            {confirmStep === 1 ? (
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label>Naam</Label>
+                  <Input value={confirmClientName} onChange={(event) => setConfirmClientName(event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>E-mail</Label>
+                  <Input type="email" value={confirmClientEmail} onChange={(event) => setConfirmClientEmail(event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Locatie</Label>
+                  <Input value={confirmLocation} onChange={(event) => setConfirmLocation(event.target.value)} placeholder="Google Meet / kantoor / ..." />
+                </div>
+                <div className="space-y-2">
+                  <Label>Notities</Label>
+                  <Textarea rows={3} value={confirmNotes} onChange={(event) => setConfirmNotes(event.target.value)} />
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border p-3 text-sm">
+                <p><span className="text-muted-foreground">Naam:</span> {confirmClientName || "-"}</p>
+                <p><span className="text-muted-foreground">E-mail:</span> {confirmClientEmail || "-"}</p>
+                <p><span className="text-muted-foreground">Locatie:</span> {confirmLocation || "-"}</p>
+                <p className="mt-2"><span className="text-muted-foreground">Notities:</span> {confirmNotes || "-"}</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConfirmOpen(false)}>
+              Sluiten
+            </Button>
+            {confirmStep === 1 ? (
+              <Button
+                type="button"
+                onClick={() => setConfirmStep(2)}
+                disabled={!confirmClientName.trim()}
+              >
+                Verder
+              </Button>
+            ) : (
+              <Button type="button" onClick={submitConfirmWizard} disabled={confirmSubmitting}>
+                {confirmSubmitting ? "Verzenden..." : "Bevestigen en verzenden"}
+              </Button>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
