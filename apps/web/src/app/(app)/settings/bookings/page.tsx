@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   Calendar,
@@ -138,6 +139,7 @@ function buildBookingSnapshot(input: {
 }
 
 export default function BookingSettingsPage() {
+  const searchParams = useSearchParams();
   const { data: settings, isLoading, error, refetch } = trpc.settings.getAll.useQuery(undefined, {
     retry: 1,
     refetchOnWindowFocus: false,
@@ -190,6 +192,50 @@ export default function BookingSettingsPage() {
   const [googleTimezone, setGoogleTimezone] = useState("Europe/Brussels");
   const [copied, setCopied] = useState(false);
   const [snapshot, setSnapshot] = useState("");
+
+  useEffect(() => {
+    const googleStatus = searchParams.get("google");
+    if (!googleStatus) return;
+    const messages: Record<string, { title: string; description: string; variant?: "success" | "error" | "info" }> = {
+      connected: {
+        title: "Google Agenda gekoppeld",
+        description: "Auto-sync is ingeschakeld en je primaire agenda is geselecteerd.",
+        variant: "success",
+      },
+      missing_config: {
+        title: "Google OAuth mist configuratie",
+        description: "Voeg GOOGLE_CLIENT_ID en GOOGLE_CLIENT_SECRET toe aan Vercel production env.",
+        variant: "error",
+      },
+      "missing-config": {
+        title: "Google OAuth mist configuratie",
+        description: "Voeg GOOGLE_CLIENT_ID en GOOGLE_CLIENT_SECRET toe aan Vercel production env.",
+        variant: "error",
+      },
+      invalid_state: {
+        title: "Google login verlopen",
+        description: "Start de Google koppeling opnieuw vanuit deze pagina.",
+        variant: "error",
+      },
+      "invalid-state": {
+        title: "Google login verlopen",
+        description: "Start de Google koppeling opnieuw vanuit deze pagina.",
+        variant: "error",
+      },
+      error: {
+        title: "Google koppeling mislukt",
+        description: "Controleer de OAuth redirect URL en probeer opnieuw.",
+        variant: "error",
+      },
+      access_denied: {
+        title: "Google koppeling geannuleerd",
+        description: "Je hebt de toegang niet toegestaan.",
+        variant: "error",
+      },
+    };
+    const message = messages[googleStatus] || messages.error;
+    showToast(message);
+  }, [searchParams, showToast]);
 
   useEffect(() => {
     if (!settings) return;
@@ -721,6 +767,9 @@ export default function BookingSettingsPage() {
                     {googleOauthEmail
                       ? `Agenda verbonden via Google-auth als ${googleOauthEmail}. Nieuwe boekingen worden op die agenda gecontroleerd en ingepland.`
                       : "Klik op 'Google Agenda koppelen' om je eigen agenda veilig te verbinden zonder private key."}
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Google redirect URL: {getAppUrl()}/api/integrations/google-calendar/callback
                   </p>
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">

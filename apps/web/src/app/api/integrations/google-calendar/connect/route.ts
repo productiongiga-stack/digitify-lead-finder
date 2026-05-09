@@ -26,7 +26,9 @@ function resolveAppUrl() {
 export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("callbackUrl", "/settings/bookings#google-agenda");
+    return NextResponse.redirect(loginUrl);
   }
 
   const clientId = process.env.GOOGLE_CLIENT_ID?.trim() || "";
@@ -38,12 +40,14 @@ export async function GET(request: Request) {
   const appUrl = resolveAppUrl();
   const redirectUri = `${appUrl}/api/integrations/google-calendar/callback`;
   const state = randomUUID();
+  const nonce = randomUUID();
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("prompt", "consent");
+  url.searchParams.set("include_granted_scopes", "true");
   url.searchParams.set("scope", [
     "openid",
     "email",
@@ -52,9 +56,17 @@ export async function GET(request: Request) {
     "https://www.googleapis.com/auth/calendar.readonly",
   ].join(" "));
   url.searchParams.set("state", state);
+  url.searchParams.set("nonce", nonce);
 
   const response = NextResponse.redirect(url);
   response.cookies.set("digitify_google_calendar_state", state, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: appUrl.startsWith("https://"),
+    path: "/",
+    maxAge: 60 * 15,
+  });
+  response.cookies.set("digitify_google_calendar_nonce", nonce, {
     httpOnly: true,
     sameSite: "lax",
     secure: appUrl.startsWith("https://"),

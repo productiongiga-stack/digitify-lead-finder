@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { prisma, protectSettingValue, revealSettingValue } from "@digitify/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { userSettingKey } from "@digitify/api/src/lib/user-settings";
@@ -37,7 +38,13 @@ export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code")?.trim() || "";
   const state = requestUrl.searchParams.get("state")?.trim() || "";
-  const cookieState = request.headers.get("cookie")?.match(/digitify_google_calendar_state=([^;]+)/)?.[1] || "";
+  const error = requestUrl.searchParams.get("error")?.trim() || "";
+  const cookieStore = await cookies();
+  const cookieState = cookieStore.get("digitify_google_calendar_state")?.value || "";
+
+  if (error) {
+    return NextResponse.redirect(new URL(`/settings/bookings?google=${encodeURIComponent(error)}#google-agenda`, request.url));
+  }
 
   if (!code || !state || !cookieState || state !== cookieState) {
     return NextResponse.redirect(new URL("/settings/bookings?google=invalid-state", request.url));
@@ -127,7 +134,7 @@ export async function GET(request: Request) {
       )
     );
 
-    const response = NextResponse.redirect(new URL("/settings/bookings?google=connected", request.url));
+    const response = NextResponse.redirect(new URL("/settings/bookings?google=connected#google-agenda", request.url));
     response.cookies.set("digitify_google_calendar_state", "", {
       httpOnly: true,
       sameSite: "lax",
@@ -135,8 +142,16 @@ export async function GET(request: Request) {
       path: "/",
       maxAge: 0,
     });
+    response.cookies.set("digitify_google_calendar_nonce", "", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: appUrl.startsWith("https://"),
+      path: "/",
+      maxAge: 0,
+    });
     return response;
-  } catch {
-    return NextResponse.redirect(new URL("/settings/bookings?google=error", request.url));
+  } catch (callbackError) {
+    console.error("[google-calendar-callback] OAuth callback failed", callbackError);
+    return NextResponse.redirect(new URL("/settings/bookings?google=error#google-agenda", request.url));
   }
 }
