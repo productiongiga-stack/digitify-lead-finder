@@ -102,6 +102,7 @@ async function syncBookingCalendarEvent(
     notes: string | null;
     googleEventId?: string | null;
     googleHtmlLink?: string | null;
+    googleMeetLink?: string | null;
     location?: string | null;
     status: string;
     leadId?: string | null;
@@ -117,12 +118,13 @@ async function syncBookingCalendarEvent(
     await deleteGoogleBookingEvent(db, existingEventId, userId).catch(() => null);
     return db.booking.update({
       where: { id: booking.id },
-      data: { googleEventId: null, googleHtmlLink: null, notes: removeLegacyGoogleEventId(booking.notes) },
+      data: { googleEventId: null, googleHtmlLink: null, googleMeetLink: null, notes: removeLegacyGoogleEventId(booking.notes) },
     });
   }
 
   const event = await upsertGoogleBookingEvent(db, {
     start: booking.date,
+    bookingId: booking.id,
     end: getBookingEndDate(booking),
     summary: `Afspraak met ${booking.clientName}`,
     description: [
@@ -131,7 +133,7 @@ async function syncBookingCalendarEvent(
       `E-mail: ${booking.clientEmail || "-"}`,
       `Notities: ${booking.notes || "-"}`,
       `Bedrijf: ${companyName}`,
-    ].join("\n"),
+    ].filter(Boolean).join("\n"),
     attendeeEmail: booking.clientEmail || undefined,
     location: booking.location || undefined,
     existingEventId,
@@ -144,6 +146,7 @@ async function syncBookingCalendarEvent(
     data: {
       googleEventId: event.eventId,
       googleHtmlLink: event.htmlLink || booking.googleHtmlLink || null,
+      googleMeetLink: event.meetLink || booking.googleMeetLink || null,
       notes: removeLegacyGoogleEventId(booking.notes),
     },
   });
@@ -160,6 +163,8 @@ async function sendBookingChangeEmails(params: {
     status: string;
     id?: string;
     location?: string | null;
+    googleMeetLink?: string | null;
+    googleHtmlLink?: string | null;
   };
   companyName: string;
   adminRecipient: string;
@@ -174,8 +179,10 @@ async function sendBookingChangeEmails(params: {
     `Datum: ${formatBookingDate(booking.date)}`,
     `Duur: ${booking.duration} minuten`,
     `Status: ${booking.status}`,
+    booking.googleMeetLink ? `Google Meet: ${booking.googleMeetLink}` : "",
+    booking.googleHtmlLink ? `Agenda event: ${booking.googleHtmlLink}` : "",
     `Notities: ${booking.notes || "Geen notities."}`,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   const emailTasks: Promise<{ success: boolean; messageId?: string; error?: string }>[] = [];
   if (booking.clientEmail) {
@@ -188,7 +195,7 @@ async function sendBookingChangeEmails(params: {
             end: getBookingEndDate(booking),
             summary: `Afspraak met ${booking.clientName}`,
             description: booking.notes || undefined,
-            location: booking.location || undefined,
+            location: booking.googleMeetLink || booking.location || undefined,
             organizerEmail: adminRecipient || undefined,
             attendeeEmail: booking.clientEmail,
           }),
@@ -420,6 +427,7 @@ export const bookingRouter = router({
         `Boeking: ${bookingLabel}`,
         `Duur: ${booking.duration} minuten`,
         booking.location ? `Locatie: ${booking.location}` : "",
+        booking.googleMeetLink ? `Google Meet: ${booking.googleMeetLink}` : "",
         `Notities: ${booking.notes || "Geen notities."}`,
       ].filter(Boolean).join("\n");
 
@@ -448,7 +456,7 @@ export const bookingRouter = router({
                 end: getBookingEndDate(booking),
                 summary: `Afspraak met ${booking.clientName}`,
                 description: booking.notes || undefined,
-                location: booking.location || undefined,
+                location: booking.googleMeetLink || booking.location || undefined,
                 organizerEmail: adminRecipient || undefined,
                 attendeeEmail: booking.clientEmail,
               }),

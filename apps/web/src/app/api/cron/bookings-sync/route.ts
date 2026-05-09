@@ -131,6 +131,7 @@ async function runBookingsSync(request: Request) {
             status: "CANCELLED",
             googleEventId: null,
             googleHtmlLink: null,
+            googleMeetLink: null,
             notes: removeLegacyGoogleEventId(booking.notes),
           },
         });
@@ -172,6 +173,8 @@ async function runBookingsSync(request: Request) {
           duration: remoteDuration,
           clientEmail: emailCandidate || booking.clientEmail,
           googleEventId: remote.eventId,
+          googleHtmlLink: remote.htmlLink || booking.googleHtmlLink,
+          googleMeetLink: remote.meetLink || booking.googleMeetLink,
           notes: removeLegacyGoogleEventId(booking.notes),
         },
       });
@@ -223,6 +226,7 @@ async function runBookingsSync(request: Request) {
         `Datum: ${formatBookingDate(booking.date)}`,
         `Duur: ${booking.duration} minuten`,
         booking.location ? `Locatie: ${booking.location}` : "",
+        booking.googleMeetLink ? `Google Meet: ${booking.googleMeetLink}` : "",
       ].filter(Boolean).join("\n"),
       recipientCompany: booking.clientName,
       userId: booking.createdById,
@@ -234,7 +238,7 @@ async function runBookingsSync(request: Request) {
           end: new Date(booking.date.getTime() + booking.duration * 60_000),
           summary: `Afspraak met ${booking.clientName}`,
           description: booking.notes || undefined,
-          location: booking.location || undefined,
+          location: booking.googleMeetLink || booking.location || undefined,
           attendeeEmail: booking.clientEmail,
         }),
       ],

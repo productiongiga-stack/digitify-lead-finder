@@ -57,7 +57,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     if (eventId) await deleteGoogleBookingEvent(prisma, eventId, booking.hostUserId || booking.createdById).catch(() => null);
     const updated = await prisma.booking.update({
       where: { id: booking.id },
-      data: { status: "CANCELLED", cancelledAt: new Date(), googleEventId: null, googleHtmlLink: null },
+      data: { status: "CANCELLED", cancelledAt: new Date(), googleEventId: null, googleHtmlLink: null, googleMeetLink: null },
     });
     if (updated.clientEmail) {
       await sendBrandedEmail(prisma, {

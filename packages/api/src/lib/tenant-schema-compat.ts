@@ -21,6 +21,7 @@ const TENANT_SCHEMA_STATEMENTS = [
   `ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "location" TEXT`,
   `ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "googleEventId" TEXT`,
   `ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "googleHtmlLink" TEXT`,
+  `ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "googleMeetLink" TEXT`,
   `ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "hostUserId" TEXT`,
   `ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "eventTypeId" TEXT`,
   `ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "cancelTokenHash" TEXT`,

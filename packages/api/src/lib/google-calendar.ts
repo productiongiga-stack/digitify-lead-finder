@@ -20,6 +20,7 @@ export type GoogleCalendarSyncConfig = {
 };
 
 type GoogleEventWindow = {
+  bookingId?: string;
   start: Date;
   end: Date;
   summary: string;
@@ -35,6 +36,12 @@ type GoogleEventItem = {
   status?: string;
   summary?: string;
   description?: string;
+  htmlLink?: string;
+  hangoutLink?: string;
+  conferenceData?: {
+    entryPoints?: Array<{ entryPointType?: string; uri?: string; label?: string }>;
+    conferenceId?: string;
+  };
   attendees?: Array<{ email?: string; responseStatus?: string }>;
   start?: { dateTime?: string; date?: string };
   end?: { dateTime?: string; date?: string };
@@ -65,6 +72,11 @@ function eventDateToDate(value?: { dateTime?: string; date?: string }) {
 
 function overlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && bStart < aEnd;
+}
+
+function extractMeetLinkFromEvent(event: Pick<GoogleEventItem, "hangoutLink" | "conferenceData">) {
+  if (event.hangoutLink) return event.hangoutLink;
+  return event.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video" && entry.uri)?.uri || null;
 }
 
 async function getAccessToken(config: GoogleCalendarSyncConfig) {
@@ -249,7 +261,7 @@ export async function isGoogleSlotAvailable(
 export async function upsertGoogleBookingEvent(
   db: SettingsDb,
   options: GoogleEventWindow
-): Promise<{ synced: boolean; eventId: string | null; htmlLink?: string }> {
+): Promise<{ synced: boolean; eventId: string | null; htmlLink?: string; meetLink?: string | null }> {
   const config = await loadGoogleCalendarSyncConfig(db, options.userId);
   if (!config.enabled || !config.calendarId || !hasGoogleAuth(config)) {
     return { synced: false, eventId: options.existingEventId || null };
@@ -262,30 +274,37 @@ export async function upsertGoogleBookingEvent(
     start: { dateTime: toIso(options.start), timeZone: config.timezone },
     end: { dateTime: toIso(options.end), timeZone: config.timezone },
     attendees: options.attendeeEmail ? [{ email: options.attendeeEmail }] : undefined,
+    conferenceData: {
+      createRequest: {
+        requestId: `digitify-${options.bookingId || options.existingEventId || Date.now()}`,
+        conferenceSolutionKey: { type: "hangoutsMeet" },
+      },
+    },
   };
 
   if (options.existingEventId) {
     try {
-      const updated = await googleCalendarRequest<{ id?: string; htmlLink?: string }>(
+      const updated = await googleCalendarRequest<{ id?: string; htmlLink?: string; hangoutLink?: string; conferenceData?: GoogleEventItem["conferenceData"] }>(
         config,
-        `/events/${encodeURIComponent(options.existingEventId)}`,
+        `/events/${encodeURIComponent(options.existingEventId)}?conferenceDataVersion=1`,
         { method: "PATCH", body: JSON.stringify(payload) }
       );
       return {
         synced: true,
         eventId: updated.id || options.existingEventId,
         htmlLink: updated.htmlLink,
+        meetLink: extractMeetLinkFromEvent(updated),
       };
     } catch {
       // Fallback to create when previous event no longer exists.
     }
   }
 
-  const created = await googleCalendarRequest<{ id?: string; htmlLink?: string }>(config, "/events", {
+  const created = await googleCalendarRequest<{ id?: string; htmlLink?: string; hangoutLink?: string; conferenceData?: GoogleEventItem["conferenceData"] }>(config, "/events?conferenceDataVersion=1", {
     method: "POST",
     body: JSON.stringify(payload),
   });
-  return { synced: true, eventId: created.id || null, htmlLink: created.htmlLink };
+  return { synced: true, eventId: created.id || null, htmlLink: created.htmlLink, meetLink: extractMeetLinkFromEvent(created) };
 }
 
 export async function deleteGoogleBookingEvent(
@@ -340,6 +359,8 @@ export async function getGoogleBookingEvent(
       end: Date | null;
       summary: string;
       description: string;
+      htmlLink: string | null;
+      meetLink: string | null;
       attendeeEmails: string[];
     }
 > {
@@ -373,6 +394,8 @@ export async function getGoogleBookingEvent(
       end: null,
       summary: "",
       description: "",
+      htmlLink: null,
+      meetLink: null,
       attendeeEmails: [],
     };
   }
@@ -392,6 +415,8 @@ export async function getGoogleBookingEvent(
     end: eventDateToDate(event.end),
     summary: event.summary || "",
     description: event.description || "",
+    htmlLink: event.htmlLink || null,
+    meetLink: extractMeetLinkFromEvent(event),
     attendeeEmails: (event.attendees || [])
       .map((attendee) => attendee.email?.trim() || "")
       .filter(Boolean),
