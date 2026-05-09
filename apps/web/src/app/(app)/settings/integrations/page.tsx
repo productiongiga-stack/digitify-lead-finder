@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Label, Skeleton, Badge, Switch, Tabs, TabsContent, TabsList, TabsTrigger } from "@digitify/ui";
-import { ArrowLeft, Save, Loader2, Key, Eye, EyeOff, CheckCircle, XCircle, Bot, Globe, Mail, Inbox, Zap, AlertCircle, Settings2 } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Key, Eye, EyeOff, CheckCircle, XCircle, Bot, Globe, Mail, Inbox, Zap, AlertCircle, Settings2, CalendarDays } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
 import { readSettingBoolean, readSettingString } from "@/lib/settings";
@@ -189,6 +189,10 @@ export default function IntegrationsSettingsPage() {
   const [googlePlacesKey, setGooglePlacesKey] = useState("");
   const [googlePlacesConfigured, setGooglePlacesConfigured] = useState(false);
   const [showGoogleKey, setShowGoogleKey] = useState(false);
+  const [googleOAuthClientId, setGoogleOAuthClientId] = useState("");
+  const [googleOAuthClientSecret, setGoogleOAuthClientSecret] = useState("");
+  const [googleOAuthSecretConfigured, setGoogleOAuthSecretConfigured] = useState(false);
+  const [showGoogleOAuthSecret, setShowGoogleOAuthSecret] = useState(false);
 
   // AI
   const [anthropicKey, setAnthropicKey] = useState("");
@@ -226,6 +230,7 @@ export default function IntegrationsSettingsPage() {
   const effectiveTlsServername = smtpServername.trim() || recommendedTlsServername;
   const initialState = useMemo(() => ({
     googlePlacesKey: readSettingString(settings, "api.google_places_key"),
+    googleOAuthClientId: readSettingString(settings, "integrations.google_oauth_client_id"),
     anthropicKey: readSettingString(settings, "api.anthropic_key"),
     openaiKey: readSettingString(settings, "api.openai_key"),
     smtpHost: readSettingString(settings, "email.smtp_host"),
@@ -238,7 +243,10 @@ export default function IntegrationsSettingsPage() {
     imapUser: readSettingString(settings, "email.imap_user"),
     imapTls: readSettingBoolean(settings, "email.imap_tls", true),
   }), [settings]);
-  const googleDirty = googlePlacesKey.trim() !== initialState.googlePlacesKey;
+  const googleDirty =
+    googlePlacesKey.trim() !== initialState.googlePlacesKey
+    || googleOAuthClientId.trim() !== initialState.googleOAuthClientId
+    || Boolean(googleOAuthClientSecret.trim());
   const aiDirty = anthropicKey.trim() !== initialState.anthropicKey || openaiKey.trim() !== initialState.openaiKey;
   const smtpDirty =
     smtpHost.trim() !== initialState.smtpHost
@@ -265,16 +273,20 @@ export default function IntegrationsSettingsPage() {
   useEffect(() => {
     if (settings) {
       const googleKeyRaw = readSettingString(settings, "api.google_places_key");
+      const googleOAuthSecretRaw = readSettingString(settings, "integrations.google_oauth_client_secret");
       const anthropicKeyRaw = readSettingString(settings, "api.anthropic_key");
       const openaiKeyRaw = readSettingString(settings, "api.openai_key");
       const smtpPassRaw = readSettingString(settings, "email.smtp_pass");
       const imapPassRaw = readSettingString(settings, "email.imap_pass");
 
       setGooglePlacesConfigured(Boolean(googleKeyRaw));
+      setGoogleOAuthSecretConfigured(Boolean(googleOAuthSecretRaw));
       setAnthropicConfigured(Boolean(anthropicKeyRaw));
       setOpenaiConfigured(Boolean(openaiKeyRaw));
 
       setGooglePlacesKey(googleKeyRaw === SECRET_MASK ? "" : googleKeyRaw);
+      setGoogleOAuthClientId(readSettingString(settings, "integrations.google_oauth_client_id"));
+      setGoogleOAuthClientSecret(googleOAuthSecretRaw === SECRET_MASK ? "" : googleOAuthSecretRaw);
       setAnthropicKey(anthropicKeyRaw === SECRET_MASK ? "" : anthropicKeyRaw);
       setOpenaiKey(openaiKeyRaw === SECRET_MASK ? "" : openaiKeyRaw);
       setSmtpHost(readSettingString(settings, "email.smtp_host"));
@@ -301,6 +313,8 @@ export default function IntegrationsSettingsPage() {
   function handleSave() {
     batchUpdate.mutate([
       { key: "api.google_places_key", value: googlePlacesKey.trim() },
+      { key: "integrations.google_oauth_client_id", value: googleOAuthClientId.trim() },
+      { key: "integrations.google_oauth_client_secret", value: googleOAuthClientSecret },
       { key: "api.anthropic_key", value: anthropicKey.trim() },
       { key: "api.openai_key", value: openaiKey.trim() },
       { key: "email.smtp_host", value: smtpHost.trim() },
@@ -319,7 +333,11 @@ export default function IntegrationsSettingsPage() {
   }
 
   function handleSaveGoogle() {
-    batchUpdate.mutate([{ key: "api.google_places_key", value: googlePlacesKey.trim() }]);
+    batchUpdate.mutate([
+      { key: "api.google_places_key", value: googlePlacesKey.trim() },
+      { key: "integrations.google_oauth_client_id", value: googleOAuthClientId.trim() },
+      { key: "integrations.google_oauth_client_secret", value: googleOAuthClientSecret },
+    ]);
   }
 
   function handleSaveAi() {
@@ -414,8 +432,9 @@ export default function IntegrationsSettingsPage() {
       </div>
 
       <Tabs defaultValue="providers" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="providers">API & AI</TabsTrigger>
+          <TabsTrigger value="calendar">Google OAuth</TabsTrigger>
           <TabsTrigger value="mail">SMTP & DNS</TabsTrigger>
           <TabsTrigger value="inbox">Inbox (IMAP)</TabsTrigger>
         </TabsList>
@@ -602,6 +621,75 @@ export default function IntegrationsSettingsPage() {
             </div>
           </CardContent>
         </Card>
+        </TabsContent>
+
+        <TabsContent value="calendar" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-sky-500/10">
+                  <CalendarDays className="h-5 w-5 text-sky-500" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Google Calendar & Meet OAuth</CardTitle>
+                  <CardDescription className="text-xs">
+                    Globale Google app-credentials voor login. Elke gebruiker koppelt daarna zijn eigen agenda via Booking instellingen.
+                  </CardDescription>
+                </div>
+                {googleOAuthClientId.trim() && (googleOAuthSecretConfigured || googleOAuthClientSecret.trim()) ? (
+                  <Badge variant="success" className="ml-auto"><CheckCircle className="mr-1 h-3 w-3" /> Klaar</Badge>
+                ) : (
+                  <Badge variant="secondary" className="ml-auto"><XCircle className="mr-1 h-3 w-3" /> Niet compleet</Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>OAuth Client ID</Label>
+                <Input
+                  value={googleOAuthClientId}
+                  onChange={(event) => setGoogleOAuthClientId(event.target.value)}
+                  placeholder="...apps.googleusercontent.com"
+                  className="font-mono text-sm"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>OAuth Client Secret</Label>
+                <div className="relative">
+                  <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type={showGoogleOAuthSecret ? "text" : "password"}
+                    value={googleOAuthClientSecret}
+                    onChange={(event) => setGoogleOAuthClientSecret(event.target.value)}
+                    placeholder={googleOAuthSecretConfigured ? "Nieuwe secret invullen om te vervangen" : "GOCSPX-..."}
+                    className="pl-9 pr-10 font-mono text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowGoogleOAuthSecret(!showGoogleOAuthSecret)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showGoogleOAuthSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+              <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+                Redirect URL: <span className="font-mono text-foreground">https://leads.digitify.be/api/integrations/google-calendar/callback</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <Button variant="outline" size="sm" asChild>
+                  <Link href="/settings/bookings#google-agenda">
+                    <CalendarDays className="mr-2 h-3.5 w-3.5" />
+                    Mijn agenda koppelen
+                  </Link>
+                </Button>
+                <Button size="sm" onClick={handleSaveGoogle} disabled={batchUpdate.isPending || !googleDirty}>
+                  {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
+                  Google OAuth opslaan
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="mail" className="space-y-4">

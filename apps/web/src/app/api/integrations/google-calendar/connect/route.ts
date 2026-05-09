@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
+import { prisma } from "@digitify/db";
+import { loadGoogleOAuthClientConfig } from "@digitify/api/src/lib/google-calendar";
 import { getCurrentUser } from "@/lib/auth/session";
 
 function resolveAppUrl() {
@@ -31,8 +33,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(loginUrl);
   }
 
-  const clientId = process.env.GOOGLE_CLIENT_ID?.trim() || "";
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
+  const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(prisma as any);
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(new URL("/settings/bookings?google=missing-config", request.url));
   }

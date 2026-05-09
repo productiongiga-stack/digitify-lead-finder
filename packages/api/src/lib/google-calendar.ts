@@ -1,9 +1,13 @@
 import { createSign } from "node:crypto";
 import { getSettingBoolean, getSettingString, settingsRowsToMap, type SettingRow } from "./settings";
+import { loadUserSettingRows } from "./user-settings";
 
 type SettingsDb = {
   setting: {
     findMany: (args?: any) => Promise<SettingRow[]>;
+  };
+  user?: {
+    findFirst: (args?: any) => Promise<{ id: string } | null>;
   };
 };
 
@@ -17,6 +21,8 @@ export type GoogleCalendarSyncConfig = {
   oauthAccountEmail: string;
   timezone: string;
   appName: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
 };
 
 type GoogleEventWindow = {
@@ -79,10 +85,40 @@ function extractMeetLinkFromEvent(event: Pick<GoogleEventItem, "hangoutLink" | "
   return event.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video" && entry.uri)?.uri || null;
 }
 
+export async function loadGoogleOAuthClientConfig(db?: SettingsDb) {
+  const envClientId = process.env.GOOGLE_CLIENT_ID?.trim() || "";
+  const envClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
+  let ownerClientId = "";
+  let ownerClientSecret = "";
+
+  if (db?.user?.findFirst) {
+    const owner = await db.user.findFirst({
+      where: { role: "OWNER" },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+    if (owner?.id) {
+      const rows = await loadUserSettingRows(db as any, owner.id, [
+        "integrations.google_oauth_client_id",
+        "integrations.google_oauth_client_secret",
+      ]);
+      const settings = settingsRowsToMap(rows);
+      ownerClientId = getSettingString(settings, "integrations.google_oauth_client_id");
+      ownerClientSecret = getSettingString(settings, "integrations.google_oauth_client_secret");
+    }
+  }
+
+  return {
+    clientId: ownerClientId || envClientId,
+    clientSecret: ownerClientSecret || envClientSecret,
+    source: ownerClientId && ownerClientSecret ? "settings" : envClientId && envClientSecret ? "env" : "missing",
+  };
+}
+
 async function getAccessToken(config: GoogleCalendarSyncConfig) {
   if (config.oauthRefreshToken) {
-    const clientId = process.env.GOOGLE_CLIENT_ID?.trim() || "";
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
+    const clientId = config.oauthClientId;
+    const clientSecret = config.oauthClientSecret;
     if (!clientId || !clientSecret) {
       throw new Error("Google OAuth client is niet geconfigureerd.");
     }
@@ -201,6 +237,7 @@ export async function loadGoogleCalendarSyncConfig(db: SettingsDb, userId?: stri
       }))
     : await db.setting.findMany({ where: { key: { in: keys } } } as any);
   const map = settingsRowsToMap(settingRows);
+  const oauthClient = await loadGoogleOAuthClientConfig(db);
 
   return {
     enabled: getSettingBoolean(map, "bookings.google_sync_enabled", false),
@@ -212,6 +249,8 @@ export async function loadGoogleCalendarSyncConfig(db: SettingsDb, userId?: stri
     oauthAccountEmail: getSettingString(map, "bookings.google_oauth_account_email"),
     timezone: getSettingString(map, "bookings.google_calendar_timezone", "Europe/Brussels"),
     appName: getSettingString(map, "branding.company_name", "Digitify"),
+    oauthClientId: oauthClient.clientId,
+    oauthClientSecret: oauthClient.clientSecret,
   };
 }
 

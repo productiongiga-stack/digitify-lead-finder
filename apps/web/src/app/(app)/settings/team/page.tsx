@@ -7,7 +7,7 @@ import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Skeleton, Inpu
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@digitify/ui";
-import { ArrowLeft, UserPlus, Loader2, Trash2, AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
+import { ArrowLeft, UserPlus, Loader2, Trash2, AlertTriangle, CheckCircle2, XCircle, CalendarDays } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 
@@ -85,6 +85,7 @@ export default function TeamSettingsPage() {
               <TableHead>Naam</TableHead>
               <TableHead>E-mail</TableHead>
               <TableHead>Rol</TableHead>
+              <TableHead>Google Agenda</TableHead>
               <TableHead>Leads</TableHead>
               <TableHead>Lid sinds</TableHead>
               <TableHead className="w-[50px]"></TableHead>
@@ -94,7 +95,7 @@ export default function TeamSettingsPage() {
             {isLoading ? (
               Array.from({ length: 3 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 6 }).map((_, j) => (
+                  {Array.from({ length: 7 }).map((_, j) => (
                     <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                   ))}
                 </TableRow>
@@ -127,6 +128,21 @@ export default function TeamSettingsPage() {
                       </Select>
                     ) : (
                       <Badge variant="outline">{user.role.toLowerCase()}</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {user.googleCalendar?.connected ? (
+                      <div className="space-y-1">
+                        <Badge variant={user.googleCalendar.syncEnabled ? "success" : "secondary"}>
+                          <CalendarDays className="mr-1 h-3 w-3" />
+                          {user.googleCalendar.syncEnabled ? "Sync actief" : "Gekoppeld"}
+                        </Badge>
+                        <p className="max-w-[220px] truncate text-xs text-muted-foreground">
+                          {user.googleCalendar.accountEmail || user.googleCalendar.calendarId}
+                        </p>
+                      </div>
+                    ) : (
+                      <Badge variant="outline">Niet gekoppeld</Badge>
                     )}
                   </TableCell>
                   <TableCell>{user._count.leads}</TableCell>

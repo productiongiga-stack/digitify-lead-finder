@@ -7,6 +7,7 @@ const SECRET_SETTING_KEYS = new Set([
   "api.anthropic_key",
   "api.openai_key",
   "api.google_places_key",
+  "integrations.google_oauth_client_secret",
   "email.smtp_pass",
   "email.imap_pass",
   "bookings.google_oauth_access_token",

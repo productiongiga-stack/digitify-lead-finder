@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { prisma, protectSettingValue, revealSettingValue } from "@digitify/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { userSettingKey } from "@digitify/api/src/lib/user-settings";
+import { loadGoogleOAuthClientConfig } from "@digitify/api/src/lib/google-calendar";
 
 function resolveAppUrl() {
   const candidates = [
@@ -50,8 +51,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL("/settings/bookings?google=invalid-state", request.url));
   }
 
-  const clientId = process.env.GOOGLE_CLIENT_ID?.trim() || "";
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
+  const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(prisma as any);
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(new URL("/settings/bookings?google=missing-config", request.url));
   }

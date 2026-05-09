@@ -4,6 +4,8 @@ import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
 import { ensureUserWorkspace } from "../lib/user-workspace";
 import { passwordPolicySchema } from "../lib/password-policy";
+import { getSettingString, settingsRowsToMap } from "../lib/settings";
+import { loadUserSettingRows } from "../lib/user-settings";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -92,7 +94,7 @@ export const userRouter = router({
     }),
 
   list: adminProcedure.query(async ({ ctx }) => {
-    return ctx.db.user.findMany({
+    const users = await ctx.db.user.findMany({
       select: {
         id: true,
         email: true,
@@ -103,6 +105,42 @@ export const userRouter = router({
       },
       orderBy: { createdAt: "asc" },
     });
+    const googleStatuses = await Promise.all(
+      users.map(async (user) => {
+        const rows = await loadUserSettingRows(ctx.db, user.id, [
+          "bookings.google_sync_enabled",
+          "bookings.google_calendar_id",
+          "bookings.google_calendar_timezone",
+          "bookings.google_oauth_account_email",
+          "bookings.google_oauth_refresh_token",
+        ]);
+        const settings = settingsRowsToMap(rows);
+        const oauthEmail = getSettingString(settings, "bookings.google_oauth_account_email");
+        const calendarId = getSettingString(settings, "bookings.google_calendar_id");
+        const refreshToken = getSettingString(settings, "bookings.google_oauth_refresh_token");
+        return {
+          userId: user.id,
+          googleCalendar: {
+            connected: Boolean(oauthEmail && refreshToken),
+            syncEnabled: String(settings["bookings.google_sync_enabled"] ?? "").toLowerCase() === "true",
+            accountEmail: oauthEmail,
+            calendarId,
+            timezone: getSettingString(settings, "bookings.google_calendar_timezone", "Europe/Brussels"),
+          },
+        };
+      }),
+    );
+    const statusByUserId = new Map(googleStatuses.map((status) => [status.userId, status.googleCalendar]));
+    return users.map((user) => ({
+      ...user,
+      googleCalendar: statusByUserId.get(user.id) || {
+        connected: false,
+        syncEnabled: false,
+        accountEmail: "",
+        calendarId: "",
+        timezone: "Europe/Brussels",
+      },
+    }));
   }),
 
   updateRole: ownerProcedure
