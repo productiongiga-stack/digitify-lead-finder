@@ -992,6 +992,26 @@ export const bookingRouter = router({
       });
     }),
 
+  deleteEventType: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const eventType = await ctx.db.bookingEventType.findFirst({
+        where: { id: input.id, createdById: ctx.user.id },
+      });
+      if (!eventType) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Bookingtype niet gevonden" });
+      }
+      if (eventType.isDefault) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Het standaard boekingstype kan niet verwijderd worden." });
+      }
+      // Soft-delete: set isActive to false, preserves booking history
+      await ctx.db.bookingEventType.update({
+        where: { id: input.id },
+        data: { isActive: false },
+      });
+      return { success: true };
+    }),
+
   getAnalyticsSummary: protectedProcedure
     .input(
       z

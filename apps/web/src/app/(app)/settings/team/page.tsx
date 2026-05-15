@@ -3,13 +3,55 @@
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { trpc } from "@/lib/trpc/client";
-import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Skeleton, Input, Label } from "@digitify/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Skeleton, Input, Label, Switch } from "@digitify/ui";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@digitify/ui";
-import { ArrowLeft, UserPlus, Loader2, Trash2, AlertTriangle, CheckCircle2, XCircle, CalendarDays } from "lucide-react";
+import { ArrowLeft, UserPlus, Loader2, Trash2, AlertTriangle, CheckCircle2, XCircle, CalendarDays, Layers } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
+import { ALL_MODULES } from "@/lib/navigation";
+
+// ─── Module Access Panel (owner-only) ─────────────────────────────────────────
+
+function ModuleAccessPanel({ userId, userName }: { userId: string; userName: string }) {
+  const utils = trpc.useUtils();
+  const { data, isLoading } = trpc.user.getUserModules.useQuery({ userId });
+  const setModule = trpc.user.setUserModule.useMutation({
+    onSuccess: () => {
+      utils.user.getUserModules.invalidate({ userId });
+    },
+  });
+
+  const disabledSet = new Set(data?.disabled || []);
+
+  if (isLoading) return <Skeleton className="h-40 w-full" />;
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        Module-toegang voor <strong>{userName}</strong>. Uitgeschakelde modules verschijnen niet in de sidebar.
+      </p>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {ALL_MODULES.map((mod) => {
+          const enabled = !disabledSet.has(mod.id);
+          return (
+            <div key={mod.id} className="flex items-center justify-between rounded-xl border px-3 py-2 text-sm">
+              <span className={enabled ? "" : "text-muted-foreground"}>{mod.label}</span>
+              <Switch
+                checked={enabled}
+                disabled={setModule.isPending}
+                onCheckedChange={(value) =>
+                  setModule.mutate({ userId, module: mod.id, enabled: value })
+                }
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function TeamSettingsPage() {
   const { data: session } = useSession();
@@ -59,6 +101,7 @@ export default function TeamSettingsPage() {
   const [inviteRole, setInviteRole] = useState<"ADMIN" | "MODERATOR" | "MEMBER" | "TRIAL" | "TESTER" | "VIEWER">("MEMBER");
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string | null } | null>(null);
+  const [moduleTarget, setModuleTarget] = useState<{ id: string; name: string } | null>(null);
 
   return (
     <div className="space-y-5">
@@ -149,14 +192,25 @@ export default function TeamSettingsPage() {
                   <TableCell className="text-sm text-muted-foreground">{formatDate(user.createdAt)}</TableCell>
                   <TableCell>
                     {canManageUsers ? (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                        onClick={() => setDeleteTarget({ id: user.id, name: user.name })}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          title="Module toegang"
+                          onClick={() => setModuleTarget({ id: user.id, name: user.name || user.email })}
+                        >
+                          <Layers className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          onClick={() => setDeleteTarget({ id: user.id, name: user.name })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     ) : null}
                   </TableCell>
                 </TableRow>
@@ -165,6 +219,27 @@ export default function TeamSettingsPage() {
           </TableBody>
         </Table>
       </Card>
+
+      {/* Module access modal */}
+      {moduleTarget && canManageUsers && (
+        <Dialog open={!!moduleTarget} onOpenChange={(open) => !open && setModuleTarget(null)}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Layers className="h-5 w-5" />
+                Module toegang
+              </DialogTitle>
+              <DialogDescription>
+                Schakel modules in of uit voor {moduleTarget.name}.
+              </DialogDescription>
+            </DialogHeader>
+            <ModuleAccessPanel userId={moduleTarget.id} userName={moduleTarget.name} />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setModuleTarget(null)}>Sluiten</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       <Card>
         <CardHeader>

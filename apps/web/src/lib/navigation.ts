@@ -34,6 +34,7 @@ export type NavItem = {
   href: string;
   label: string;
   icon: LucideIcon;
+  moduleId?: string; // used for per-user module toggle
   activeMatch?: (pathname: string) => boolean;
 };
 
@@ -41,6 +42,7 @@ export type QuickNavItem = {
   href: string;
   label: string;
   icon: LucideIcon;
+  moduleId?: string;
 };
 
 export const MAIN_NAV_ITEMS: NavItem[] = [
@@ -58,15 +60,15 @@ export const MAIN_NAV_ITEMS: NavItem[] = [
 
 export const LEADS_WORKFLOW_ITEMS: QuickNavItem[] = [
   { href: "/leads/search", label: "Leads zoeken", icon: Search },
-  { href: "/campaigns", label: "Campagnes", icon: Target },
-  { href: "/contacts", label: "Outbound", icon: SendHorizonal },
-  { href: "/contacts/inbox", label: "Inbox", icon: Inbox },
-  { href: "/quotes", label: "Offertes", icon: Receipt },
-  { href: "/invoices", label: "Facturen", icon: Receipt },
-  { href: "/reports", label: "Rapporten", icon: FileText },
-  { href: "/crm", label: "CRM", icon: Building2 },
-  { href: "/tasks", label: "Taken", icon: CheckSquare },
-  { href: "/templates", label: "Templates", icon: Library },
+  { href: "/campaigns", label: "Campagnes", icon: Target, moduleId: "campaigns" },
+  { href: "/contacts", label: "Outbound", icon: SendHorizonal, moduleId: "contacts" },
+  { href: "/contacts/inbox", label: "Inbox", icon: Inbox, moduleId: "contacts" },
+  { href: "/quotes", label: "Offertes", icon: Receipt, moduleId: "quotes" },
+  { href: "/invoices", label: "Facturen", icon: Receipt, moduleId: "invoices" },
+  { href: "/reports", label: "Rapporten", icon: FileText, moduleId: "reports" },
+  { href: "/crm", label: "CRM", icon: Building2, moduleId: "crm" },
+  { href: "/tasks", label: "Taken", icon: CheckSquare, moduleId: "tasks" },
+  { href: "/templates", label: "Templates", icon: Library, moduleId: "templates" },
 ];
 
 export const LEADS_MENU_ITEMS: QuickNavItem[] = [
@@ -75,12 +77,29 @@ export const LEADS_MENU_ITEMS: QuickNavItem[] = [
 ];
 
 export const TOOL_NAV_ITEMS: NavItem[] = [
-  { href: "/bookings", label: "Boekingen", icon: Calendar },
-  { href: "/domains", label: "Domeinen", icon: Globe2 },
-  { href: "/reviews", label: "Reviews", icon: Star },
-  { href: "/chatbot", label: "Chatbot", icon: MessageSquare },
-  { href: "/audit", label: "Website Audit", icon: ScanSearch },
+  { href: "/bookings", label: "Boekingen", icon: Calendar, moduleId: "bookings" },
+  { href: "/domains", label: "Domeinen", icon: Globe2, moduleId: "domains" },
+  { href: "/reviews", label: "Reviews", icon: Star, moduleId: "reviews" },
+  { href: "/chatbot", label: "Chatbot", icon: MessageSquare, moduleId: "chatbot" },
+  { href: "/audit", label: "Website Audit", icon: ScanSearch, moduleId: "audit" },
 ];
+
+// All toggleable modules available for owner management
+export const ALL_MODULES = [
+  { id: "bookings", label: "Boekingen" },
+  { id: "campaigns", label: "Campagnes" },
+  { id: "contacts", label: "Outbound / Contacten" },
+  { id: "quotes", label: "Offertes" },
+  { id: "invoices", label: "Facturen" },
+  { id: "reports", label: "Rapporten" },
+  { id: "crm", label: "CRM" },
+  { id: "tasks", label: "Taken" },
+  { id: "templates", label: "Templates" },
+  { id: "domains", label: "Domeinen" },
+  { id: "reviews", label: "Reviews" },
+  { id: "chatbot", label: "Chatbot" },
+  { id: "audit", label: "Website Audit" },
+] as const;
 
 export const BOTTOM_NAV_ITEMS: NavItem[] = [
   { href: "/settings", label: "Instellingen", icon: Settings },

@@ -4,6 +4,8 @@ import { loadEmailSettings, sendBrandedEmail } from "@digitify/api/src/lib/email
 import { log } from "@digitify/api/src/lib/logger";
 import { deleteGoogleBookingEvent, getGoogleBookingEvent, upsertGoogleBookingEvent } from "@digitify/api/src/lib/google-calendar";
 import { buildIcsAttachment, getStoredGoogleEventId, removeLegacyGoogleEventId } from "@digitify/api/src/lib/booking-utils";
+import { loadUserSettingRows } from "@digitify/api/src/lib/user-settings";
+import { getSettingBoolean, settingsRowsToMap } from "@digitify/api/src/lib/settings";
 
 function isAuthorized(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -330,11 +332,31 @@ async function runBookingsSync(request: Request) {
     take: 200,
   });
 
+  // Cache reminder settings per user to avoid redundant DB lookups
+  const reminderSettingsCache = new Map<string, { enabled24h: boolean; enabled1h: boolean }>();
+
   for (const booking of reminderCandidates) {
     const msUntil = booking.date.getTime() - Date.now();
     const due24h = msUntil <= 24 * 60 * 60_000 && !booking.reminder24hSentAt;
     const due1h = msUntil <= 60 * 60_000 && !booking.reminder1hSentAt;
     if (!due24h && !due1h) continue;
+
+    // Check per-user reminder toggles (default: enabled)
+    if (!reminderSettingsCache.has(booking.createdById)) {
+      const rows = await loadUserSettingRows(prisma as any, booking.createdById, [
+        "bookings.reminders_24h_enabled",
+        "bookings.reminders_1h_enabled",
+      ]).catch(() => [] as any[]);
+      const map = settingsRowsToMap(rows);
+      reminderSettingsCache.set(booking.createdById, {
+        enabled24h: getSettingBoolean(map, "bookings.reminders_24h_enabled", true),
+        enabled1h: getSettingBoolean(map, "bookings.reminders_1h_enabled", true),
+      });
+    }
+    const reminderSettings = reminderSettingsCache.get(booking.createdById)!;
+    if (due24h && !reminderSettings.enabled24h) continue;
+    if (due1h && !reminderSettings.enabled1h) continue;
+
     const emailCfg = await loadEmailSettings(prisma, booking.createdById).catch(() => null);
     const companyName = emailCfg?.companyName || emailCfg?.fromName || "Digitify";
     const title = due1h ? `Herinnering: uw afspraak start bijna` : `Herinnering: uw afspraak bij ${companyName}`;

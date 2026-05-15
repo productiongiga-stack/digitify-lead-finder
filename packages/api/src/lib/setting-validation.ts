@@ -18,6 +18,8 @@ const BOOLEAN_SETTING_KEYS = new Set([
   "chatbot.ai_responses_enabled",
   "chatbot.ask_name_before_chat",
   "bookings.google_sync_enabled",
+  "bookings.reminders_24h_enabled",
+  "bookings.reminders_1h_enabled",
   "email.smtp_tls_reject_unauthorized",
   "email.imap_tls",
 ]);
@@ -73,6 +75,9 @@ function isLikelyEmailKey(key: string) {
   );
 }
 
+// Keys that hold webhook endpoints — need http(s):// but NOT data:image validation
+const WEBHOOK_URL_KEYS = new Set(["bookings.webhook_url"]);
+
 function isLikelyUrlKey(key: string) {
   return key.endsWith("_url") || key === "branding.logo_url" || key === "branding.favicon_url";
 }
@@ -123,6 +128,21 @@ function validateStringValue(key: string, value: string) {
         invalid(`Instelling "${key}" bevat een ongeldig website-formaat.`);
       }
     }
+  }
+
+  if (WEBHOOK_URL_KEYS.has(key) && value) {
+    if (!/^https?:\/\//i.test(value)) {
+      invalid(`Instelling "${key}" verwacht een https:// URL.`);
+    }
+    try {
+      const parsed = new URL(value);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        invalid(`Instelling "${key}" gebruikt een ongeldig URL protocol.`);
+      }
+    } catch {
+      invalid(`Instelling "${key}" bevat een ongeldig URL-formaat.`);
+    }
+    return;
   }
 
   if (isLikelyUrlKey(key) && !isWebsiteKey(key) && value) {

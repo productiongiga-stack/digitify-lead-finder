@@ -19,13 +19,25 @@ import {
   Bot,
   X,
 } from "lucide-react";
+import { trpc } from "@/lib/trpc/client";
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { sidebarCollapsed, toggleSidebar, mobileSidebarOpen, setMobileSidebarOpen } = useUIStore();
   const { branding } = useBranding();
-  const hasLeadWorkflowMatch = LEADS_MENU_ITEMS.some(
+
+  // Load user's disabled modules (cached for 5 min)
+  const { data: moduleAccess } = trpc.user.getMyModules.useQuery(undefined, {
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+  const disabledModules = new Set(moduleAccess?.disabled || []);
+
+  const visibleToolNav = TOOL_NAV_ITEMS.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId));
+  const visibleLeadsMenu = LEADS_MENU_ITEMS.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId));
+
+  const hasLeadWorkflowMatch = visibleLeadsMenu.some(
     (entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`)
   );
   const [leadWorkflowOpen, setLeadWorkflowOpen] = useState(hasLeadWorkflowMatch);
@@ -65,7 +77,7 @@ export function Sidebar() {
   const logoUrl = branding.logoUrl;
   const brandName = branding.companyName || process.env.NEXT_PUBLIC_APP_NAME || "Lead Finder";
   const brandSlogan = branding.companySlogan;
-  const hasToolNav = TOOL_NAV_ITEMS.length > 0;
+  const hasToolNav = visibleToolNav.length > 0;
 
   const renderContent = (mobile: boolean) => {
     const collapsed = mobile ? false : sidebarCollapsed;
@@ -119,7 +131,7 @@ export function Sidebar() {
           {MAIN_NAV_ITEMS.map((item) => {
             const isLeadNavItem = item.href === "/leads";
             const activeLeadMenuHref = isLeadNavItem
-              ? LEADS_MENU_ITEMS
+              ? visibleLeadsMenu
                   .filter((entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`))
                   .sort((left, right) => right.href.length - left.href.length)[0]?.href
               : undefined;
@@ -167,7 +179,7 @@ export function Sidebar() {
                   </div>
                   {leadWorkflowOpen && !collapsed ? (
                     <div className="ml-6 space-y-1 border-l pl-2">
-                      {LEADS_MENU_ITEMS.map((entry) => {
+                      {visibleLeadsMenu.map((entry) => {
                         const workflowActive = activeLeadMenuHref === entry.href;
                         return (
                           <Link
@@ -224,7 +236,7 @@ export function Sidebar() {
             )}
 
             <nav className="space-y-1 px-2">
-              {TOOL_NAV_ITEMS.map((item) => {
+              {visibleToolNav.map((item) => {
                 const isActive = isNavItemActive(item, pathname);
                 return (
                   <Link

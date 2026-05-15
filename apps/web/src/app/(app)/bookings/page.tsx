@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { cn } from "@/lib/utils";
-import { readSettingBoolean } from "@/lib/settings";
+import { readSettingBoolean, readSettingString } from "@/lib/settings";
+import { getAppUrl } from "@/lib/config";
 import {
   Card, CardContent, CardHeader, CardTitle, Badge, Button, Skeleton,
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -294,6 +295,8 @@ export default function BookingsPage() {
   }).slice(0, 5);
   const compactFromSettings = readSettingBoolean(settingsData, "ui.bookings_compact", false);
   const effectiveCompactMode = compactMode || compactFromSettings;
+  const publicTenantToken = readSettingString(settingsData, "chatbot.public_tenant_token", "");
+  const bookingEmbedUrl = `${getAppUrl()}/embed/bookings${publicTenantToken ? `?tenant=${encodeURIComponent(publicTenantToken)}` : ""}`;
 
   return (
     <div className="app-page">
@@ -340,9 +343,11 @@ export default function BookingsPage() {
               Instellingen
             </Button>
           </Link>
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Nieuwe Boeking
+          <Button size="sm" asChild>
+            <a href={bookingEmbedUrl} target="_blank" rel="noopener noreferrer">
+              <Plus className="mr-2 h-4 w-4" />
+              Nieuwe Boeking
+            </a>
           </Button>
         </div>
       </div>

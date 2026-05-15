@@ -11,12 +11,16 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  Clock,
   Copy,
   ExternalLink,
   Globe2,
   ListChecks,
+  Pencil,
+  Plus,
   Save,
   Settings2,
+  Trash2,
   Webhook,
   Zap,
 } from "lucide-react";
@@ -158,9 +162,264 @@ function buildBookingSnapshot(input: {
   webhookUrl: string;
   webhookSecret: string;
   webhookEvents: string[];
+  reminders24hEnabled: boolean;
+  reminders1hEnabled: boolean;
 }) {
   return JSON.stringify(input);
 }
+
+// ─── Booking Event Type Manager ───────────────────────────────────────────────
+
+function BookingEventTypeManager({ publicTenantToken }: { publicTenantToken: string }) {
+  const utils = trpc.useUtils();
+  const { showToast } = useToast();
+  const { data: eventTypes, isLoading } = trpc.booking.listEventTypes.useQuery();
+  const [editTarget, setEditTarget] = useState<null | {
+    id?: string;
+    name: string;
+    slug: string;
+    description: string;
+    duration: number;
+    slotMinutes: number;
+    color: string;
+    location: string;
+    approvalMode: string;
+    isActive: boolean;
+  }>(null);
+  const [deleteTarget, setDeleteTarget] = useState<null | { id: string; name: string }>(null);
+
+  const upsertMutation = trpc.booking.upsertEventType.useMutation({
+    onSuccess: () => {
+      utils.booking.listEventTypes.invalidate();
+      setEditTarget(null);
+      showToast({ title: "Boekingstype opgeslagen" });
+    },
+    onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
+  });
+
+  const deleteMutation = trpc.booking.deleteEventType.useMutation({
+    onSuccess: () => {
+      utils.booking.listEventTypes.invalidate();
+      setDeleteTarget(null);
+      showToast({ title: "Boekingstype verwijderd" });
+    },
+    onError: (error) => showToast({ title: "Verwijderen mislukt", description: error.message, variant: "error" }),
+  });
+
+  function openCreate() {
+    setEditTarget({
+      name: "",
+      slug: "",
+      description: "",
+      duration: 60,
+      slotMinutes: 30,
+      color: "#f9ae5a",
+      location: "Google Meet",
+      approvalMode: "manual",
+      isActive: true,
+    });
+  }
+
+  function openEdit(et: NonNullable<typeof eventTypes>[number]) {
+    setEditTarget({
+      id: et.id,
+      name: et.name,
+      slug: et.slug,
+      description: et.description || "",
+      duration: et.duration,
+      slotMinutes: et.slotMinutes,
+      color: et.color,
+      location: et.location || "",
+      approvalMode: et.approvalMode,
+      isActive: et.isActive,
+    });
+  }
+
+  function handleSave() {
+    if (!editTarget || !editTarget.name.trim()) return;
+    upsertMutation.mutate({
+      id: editTarget.id,
+      name: editTarget.name.trim(),
+      slug: editTarget.slug.trim() || undefined,
+      description: editTarget.description,
+      duration: editTarget.duration,
+      slotMinutes: editTarget.slotMinutes,
+      color: editTarget.color,
+      location: editTarget.location,
+      approvalMode: editTarget.approvalMode,
+      isActive: editTarget.isActive,
+    });
+  }
+
+  if (isLoading) return <Skeleton className="h-40 w-full" />;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <Label>Boekingstypes</Label>
+          <p className="text-xs text-muted-foreground">
+            Maak meerdere types aan — elk met eigen duur, beschikbaarheid en embed URL.
+          </p>
+        </div>
+        <Button size="sm" type="button" onClick={openCreate}>
+          <Plus className="mr-1.5 h-4 w-4" />
+          Nieuw type
+        </Button>
+      </div>
+
+      <div className="space-y-2">
+        {(eventTypes || []).map((et) => {
+          const embedUrl = `${getAppUrl()}/embed/bookings${publicTenantToken ? `?tenant=${encodeURIComponent(publicTenantToken)}&eventType=${encodeURIComponent(et.slug)}` : ""}`;
+          return (
+            <div key={et.id} className="flex items-center gap-3 rounded-xl border px-4 py-3">
+              <div
+                className="h-3 w-3 shrink-0 rounded-full"
+                style={{ backgroundColor: et.color }}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="truncate text-sm font-medium">{et.name}</p>
+                  {et.isDefault && (
+                    <Badge variant="secondary" className="text-xs">Standaard</Badge>
+                  )}
+                  {!et.isActive && (
+                    <Badge variant="destructive" className="text-xs">Inactief</Badge>
+                  )}
+                </div>
+                <div className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {et.duration} min
+                  </span>
+                  <span className="font-mono">/{et.slug}</span>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                {publicTenantToken && (
+                  <Button size="sm" variant="ghost" asChild>
+                    <a href={embedUrl} target="_blank" rel="noreferrer">
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" type="button" onClick={() => openEdit(et)}>
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                {!et.isDefault && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    type="button"
+                    onClick={() => setDeleteTarget({ id: et.id, name: et.name })}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Edit / Create modal */}
+      {editTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEditTarget(null)}>
+          <div className="w-full max-w-md space-y-4 rounded-2xl bg-background p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold">{editTarget.id ? "Boekingstype bewerken" : "Nieuw boekingstype"}</h3>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label>Naam *</Label>
+                <Input
+                  value={editTarget.name}
+                  onChange={(e) => setEditTarget((t) => t ? { ...t, name: e.target.value } : t)}
+                  placeholder="bijv. Intake gesprek"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Duur (min)</Label>
+                  <Input
+                    type="number"
+                    min={5}
+                    max={480}
+                    value={editTarget.duration}
+                    onChange={(e) => setEditTarget((t) => t ? { ...t, duration: Number(e.target.value) } : t)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Interval (min)</Label>
+                  <Input
+                    type="number"
+                    min={5}
+                    max={240}
+                    value={editTarget.slotMinutes}
+                    onChange={(e) => setEditTarget((t) => t ? { ...t, slotMinutes: Number(e.target.value) } : t)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label>Locatie</Label>
+                <Input
+                  value={editTarget.location}
+                  onChange={(e) => setEditTarget((t) => t ? { ...t, location: e.target.value } : t)}
+                  placeholder="Google Meet"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Beschrijving</Label>
+                <Textarea
+                  value={editTarget.description}
+                  onChange={(e) => setEditTarget((t) => t ? { ...t, description: e.target.value } : t)}
+                  rows={2}
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-xl border px-3 py-2">
+                <Label className="cursor-pointer">Actief</Label>
+                <Switch
+                  checked={editTarget.isActive}
+                  onCheckedChange={(v) => setEditTarget((t) => t ? { ...t, isActive: v } : t)}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" type="button" onClick={() => setEditTarget(null)}>Annuleren</Button>
+              <Button type="button" disabled={upsertMutation.isPending || !editTarget.name.trim()} onClick={handleSave}>
+                {upsertMutation.isPending ? "Opslaan..." : "Opslaan"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDeleteTarget(null)}>
+          <div className="w-full max-w-sm space-y-4 rounded-2xl bg-background p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold">Boekingstype verwijderen?</h3>
+            <p className="text-sm text-muted-foreground">
+              <strong>{deleteTarget.name}</strong> wordt op inactief gezet. Bestaande boekingen blijven bewaard.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" type="button" onClick={() => setDeleteTarget(null)}>Annuleren</Button>
+              <Button
+                variant="destructive"
+                type="button"
+                disabled={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate({ id: deleteTarget.id })}
+              >
+                {deleteMutation.isPending ? "Verwijderen..." : "Verwijderen"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main Settings Page ────────────────────────────────────────────────────────
 
 export default function BookingSettingsPage() {
   const searchParams = useSearchParams();
@@ -220,6 +479,8 @@ export default function BookingSettingsPage() {
   const [webhookUrl, setWebhookUrl] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
   const [webhookEvents, setWebhookEvents] = useState<WebhookEventKey[]>([]);
+  const [reminders24hEnabled, setReminders24hEnabled] = useState(true);
+  const [reminders1hEnabled, setReminders1hEnabled] = useState(true);
 
   useEffect(() => {
     const googleStatus = searchParams.get("google");
@@ -331,6 +592,11 @@ export default function BookingSettingsPage() {
     setWebhookUrl(nextWebhookUrl);
     setWebhookSecret(nextWebhookSecret);
     setWebhookEvents(nextWebhookEvents);
+    setReminders24hEnabled(readSettingBoolean(settings, "bookings.reminders_24h_enabled", true));
+    setReminders1hEnabled(readSettingBoolean(settings, "bookings.reminders_1h_enabled", true));
+
+    const nextReminders24h = readSettingBoolean(settings, "bookings.reminders_24h_enabled", true);
+    const nextReminders1h = readSettingBoolean(settings, "bookings.reminders_1h_enabled", true);
 
     setSnapshot(
       buildBookingSnapshot({
@@ -356,6 +622,8 @@ export default function BookingSettingsPage() {
         webhookUrl: nextWebhookUrl,
         webhookSecret: nextWebhookSecret,
         webhookEvents: nextWebhookEvents,
+        reminders24hEnabled: nextReminders24h,
+        reminders1hEnabled: nextReminders1h,
       })
     );
   }, [settings]);
@@ -400,6 +668,8 @@ export default function BookingSettingsPage() {
         webhookUrl,
         webhookSecret,
         webhookEvents,
+        reminders24hEnabled,
+        reminders1hEnabled,
       }),
     [
       title,
@@ -424,6 +694,8 @@ export default function BookingSettingsPage() {
       webhookUrl,
       webhookSecret,
       webhookEvents,
+      reminders24hEnabled,
+      reminders1hEnabled,
     ]
   );
 
@@ -511,6 +783,17 @@ export default function BookingSettingsPage() {
   }
 
   function handleSave() {
+    // Client-side webhook URL validation
+    const webhookUrlTrimmed = webhookUrl.trim();
+    if (webhookUrlTrimmed && !/^https?:\/\//i.test(webhookUrlTrimmed)) {
+      showToast({
+        title: "Ongeldige webhook URL",
+        description: "Webhook URL moet beginnen met https:// of http://",
+        variant: "error",
+      });
+      return;
+    }
+
     const entries = [
       { key: "bookings.embed_title", value: title },
       { key: "bookings.embed_description", value: description },
@@ -533,11 +816,12 @@ export default function BookingSettingsPage() {
       { key: "bookings.google_service_account_email", value: googleServiceAccountEmail.trim() },
       { key: "bookings.google_service_account_private_key", value: googleServicePrivateKey },
       { key: "bookings.google_calendar_timezone", value: googleTimezone.trim() || "Europe/Brussels" },
-      { key: "bookings.google_calendar_url", value: "" },
       { key: "bookings.default_approval_mode", value: approvalMode },
-      { key: "bookings.webhook_url", value: webhookUrl.trim() },
+      { key: "bookings.webhook_url", value: webhookUrlTrimmed },
       { key: "bookings.webhook_secret", value: webhookSecret },
       { key: "bookings.webhook_events", value: webhookEvents.join(",") },
+      { key: "bookings.reminders_24h_enabled", value: String(reminders24hEnabled) },
+      { key: "bookings.reminders_1h_enabled", value: String(reminders1hEnabled) },
     ];
 
     batchUpdate.mutate(entries, {
@@ -794,6 +1078,7 @@ export default function BookingSettingsPage() {
                 <TabsTrigger value="automations">Automaties</TabsTrigger>
                 <TabsTrigger value="google">Google</TabsTrigger>
                 <TabsTrigger value="embed">Embed</TabsTrigger>
+                <TabsTrigger value="types">Boekingstypes</TabsTrigger>
               </TabsList>
 
               <TabsContent value="flow" className="space-y-4 rounded-2xl border p-4">
@@ -1004,27 +1289,29 @@ export default function BookingSettingsPage() {
                     Herinneringen
                   </Label>
                   <p className="text-xs text-muted-foreground">
-                    Automatische e-mailherinneringen voor komende afspraken. Geen configuratie nodig.
+                    Automatische e-mailherinneringen voor bevestigde afspraken.
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-950/20">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                  <div className="flex items-center justify-between gap-3 rounded-xl border px-4 py-3">
                     <div>
-                      <p className="text-sm font-medium text-emerald-800 dark:text-emerald-400">24u-herinnering actief</p>
-                      <p className="text-xs text-emerald-700 dark:text-emerald-500">
-                        Klanten ontvangen automatisch een herinnering 24 uur voor hun afspraak.
-                      </p>
+                      <p className="text-sm font-medium">24u-herinnering</p>
+                      <p className="text-xs text-muted-foreground">E-mail 24 uur voor de afspraak.</p>
                     </div>
+                    <Switch
+                      checked={reminders24hEnabled}
+                      onCheckedChange={setReminders24hEnabled}
+                    />
                   </div>
-                  <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-950/20">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                  <div className="flex items-center justify-between gap-3 rounded-xl border px-4 py-3">
                     <div>
-                      <p className="text-sm font-medium text-emerald-800 dark:text-emerald-400">1u-herinnering actief</p>
-                      <p className="text-xs text-emerald-700 dark:text-emerald-500">
-                        Klanten ontvangen automatisch een herinnering 1 uur voor hun afspraak.
-                      </p>
+                      <p className="text-sm font-medium">1u-herinnering</p>
+                      <p className="text-xs text-muted-foreground">E-mail 1 uur voor de afspraak.</p>
                     </div>
+                    <Switch
+                      checked={reminders1hEnabled}
+                      onCheckedChange={setReminders1hEnabled}
+                    />
                   </div>
                 </div>
 
@@ -1203,29 +1490,45 @@ export default function BookingSettingsPage() {
               </TabsContent>
 
               <TabsContent value="embed" className="space-y-4 rounded-2xl border p-4">
-                <div>
-                  <Label>Embed gebruik</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Open de pagina live of kopieer de iframe-code uit de previewkolom.
-                  </p>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-2xl border p-4">
-                    <p className="text-sm font-medium">Live bookingpagina</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Controleer de compacte publieke flow rechtstreeks in de browser.
-                    </p>
-                    <Button className="mt-3" type="button" variant="outline" asChild>
-                      <a href={bookingPreviewUrl} target="_blank" rel="noreferrer">Open voorbeeld</a>
-                    </Button>
-                  </div>
-                  <div className="rounded-2xl border p-4">
-                    <p className="text-sm font-medium">Opslag</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Alle velden in deze tabs worden centraal opgeslagen voor de bookingflow.
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <Label>Live preview</Label>
+                    <p className="text-xs text-muted-foreground">
+                      De echte booking widget — exact wat je klanten zien.
                     </p>
                   </div>
+                  <Button type="button" variant="outline" size="sm" asChild>
+                    <a href={bookingPreviewUrl} target="_blank" rel="noreferrer">
+                      <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                      Openen
+                    </a>
+                  </Button>
                 </div>
+                {publicTenantToken ? (
+                  <div className="overflow-hidden rounded-2xl border bg-muted/20" style={{ height: 560 }}>
+                    <iframe
+                      key={bookingPreviewUrl}
+                      src={bookingPreviewUrl}
+                      className="h-full w-full"
+                      style={{ border: 0 }}
+                      title="Booking widget preview"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed bg-muted/20 p-6 text-center">
+                    <div>
+                      <Globe2 className="mx-auto mb-2 h-8 w-8 text-muted-foreground/40" />
+                      <p className="text-sm font-medium text-muted-foreground">Geen tenant token</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Genereer een publiek token via de chatbot-instellingen om de live preview te activeren.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="types" className="space-y-4 rounded-2xl border p-4">
+                <BookingEventTypeManager publicTenantToken={publicTenantToken} />
               </TabsContent>
             </Tabs>
 
@@ -1238,8 +1541,8 @@ export default function BookingSettingsPage() {
 
         <Card className="xl:sticky xl:top-20">
           <CardHeader>
-            <CardTitle className="text-base">Embed & Preview</CardTitle>
-            <CardDescription>Kopieer de iframe-code voor je website.</CardDescription>
+            <CardTitle className="text-base">Embed code</CardTitle>
+            <CardDescription>Plak deze iframe-code op je website.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="relative">
@@ -1249,32 +1552,12 @@ export default function BookingSettingsPage() {
                 {copied ? "Gekopieerd" : "Kopieer"}
               </Button>
             </div>
-            <div className={`rounded-3xl border p-5 shadow-sm ${theme === "dark" ? "bg-[#171717] text-white" : "bg-[#fcfaf5]"}`}>
-              <div
-                className="inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-white"
-                style={{ backgroundColor: color }}
-              >
-                Booking preview
-              </div>
-              <h3 className="mt-4 text-xl font-semibold tracking-tight">{meetingName || title}</h3>
-              <p className={`mt-2 text-sm leading-6 ${theme === "dark" ? "text-white/70" : "text-muted-foreground"}`}>
-                {description}
-              </p>
-              <div className={`mt-5 grid gap-2 text-sm ${theme === "dark" ? "text-white/70" : "text-muted-foreground"}`}>
-                <div className={`rounded-2xl border px-4 py-3 ${theme === "dark" ? "border-white/10 bg-white/5" : "bg-white"}`}>Merk: {brandName}</div>
-                <div className={`rounded-2xl border px-4 py-3 ${theme === "dark" ? "border-white/10 bg-white/5" : "bg-white"}`}>Locatie: {meetingLocation}</div>
-                <div className={`rounded-2xl border px-4 py-3 ${theme === "dark" ? "border-white/10 bg-white/5" : "bg-white"}`}>Actieve dagen: {availableDaysCsv || "geen"}</div>
-                <div className={`rounded-2xl border px-4 py-3 ${theme === "dark" ? "border-white/10 bg-white/5" : "bg-white"}`}>Slots: elke {slotMinutes} minuten</div>
-                <div className={`rounded-2xl border px-4 py-3 ${theme === "dark" ? "border-white/10 bg-white/5" : "bg-white"}`}>Duur per afspraak: {duration} minuten</div>
-              </div>
-              <button
-                type="button"
-                className="mt-5 h-11 w-full rounded-full px-4 text-sm font-semibold text-slate-950"
-                style={{ backgroundColor: color }}
-              >
-                {submitText}
-              </button>
-            </div>
+            <Button type="button" variant="outline" className="w-full" asChild>
+              <a href={bookingPreviewUrl} target="_blank" rel="noreferrer">
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Open live preview
+              </a>
+            </Button>
           </CardContent>
         </Card>
       </div>

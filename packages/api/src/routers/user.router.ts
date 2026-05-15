@@ -211,4 +211,51 @@ export const userRouter = router({
       await ctx.db.user.delete({ where: { id: input.userId } });
       return { success: true };
     }),
+
+  // ─── Module access (owner-only) ──────────────────────────────────────────────
+
+  getUserModules: ownerProcedure
+    .input(z.object({ userId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const rows = await loadUserSettingRows(ctx.db as any, input.userId, ["modules.disabled"]);
+      const map = settingsRowsToMap(rows);
+      const raw = getSettingString(map, "modules.disabled", "");
+      const disabled = raw ? raw.split(",").map((s: string) => s.trim()).filter(Boolean) : [];
+      return { disabled };
+    }),
+
+  setUserModule: ownerProcedure
+    .input(z.object({
+      userId: z.string(),
+      module: z.string().min(1),
+      enabled: z.boolean(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const rows = await loadUserSettingRows(ctx.db as any, input.userId, ["modules.disabled"]);
+      const map = settingsRowsToMap(rows);
+      const raw = getSettingString(map, "modules.disabled", "");
+      const disabled = raw ? raw.split(",").map((s: string) => s.trim()).filter(Boolean) : [];
+
+      const next = input.enabled
+        ? disabled.filter((m: string) => m !== input.module) // re-enable: remove from disabled
+        : [...new Set([...disabled, input.module])];           // disable: add to disabled set
+
+      const key = `user:${input.userId}:modules.disabled`;
+      const value = next.join(",");
+      await ctx.db.setting.upsert({
+        where: { key },
+        update: { value },
+        create: { key, value },
+      });
+      return { success: true, disabled: next };
+    }),
+
+  // Used by client to load own module access (no owner restriction)
+  getMyModules: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await loadUserSettingRows(ctx.db as any, ctx.user.id, ["modules.disabled"]);
+    const map = settingsRowsToMap(rows);
+    const raw = getSettingString(map, "modules.disabled", "");
+    const disabled = raw ? raw.split(",").map((s: string) => s.trim()).filter(Boolean) : [];
+    return { disabled };
+  }),
 });

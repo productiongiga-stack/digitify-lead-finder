@@ -220,7 +220,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const googleAvailability = await isGoogleSlotAvailable(prisma, { start: bookingDate, end: bookingEnd, userId: hostUserId });
+    let googleAvailability: { enabled: boolean; available: boolean } = { enabled: false, available: true };
+    try {
+      googleAvailability = await isGoogleSlotAvailable(prisma, { start: bookingDate, end: bookingEnd, userId: hostUserId });
+    } catch {
+      // Google auth/network failure — skip the check so customers can still book
+    }
     if (googleAvailability.enabled && !googleAvailability.available) {
       const suggestedSlots = await findNextAvailableSlots(prisma, {
         tenantUserId,
