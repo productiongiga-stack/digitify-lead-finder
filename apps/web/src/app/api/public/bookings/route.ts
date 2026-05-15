@@ -5,12 +5,18 @@ import { log } from "@digitify/api/src/lib/logger";
 import { isGoogleSlotAvailable } from "@digitify/api/src/lib/google-calendar";
 import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import {
+  addMinutes,
+  buildIcsAttachment,
   createPublicToken,
   DEFAULT_BOOKING_TIMEZONE,
   ensureDefaultBookingEventType,
+  formatDateKey,
   hashPublicToken,
   hasBookingOverlap,
+  minutesToTime,
+  timeToMinutes,
 } from "@digitify/api/src/lib/booking-utils";
+import { fireBookingWebhook } from "@digitify/api/src/lib/booking-webhooks";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
 function userSettingKey(userId: string, key: string) {
@@ -42,6 +48,61 @@ function parseRules(rawRules: Array<{ weekday: number; enabled: boolean; startTi
     rules.set(rule.weekday, { enabled: rule.enabled, start: rule.startTime, end: rule.endTime });
   }
   return rules;
+}
+
+type SuggestedSlot = { date: string; time: string; start: string };
+
+async function findNextAvailableSlots(
+  db: typeof prisma,
+  input: {
+    tenantUserId: string;
+    hostUserId: string;
+    eventType: { duration: number; slotMinutes: number; bufferBefore: number; bufferAfter: number };
+    rules: Map<number, DaySchedule>;
+    fromDate: Date;
+    limit?: number;
+  }
+): Promise<SuggestedSlot[]> {
+  const { tenantUserId, hostUserId, eventType, rules, fromDate, limit = 3 } = input;
+  const suggestions: SuggestedSlot[] = [];
+  const interval = Math.max(5, eventType.slotMinutes || 30);
+  const requestedMinutes = fromDate.getHours() * 60 + fromDate.getMinutes();
+
+  for (let dayOffset = 0; dayOffset < 7 && suggestions.length < limit; dayOffset += 1) {
+    const candidateDay = new Date(fromDate);
+    candidateDay.setDate(fromDate.getDate() + dayOffset);
+    const dateKey = formatDateKey(candidateDay);
+    const rule = rules.get(candidateDay.getDay());
+    if (!rule?.enabled) continue;
+
+    const startMinutes = timeToMinutes(rule.start, 9 * 60);
+    const endMinutes = timeToMinutes(rule.end, 17 * 60);
+    // On the same day, start from the next slot after the requested time
+    const slotStart = dayOffset === 0
+      ? Math.ceil((requestedMinutes + interval) / interval) * interval
+      : startMinutes;
+
+    for (
+      let minutes = Math.max(slotStart, startMinutes);
+      minutes + eventType.duration <= endMinutes && suggestions.length < limit;
+      minutes += interval
+    ) {
+      const slotTime = minutesToTime(minutes);
+      const slotDatetime = new Date(`${dateKey}T${slotTime}:00`);
+      const slotEnd = addMinutes(slotDatetime, eventType.duration);
+
+      const overlap = await hasBookingOverlap(db, {
+        ownerUserId: tenantUserId,
+        hostUserId,
+        start: addMinutes(slotDatetime, -(eventType.bufferBefore || 0)),
+        end: addMinutes(slotEnd, eventType.bufferAfter || 0),
+      });
+      if (!overlap) {
+        suggestions.push({ date: dateKey, time: slotTime, start: slotDatetime.toISOString() });
+      }
+    }
+  }
+  return suggestions;
 }
 
 export async function POST(request: Request) {
@@ -138,17 +199,40 @@ export async function POST(request: Request) {
       : [tenantUserId];
     const hostUserId = hostIds[0] || tenantUserId;
     const bookingEnd = new Date(bookingDate.getTime() + duration * 60 * 1000);
+
     const overlap = await hasBookingOverlap(prisma, {
       ownerUserId: tenantUserId,
       hostUserId,
       start: new Date(bookingDate.getTime() - (eventType.bufferBefore || 0) * 60_000),
       end: new Date(bookingEnd.getTime() + (eventType.bufferAfter || 0) * 60_000),
     });
-    if (overlap) return NextResponse.json({ error: "Dit tijdslot is net al ingenomen. Kies een ander moment." }, { status: 409 });
+    if (overlap) {
+      const suggestedSlots = await findNextAvailableSlots(prisma, {
+        tenantUserId,
+        hostUserId,
+        eventType: { duration, slotMinutes: eventType.slotMinutes, bufferBefore: eventType.bufferBefore, bufferAfter: eventType.bufferAfter },
+        rules,
+        fromDate: bookingDate,
+      });
+      return NextResponse.json(
+        { error: "Dit tijdslot is net al ingenomen. Kies een ander moment.", suggestedSlots },
+        { status: 409 }
+      );
+    }
 
     const googleAvailability = await isGoogleSlotAvailable(prisma, { start: bookingDate, end: bookingEnd, userId: hostUserId });
     if (googleAvailability.enabled && !googleAvailability.available) {
-      return NextResponse.json({ error: "Dit tijdslot is al bezet in de gekoppelde Google agenda." }, { status: 409 });
+      const suggestedSlots = await findNextAvailableSlots(prisma, {
+        tenantUserId,
+        hostUserId,
+        eventType: { duration, slotMinutes: eventType.slotMinutes, bufferBefore: eventType.bufferBefore, bufferAfter: eventType.bufferAfter },
+        rules,
+        fromDate: bookingDate,
+      });
+      return NextResponse.json(
+        { error: "Dit tijdslot is al bezet in de gekoppelde Google agenda.", suggestedSlots },
+        { status: 409 }
+      );
     }
 
     const duplicateWindow = new Date(Date.now() - 15 * 60 * 1000);
@@ -169,6 +253,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Deze aanvraag lijkt al verstuurd. Controleer je inbox of probeer straks opnieuw." }, { status: 409 });
     }
 
+    // Check global approval mode setting as fallback when event type uses default "manual"
+    let autoConfirm = eventType.approvalMode === "automatic";
+    if (!autoConfirm) {
+      const approvalModeSetting = await prisma.setting.findFirst({
+        where: { key: userSettingKey(tenantUserId, "bookings.default_approval_mode") },
+        select: { value: true },
+      });
+      const globalApprovalMode = typeof approvalModeSetting?.value === "string"
+        ? approvalModeSetting.value.trim()
+        : "";
+      if (globalApprovalMode === "automatic") autoConfirm = true;
+    }
+
     const cancelToken = createPublicToken();
     const rescheduleToken = createPublicToken();
     const booking = await prisma.booking.create({
@@ -178,7 +275,7 @@ export async function POST(request: Request) {
         date: bookingDate,
         duration,
         notes: notes || "Aangemaakt via booking embed",
-        status: "PENDING",
+        status: autoConfirm ? "CONFIRMED" : "PENDING",
         timezone,
         location: eventType.location || null,
         eventTypeId: eventType.id,
@@ -201,62 +298,149 @@ export async function POST(request: Request) {
     if (answerRows.length) await prisma.bookingQuestionAnswer.createMany({ data: answerRows });
 
     await prisma.bookingAnalyticsEvent.create({
-      data: { createdById: tenantUserId, eventTypeId: eventType.id, bookingId: booking.id, type: "submit_success", metadata: { timezone } },
+      data: { createdById: tenantUserId, eventTypeId: eventType.id, bookingId: booking.id, type: "submit_success", metadata: { timezone, autoConfirm } },
     }).catch(() => null);
 
     const settings = await prisma.setting.findMany({
-      where: { key: { in: ["branding.company_name", "company.email", "email.from_email"].map((key) => userSettingKey(tenantUserId, key)) } },
+      where: {
+        key: {
+          in: ["branding.company_name", "company.email", "email.from_email"].map((key) =>
+            userSettingKey(tenantUserId, key)
+          ),
+        },
+      },
     });
     const scopedSettings = settings.map((row) => ({ ...row, key: row.key.replace(`user:${tenantUserId}:`, "") }));
     const companyName = getSetting(scopedSettings, "branding.company_name", "Digitify");
     const adminRecipient = getSetting(scopedSettings, "company.email") || getSetting(scopedSettings, "email.from_email");
-    const bookingDateLabel = booking.date.toLocaleString("nl-BE", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    const bookingDateLabel = booking.date.toLocaleString("nl-BE", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
     const manageUrl = new URL(`/bookings/manage/${encodeURIComponent(rescheduleToken)}`, request.url).toString();
 
-    await sendBrandedEmail(prisma, {
-      toEmail: clientEmail,
-      subject: `Boeking ontvangen bij ${companyName}`,
-      body: [
-        `Beste ${clientName},`,
-        "",
-        `Bedankt voor uw aanvraag. We hebben uw boeking goed ontvangen.`,
-        `Datum: ${bookingDateLabel}`,
-        `Duur: ${booking.duration} minuten`,
-        `Locatie: ${booking.location || "-"}`,
-        "",
-        `Extra info: ${booking.notes || "Geen extra notities."}`,
-        "",
-        `Aanpassen of annuleren: ${manageUrl}`,
-        "",
-        `We sturen u zo snel mogelijk een bevestiging.`,
-      ].join("\n"),
-      recipientCompany: clientName,
-      userId: tenantUserId,
-    }).catch(() => null);
+    const icsAttachment = buildIcsAttachment({
+      bookingId: booking.id,
+      method: "REQUEST",
+      start: booking.date,
+      end: addMinutes(booking.date, booking.duration),
+      summary: `Afspraak met ${clientName}`,
+      description: notes || undefined,
+      location: booking.location || undefined,
+      organizerEmail: adminRecipient || undefined,
+      attendeeEmail: clientEmail,
+    });
 
-    if (adminRecipient) {
+    if (autoConfirm) {
+      // Booking is immediately confirmed — send confirmation email with calendar invite
       await sendBrandedEmail(prisma, {
-        toEmail: adminRecipient,
-        subject: `Nieuwe booking aanvraag: ${clientName}`,
+        toEmail: clientEmail,
+        subject: `Afspraak bevestigd bij ${companyName}`,
         body: [
-          `Er is een nieuwe booking aanvraag binnengekomen.`,
+          `Beste ${clientName},`,
           "",
-          `Naam: ${clientName}`,
-          `E-mail: ${clientEmail}`,
-          `Bookingtype: ${eventType.name}`,
+          `Uw afspraak is bevestigd. U vindt de uitnodiging als bijlage.`,
+          "",
           `Datum: ${bookingDateLabel}`,
           `Duur: ${booking.duration} minuten`,
           `Locatie: ${booking.location || "-"}`,
-          `Notities: ${booking.notes || "-"}`,
           "",
-          `Bevestig of wijs af in de booking workqueue.`,
-        ].join("\n"),
-        recipientCompany: companyName,
+          notes ? `Extra info: ${notes}` : "",
+          "",
+          `Aanpassen of annuleren: ${manageUrl}`,
+        ].filter((line) => line !== "").join("\n"),
+        recipientCompany: clientName,
+        userId: tenantUserId,
+        attachments: [icsAttachment],
+      }).catch(() => null);
+
+      if (adminRecipient) {
+        await sendBrandedEmail(prisma, {
+          toEmail: adminRecipient,
+          subject: `Nieuwe booking (automatisch bevestigd): ${clientName}`,
+          body: [
+            `Er is een nieuwe booking automatisch bevestigd.`,
+            "",
+            `Naam: ${clientName}`,
+            `E-mail: ${clientEmail}`,
+            `Bookingtype: ${eventType.name}`,
+            `Datum: ${bookingDateLabel}`,
+            `Duur: ${booking.duration} minuten`,
+            `Locatie: ${booking.location || "-"}`,
+            notes ? `Notities: ${notes}` : "",
+          ].filter(Boolean).join("\n"),
+          recipientCompany: companyName,
+          userId: tenantUserId,
+        }).catch(() => null);
+      }
+    } else {
+      // Booking is pending — send "we received your request" email
+      await sendBrandedEmail(prisma, {
+        toEmail: clientEmail,
+        subject: `Boeking ontvangen bij ${companyName}`,
+        body: [
+          `Beste ${clientName},`,
+          "",
+          `Bedankt voor uw aanvraag. We hebben uw boeking goed ontvangen.`,
+          `Datum: ${bookingDateLabel}`,
+          `Duur: ${booking.duration} minuten`,
+          `Locatie: ${booking.location || "-"}`,
+          "",
+          notes ? `Extra info: ${notes}` : "",
+          "",
+          `Aanpassen of annuleren: ${manageUrl}`,
+          "",
+          `We sturen u zo snel mogelijk een bevestiging.`,
+        ].filter((line) => line !== "").join("\n"),
+        recipientCompany: clientName,
         userId: tenantUserId,
       }).catch(() => null);
+
+      if (adminRecipient) {
+        await sendBrandedEmail(prisma, {
+          toEmail: adminRecipient,
+          subject: `Nieuwe booking aanvraag: ${clientName}`,
+          body: [
+            `Er is een nieuwe booking aanvraag binnengekomen.`,
+            "",
+            `Naam: ${clientName}`,
+            `E-mail: ${clientEmail}`,
+            `Bookingtype: ${eventType.name}`,
+            `Datum: ${bookingDateLabel}`,
+            `Duur: ${booking.duration} minuten`,
+            `Locatie: ${booking.location || "-"}`,
+            notes ? `Notities: ${notes}` : "",
+            "",
+            `Bevestig of wijs af in de booking workqueue.`,
+          ].filter(Boolean).join("\n"),
+          recipientCompany: companyName,
+          userId: tenantUserId,
+        }).catch(() => null);
+      }
     }
 
-    return NextResponse.json({ success: true, bookingId: booking.id });
+    // Fire webhook in background (non-blocking)
+    fireBookingWebhook(prisma, tenantUserId, "booking.created", {
+      id: booking.id,
+      clientName,
+      clientEmail,
+      date: booking.date.toISOString(),
+      duration: booking.duration,
+      status: booking.status,
+      eventType: eventType.name,
+      location: booking.location,
+      timezone,
+      autoConfirmed: autoConfirm,
+    }).catch(() => null);
+
+    return NextResponse.json({
+      success: true,
+      bookingId: booking.id,
+      autoConfirmed: autoConfirm,
+    });
   } catch (error) {
     log.api.error("Public booking request failed", { route: "/api/public/bookings" }, error);
     return NextResponse.json({ error: "Boeking opslaan mislukt." }, { status: 500 });

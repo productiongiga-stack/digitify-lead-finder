@@ -21,6 +21,7 @@ import {
   normalizeSlug,
   removeLegacyGoogleEventId,
 } from "../lib/booking-utils";
+import { fireBookingWebhook } from "../lib/booking-webhooks";
 
 const BOOKING_STATUSES = [
   "SCHEDULED",
@@ -72,6 +73,29 @@ function resolveAppUrl() {
     }
   }
   return "http://localhost:3000";
+}
+
+function bookingToWebhookPayload(booking: Record<string, unknown>): Record<string, unknown> {
+  // Serialize only safe, non-circular fields for webhook delivery
+  return {
+    id: booking.id,
+    status: booking.status,
+    clientName: booking.clientName,
+    clientEmail: booking.clientEmail,
+    date: booking.date instanceof Date ? booking.date.toISOString() : booking.date,
+    duration: booking.duration,
+    timezone: booking.timezone,
+    location: booking.location,
+    notes: booking.notes,
+    eventTypeId: booking.eventTypeId,
+    hostUserId: booking.hostUserId,
+    leadId: booking.leadId,
+    createdById: booking.createdById,
+    createdAt: booking.createdAt instanceof Date ? booking.createdAt.toISOString() : booking.createdAt,
+    updatedAt: booking.updatedAt instanceof Date ? booking.updatedAt.toISOString() : booking.updatedAt,
+    googleMeetLink: booking.googleMeetLink,
+    googleHtmlLink: booking.googleHtmlLink,
+  };
 }
 
 async function logBookingActivity(params: {
@@ -483,6 +507,7 @@ export const bookingRouter = router({
         title: `Boeking aangemaakt voor ${booking.clientName}`,
         source: "booking.create",
       });
+      fireBookingWebhook(ctx.db, ctx.user.id, "booking.created", bookingToWebhookPayload(booking as Record<string, unknown>)).catch(() => null);
 
       const adminRecipient = emailCfg.fromEmail || emailCfg.smtpUser;
       const bookingLabel = formatBookingDate(booking.date);
@@ -665,6 +690,11 @@ export const bookingRouter = router({
         title: `Boeking bijgewerkt voor ${updated.clientName}`,
         source: "booking.update",
       });
+      const webhookUpdateEvent =
+        updated.status === "CANCELLED" ? "booking.cancelled" :
+        updated.status === "COMPLETED" ? "booking.completed" :
+        "booking.updated";
+      fireBookingWebhook(ctx.db, ctx.user.id, webhookUpdateEvent, bookingToWebhookPayload(updated as Record<string, unknown>)).catch(() => null);
       await sendBookingChangeEmails({
         db: ctx.db,
         booking: updated,
@@ -719,6 +749,7 @@ export const bookingRouter = router({
         title: `Boeking bevestigd voor ${synced.clientName}`,
         source: "booking.confirm",
       });
+      fireBookingWebhook(ctx.db, ctx.user.id, "booking.confirmed", bookingToWebhookPayload(synced as Record<string, unknown>)).catch(() => null);
       return synced;
     }),
 
@@ -770,6 +801,7 @@ export const bookingRouter = router({
         title: `Boeking afgewezen voor ${synced.clientName}`,
         source: "booking.reject",
       });
+      fireBookingWebhook(ctx.db, ctx.user.id, "booking.rejected", bookingToWebhookPayload(synced as Record<string, unknown>)).catch(() => null);
       return synced;
     }),
 
@@ -960,32 +992,147 @@ export const bookingRouter = router({
       });
     }),
 
-  getAnalyticsSummary: protectedProcedure.query(async ({ ctx }) => {
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const [events, confirmed, noShow, total] = await Promise.all([
-      ctx.db.bookingAnalyticsEvent.findMany({
-        where: { createdById: ctx.user.id, createdAt: { gte: since } },
-        include: { eventType: { select: { id: true, name: true } } },
-        take: 1000,
-      }),
-      ctx.db.booking.count({ where: { createdById: ctx.user.id, status: "CONFIRMED", createdAt: { gte: since } } }),
-      ctx.db.booking.count({ where: { createdById: ctx.user.id, status: "NO_SHOW", createdAt: { gte: since } } }),
-      ctx.db.booking.count({ where: { createdById: ctx.user.id, createdAt: { gte: since } } }),
-    ]);
-    const byType = events.reduce<Record<string, number>>((acc, event) => {
-      acc[event.type] = (acc[event.type] || 0) + 1;
-      return acc;
-    }, {});
-    const submitSuccess = byType.submit_success || 0;
-    const pageViews = byType.page_view || 0;
-    return {
-      windowDays: 30,
-      events: byType,
-      conversionRate: pageViews ? submitSuccess / pageViews : 0,
-      confirmationRate: total ? confirmed / total : 0,
-      noShowRate: total ? noShow / total : 0,
-    };
-  }),
+  getAnalyticsSummary: protectedProcedure
+    .input(
+      z
+        .object({
+          windowDays: z.union([z.literal(7), z.literal(14), z.literal(30), z.literal(90)]).default(30),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const days = input?.windowDays ?? 30;
+      const now = Date.now();
+      const since = new Date(now - days * 24 * 60 * 60 * 1000);
+      const prevStart = new Date(now - 2 * days * 24 * 60 * 60 * 1000);
+
+      const [analyticsEvents, bookingsInWindow, prevCount, confirmed, noShow] = await Promise.all([
+        // Analytics events for conversion/confirmation rates
+        ctx.db.bookingAnalyticsEvent.findMany({
+          where: { createdById: ctx.user.id, createdAt: { gte: since } },
+          include: { eventType: { select: { id: true, name: true } } },
+          take: 1000,
+        }),
+        // All bookings in current window (for grouping in JS)
+        ctx.db.booking.findMany({
+          where: { createdById: ctx.user.id, createdAt: { gte: since } },
+          select: {
+            date: true,
+            status: true,
+            eventTypeId: true,
+            duration: true,
+            eventType: { select: { id: true, name: true } },
+          },
+        }),
+        // Previous window count for trend
+        ctx.db.booking.count({
+          where: { createdById: ctx.user.id, createdAt: { gte: prevStart, lt: since } },
+        }),
+        // Confirmed count in current window
+        ctx.db.booking.count({
+          where: { createdById: ctx.user.id, status: "CONFIRMED", createdAt: { gte: since } },
+        }),
+        // No-show count in current window
+        ctx.db.booking.count({
+          where: { createdById: ctx.user.id, status: "NO_SHOW", createdAt: { gte: since } },
+        }),
+      ]);
+
+      // --- existing analytics event logic ---
+      const byType = analyticsEvents.reduce<Record<string, number>>((acc, event) => {
+        acc[event.type] = (acc[event.type] || 0) + 1;
+        return acc;
+      }, {});
+      const submitSuccess = byType.submit_success || 0;
+      const pageViews = byType.page_view || 0;
+      const total = bookingsInWindow.length;
+
+      // --- byDayOfWeek ---
+      const DAY_LABELS = ["Zo", "Ma", "Di", "Wo", "Do", "Vr", "Za"] as const;
+      const dowCounts = new Array(7).fill(0) as number[];
+      for (const b of bookingsInWindow) {
+        if (b.date) {
+          const d = new Date(b.date);
+          dowCounts[d.getDay()]++;
+        }
+      }
+      const byDayOfWeek = dowCounts.map((count, day) => ({
+        day,
+        label: DAY_LABELS[day],
+        count,
+      }));
+
+      // --- byHour ---
+      const hourCounts = new Map<number, number>();
+      for (const b of bookingsInWindow) {
+        if (b.date) {
+          const hour = new Date(b.date).getHours();
+          hourCounts.set(hour, (hourCounts.get(hour) ?? 0) + 1);
+        }
+      }
+      const byHour = Array.from(hourCounts.entries())
+        .map(([hour, count]) => ({ hour, count }))
+        .sort((a, b) => a.hour - b.hour);
+
+      // --- byStatus ---
+      const byStatus: Record<string, number> = {};
+      for (const b of bookingsInWindow) {
+        const s = b.status ?? "UNKNOWN";
+        byStatus[s] = (byStatus[s] ?? 0) + 1;
+      }
+
+      // --- topEventTypes ---
+      const etCounts = new Map<string, { id: string; name: string; count: number }>();
+      for (const b of bookingsInWindow) {
+        if (b.eventType) {
+          const { id, name } = b.eventType;
+          const existing = etCounts.get(id);
+          if (existing) {
+            existing.count++;
+          } else {
+            etCounts.set(id, { id, name, count: 1 });
+          }
+        }
+      }
+      const topEventTypes = Array.from(etCounts.values())
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+      // --- avgDurationMinutes ---
+      const durationsWithValue = bookingsInWindow
+        .map((b) => b.duration)
+        .filter((d): d is number => typeof d === "number" && d > 0);
+      const avgDurationMinutes =
+        durationsWithValue.length > 0
+          ? durationsWithValue.reduce((sum, d) => sum + d, 0) / durationsWithValue.length
+          : 0;
+
+      // --- trend ---
+      const currentCount = total;
+      const previousCount = prevCount;
+      const changePercent =
+        previousCount === 0
+          ? currentCount > 0
+            ? 100
+            : 0
+          : ((currentCount - previousCount) / previousCount) * 100;
+      const trend = { current: currentCount, previous: previousCount, changePercent };
+
+      return {
+        windowDays: days,
+        events: byType,
+        conversionRate: pageViews ? submitSuccess / pageViews : 0,
+        confirmationRate: total ? confirmed / total : 0,
+        noShowRate: total ? noShow / total : 0,
+        totalInWindow: total,
+        byDayOfWeek,
+        byHour,
+        byStatus,
+        topEventTypes,
+        avgDurationMinutes,
+        trend,
+      };
+    }),
 
   testGoogleSync: protectedProcedure.mutation(async ({ ctx }) => {
     const now = new Date();

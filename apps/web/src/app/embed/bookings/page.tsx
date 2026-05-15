@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   CalendarDays,
@@ -9,10 +9,8 @@ import {
   ChevronRight,
   Clock3,
   Globe2,
-  MapPin,
-  MoonStar,
+  Loader2,
   Play,
-  SunMedium,
   Video,
 } from "lucide-react";
 
@@ -41,6 +39,7 @@ type PublicEventType = {
   questions: PublicQuestion[];
 };
 type AvailabilitySlot = { time: string; start: string; end: string; available: boolean; hostUserId: string | null };
+type SuggestedSlot = { date: string; time: string; start: string };
 
 const DEFAULT_WEEKLY_HOURS: WeeklyHours = {
   0: { enabled: false, start: "09:00", end: "17:00" },
@@ -269,6 +268,9 @@ function BookingEmbedContent() {
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [resultModal, setResultModal] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [loadingAvailability, setLoadingAvailability] = useState(false);
+  const [suggestedSlots, setSuggestedSlots] = useState<SuggestedSlot[]>([]);
+  const formRef = useRef<HTMLDivElement>(null);
 
   const effectiveDuration = eventType?.duration || duration;
   const effectiveSlotMinutes = eventType?.slotMinutes || slotMinutes;
@@ -310,6 +312,7 @@ function BookingEmbedContent() {
     url.searchParams.set("from", formatDateKey(currentMonth));
     url.searchParams.set("to", formatDateKey(toDate));
     url.searchParams.set("timezone", visitorTimezone);
+    setLoadingAvailability(true);
     fetch(url)
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
@@ -317,7 +320,8 @@ function BookingEmbedContent() {
           setAvailability(Object.fromEntries(data.days.map((day: { date: string; slots: AvailabilitySlot[] }) => [day.date, day.slots])));
         }
       })
-      .catch(() => null);
+      .catch(() => null)
+      .finally(() => setLoadingAvailability(false));
   }, [tenant, eventType?.slug, eventTypeSlug, currentMonth, visitorTimezone]);
 
   useEffect(() => {
@@ -330,6 +334,12 @@ function BookingEmbedContent() {
     }
   }, [selectedSlots, selectedTime]);
 
+  useEffect(() => {
+    if (selectedDate && selectedTime && formRef.current) {
+      formRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [selectedDate, selectedTime]);
+
   const monthDays = useMemo(() => createMonthGrid(currentMonth), [currentMonth]);
   const selectedDateObject = selectedDate ? parseDateKey(selectedDate) : null;
   const selectedDayLabel = selectedDateObject
@@ -338,57 +348,103 @@ function BookingEmbedContent() {
   const isReadyForForm = Boolean(selectedDate && selectedTime);
   const themeMode = theme as ThemeMode;
 
+  function handleCalendarKeyDown(event: React.KeyboardEvent, currentDate: Date) {
+    let delta = 0;
+    if (event.key === "ArrowRight") delta = 1;
+    else if (event.key === "ArrowLeft") delta = -1;
+    else if (event.key === "ArrowDown") delta = 7;
+    else if (event.key === "ArrowUp") delta = -7;
+    else return;
+
+    event.preventDefault();
+    const next = new Date(currentDate);
+    next.setDate(currentDate.getDate() + delta);
+    const nextKey = formatDateKey(next);
+    // Navigate month if needed
+    setCurrentMonth(getMonthStart(next));
+    // Only select if available
+    const nextDayOfWeek = next.getDay();
+    const schedule = weeklyHours[nextDayOfWeek];
+    if (schedule?.enabled) {
+      setSelectedDate(nextKey);
+    }
+    // Focus the next button
+    const btn = document.querySelector(`[data-datekey="${nextKey}"]`) as HTMLButtonElement | null;
+    btn?.focus();
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!selectedDate || !selectedTime) return;
 
     setLoading(true);
     setStatus(null);
+    setSuggestedSlots([]);
 
-    const response = await fetch("/api/public/bookings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientName,
-        clientEmail,
-        date: toIsoDateTime(selectedDate, selectedTime),
-        localDate: selectedDate,
-        localTime: selectedTime,
-        duration: effectiveDuration,
-        notes,
-        service: serviceName || undefined,
-        eventType: eventType?.slug || eventTypeSlug || undefined,
-        timezone: visitorTimezone,
-        answers: Object.entries(questionAnswers).map(([questionId, value]) => ({ questionId, value })),
-        consentAccepted,
-        website,
-        tenant: tenant || undefined,
-      }),
-    });
+    try {
+      const response = await fetch("/api/public/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientName,
+          clientEmail,
+          date: toIsoDateTime(selectedDate, selectedTime),
+          localDate: selectedDate,
+          localTime: selectedTime,
+          duration: effectiveDuration,
+          notes,
+          service: serviceName || undefined,
+          eventType: eventType?.slug || eventTypeSlug || undefined,
+          timezone: visitorTimezone,
+          answers: Object.entries(questionAnswers).map(([questionId, value]) => ({ questionId, value })),
+          consentAccepted,
+          website,
+          tenant: tenant || undefined,
+        }),
+      });
 
-    const data = await response.json().catch(() => ({}));
-    setLoading(false);
+      const data = await response.json().catch(() => ({}));
+      setLoading(false);
 
-    if (response.ok) {
-      setClientName("");
-      setClientEmail("");
-      setNotes("");
-      setWebsite("");
-      const nextStatus = {
-        type: "success",
-        message: "Uw afspraak is aangevraagd. U ontvangt snel een bevestiging per e-mail.",
-      } as const;
-      setStatus(nextStatus);
-      setResultModal(nextStatus);
-      return;
+      if (response.ok) {
+        setClientName("");
+        setClientEmail("");
+        setNotes("");
+        setWebsite("");
+        const autoConfirmed = Boolean(data.autoConfirmed);
+        const nextStatus = {
+          type: "success",
+          message: autoConfirmed
+            ? "Uw afspraak is bevestigd! U ontvangt een bevestigingsmail met de kalenderuitnodiging."
+            : "Uw afspraak is aangevraagd. U ontvangt snel een bevestiging per e-mail.",
+        } as const;
+        setStatus(nextStatus);
+        setResultModal(nextStatus);
+        return;
+      }
+
+      // Rate limit
+      if (response.status === 429) {
+        setStatus({ type: "error", message: data.error || "Te veel aanvragen. Wacht even en probeer opnieuw." });
+        setResultModal(null);
+        return;
+      }
+
+      // Conflict with suggested slots
+      if (data.suggestedSlots?.length) {
+        setSuggestedSlots(data.suggestedSlots as SuggestedSlot[]);
+      }
+
+      setStatus({ type: "error", message: data.error || "Boeking aanvragen mislukt." });
+      setResultModal(null);
+    } catch {
+      setLoading(false);
+      setStatus({
+        type: "error",
+        message: "Verbindingsfout. Controleer uw internetverbinding en probeer opnieuw.",
+      });
+      setResultModal(null);
     }
-
-    const nextStatus = {
-      type: "error",
-      message: data.error || "Boeking aanvragen mislukt.",
-    } as const;
-    setStatus(nextStatus);
-    setResultModal(nextStatus);
   }
 
   const themeClasses = {
@@ -424,102 +480,128 @@ function BookingEmbedContent() {
     <div className={themeClasses.page} style={{ colorScheme: themeMode }}>
       <div className={themeClasses.shell}>
         <div className="grid lg:grid-cols-[260px_minmax(0,1fr)_310px]">
-          <aside className={`flex flex-col gap-4 border-b p-4 sm:p-5 lg:border-b-0 lg:border-r ${themeClasses.panelBorder}`}>
-            <div
-              className="flex h-12 w-12 items-center justify-center rounded-full border shadow-sm"
-              style={{
-                backgroundColor: effectiveColor,
-                borderColor: themeMode === "dark" ? "rgba(255,255,255,0.12)" : "rgba(15,23,42,0.08)",
-              }}
-            >
-              <Play className="h-6 w-6 fill-current text-white" />
-            </div>
-            <div>
+          <aside className={`flex flex-col gap-5 border-b p-5 sm:p-6 lg:border-b-0 lg:border-r ${themeClasses.panelBorder}`}>
+            <div className="flex items-center gap-3">
+              <div
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-sm"
+                style={{ backgroundColor: effectiveColor }}
+              >
+                <Play className="h-5 w-5 fill-current text-white" />
+              </div>
               <p className={`text-sm font-semibold ${themeClasses.muted}`}>{brandName}</p>
-              <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-                {effectiveMeetingName}
-                <span className={themeClasses.muted}> / {effectiveDuration} min</span>
-              </h1>
-              <p className={`mt-3 max-w-sm text-sm leading-6 ${themeClasses.muted}`}>{effectiveDescription}</p>
-              {serviceName ? (
-                <p className={`mt-2 text-xs font-medium ${themeClasses.muted}`}>Service: {serviceName}</p>
-              ) : null}
             </div>
 
-            <div className="space-y-3 pt-1 text-sm">
-              <div className="flex items-center gap-3">
-                <Clock3 className="h-4 w-4 shrink-0" />
-                <span>{effectiveDuration}m</span>
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight sm:text-[1.65rem]">
+                {effectiveMeetingName}
+              </h1>
+              <p className={`mt-2 text-sm leading-6 ${themeClasses.muted}`}>{effectiveDescription}</p>
+            </div>
+
+            <div className={`space-y-2.5 rounded-2xl border p-3.5 text-sm ${themeClasses.card}`}>
+              <div className="flex items-center gap-2.5">
+                <Clock3 className="h-4 w-4 shrink-0" style={{ color: effectiveColor }} />
+                <span>{effectiveDuration} minuten</span>
               </div>
-              <div className="flex items-center gap-3">
-                <Video className="h-4 w-4 shrink-0" />
+              <div className="flex items-center gap-2.5">
+                <Video className="h-4 w-4 shrink-0" style={{ color: effectiveColor }} />
                 <span>{effectiveLocation}</span>
               </div>
-              <div className="flex items-center gap-3">
-                <Globe2 className="h-4 w-4 shrink-0" />
-                <span>{visitorTimezone}</span>
+              <div className="flex items-center gap-2.5">
+                <Globe2 className="h-4 w-4 shrink-0" style={{ color: effectiveColor }} />
+                <span className="truncate" title={visitorTimezone}>{visitorTimezone}</span>
               </div>
             </div>
 
-            <div className={`mt-auto rounded-[20px] border p-4 ${themeClasses.card}`}>
-              <p className="text-sm font-medium uppercase tracking-[0.22em]" style={{ color: effectiveColor }}>
-                Samenvatting
+            <div className="mt-auto space-y-2">
+              <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${themeClasses.muted}`}>
+                Voortgang
               </p>
-              <div className="mt-4 space-y-3 text-sm">
-                <div>
-                  <p className={themeClasses.muted}>Stap 1</p>
-                  <p className="mt-1 font-medium">
-                    {selectedDate ? formatLongDate(selectedDate) : "Kies een datum"}
-                  </p>
+              {[
+                {
+                  step: 1,
+                  label: "Datum",
+                  value: selectedDate ? formatLongDate(selectedDate) : null,
+                  placeholder: "Kies een dag",
+                  done: Boolean(selectedDate),
+                },
+                {
+                  step: 2,
+                  label: "Tijdslot",
+                  value: selectedTime ? formatTimeDisplay(selectedTime, timeMode) : null,
+                  placeholder: "Kies een tijdslot",
+                  done: Boolean(selectedTime),
+                },
+                {
+                  step: 3,
+                  label: "Gegevens",
+                  value: isReadyForForm ? "Formulier invullen" : null,
+                  placeholder: "Na tijdkeuze",
+                  done: false,
+                },
+              ].map(({ step, label, value, placeholder, done }) => (
+                <div
+                  key={step}
+                  className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-all ${done || (step === 3 && isReadyForForm) ? "" : `opacity-60 ${themeClasses.card}`}`}
+                  style={done || (step === 3 && isReadyForForm) ? { borderColor: effectiveColor + "55", backgroundColor: effectiveColor + "10" } : {}}
+                >
+                  <div
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold"
+                    style={{
+                      backgroundColor: done ? effectiveColor : "transparent",
+                      color: done ? "#fff" : undefined,
+                      borderWidth: done ? 0 : 1.5,
+                      borderColor: done ? undefined : "currentColor",
+                    }}
+                  >
+                    {done ? <CheckCircle2 className="h-4 w-4" /> : step}
+                  </div>
+                  <div className="min-w-0">
+                    <p className={`text-xs ${themeClasses.muted}`}>{label}</p>
+                    <p className="truncate text-sm font-medium">{value ?? placeholder}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className={themeClasses.muted}>Stap 2</p>
-                  <p className="mt-1 font-medium">
-                    {selectedTime ? formatTimeDisplay(selectedTime, timeMode) : "Kies een tijdslot"}
-                  </p>
-                </div>
-                <div>
-                  <p className={themeClasses.muted}>Stap 3</p>
-                  <p className="mt-1 font-medium">
-                    {isReadyForForm ? "Vul uw gegevens in" : "Na tijdslotkeuze verschijnt het formulier"}
-                  </p>
-                </div>
-              </div>
+              ))}
             </div>
           </aside>
 
-          <section className={`border-b p-4 sm:p-5 lg:border-b-0 lg:border-r ${themeClasses.panelBorder}`}>
+          <section className={`border-b p-5 sm:p-6 lg:border-b-0 lg:border-r ${themeClasses.panelBorder}`}>
             <div className="flex items-center justify-between gap-4">
-              <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">{formatMonthTitle(currentMonth)}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-2xl font-semibold tracking-tight sm:text-[1.65rem]">{formatMonthTitle(currentMonth)}</h2>
+                {loadingAvailability ? (
+                  <Loader2 className="h-4 w-4 animate-spin opacity-50" />
+                ) : null}
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setCurrentMonth((current) => addMonths(current, -1))}
-                  className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${themeClasses.slot}`}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full border transition ${themeClasses.slot}`}
                   aria-label="Vorige maand"
                 >
-                  <ChevronLeft className="h-5 w-5" />
+                  <ChevronLeft className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
                   onClick={() => setCurrentMonth((current) => addMonths(current, 1))}
-                  className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${themeClasses.slot}`}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full border transition ${themeClasses.slot}`}
                   aria-label="Volgende maand"
                 >
-                  <ChevronRight className="h-5 w-5" />
+                  <ChevronRight className="h-4 w-4" />
                 </button>
               </div>
             </div>
 
-            <div className="mt-6 grid grid-cols-7 gap-y-3 text-center text-sm font-semibold tracking-wide">
+            <div role="row" className="mt-5 grid grid-cols-7 gap-y-2 text-center text-xs font-semibold tracking-wider uppercase">
               {DAY_LABELS.slice(1).concat(DAY_LABELS.slice(0, 1)).map((label) => (
-                <div key={label} className={themeClasses.muted}>
+                <div key={label} role="columnheader" aria-label={label} className={themeClasses.muted}>
                   {label}
                 </div>
               ))}
             </div>
 
-            <div className="mt-4 grid grid-cols-7 gap-2">
+            <div role="grid" aria-label="Kalender" className="mt-3 grid grid-cols-7 gap-1.5">
               {monthDays.map((day) => {
                 const dateKey = formatDateKey(day);
                 const inCurrentMonth = day.getMonth() === currentMonth.getMonth();
@@ -534,60 +616,71 @@ function BookingEmbedContent() {
                   <button
                     key={dateKey}
                     type="button"
+                    data-datekey={dateKey}
+                    role="gridcell"
+                    aria-selected={isSelected}
+                    aria-label={`${DAY_NAMES[day.getDay()]} ${day.getDate()} ${MONTH_NAMES[day.getMonth()]} ${day.getFullYear()}${isSelected ? ", geselecteerd" : ""}${isToday ? ", vandaag" : ""}${!isAvailable ? ", niet beschikbaar" : ""}`}
                     onClick={() => {
                       if (!isAvailable) return;
                       setSelectedDate(dateKey);
                       setCurrentMonth(getMonthStart(day));
                     }}
+                    onKeyDown={(event) => handleCalendarKeyDown(event, day)}
                     disabled={!isAvailable}
-                    className={`relative flex aspect-square min-h-[48px] items-center justify-center rounded-[16px] border text-base font-semibold transition sm:min-h-[64px] sm:text-xl ${
-                      isAvailable ? "" : "cursor-not-allowed opacity-50"
+                    className={`relative flex flex-col items-center justify-center gap-0.5 rounded-[14px] border py-2 text-sm font-semibold transition sm:py-3 ${
+                      isAvailable ? "cursor-pointer" : "cursor-not-allowed opacity-35"
                     } ${
                       isSelected
-                        ? "border-transparent text-slate-950 shadow-[0_18px_40px_rgba(245,176,76,0.26)]"
+                        ? "border-transparent text-slate-950"
                         : inCurrentMonth
                           ? themeClasses.slot
-                          : `${themeClasses.slot} opacity-55`
+                          : `${themeClasses.slot} opacity-40`
                     }`}
                     style={{
                       backgroundColor: isSelected ? effectiveColor : undefined,
+                      boxShadow: isSelected ? `0 8px 24px ${effectiveColor}44` : undefined,
+                      touchAction: "manipulation",
                     }}
                   >
                     <span>{day.getDate()}</span>
                     {isToday && !isSelected ? (
                       <span
-                        className="absolute bottom-3 h-2.5 w-2.5 rounded-full"
+                        className="h-1.5 w-1.5 rounded-full"
                         style={{ backgroundColor: effectiveColor }}
                       />
-                    ) : null}
+                    ) : isAvailable && !isSelected && inCurrentMonth ? (
+                      <span className="h-1.5 w-1.5 rounded-full opacity-40" style={{ backgroundColor: effectiveColor }} />
+                    ) : (
+                      <span className="h-1.5 w-1.5" />
+                    )}
                   </button>
                 );
               })}
             </div>
           </section>
 
-          <section className="p-4 sm:p-5">
+          <section className="flex flex-col gap-5 p-5 sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">{selectedDayLabel.toLowerCase()}</h2>
-                <p className={`mt-2 text-sm ${themeClasses.muted}`}>
-                  {selectedDate ? formatLongDate(selectedDate) : "Kies eerst een datum"}
+                <h2 className="text-2xl font-semibold tracking-tight sm:text-[1.65rem]">{selectedDayLabel.toLowerCase()}</h2>
+                <p className={`mt-1.5 text-sm ${themeClasses.muted}`}>
+                  {selectedDate ? formatLongDate(selectedDate) : "Kies eerst een datum in de kalender"}
                 </p>
               </div>
-              <div className={`inline-flex rounded-[16px] p-1 ${themeClasses.softStrong}`}>
+              <div className={`inline-flex shrink-0 rounded-[14px] p-1 ${themeClasses.softStrong}`}>
                 <button
                   type="button"
                   onClick={() => setTimeMode("12")}
-                  className={`rounded-[14px] px-3 py-1.5 text-sm transition ${
+                  className={`rounded-[12px] px-3 py-1.5 text-xs font-medium transition ${
                     timeMode === "12" ? (themeMode === "dark" ? "bg-black text-white" : "bg-white text-slate-950 shadow-sm") : themeClasses.muted
                   }`}
                 >
-                  12 uur
+                  12u
                 </button>
                 <button
                   type="button"
                   onClick={() => setTimeMode("24")}
-                  className={`rounded-[14px] px-3 py-1.5 text-sm transition ${
+                  className={`rounded-[12px] px-3 py-1.5 text-xs font-medium transition ${
                     timeMode === "24" ? (themeMode === "dark" ? "bg-black text-white" : "bg-white text-slate-950 shadow-sm") : themeClasses.muted
                   }`}
                 >
@@ -596,20 +689,26 @@ function BookingEmbedContent() {
               </div>
             </div>
 
-            <div className="mt-5">
+            <div>
               {selectedSlots.length ? (
-                <div className="grid max-h-[272px] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {selectedSlots.map((slot) => {
                     const active = selectedTime === slot;
                     return (
                       <button
                         key={slot}
                         type="button"
+                        aria-pressed={active}
+                        aria-label={`Tijdslot ${formatTimeDisplay(slot, timeMode)}`}
                         onClick={() => setSelectedTime(slot)}
                         className={`flex h-11 items-center justify-center rounded-[14px] border px-3 text-sm font-semibold transition ${
-                          active ? "border-transparent text-slate-950 shadow-[0_14px_30px_rgba(245,176,76,0.22)]" : themeClasses.slot
+                          active ? "border-transparent text-slate-950" : themeClasses.slot
                         }`}
-                        style={{ backgroundColor: active ? effectiveColor : undefined }}
+                        style={{
+                          backgroundColor: active ? effectiveColor : undefined,
+                          boxShadow: active ? `0 8px 20px ${effectiveColor}44` : undefined,
+                          touchAction: "manipulation",
+                        }}
                       >
                         {formatTimeDisplay(slot, timeMode)}
                       </button>
@@ -617,29 +716,19 @@ function BookingEmbedContent() {
                   })}
                 </div>
               ) : (
-                <div className={`rounded-[28px] border px-6 py-8 ${themeClasses.card}`}>
-                  <p className="text-lg font-medium">Geen beschikbare slots op deze dag</p>
-                  <p className={`mt-2 text-sm leading-6 ${themeClasses.muted}`}>
-                    Kies een andere dag in de kalender. Alleen dagen met effectieve beschikbaarheid zijn selecteerbaar.
+                <div className={`rounded-[20px] border px-5 py-6 text-center ${themeClasses.card}`}>
+                  <CalendarDays className={`mx-auto mb-3 h-8 w-8 ${themeClasses.muted}`} />
+                  <p className="font-medium">Geen tijdsloten beschikbaar</p>
+                  <p className={`mt-1 text-sm ${themeClasses.muted}`}>
+                    Selecteer een dag met een gekleurde stip in de kalender.
                   </p>
                 </div>
               )}
             </div>
 
-            <div className={`mt-4 rounded-[20px] border p-4 ${themeClasses.card}`}>
-              <div className="flex items-center gap-3">
-                {themeMode === "dark" ? <MoonStar className="h-5 w-5" /> : <SunMedium className="h-5 w-5" />}
-                <div>
-                  <p className="font-medium">Boekingsflow</p>
-                  <p className={`text-sm ${themeClasses.muted}`}>
-                    Datum kiezen, tijd selecteren en dan pas uw gegevens bevestigen.
-                  </p>
-                </div>
-              </div>
-            </div>
-
+            <div ref={formRef}>
             {isReadyForForm ? (
-              <form onSubmit={handleSubmit} className={`mt-4 rounded-[20px] border p-4 ${themeClasses.card}`}>
+              <form onSubmit={handleSubmit} className={`rounded-[20px] border p-4 ${themeClasses.card}`}>
                 <div className="flex items-center gap-3">
                   <CalendarDays className="h-5 w-5" />
                   <div>
@@ -682,11 +771,10 @@ function BookingEmbedContent() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Tijdzone</label>
-                    <input
-                      value={visitorTimezone}
-                      onChange={(event) => setVisitorTimezone(event.target.value)}
-                      className={`h-12 w-full rounded-2xl border px-4 text-sm outline-none transition focus:border-slate-400 ${themeClasses.input}`}
-                    />
+                    <div className={`flex h-12 items-center gap-2 rounded-2xl border px-4 text-sm ${themeClasses.input}`}>
+                      <Globe2 className="h-4 w-4 shrink-0 opacity-50" />
+                      <span className="truncate opacity-70">{visitorTimezone}</span>
+                    </div>
                   </div>
                   {eventType?.questions.map((question) => (
                     <div key={question.id} className="space-y-2">
@@ -742,35 +830,81 @@ function BookingEmbedContent() {
                   name="website"
                 />
 
-                {status ? (
-                  <div
-                    className={`mt-4 rounded-2xl px-4 py-3 text-sm ${
-                      status.type === "success"
-                        ? themeMode === "dark"
-                          ? "bg-emerald-500/15 text-emerald-200"
-                          : "bg-emerald-50 text-emerald-700"
-                        : themeMode === "dark"
-                          ? "bg-red-500/15 text-red-200"
-                          : "bg-red-50 text-red-700"
-                    }`}
-                  >
-                    {status.message}
+                <div role="alert" aria-live="polite">
+                  {status ? (
+                    <div
+                      className={`mt-4 rounded-2xl px-4 py-3 text-sm ${
+                        status.type === "success"
+                          ? themeMode === "dark"
+                            ? "bg-emerald-500/15 text-emerald-200"
+                            : "bg-emerald-50 text-emerald-700"
+                          : themeMode === "dark"
+                            ? "bg-red-500/15 text-red-200"
+                            : "bg-red-50 text-red-700"
+                      }`}
+                    >
+                      {status.message}
+                    </div>
+                  ) : null}
+                </div>
+
+                {suggestedSlots.length > 0 && status?.type === "error" ? (
+                  <div className={`mt-3 rounded-2xl border p-4 ${themeClasses.card}`}>
+                    <p className={`mb-2.5 text-xs font-semibold uppercase tracking-wider ${themeClasses.muted}`}>
+                      Volgende beschikbare momenten
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {suggestedSlots.map((slot) => (
+                        <button
+                          key={slot.start}
+                          type="button"
+                          onClick={() => {
+                            setSelectedDate(slot.date);
+                            setSelectedTime(slot.time);
+                            setCurrentMonth(getMonthStart(parseDateKey(slot.date)));
+                            setStatus(null);
+                            setSuggestedSlots([]);
+                          }}
+                          className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition hover:opacity-80"
+                          style={{ borderColor: effectiveColor + "88", color: effectiveColor }}
+                        >
+                          <CalendarDays className="h-3.5 w-3.5" />
+                          {formatLongDate(slot.date)} om {formatTimeDisplay(slot.time, timeMode)}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
 
                 <button
                   type="submit"
                   disabled={loading}
-                  className="mt-5 h-12 w-full rounded-full px-5 text-sm font-semibold text-slate-950 transition disabled:opacity-50"
+                  className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold text-slate-950 transition disabled:opacity-50"
                   style={{ backgroundColor: effectiveColor }}
                 >
-                  {loading ? "Bezig..." : submitText}
+                  {loading ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /><span>Bezig...</span></>
+                  ) : (
+                    submitText
+                  )}
                 </button>
               </form>
-            ) : null}
-
-            <div className={`mt-6 text-sm ${themeClasses.muted}`}>
-              Door te boeken gaat u akkoord dat we een bevestiging sturen voor dit gekozen moment.
+            ) : (
+              <div className={`rounded-[20px] border px-5 py-5 ${themeClasses.card}`}>
+                <div className="flex items-center gap-3">
+                  <div
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+                    style={{ backgroundColor: effectiveColor + "22" }}
+                  >
+                    <CalendarDays className="h-4 w-4" style={{ color: effectiveColor }} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Kies eerst een datum en tijdslot</p>
+                    <p className={`text-xs ${themeClasses.muted}`}>Het formulier verschijnt hier daarna automatisch.</p>
+                  </div>
+                </div>
+              </div>
+            )}
             </div>
           </section>
         </div>
@@ -814,12 +948,50 @@ function BookingEmbedContent() {
 
 function BookingEmbedFallback() {
   return (
-    <div className="min-h-screen bg-[#f3f1ee] p-4">
-      <div className="mx-auto max-w-[1600px] overflow-hidden rounded-[32px] border border-black/8 bg-white shadow-[0_30px_120px_rgba(15,23,42,0.12)]">
-        <div className="grid min-h-[880px] animate-pulse lg:grid-cols-[320px_minmax(0,1fr)_360px]">
-          <div className="border-b border-black/8 p-8 lg:border-b-0 lg:border-r" />
-          <div className="border-b border-black/8 p-8 lg:border-b-0 lg:border-r" />
-          <div className="p-8" />
+    <div className="min-h-screen bg-[#f3f1ee] p-2 sm:p-3">
+      <div className="mx-auto max-w-[1180px] overflow-hidden rounded-[24px] border border-black/8 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
+        <div className="grid animate-pulse lg:grid-cols-[260px_minmax(0,1fr)_310px]">
+          <div className="border-b border-black/8 p-5 lg:border-b-0 lg:border-r">
+            <div className="flex items-center gap-3">
+              <div className="h-11 w-11 rounded-2xl bg-slate-100" />
+              <div className="h-4 w-20 rounded-lg bg-slate-100" />
+            </div>
+            <div className="mt-5 h-7 w-3/4 rounded-lg bg-slate-100" />
+            <div className="mt-3 h-4 w-full rounded bg-slate-100" />
+            <div className="mt-1 h-4 w-2/3 rounded bg-slate-100" />
+            <div className="mt-5 rounded-2xl border p-3.5">
+              <div className="space-y-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-2.5">
+                    <div className="h-4 w-4 rounded bg-slate-100" />
+                    <div className="h-4 w-24 rounded bg-slate-100" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="border-b border-black/8 p-5 lg:border-b-0 lg:border-r">
+            <div className="flex items-center justify-between">
+              <div className="h-7 w-32 rounded-lg bg-slate-100" />
+              <div className="flex gap-2">
+                <div className="h-9 w-9 rounded-full bg-slate-100" />
+                <div className="h-9 w-9 rounded-full bg-slate-100" />
+              </div>
+            </div>
+            <div className="mt-5 grid grid-cols-7 gap-1.5">
+              {Array.from({ length: 42 }).map((_, i) => (
+                <div key={i} className="aspect-square rounded-[14px] bg-slate-100" />
+              ))}
+            </div>
+          </div>
+          <div className="p-5">
+            <div className="h-7 w-20 rounded-lg bg-slate-100" />
+            <div className="mt-5 grid grid-cols-3 gap-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-11 rounded-[14px] bg-slate-100" />
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>

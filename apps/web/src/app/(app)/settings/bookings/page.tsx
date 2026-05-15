@@ -4,7 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
+  AlertCircle,
   ArrowLeft,
+  Bell,
   Calendar,
   CalendarDays,
   Check,
@@ -12,8 +14,11 @@ import {
   Copy,
   ExternalLink,
   Globe2,
+  ListChecks,
   Save,
   Settings2,
+  Webhook,
+  Zap,
 } from "lucide-react";
 import {
   Badge,
@@ -25,6 +30,11 @@ import {
   CardTitle,
   Input,
   Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Skeleton,
   Switch,
   Tabs,
@@ -115,6 +125,16 @@ function parseWeeklyHours(raw: unknown, fallbackStart: string, fallbackEnd: stri
   return next;
 }
 
+const ALL_WEBHOOK_EVENTS = [
+  "booking.created",
+  "booking.confirmed",
+  "booking.rejected",
+  "booking.cancelled",
+  "booking.completed",
+  "booking.updated",
+] as const;
+type WebhookEventKey = (typeof ALL_WEBHOOK_EVENTS)[number];
+
 function buildBookingSnapshot(input: {
   title: string;
   description: string;
@@ -134,6 +154,10 @@ function buildBookingSnapshot(input: {
   googleServiceAccountEmail: string;
   googleServicePrivateKey: string;
   googleTimezone: string;
+  approvalMode: string;
+  webhookUrl: string;
+  webhookSecret: string;
+  webhookEvents: string[];
 }) {
   return JSON.stringify(input);
 }
@@ -192,6 +216,10 @@ export default function BookingSettingsPage() {
   const [googleTimezone, setGoogleTimezone] = useState("Europe/Brussels");
   const [copied, setCopied] = useState(false);
   const [snapshot, setSnapshot] = useState("");
+  const [approvalMode, setApprovalMode] = useState("manual");
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [webhookEvents, setWebhookEvents] = useState<WebhookEventKey[]>([]);
 
   useEffect(() => {
     const googleStatus = searchParams.get("google");
@@ -289,6 +317,21 @@ export default function BookingSettingsPage() {
     setGoogleServiceAccountEmail(nextGoogleServiceAccountEmail);
     setGoogleServicePrivateKey(nextGoogleServicePrivateKey);
     setGoogleTimezone(nextGoogleTimezone);
+
+    const nextApprovalMode = readSettingString(settings, "bookings.default_approval_mode", "manual");
+    const nextWebhookUrl = readSettingString(settings, "bookings.webhook_url", "");
+    const nextWebhookSecret = readSettingString(settings, "bookings.webhook_secret", "");
+    const nextWebhookEventsCsv = readSettingString(settings, "bookings.webhook_events", "");
+    const nextWebhookEvents = nextWebhookEventsCsv
+      .split(",")
+      .map((e) => e.trim())
+      .filter((e): e is WebhookEventKey => ALL_WEBHOOK_EVENTS.includes(e as WebhookEventKey));
+
+    setApprovalMode(nextApprovalMode);
+    setWebhookUrl(nextWebhookUrl);
+    setWebhookSecret(nextWebhookSecret);
+    setWebhookEvents(nextWebhookEvents);
+
     setSnapshot(
       buildBookingSnapshot({
         title: nextTitle,
@@ -309,6 +352,10 @@ export default function BookingSettingsPage() {
         googleServiceAccountEmail: nextGoogleServiceAccountEmail,
         googleServicePrivateKey: nextGoogleServicePrivateKey,
         googleTimezone: nextGoogleTimezone,
+        approvalMode: nextApprovalMode,
+        webhookUrl: nextWebhookUrl,
+        webhookSecret: nextWebhookSecret,
+        webhookEvents: nextWebhookEvents,
       })
     );
   }, [settings]);
@@ -349,6 +396,10 @@ export default function BookingSettingsPage() {
         googleServiceAccountEmail,
         googleServicePrivateKey,
         googleTimezone,
+        approvalMode,
+        webhookUrl,
+        webhookSecret,
+        webhookEvents,
       }),
     [
       title,
@@ -369,6 +420,10 @@ export default function BookingSettingsPage() {
       googleServiceAccountEmail,
       googleServicePrivateKey,
       googleTimezone,
+      approvalMode,
+      webhookUrl,
+      webhookSecret,
+      webhookEvents,
     ]
   );
 
@@ -449,6 +504,12 @@ export default function BookingSettingsPage() {
     }));
   }
 
+  function toggleWebhookEvent(event: WebhookEventKey) {
+    setWebhookEvents((current) =>
+      current.includes(event) ? current.filter((e) => e !== event) : [...current, event]
+    );
+  }
+
   function handleSave() {
     const entries = [
       { key: "bookings.embed_title", value: title },
@@ -473,6 +534,10 @@ export default function BookingSettingsPage() {
       { key: "bookings.google_service_account_private_key", value: googleServicePrivateKey },
       { key: "bookings.google_calendar_timezone", value: googleTimezone.trim() || "Europe/Brussels" },
       { key: "bookings.google_calendar_url", value: "" },
+      { key: "bookings.default_approval_mode", value: approvalMode },
+      { key: "bookings.webhook_url", value: webhookUrl.trim() },
+      { key: "bookings.webhook_secret", value: webhookSecret },
+      { key: "bookings.webhook_events", value: webhookEvents.join(",") },
     ];
 
     batchUpdate.mutate(entries, {
@@ -528,14 +593,108 @@ export default function BookingSettingsPage() {
           <ArrowLeft className="h-4 w-4" />
           Terug naar instellingen
         </Link>
-        <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
-          <Settings2 className="h-6 w-6" />
-          Booking Instellingen
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Configureer de booking embed, weekplanning en Google Workspace synchronisatie.
-        </p>
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
+              <Settings2 className="h-6 w-6" />
+              Booking Instellingen
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Configureer de booking embed, weekplanning en Google Workspace synchronisatie.
+            </p>
+          </div>
+          {hasChanges ? (
+            <Button onClick={handleSave} disabled={batchUpdate.isPending} className="shrink-0">
+              <Save className="mr-2 h-4 w-4" />
+              {batchUpdate.isPending ? "Opslaan..." : "Instellingen opslaan"}
+            </Button>
+          ) : null}
+        </div>
       </div>
+
+      <Card>
+        <CardContent className="p-4">
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
+            <ListChecks className="h-4 w-4" />
+            Setup checklist
+          </h2>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {/* Google Agenda */}
+            {(() => {
+              const done = Boolean(googleOauthEmail || googleServiceAccountEmail.trim());
+              return (
+                <div className="flex items-start gap-3 rounded-xl border p-3">
+                  <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${done ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-500"}`}>
+                    {done ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Google Agenda</p>
+                    <p className="text-xs text-muted-foreground">
+                      {done
+                        ? `Verbonden als ${googleOauthEmail || "Service account actief"}`
+                        : "Koppel je Google Agenda in de Google-tab"}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+            {/* Beschikbaarheid */}
+            {(() => {
+              const activeDays = availableDaysCsv.split(",").filter(Boolean).length;
+              const done = activeDays > 0;
+              return (
+                <div className="flex items-start gap-3 rounded-xl border p-3">
+                  <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${done ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-500"}`}>
+                    {done ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Beschikbaarheid</p>
+                    <p className="text-xs text-muted-foreground">
+                      {done ? `${activeDays} dagen actief` : "Stel je beschikbare dagen in"}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+            {/* Embed actief */}
+            {(() => {
+              const done = Boolean(publicTenantToken);
+              return (
+                <div className="flex items-start gap-3 rounded-xl border p-3">
+                  <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${done ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-500"}`}>
+                    {done ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Embed actief</p>
+                    <p className="text-xs text-muted-foreground">
+                      {done ? "Publieke link beschikbaar" : "Genereer je publieke token via de embed-tab"}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+            {/* Automaties */}
+            {(() => {
+              const done = Boolean(webhookUrl.trim()) || approvalMode === "automatic";
+              return (
+                <div className="flex items-start gap-3 rounded-xl border p-3">
+                  <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${done ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-500"}`}>
+                    {done ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Automaties</p>
+                    <p className="text-xs text-muted-foreground">
+                      {done
+                        ? approvalMode === "automatic" ? "Auto-bevestiging aan" : "Webhook geconfigureerd"
+                        : "Stel auto-bevestiging of webhook in"}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card>
@@ -629,9 +788,10 @@ export default function BookingSettingsPage() {
               </Button>
             </div>
             <Tabs defaultValue="flow" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="flow">Flow</TabsTrigger>
                 <TabsTrigger value="availability">Beschikbaarheid</TabsTrigger>
+                <TabsTrigger value="automations">Automaties</TabsTrigger>
                 <TabsTrigger value="google">Google</TabsTrigger>
                 <TabsTrigger value="embed">Embed</TabsTrigger>
               </TabsList>
@@ -682,25 +842,70 @@ export default function BookingSettingsPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>Theme</Label>
-                    <select
-                      value={theme}
-                      onChange={(event) => setTheme(event.target.value)}
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    >
-                      <option value="light">Light</option>
-                      <option value="dark">Dark</option>
-                    </select>
+                    <Select value={theme} onValueChange={setTheme}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="light">Light</SelectItem>
+                        <SelectItem value="dark">Dark</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
                     <Label>Tijdweergave</Label>
-                    <select
-                      value={timeMode}
-                      onChange={(event) => setTimeMode(event.target.value)}
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    <Select value={timeMode} onValueChange={setTimeMode}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="24">24u</SelectItem>
+                        <SelectItem value="12">12 uur</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border p-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-amber-500" />
+                    <span className="text-sm font-semibold">Bevestigingsmodus</span>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setApprovalMode("manual")}
+                      className={`rounded-xl border p-3 text-left transition ${
+                        approvalMode === "manual"
+                          ? "border-foreground/30 bg-muted"
+                          : "border-border hover:border-foreground/20"
+                      }`}
                     >
-                      <option value="24">24u</option>
-                      <option value="12">12 uur</option>
-                    </select>
+                      <p className="text-sm font-medium">Handmatige goedkeuring</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Elke boeking start als PENDING. Jij bevestigt manueel per boeking.
+                      </p>
+                      {approvalMode === "manual" ? (
+                        <Badge variant="secondary" className="mt-2 text-xs">Actief</Badge>
+                      ) : null}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setApprovalMode("automatic")}
+                      className={`rounded-xl border p-3 text-left transition ${
+                        approvalMode === "automatic"
+                          ? "border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/20"
+                          : "border-border hover:border-foreground/20"
+                      }`}
+                    >
+                      <p className="text-sm font-medium">Automatische bevestiging</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Boekingen worden direct CONFIRMED. Klant ontvangt meteen een kalenderuitnodiging.
+                      </p>
+                      {approvalMode === "automatic" ? (
+                        <Badge variant="success" className="mt-2 text-xs">Actief</Badge>
+                      ) : null}
+                    </button>
                   </div>
                 </div>
               </TabsContent>
@@ -709,15 +914,41 @@ export default function BookingSettingsPage() {
                 <div className="grid gap-4 sm:grid-cols-3">
                   <div className="space-y-2">
                     <Label>Kleur</Label>
-                    <Input value={color} onChange={(event) => setColor(event.target.value)} />
+                    <div className="flex gap-2">
+                      <input
+                        type="color"
+                        value={color}
+                        onChange={(event) => setColor(event.target.value)}
+                        className="h-10 w-12 shrink-0 cursor-pointer rounded-md border border-input bg-background p-1"
+                      />
+                      <Input value={color} onChange={(event) => setColor(event.target.value)} className="font-mono" />
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <Label>Duur (minuten)</Label>
-                    <Input value={duration} onChange={(event) => setDuration(event.target.value)} />
+                    <Select value={duration} onValueChange={setDuration}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {["15", "20", "30", "45", "60", "90", "120"].map((v) => (
+                          <SelectItem key={v} value={v}>{v} min</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
                     <Label>Slot interval</Label>
-                    <Input value={slotMinutes} onChange={(event) => setSlotMinutes(event.target.value)} />
+                    <Select value={slotMinutes} onValueChange={setSlotMinutes}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {["15", "20", "30", "45", "60"].map((v) => (
+                          <SelectItem key={v} value={v}>Elke {v} min</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <div>
@@ -727,30 +958,142 @@ export default function BookingSettingsPage() {
                   </p>
                 </div>
                 <div className="space-y-2">
-                  {DAY_ROWS.map((day) => (
-                    <div key={day.key} className="grid grid-cols-[64px_1fr_1fr_auto] items-center gap-2 rounded-xl border px-3 py-2">
-                      <div className="text-sm font-medium">
-                        {day.short}
-                        <span className="ml-1 text-xs text-muted-foreground">{day.label}</span>
+                  {DAY_ROWS.map((day) => {
+                    const enabled = weeklyHours[day.key].enabled;
+                    return (
+                      <div
+                        key={day.key}
+                        className={`grid grid-cols-[80px_1fr_1fr_auto] items-center gap-2 rounded-xl border px-3 py-2.5 transition-colors ${
+                          enabled ? "border-border bg-background" : "border-border/40 bg-muted/20 opacity-60"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="h-2 w-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: enabled ? color : undefined }}
+                            aria-hidden="true"
+                          />
+                          <span className="text-sm font-medium">{day.short}</span>
+                        </div>
+                        <Input
+                          type="time"
+                          value={weeklyHours[day.key].start}
+                          onChange={(event) => updateDay(day.key, { start: event.target.value })}
+                          disabled={!enabled}
+                        />
+                        <Input
+                          type="time"
+                          value={weeklyHours[day.key].end}
+                          onChange={(event) => updateDay(day.key, { end: event.target.value })}
+                          disabled={!enabled}
+                        />
+                        <Switch
+                          checked={enabled}
+                          onCheckedChange={(checked) => updateDay(day.key, { enabled: checked })}
+                        />
                       </div>
-                      <Input
-                        type="time"
-                        value={weeklyHours[day.key].start}
-                        onChange={(event) => updateDay(day.key, { start: event.target.value })}
-                        disabled={!weeklyHours[day.key].enabled}
-                      />
-                      <Input
-                        type="time"
-                        value={weeklyHours[day.key].end}
-                        onChange={(event) => updateDay(day.key, { end: event.target.value })}
-                        disabled={!weeklyHours[day.key].enabled}
-                      />
-                      <Switch
-                        checked={weeklyHours[day.key].enabled}
-                        onCheckedChange={(checked) => updateDay(day.key, { enabled: checked })}
-                      />
+                    );
+                  })}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="automations" className="space-y-5 rounded-2xl border p-4">
+                <div>
+                  <Label className="flex items-center gap-2">
+                    <Bell className="h-4 w-4 text-blue-500" />
+                    Herinneringen
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Automatische e-mailherinneringen voor komende afspraken. Geen configuratie nodig.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-950/20">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                    <div>
+                      <p className="text-sm font-medium text-emerald-800 dark:text-emerald-400">24u-herinnering actief</p>
+                      <p className="text-xs text-emerald-700 dark:text-emerald-500">
+                        Klanten ontvangen automatisch een herinnering 24 uur voor hun afspraak.
+                      </p>
                     </div>
-                  ))}
+                  </div>
+                  <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-950/20">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                    <div>
+                      <p className="text-sm font-medium text-emerald-800 dark:text-emerald-400">1u-herinnering actief</p>
+                      <p className="text-xs text-emerald-700 dark:text-emerald-500">
+                        Klanten ontvangen automatisch een herinnering 1 uur voor hun afspraak.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t pt-5">
+                  <Label className="flex items-center gap-2">
+                    <Webhook className="h-4 w-4 text-purple-500" />
+                    Webhook integratie
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Stuur boekingsgebeurtenissen naar een extern systeem (Zapier, Make, eigen server).
+                  </p>
+                </div>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Webhook URL</Label>
+                    <Input
+                      value={webhookUrl}
+                      onChange={(event) => setWebhookUrl(event.target.value)}
+                      placeholder="https://jouw-server.nl/webhook/boekingen"
+                      type="url"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      POST-verzoeken worden verstuurd met HMAC-SHA256 handtekening in de header <code className="rounded bg-muted px-1">X-Digitify-Signature</code>.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Webhook secret (optioneel)</Label>
+                    <Input
+                      value={webhookSecret}
+                      onChange={(event) => setWebhookSecret(event.target.value)}
+                      type="password"
+                      placeholder="Geheime sleutel voor handtekeningverificatie"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Actieve eventi (leeg = alle)</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {ALL_WEBHOOK_EVENTS.map((evt) => {
+                        const active = webhookEvents.includes(evt);
+                        return (
+                          <button
+                            key={evt}
+                            type="button"
+                            onClick={() => toggleWebhookEvent(evt)}
+                            className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                              active
+                                ? "border-foreground/30 bg-foreground text-background"
+                                : "border-border text-muted-foreground hover:border-foreground/30"
+                            }`}
+                          >
+                            {evt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {webhookEvents.length === 0
+                        ? "Alle booking-eventi worden verstuurd."
+                        : `Alleen ${webhookEvents.length} geselecteerde event${webhookEvents.length > 1 ? "s" : ""} worden verstuurd.`}
+                    </p>
+                  </div>
+                  {webhookUrl.trim() ? (
+                    <div className="rounded-xl border border-purple-200 bg-purple-50 px-4 py-3 dark:border-purple-800 dark:bg-purple-950/20">
+                      <p className="text-xs font-medium text-purple-800 dark:text-purple-400">Webhook geconfigureerd</p>
+                      <p className="mt-1 text-xs text-purple-700 dark:text-purple-500">
+                        Sla op om wijzigingen actief te maken. Webhooks worden verstuurd bij booking.created, .confirmed, .rejected, .cancelled, .completed en .updated.
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
               </TabsContent>
 

@@ -13,7 +13,7 @@ import {
 } from "@digitify/ui";
 import {
   Calendar, Plus, Clock, CheckCircle2, XCircle, Trash2, Pencil,
-  CalendarCheck, CalendarX, BarChart3, Settings2, ArrowRight, Sparkles, CalendarClock, Activity,
+  CalendarCheck, CalendarX, BarChart3, Settings2, ArrowRight, Sparkles, CalendarClock, Activity, Download,
 } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
@@ -316,16 +316,28 @@ export default function BookingsPage() {
           >
             {effectiveCompactMode ? "Compact: aan" : "Compact: uit"}
           </Button>
+          <Link href="/bookings/analytics">
+            <Button variant="outline" size="sm">
+              <BarChart3 className="mr-2 h-4 w-4" />
+              Analytics
+            </Button>
+          </Link>
+          <a href="/api/bookings/export" download>
+            <Button variant="outline" size="sm">
+              <Download className="mr-2 h-4 w-4" />
+              Export CSV
+            </Button>
+          </a>
           <Link href="/settings/bookings#google-agenda">
             <Button variant="outline" size="sm">
               <Calendar className="mr-2 h-4 w-4" />
-              Google Agenda koppelen
+              Google Agenda
             </Button>
           </Link>
           <Link href="/settings/bookings">
             <Button variant="outline" size="sm">
               <Settings2 className="mr-2 h-4 w-4" />
-              Embed & Instellingen
+              Instellingen
             </Button>
           </Link>
           <Button size="sm" onClick={() => setCreateOpen(true)}>
@@ -335,87 +347,36 @@ export default function BookingsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="list" className="space-y-3">
-        <TabsList className="grid w-full max-w-xl grid-cols-3">
-          <TabsTrigger value="list">Lijst</TabsTrigger>
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="automations">Automations</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="list" className="space-y-3">
-          <Card className="border-border/60 shadow-sm">
-            <CardContent className={cn("grid gap-3 md:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,0.8fr))]", effectiveCompactMode ? "p-3" : "p-4")}>
-              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Zoek op klant, e-mail of notitie..." />
-              <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-              <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
-              <Select value={eventTypeFilter} onValueChange={setEventTypeFilter}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Bookingtype" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all">Alle bookingtypes</SelectItem>
-                  {eventTypes?.map((item: NonNullable<typeof eventTypes>[number]) => (
-                    <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </CardContent>
-          </Card>
-          <div className="-mx-1 overflow-x-auto px-1 pb-1">
-            <div className="flex min-w-max gap-2">
-              {filterTabs.map((tab) => (
-                <Button key={tab.label} variant={statusFilter === tab.key ? "default" : "outline"} size="sm" className="whitespace-nowrap" onClick={() => setStatusFilter(tab.key)}>
-                  {tab.label}
-                  {tab.count !== undefined && <Badge variant="secondary" className="ml-1.5 h-5 min-w-5 px-1 text-xs">{tab.count}</Badge>}
-                </Button>
-              ))}
+      {/* Pending bookings alert */}
+      {(stats as any)?.pending > 0 ? (
+        <div className="flex items-center justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-950/20">
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500/20">
+              <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                {(stats as any).pending} boeking{(stats as any).pending !== 1 ? "en" : ""} wacht op bevestiging
+              </p>
+              <p className="text-xs text-amber-600 dark:text-amber-500">
+                Controleer en bevestig of wijs af via de lijst hieronder.
+              </p>
             </div>
           </div>
-          <Card className="border-border/50 shadow-sm">
-            <CardContent className="p-0">
-              {isLoading ? (
-                <div className="space-y-3 p-6">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-              ) : !sortedBookings.length ? (
-                <EmptyState icon={<Calendar />} title="Geen boekingen gevonden" description="Maak een nieuwe boeking aan om te beginnen." />
-              ) : (
-                <div className={cn("grid gap-3", effectiveCompactMode ? "p-3" : "p-4")}>
-                  {sortedBookings.map((booking) => {
-                    const statusInfo = STATUS_MAP[booking.status] ?? { label: booking.status, variant: "secondary" as const };
-                    const syncInfo = getSyncBadge((booking as any).googleSyncState);
-                    const bookingDate = new Date(booking.date);
-                    return (
-                      <div key={booking.id} className={cn("rounded-2xl border", effectiveCompactMode ? "p-3" : "p-4")}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-semibold">{booking.clientName}</p>
-                              <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
-                              <Badge variant={syncInfo.variant}>{syncInfo.label}</Badge>
-                            </div>
-                            {booking.clientEmail ? <p className="text-xs text-muted-foreground">{booking.clientEmail}</p> : null}
-                          </div>
-                          <p className="text-xs text-muted-foreground">{formatDateNice(bookingDate)}</p>
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <Button variant="outline" size="sm" onClick={() => openEdit(booking)}><Pencil className="mr-2 h-3.5 w-3.5" />Bewerk</Button>
-                          {booking.status === "PENDING" ? <Button variant="outline" size="sm" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => openConfirmWizard(booking)}><CheckCircle2 className="mr-2 h-3.5 w-3.5" />Bevestig</Button> : null}
-                          {booking.status === "PENDING" ? <Button variant="outline" size="sm" className="border-red-200 text-red-700 hover:bg-red-50" onClick={() => rejectMutation.mutate({ id: booking.id })}><XCircle className="mr-2 h-3.5 w-3.5" />Afwijzen</Button> : null}
-                          {(booking.status === "PENDING" || booking.status === "SCHEDULED") ? <Button variant="outline" size="sm" className="border-blue-200 text-blue-700 hover:bg-blue-50" onClick={() => updateMutation.mutate({ id: booking.id, status: "COMPLETED" })}><CalendarCheck className="mr-2 h-3.5 w-3.5" />Voltooi</Button> : null}
-                          <Button variant="outline" size="sm" className="text-destructive" onClick={() => openDelete(booking.id, booking.clientName)}><Trash2 className="mr-2 h-3.5 w-3.5" />Verwijder</Button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0 border-amber-300 bg-white text-amber-800 hover:bg-amber-50 dark:border-amber-800 dark:bg-transparent dark:text-amber-300"
+            onClick={() => setStatusFilter("PENDING")}
+          >
+            Bekijk
+          </Button>
+        </div>
+      ) : null}
 
-        <TabsContent value="overview" className="space-y-3">
-      {/* Filter tabs */}
+      {/* Shared filters rendered once, used by both List and Overview tabs */}
       <Card className="border-border/60 shadow-sm">
-        <CardContent className="grid gap-3 p-4 md:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,0.8fr))]">
+        <CardContent className={cn("grid gap-3 md:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,0.8fr))]", effectiveCompactMode ? "p-3" : "p-4")}>
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Zoek op klant, e-mail of notitie..." />
           <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
           <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
@@ -435,24 +396,64 @@ export default function BookingsPage() {
       <div className="-mx-1 overflow-x-auto px-1 pb-1">
         <div className="flex min-w-max gap-2">
           {filterTabs.map((tab) => (
-            <Button
-              key={tab.label}
-              variant={statusFilter === tab.key ? "default" : "outline"}
-              size="sm"
-              className="whitespace-nowrap"
-              onClick={() => setStatusFilter(tab.key)}
-            >
+            <Button key={tab.label} variant={statusFilter === tab.key ? "default" : "outline"} size="sm" className="whitespace-nowrap" onClick={() => setStatusFilter(tab.key)}>
               {tab.label}
-              {tab.count !== undefined && (
-                <Badge variant="secondary" className="ml-1.5 h-5 min-w-5 px-1 text-xs">
-                  {tab.count}
-                </Badge>
-              )}
+              {tab.count !== undefined && <Badge variant="secondary" className="ml-1.5 h-5 min-w-5 px-1 text-xs">{tab.count}</Badge>}
             </Button>
           ))}
         </div>
       </div>
 
+      <Tabs defaultValue="list" className="space-y-3">
+        <TabsList className="grid w-full max-w-md grid-cols-3">
+          <TabsTrigger value="list">Lijst</TabsTrigger>
+          <TabsTrigger value="overview">Overzicht</TabsTrigger>
+          <TabsTrigger value="automations">Automations</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="list" className="space-y-3">
+          <Card className="border-border/50 shadow-sm">
+            <CardContent className="p-0">
+              {isLoading ? (
+                <div className="space-y-3 p-6">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+              ) : !sortedBookings.length ? (
+                <EmptyState icon={<Calendar />} title="Geen boekingen gevonden" description="Maak een nieuwe boeking aan om te beginnen." />
+              ) : (
+                <div className={cn("grid gap-3", effectiveCompactMode ? "p-3" : "p-4")}>
+                  {sortedBookings.map((booking) => {
+                    const statusInfo = STATUS_MAP[booking.status] ?? { label: booking.status, variant: "secondary" as const };
+                    const syncInfo = getSyncBadge((booking as any).googleSyncState);
+                    const bookingDate = new Date(booking.date);
+                    return (
+                      <div key={booking.id} className={cn("rounded-2xl border", effectiveCompactMode ? "p-3" : "p-4")} role="article" aria-label={`Boeking ${booking.clientName}`}>
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-semibold">{booking.clientName}</p>
+                              <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                              <Badge variant={syncInfo.variant}>{syncInfo.label}</Badge>
+                            </div>
+                            {booking.clientEmail ? <p className="text-xs text-muted-foreground">{booking.clientEmail}</p> : null}
+                          </div>
+                          <p className="shrink-0 text-xs text-muted-foreground">{formatDateNice(bookingDate)}</p>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" aria-label={`Bewerk boeking ${booking.clientName}`} onClick={() => openEdit(booking)}><Pencil className="mr-2 h-3.5 w-3.5" />Bewerk</Button>
+                          {booking.status === "PENDING" ? <Button variant="outline" size="sm" className="border-emerald-200 text-emerald-700 hover:bg-emerald-50" aria-label={`Bevestig boeking ${booking.clientName}`} onClick={() => openConfirmWizard(booking)}><CheckCircle2 className="mr-2 h-3.5 w-3.5" />Bevestig</Button> : null}
+                          {booking.status === "PENDING" ? <Button variant="outline" size="sm" className="border-red-200 text-red-700 hover:bg-red-50" aria-label={`Wijs boeking af voor ${booking.clientName}`} onClick={() => rejectMutation.mutate({ id: booking.id })}><XCircle className="mr-2 h-3.5 w-3.5" />Afwijzen</Button> : null}
+                          {(booking.status === "PENDING" || booking.status === "SCHEDULED") ? <Button variant="outline" size="sm" className="border-blue-200 text-blue-700 hover:bg-blue-50" aria-label={`Markeer als voltooid: ${booking.clientName}`} onClick={() => updateMutation.mutate({ id: booking.id, status: "COMPLETED" })}><CalendarCheck className="mr-2 h-3.5 w-3.5" />Voltooi</Button> : null}
+                          <Button variant="outline" size="sm" className="text-destructive" aria-label={`Verwijder boeking ${booking.clientName}`} onClick={() => openDelete(booking.id, booking.clientName)}><Trash2 className="mr-2 h-3.5 w-3.5" />Verwijder</Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="overview" className="space-y-3">
       {/* Stats Cards */}
       <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
         <Card>
@@ -924,58 +925,69 @@ export default function BookingsPage() {
       </Card>
         </TabsContent>
 
-        <TabsContent value="automations" className="space-y-3">
-          <div className="grid gap-3 xl:grid-cols-3">
-            <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-              <CardContent className="p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Planning flow</p>
-                <p className="mt-2 text-sm font-medium">
-                  Start met pending aanvragen, bevestig wat klopt en werk afgeronde afspraken meteen af.
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Zo blijft je dashboard schoon en weet je welke boekingen nog actie vragen.
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-              <CardContent className="p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Embed compact</p>
-                <p className="mt-2 text-sm font-medium">
-                  De publieke booking embed is compacter gemaakt zodat hij beter werkt in iframes en op mobiel.
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Kalender, tijdsloten en formulier blijven in één duidelijke flow.
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-              <CardContent className="p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Koppelingen</p>
-                <p className="mt-2 text-sm font-medium">
-                  Google Agenda en lead-koppeling blijven de belangrijkste plekken om dubbele opvolging te vermijden.
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button asChild size="sm" variant="outline">
-                    <Link href="/settings/bookings">Instellingen</Link>
-                  </Button>
-                  <Button asChild size="sm" variant="ghost">
-                    <Link href="/embed/bookings">Embed bekijken</Link>
-                  </Button>
+        <TabsContent value="automations" className="space-y-4">
+          {/* Status metrics */}
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              {
+                label: "In afwachting",
+                value: (stats as any)?.pending ?? 0,
+                color: "amber",
+                icon: <Clock className="h-4 w-4" />,
+                action: () => setStatusFilter("PENDING"),
+              },
+              {
+                label: "Bevestigd",
+                value: (stats as any)?.confirmed ?? 0,
+                color: "blue",
+                icon: <CheckCircle2 className="h-4 w-4" />,
+                action: () => setStatusFilter("CONFIRMED"),
+              },
+              {
+                label: "Voltooid",
+                value: stats?.completed ?? 0,
+                color: "emerald",
+                icon: <CalendarCheck className="h-4 w-4" />,
+                action: () => setStatusFilter("COMPLETED"),
+              },
+              {
+                label: "Niet verschenen",
+                value: (stats as any)?.noShow ?? 0,
+                color: "red",
+                icon: <CalendarX className="h-4 w-4" />,
+                action: () => setStatusFilter("NO_SHOW"),
+              },
+            ].map(({ label, value, color, icon, action }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={action}
+                className={`rounded-2xl border p-4 text-left transition hover:shadow-sm border-${color}-200 bg-${color}-50/60 dark:border-${color}-900/40 dark:bg-${color}-950/20`}
+              >
+                <div className={`mb-2 flex h-9 w-9 items-center justify-center rounded-xl bg-${color}-500/15 text-${color}-600 dark:text-${color}-400`}>
+                  {icon}
                 </div>
-              </CardContent>
-            </Card>
+                <p className="text-2xl font-bold">{value}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{label}</p>
+              </button>
+            ))}
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
+            {/* Active reminders */}
             <Card className="border-border/60 shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-base">Booking reminders</CardTitle>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <CalendarClock className="h-4 w-4 text-primary" />
+                  Aankomende reminders
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
                 {bookingReminderItems.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    Geen booking-reminders op dit moment. Nieuwe aanvragen en bijna-startende afspraken verschijnen hier automatisch.
-                  </p>
+                  <div className="rounded-xl border border-dashed p-4 text-center">
+                    <p className="text-sm text-muted-foreground">Geen reminders op dit moment.</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Nieuwe aanvragen en bijna-startende afspraken verschijnen hier automatisch.</p>
+                  </div>
                 ) : (
                   bookingReminderItems.map((item) => (
                     <Link
@@ -994,30 +1006,63 @@ export default function BookingsPage() {
               </CardContent>
             </Card>
 
+            {/* Recent activity */}
             <Card className="border-border/60 shadow-sm">
-              <CardHeader>
+              <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Activity className="h-4 w-4" />
-                  Recente booking activiteit
+                  <Activity className="h-4 w-4 text-primary" />
+                  Recente activiteit
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
                 {bookingActivities.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nog geen recente bookingactiviteit gevonden.</p>
+                  <div className="rounded-xl border border-dashed p-4 text-center">
+                    <p className="text-sm text-muted-foreground">Nog geen recente bookingactiviteit.</p>
+                  </div>
                 ) : (
                   bookingActivities.map((activity) => (
-                    <div key={activity.id} className="rounded-xl border p-3">
-                      <p className="text-sm font-medium">{activity.title}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {activity.user?.name ? `${activity.user.name} · ` : ""}
-                        {formatDateNice(activity.createdAt)}
-                      </p>
+                    <div key={activity.id} className="flex items-start gap-3 rounded-xl border p-3">
+                      <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Activity className="h-3.5 w-3.5 text-primary" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{activity.title}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {activity.user?.name ? `${activity.user.name} · ` : ""}
+                          {formatDateNice(activity.createdAt)}
+                        </p>
+                      </div>
                     </div>
                   ))
                 )}
               </CardContent>
             </Card>
           </div>
+
+          {/* Quick links */}
+          <Card className="border-border/60 shadow-sm">
+            <CardContent className="flex flex-wrap items-center gap-3 p-4">
+              <p className="text-sm font-medium text-muted-foreground">Snelle acties:</p>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/settings/bookings">
+                  <Settings2 className="mr-2 h-3.5 w-3.5" />
+                  Bookingflow aanpassen
+                </Link>
+              </Button>
+              <Button asChild size="sm" variant="outline">
+                <Link href="/settings/bookings#google-agenda">
+                  <Calendar className="mr-2 h-3.5 w-3.5" />
+                  Google Agenda setup
+                </Link>
+              </Button>
+              <Button asChild size="sm" variant="outline">
+                <a href="/embed/bookings" target="_blank" rel="noreferrer">
+                  <ArrowRight className="mr-2 h-3.5 w-3.5" />
+                  Embed bekijken
+                </a>
+              </Button>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
