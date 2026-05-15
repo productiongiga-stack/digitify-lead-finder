@@ -65,8 +65,12 @@ export async function GET(request: Request) {
         });
         let available = !localOverlap;
         if (available) {
-          const google = await isGoogleSlotAvailable(prisma, { start, end, userId: hostUserId });
-          available = !google.enabled || google.available;
+          try {
+            const google = await isGoogleSlotAvailable(prisma, { start, end, userId: hostUserId });
+            available = !google.enabled || google.available;
+          } catch {
+            // Google auth failure — treat slot as available so the calendar still loads
+          }
         }
         slots.push({
           time,

@@ -883,9 +883,7 @@ export default function BookingSettingsPage() {
               <Settings2 className="h-6 w-6" />
               Booking Instellingen
             </h1>
-            <p className="text-sm text-muted-foreground">
-              Configureer de booking embed, weekplanning en Google Workspace synchronisatie.
-            </p>
+            <p className="text-sm text-muted-foreground">Embed, beschikbaarheid en Google synchronisatie.</p>
           </div>
           {hasChanges ? (
             <Button onClick={handleSave} disabled={batchUpdate.isPending} className="shrink-0">
@@ -1044,9 +1042,7 @@ export default function BookingSettingsPage() {
               <Calendar className="h-4 w-4" />
               Booking Configuratie
             </CardTitle>
-            <CardDescription>
-              Deze instellingen sturen de publieke bookingflow en de interne sync aan.
-            </CardDescription>
+            <CardDescription>Publieke bookingflow en Google synchronisatie.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="flex flex-wrap gap-2">
@@ -1072,7 +1068,7 @@ export default function BookingSettingsPage() {
               </Button>
             </div>
             <Tabs defaultValue="flow" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-5">
+              <TabsList className="grid w-full grid-cols-6">
                 <TabsTrigger value="flow">Flow</TabsTrigger>
                 <TabsTrigger value="availability">Beschikbaarheid</TabsTrigger>
                 <TabsTrigger value="automations">Automaties</TabsTrigger>
@@ -1082,12 +1078,6 @@ export default function BookingSettingsPage() {
               </TabsList>
 
               <TabsContent value="flow" className="space-y-4 rounded-2xl border p-4">
-                <div>
-                  <Label>Publieke bookingflow</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Branding, compacte layout en microcopy voor de publiek gedeelde boekingspagina.
-                  </p>
-                </div>
                 <div className="grid gap-4 lg:grid-cols-3">
                   <div className="space-y-2">
                     <Label>Merknaam</Label>
@@ -1098,7 +1088,7 @@ export default function BookingSettingsPage() {
                     <Input value={meetingName} onChange={(event) => setMeetingName(event.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Service voor embed (optioneel)</Label>
+                    <Label>Service (optioneel)</Label>
                     <Input
                       value={serviceName}
                       onChange={(event) => setServiceName(event.target.value)}
@@ -1236,12 +1226,7 @@ export default function BookingSettingsPage() {
                     </Select>
                   </div>
                 </div>
-                <div>
-                  <Label>Beschikbaarheid per dag</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Stel per weekdag in wanneer klanten effectief kunnen boeken.
-                  </p>
-                </div>
+                <Label>Beschikbaarheid per dag</Label>
                 <div className="space-y-2">
                   {DAY_ROWS.map((day) => {
                     const enabled = weeklyHours[day.key].enabled;
@@ -1283,15 +1268,10 @@ export default function BookingSettingsPage() {
               </TabsContent>
 
               <TabsContent value="automations" className="space-y-5 rounded-2xl border p-4">
-                <div>
-                  <Label className="flex items-center gap-2">
-                    <Bell className="h-4 w-4 text-blue-500" />
-                    Herinneringen
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Automatische e-mailherinneringen voor bevestigde afspraken.
-                  </p>
-                </div>
+                <Label className="flex items-center gap-2">
+                  <Bell className="h-4 w-4 text-blue-500" />
+                  Herinneringen
+                </Label>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-3 rounded-xl border px-4 py-3">
                     <div>
@@ -1320,9 +1300,6 @@ export default function BookingSettingsPage() {
                     <Webhook className="h-4 w-4 text-purple-500" />
                     Webhook integratie
                   </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Stuur boekingsgebeurtenissen naar een extern systeem (Zapier, Make, eigen server).
-                  </p>
                 </div>
                 <div className="space-y-4">
                   <div className="space-y-2">
@@ -1334,7 +1311,7 @@ export default function BookingSettingsPage() {
                       type="url"
                     />
                     <p className="text-xs text-muted-foreground">
-                      POST-verzoeken worden verstuurd met HMAC-SHA256 handtekening in de header <code className="rounded bg-muted px-1">X-Digitify-Signature</code>.
+                      Beveiligd met HMAC-SHA256 via header <code className="rounded bg-muted px-1">X-Digitify-Signature</code>.
                     </p>
                   </div>
                   <div className="space-y-2">
@@ -1375,33 +1352,16 @@ export default function BookingSettingsPage() {
                   </div>
                   {webhookUrl.trim() ? (
                     <div className="rounded-xl border border-purple-200 bg-purple-50 px-4 py-3 dark:border-purple-800 dark:bg-purple-950/20">
-                      <p className="text-xs font-medium text-purple-800 dark:text-purple-400">Webhook geconfigureerd</p>
-                      <p className="mt-1 text-xs text-purple-700 dark:text-purple-500">
-                        Sla op om wijzigingen actief te maken. Webhooks worden verstuurd bij booking.created, .confirmed, .rejected, .cancelled, .completed en .updated.
-                      </p>
+                      <p className="text-xs font-medium text-purple-800 dark:text-purple-400">Webhook geconfigureerd — sla op om te activeren.</p>
                     </div>
                   ) : null}
                 </div>
               </TabsContent>
 
               <TabsContent value="google" id="google-agenda" className="space-y-4 rounded-2xl border p-4">
-                <div>
-                  <Label>Google Agenda integratie</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Gebruik OAuth voor een eenvoudige koppeling, of laat service-account sync actief als fallback voor teams.
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-muted/40 p-4 text-sm">
-                  <p className="font-medium">{googleOauthEmail ? "OAuth actief" : "Snelle setup"}</p>
-                  <p className="mt-1 text-muted-foreground">
-                    {googleOauthEmail
-                      ? `Agenda verbonden via Google-auth als ${googleOauthEmail}. Nieuwe boekingen worden op die agenda gecontroleerd en ingepland.`
-                      : "Klik op 'Google Agenda koppelen' om je eigen agenda veilig te verbinden zonder private key."}
-                  </p>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Google redirect URL: {getAppUrl()}/api/integrations/google-calendar/callback
-                  </p>
-                </div>
+                <p className="text-xs text-muted-foreground">
+                  Redirect URL: <code className="rounded bg-muted px-1">{getAppUrl()}/api/integrations/google-calendar/callback</code>
+                </p>
                 <div className="grid gap-4 lg:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Google Calendar ID</Label>
@@ -1421,20 +1381,12 @@ export default function BookingSettingsPage() {
                   </div>
                 </div>
                 <div className="flex items-center justify-between rounded-xl border px-3 py-2">
-                  <div>
-                    <Label>Synchronisatie actief</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Controle op bezette slots, auto inboeken en updates bij statuswijzigingen.
-                    </p>
-                  </div>
+                  <Label>Synchronisatie actief</Label>
                   <Switch checked={googleSyncEnabled} onCheckedChange={setGoogleSyncEnabled} />
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
                   <div className="rounded-2xl border p-4">
                     <p className="text-sm font-medium">OAuth koppeling</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Beste keuze voor een persoonlijke of gedeelde Google Agenda.
-                    </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button type="button" variant="outline" asChild>
                         <a href="/api/integrations/google-calendar/connect">
@@ -1452,10 +1404,7 @@ export default function BookingSettingsPage() {
                     </div>
                   </div>
                   <div className="rounded-2xl border p-4">
-                    <p className="text-sm font-medium">Service account fallback</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Handig voor technische of gedeelde teamagenda's zonder interactieve login.
-                    </p>
+                    <p className="text-sm font-medium">Service account</p>
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -1491,12 +1440,7 @@ export default function BookingSettingsPage() {
 
               <TabsContent value="embed" className="space-y-4 rounded-2xl border p-4">
                 <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <Label>Live preview</Label>
-                    <p className="text-xs text-muted-foreground">
-                      De echte booking widget — exact wat je klanten zien.
-                    </p>
-                  </div>
+                  <Label>Live preview</Label>
                   <Button type="button" variant="outline" size="sm" asChild>
                     <a href={bookingPreviewUrl} target="_blank" rel="noreferrer">
                       <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
