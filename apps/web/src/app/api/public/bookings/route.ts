@@ -106,8 +106,10 @@ async function findNextAvailableSlots(
 }
 
 export async function POST(request: Request) {
+  let _phase = "parse";
   try {
     const body = await request.json();
+    _phase = "tenant";
     const ip = getClientIp(request);
     const tenantUserId = await resolvePublicTenantUserId(prisma, String(body.tenant || ""));
     if (!tenantUserId) {
@@ -115,6 +117,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
     }
 
+    _phase = "rate-limit";
     const burstLimiter = enforceRateLimit(request, {
       key: `public-booking-burst:${tenantUserId}:${ip}`,
       limit: 4,
@@ -131,6 +134,7 @@ export async function POST(request: Request) {
     if (hourlyLimiter) return hourlyLimiter;
     if (String(body.website || "").trim()) return NextResponse.json({ success: true });
 
+    _phase = "validate";
     const clientName = String(body.clientName || "").trim();
     const clientEmail = String(body.clientEmail || "").trim();
     const date = String(body.date || "").trim();
@@ -149,6 +153,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Ongeldig e-mailadres." }, { status: 400 });
     }
 
+    _phase = "event-type";
     const eventType = eventTypeSlug
       ? await prisma.bookingEventType.findFirst({
           where: { createdById: tenantUserId, slug: eventTypeSlug, isActive: true },
@@ -200,6 +205,7 @@ export async function POST(request: Request) {
     const hostUserId = hostIds[0] || tenantUserId;
     const bookingEnd = new Date(bookingDate.getTime() + duration * 60 * 1000);
 
+    _phase = "overlap-check";
     const overlap = await hasBookingOverlap(prisma, {
       ownerUserId: tenantUserId,
       hostUserId,
@@ -220,6 +226,7 @@ export async function POST(request: Request) {
       );
     }
 
+    _phase = "google-check";
     let googleAvailability: { enabled: boolean; available: boolean } = { enabled: false, available: true };
     try {
       googleAvailability = await isGoogleSlotAvailable(prisma, { start: bookingDate, end: bookingEnd, userId: hostUserId });
@@ -240,6 +247,7 @@ export async function POST(request: Request) {
       );
     }
 
+    _phase = "duplicate-check";
     const duplicateWindow = new Date(Date.now() - 15 * 60 * 1000);
     const recentDuplicate = await prisma.booking.findFirst({
       where: {
@@ -271,6 +279,7 @@ export async function POST(request: Request) {
       if (globalApprovalMode === "automatic") autoConfirm = true;
     }
 
+    _phase = "booking-create";
     const cancelToken = createPublicToken();
     const rescheduleToken = createPublicToken();
     const booking = await prisma.booking.create({
@@ -293,6 +302,7 @@ export async function POST(request: Request) {
       },
     });
 
+    _phase = "answers-create";
     const answerRows = answers
       .map((answer: any) => {
         const question = eventType.questions.find((item) => item.id === String(answer.questionId || ""));
@@ -300,12 +310,13 @@ export async function POST(request: Request) {
         return { bookingId: booking.id, questionId: question.id, label: question.label, value: String(answer.value ?? "").slice(0, 4000) };
       })
       .filter(Boolean) as Array<{ bookingId: string; questionId: string; label: string; value: string }>;
-    if (answerRows.length) await prisma.bookingQuestionAnswer.createMany({ data: answerRows });
+    if (answerRows.length) await prisma.bookingQuestionAnswer.createMany({ data: answerRows }).catch(() => null);
 
     await prisma.bookingAnalyticsEvent.create({
       data: { createdById: tenantUserId, eventTypeId: eventType.id, bookingId: booking.id, type: "submit_success", metadata: { timezone, autoConfirm } },
     }).catch(() => null);
 
+    _phase = "settings-fetch";
     const settings = await prisma.setting.findMany({
       where: {
         key: {
@@ -447,7 +458,8 @@ export async function POST(request: Request) {
       autoConfirmed: autoConfirm,
     });
   } catch (error) {
-    log.api.error("Public booking request failed", { route: "/api/public/bookings" }, error);
-    return NextResponse.json({ error: "Boeking opslaan mislukt." }, { status: 500 });
+    const errMsg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    log.api.error("Public booking request failed", { route: "/api/public/bookings", phase: _phase, errMsg }, error);
+    return NextResponse.json({ error: `Boeking opslaan mislukt. [${_phase}]` }, { status: 500 });
   }
 }
