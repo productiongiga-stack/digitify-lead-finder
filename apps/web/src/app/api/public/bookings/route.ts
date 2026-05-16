@@ -4,6 +4,7 @@ import { sendBrandedEmail } from "@digitify/api/src/lib/email-sender";
 import { log } from "@digitify/api/src/lib/logger";
 import { isGoogleSlotAvailable } from "@digitify/api/src/lib/google-calendar";
 import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
+import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-schema-compat";
 import {
   addMinutes,
   buildIcsAttachment,
@@ -106,8 +107,11 @@ async function findNextAvailableSlots(
 }
 
 export async function POST(request: Request) {
-  let _phase = "parse";
+  let _phase = "schema-compat";
+  // Ensure all booking-related DB columns/tables exist (idempotent, cached for 6h per process)
+  await ensureTenantSchemaCompatibility(prisma).catch(() => null);
   try {
+    _phase = "parse";
     const body = await request.json();
     _phase = "tenant";
     const ip = getClientIp(request);

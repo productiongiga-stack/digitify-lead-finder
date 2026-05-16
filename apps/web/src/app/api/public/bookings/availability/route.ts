@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { isGoogleSlotAvailable } from "@digitify/api/src/lib/google-calendar";
 import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
+import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-schema-compat";
 import {
   addMinutes,
   DEFAULT_BOOKING_TIMEZONE,
@@ -15,6 +16,7 @@ import {
 } from "@digitify/api/src/lib/booking-utils";
 
 export async function GET(request: Request) {
+  await ensureTenantSchemaCompatibility(prisma).catch(() => null);
   const url = new URL(request.url);
   const tenantUserId = await resolvePublicTenantUserId(prisma, url.searchParams.get("tenant") || "");
   if (!tenantUserId) return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
