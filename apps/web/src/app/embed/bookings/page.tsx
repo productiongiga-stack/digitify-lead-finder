@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   CalendarDays,
@@ -12,7 +12,10 @@ import {
   Loader2,
   Play,
   Video,
+  X,
 } from "lucide-react";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type DaySchedule = { enabled: boolean; start: string; end: string };
 type WeeklyHours = Record<number, DaySchedule>;
@@ -40,6 +43,10 @@ type PublicEventType = {
 };
 type AvailabilitySlot = { time: string; start: string; end: string; available: boolean; hostUserId: string | null };
 type SuggestedSlot = { date: string; time: string; start: string };
+type BookingStep = null | "time" | "form" | "confirm";
+type DateStatus = "available" | "partial" | "full" | "none";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_WEEKLY_HOURS: WeeklyHours = {
   0: { enabled: false, start: "09:00", end: "17:00" },
@@ -51,35 +58,19 @@ const DEFAULT_WEEKLY_HOURS: WeeklyHours = {
   6: { enabled: false, start: "09:00", end: "17:00" },
 };
 
-const MONTH_FORMATTER = new Intl.DateTimeFormat("nl-BE", {
-  month: "long",
-  year: "numeric",
-});
-
+const MONTH_FORMATTER = new Intl.DateTimeFormat("nl-BE", { month: "long", year: "numeric" });
 const DAY_LABELS = ["ZO", "MA", "DI", "WO", "DO", "VR", "ZA"];
-const DAY_NAMES = [
-  "zondag",
-  "maandag",
-  "dinsdag",
-  "woensdag",
-  "donderdag",
-  "vrijdag",
-  "zaterdag",
-];
-const MONTH_NAMES = [
-  "januari",
-  "februari",
-  "maart",
-  "april",
-  "mei",
-  "juni",
-  "juli",
-  "augustus",
-  "september",
-  "oktober",
-  "november",
-  "december",
-];
+const DAY_NAMES = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
+const MONTH_NAMES = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"];
+
+const STATUS_DOT: Record<DateStatus, string | null> = {
+  available: "#22c55e",
+  partial: "#f97316",
+  full: "#ef4444",
+  none: null,
+};
+
+// ─── Utility functions ────────────────────────────────────────────────────────
 
 function parseWeeklyHours(raw: string | null, startTime: string, endTime: string, availableDays: number[]): WeeklyHours {
   const fallback: WeeklyHours = {
@@ -155,9 +146,7 @@ function formatMonthTitle(date: Date) {
 
 function formatTimeDisplay(time: string, mode: TimeMode) {
   const [hours, minutes] = time.split(":").map((value) => Number(value));
-  if (mode === "24") {
-    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-  }
+  if (mode === "24") return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
   const suffix = hours >= 12 ? "PM" : "AM";
   const normalized = hours % 12 || 12;
   return `${normalized}:${String(minutes).padStart(2, "0")} ${suffix}`;
@@ -172,20 +161,17 @@ function buildSlotsForDate(dateValue: string, weeklyHours: WeeklyHours, duration
   const date = parseDateKey(dateValue);
   const schedule = weeklyHours[date.getDay()] || DEFAULT_WEEKLY_HOURS[date.getDay()];
   if (!schedule?.enabled) return [];
-
   const [startHour, startMinute] = schedule.start.split(":").map((value) => Number(value));
   const [endHour, endMinute] = schedule.end.split(":").map((value) => Number(value));
   const startMinutes = startHour * 60 + startMinute;
   const endMinutes = endHour * 60 + endMinute;
   const interval = clampSlotMinutes(slotMinutes);
   const slots: string[] = [];
-
   for (let minutes = startMinutes; minutes + duration <= endMinutes; minutes += interval) {
     const hours = String(Math.floor(minutes / 60)).padStart(2, "0");
     const mins = String(minutes % 60).padStart(2, "0");
     slots.push(`${hours}:${mins}`);
   }
-
   return slots;
 }
 
@@ -195,9 +181,7 @@ function getFirstAvailableDate(baseDate: Date, weeklyHours: WeeklyHours, duratio
     const current = new Date(candidate);
     current.setDate(candidate.getDate() + index);
     const dateKey = formatDateKey(current);
-    if (buildSlotsForDate(dateKey, weeklyHours, duration, slotMinutes).length > 0) {
-      return dateKey;
-    }
+    if (buildSlotsForDate(dateKey, weeklyHours, duration, slotMinutes).length > 0) return dateKey;
   }
   return formatDateKey(candidate);
 }
@@ -207,7 +191,6 @@ function createMonthGrid(month: Date) {
   const offset = (firstDay.getDay() + 6) % 7;
   const start = new Date(firstDay);
   start.setDate(firstDay.getDate() - offset);
-
   return Array.from({ length: 42 }, (_, index) => {
     const date = new Date(start);
     date.setDate(start.getDate() + index);
@@ -215,14 +198,14 @@ function createMonthGrid(month: Date) {
   });
 }
 
+// ─── Main embed component ─────────────────────────────────────────────────────
+
 function BookingEmbedContent() {
   const params = useSearchParams();
   const color = params.get("color") || "#f5b04c";
   const theme = params.get("theme") === "dark" ? "dark" : "light";
   const title = params.get("title") || "Plan een afspraak";
-  const description =
-    params.get("description") ||
-    "Kies een moment dat past. We bevestigen uw afspraak meteen in dezelfde flow.";
+  const description = params.get("description") || "Kies een moment dat past. We bevestigen uw afspraak meteen.";
   const submitText = params.get("submitText") || "Afspraak bevestigen";
   const duration = Math.max(15, Number(params.get("duration") || "60"));
   const slotMinutes = clampSlotMinutes(Number(params.get("slotMinutes") || "30"));
@@ -234,7 +217,8 @@ function BookingEmbedContent() {
     .filter((value) => !Number.isNaN(value));
   const weeklyHours = useMemo(
     () => parseWeeklyHours(params.get("weeklyHours"), startTime, endTime, availableDays),
-    [params, startTime, endTime, availableDays]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [params.get("weeklyHours"), startTime, endTime, availableDays.join(",")]
   );
   const brandName = params.get("brandName") || "Digitify";
   const meetingName = params.get("meetingName") || title;
@@ -252,6 +236,8 @@ function BookingEmbedContent() {
     [today, weeklyHours, duration, slotMinutes]
   );
 
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [activeStep, setActiveStep] = useState<BookingStep>(null);
   const [currentMonth, setCurrentMonth] = useState(getMonthStart(parseDateKey(initialDate)));
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [selectedTime, setSelectedTime] = useState("");
@@ -261,6 +247,7 @@ function BookingEmbedContent() {
   const [website, setWebsite] = useState("");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [timeMode, setTimeMode] = useState<TimeMode>(defaultTimeMode);
   const [visitorTimezone, setVisitorTimezone] = useState(timezone);
   const [eventType, setEventType] = useState<PublicEventType | null>(null);
@@ -270,7 +257,6 @@ function BookingEmbedContent() {
   const [resultModal, setResultModal] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
   const [suggestedSlots, setSuggestedSlots] = useState<SuggestedSlot[]>([]);
-  const formRef = useRef<HTMLDivElement>(null);
 
   const effectiveDuration = eventType?.duration || duration;
   const effectiveSlotMinutes = eventType?.slotMinutes || slotMinutes;
@@ -279,10 +265,16 @@ function BookingEmbedContent() {
   const effectiveDescription = eventType?.description || description;
   const effectiveLocation = eventType?.location || meetingLocation;
 
+  // Available time slots for the selected date (API-first, then local fallback)
   const selectedSlots = useMemo(() => {
-    const remoteSlots = availability[selectedDate]?.filter((slot) => slot.available).map((slot) => slot.time) || [];
-    return remoteSlots.length ? remoteSlots : buildSlotsForDate(selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes);
+    const remoteData = availability[selectedDate];
+    if (remoteData !== undefined) {
+      return remoteData.filter((slot) => slot.available).map((slot) => slot.time);
+    }
+    return buildSlotsForDate(selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes);
   }, [availability, selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes]);
+
+  // ── Effects ────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -296,9 +288,7 @@ function BookingEmbedContent() {
     if (eventTypeSlug) url.searchParams.set("eventType", eventTypeSlug);
     fetch(url)
       .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (data) setEventType(data);
-      })
+      .then((data) => { if (data) setEventType(data); })
       .catch(() => null);
   }, [tenant, eventTypeSlug]);
 
@@ -317,70 +307,47 @@ function BookingEmbedContent() {
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         if (data?.days) {
-          setAvailability(Object.fromEntries(data.days.map((day: { date: string; slots: AvailabilitySlot[] }) => [day.date, day.slots])));
+          setAvailability((prev) => ({
+            ...prev,
+            ...Object.fromEntries(data.days.map((day: { date: string; slots: AvailabilitySlot[] }) => [day.date, day.slots])),
+          }));
         }
       })
       .catch(() => null)
       .finally(() => setLoadingAvailability(false));
   }, [tenant, eventType?.slug, eventTypeSlug, currentMonth, visitorTimezone]);
 
+  // Auto-select first available slot when date changes
   useEffect(() => {
-    if (!selectedSlots.length) {
-      setSelectedTime("");
-      return;
-    }
-    if (!selectedSlots.includes(selectedTime)) {
-      setSelectedTime(selectedSlots[0] || "");
-    }
+    if (!selectedSlots.length) { setSelectedTime(""); return; }
+    if (!selectedSlots.includes(selectedTime)) setSelectedTime(selectedSlots[0] || "");
   }, [selectedSlots, selectedTime]);
 
-  useEffect(() => {
-    if (selectedDate && selectedTime && formRef.current) {
-      formRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  // ── Date status classification ─────────────────────────────────────────────
+
+  function getDateStatus(dateKey: string): DateStatus {
+    if (dateKey < todayKey) return "none";
+    const remoteData = availability[dateKey];
+    if (remoteData !== undefined) {
+      const total = remoteData.length;
+      const free = remoteData.filter((s) => s.available).length;
+      if (total === 0) return "none";
+      if (free === 0) return "full";
+      if (free < total) return "partial";
+      return "available";
     }
-  }, [selectedDate, selectedTime]);
-
-  const monthDays = useMemo(() => createMonthGrid(currentMonth), [currentMonth]);
-  const selectedDateObject = selectedDate ? parseDateKey(selectedDate) : null;
-  const selectedDayLabel = selectedDateObject
-    ? `${DAY_LABELS[(selectedDateObject.getDay() + 6) % 7]} ${selectedDateObject.getDate()}`
-    : "Kies een dag";
-  const isReadyForForm = Boolean(selectedDate && selectedTime);
-  const themeMode = theme as ThemeMode;
-
-  function handleCalendarKeyDown(event: React.KeyboardEvent, currentDate: Date) {
-    let delta = 0;
-    if (event.key === "ArrowRight") delta = 1;
-    else if (event.key === "ArrowLeft") delta = -1;
-    else if (event.key === "ArrowDown") delta = 7;
-    else if (event.key === "ArrowUp") delta = -7;
-    else return;
-
-    event.preventDefault();
-    const next = new Date(currentDate);
-    next.setDate(currentDate.getDate() + delta);
-    const nextKey = formatDateKey(next);
-    // Navigate month if needed
-    setCurrentMonth(getMonthStart(next));
-    // Only select if available
-    const nextDayOfWeek = next.getDay();
-    const schedule = weeklyHours[nextDayOfWeek];
-    if (schedule?.enabled) {
-      setSelectedDate(nextKey);
-    }
-    // Focus the next button
-    const btn = document.querySelector(`[data-datekey="${nextKey}"]`) as HTMLButtonElement | null;
-    btn?.focus();
+    // No API data yet — use weeklyHours optimistically
+    const localSlots = buildSlotsForDate(dateKey, weeklyHours, effectiveDuration, effectiveSlotMinutes);
+    return localSlots.length > 0 ? "available" : "none";
   }
 
-  async function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!selectedDate || !selectedTime) return;
+  // ── Submission ─────────────────────────────────────────────────────────────
 
+  async function submitBooking() {
+    if (!selectedDate || !selectedTime) return;
     setLoading(true);
     setStatus(null);
     setSuggestedSlots([]);
-
     try {
       const response = await fetch("/api/public/bookings", {
         method: "POST",
@@ -402,10 +369,8 @@ function BookingEmbedContent() {
           tenant: tenant || undefined,
         }),
       });
-
       const data = await response.json().catch(() => ({}));
       setLoading(false);
-
       if (response.ok) {
         setClientName("");
         setClientEmail("");
@@ -420,172 +385,191 @@ function BookingEmbedContent() {
         } as const;
         setStatus(nextStatus);
         setResultModal(nextStatus);
+        setActiveStep(null);
         return;
       }
-
-      // Rate limit
       if (response.status === 429) {
         setStatus({ type: "error", message: data.error || "Te veel aanvragen. Wacht even en probeer opnieuw." });
-        setResultModal(null);
         return;
       }
-
-      // Conflict with suggested slots
-      if (data.suggestedSlots?.length) {
-        setSuggestedSlots(data.suggestedSlots as SuggestedSlot[]);
-      }
-
+      if (data.suggestedSlots?.length) setSuggestedSlots(data.suggestedSlots as SuggestedSlot[]);
       setStatus({ type: "error", message: data.error || "Boeking aanvragen mislukt." });
-      setResultModal(null);
     } catch {
       setLoading(false);
-      setStatus({
-        type: "error",
-        message: "Verbindingsfout. Controleer uw internetverbinding en probeer opnieuw.",
-      });
-      setResultModal(null);
+      setStatus({ type: "error", message: "Verbindingsfout. Controleer uw internetverbinding en probeer opnieuw." });
     }
   }
 
-  const themeClasses = {
-    page:
-      themeMode === "dark"
-        ? "min-h-screen bg-[#121212] p-2 text-white sm:p-3"
-        : "min-h-screen bg-[#f3f1ee] p-2 text-slate-950 sm:p-3",
-    shell:
-      themeMode === "dark"
-        ? "mx-auto max-w-[1180px] overflow-hidden rounded-[24px] border border-white/8 bg-[#171717] shadow-[0_24px_80px_rgba(0,0,0,0.38)]"
-        : "mx-auto max-w-[1180px] overflow-hidden rounded-[24px] border border-black/8 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.10)]",
-    panelBorder:
-      themeMode === "dark" ? "border-white/8" : "border-black/8",
-    muted:
-      themeMode === "dark" ? "text-white/60" : "text-slate-500",
-    soft:
-      themeMode === "dark" ? "bg-white/5" : "bg-slate-100",
-    softStrong:
-      themeMode === "dark" ? "bg-white/10" : "bg-slate-200",
-    slot:
-      themeMode === "dark"
-        ? "border-white/12 bg-[#101010] text-white hover:border-white/25"
-        : "border-slate-200 bg-white text-slate-900 hover:border-slate-300",
-    input:
-      themeMode === "dark"
-        ? "border-white/10 bg-white/5 text-white placeholder:text-white/40"
-        : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400",
-    card:
-      themeMode === "dark" ? "border-white/10 bg-white/4" : "border-slate-200 bg-white",
+  function handleGoToConfirm() {
+    setFormError(null);
+    if (!clientName.trim()) { setFormError("Vul uw naam in."); return; }
+    if (!clientEmail.trim() || !clientEmail.includes("@")) { setFormError("Vul een geldig e-mailadres in."); return; }
+    const missingRequired = eventType?.questions.filter((q) => q.required && !questionAnswers[q.id]?.trim());
+    if (missingRequired?.length) { setFormError(`Vul '${missingRequired[0].label}' in.`); return; }
+    if (eventType?.requireConsent && !consentAccepted) { setFormError("Accepteer de privacyverklaring om door te gaan."); return; }
+    setActiveStep("confirm");
+  }
+
+  // ── Calendar keyboard nav ──────────────────────────────────────────────────
+
+  function handleCalendarKeyDown(event: React.KeyboardEvent, currentDate: Date) {
+    let delta = 0;
+    if (event.key === "ArrowRight") delta = 1;
+    else if (event.key === "ArrowLeft") delta = -1;
+    else if (event.key === "ArrowDown") delta = 7;
+    else if (event.key === "ArrowUp") delta = -7;
+    else return;
+    event.preventDefault();
+    const next = new Date(currentDate);
+    next.setDate(currentDate.getDate() + delta);
+    setCurrentMonth(getMonthStart(next));
+    const nextKey = formatDateKey(next);
+    const st = getDateStatus(nextKey);
+    if (st === "available" || st === "partial") setSelectedDate(nextKey);
+    const btn = document.querySelector(`[data-datekey="${nextKey}"]`) as HTMLButtonElement | null;
+    btn?.focus();
+  }
+
+  // ── Theme ──────────────────────────────────────────────────────────────────
+
+  const themeMode = theme as ThemeMode;
+  const dark = themeMode === "dark";
+
+  const tc = {
+    page: dark ? "min-h-screen bg-[#121212] p-2 text-white sm:p-3" : "min-h-screen bg-[#f3f1ee] p-2 text-slate-950 sm:p-3",
+    shell: dark
+      ? "mx-auto max-w-[980px] overflow-hidden rounded-[24px] border border-white/8 bg-[#171717] shadow-[0_24px_80px_rgba(0,0,0,0.38)]"
+      : "mx-auto max-w-[980px] overflow-hidden rounded-[24px] border border-black/8 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.10)]",
+    panelBorder: dark ? "border-white/8" : "border-black/8",
+    muted: dark ? "text-white/55" : "text-slate-500",
+    soft: dark ? "bg-white/5" : "bg-slate-50",
+    softStrong: dark ? "bg-white/10" : "bg-slate-200",
+    slot: dark ? "border-white/12 bg-[#101010] text-white hover:border-white/25" : "border-slate-200 bg-white text-slate-900 hover:border-slate-300",
+    input: dark ? "border-white/10 bg-white/5 text-white placeholder:text-white/40" : "border-slate-200 bg-white text-slate-900 placeholder:text-slate-400",
+    card: dark ? "border-white/10 bg-white/4" : "border-slate-200 bg-white",
+    overlay: "fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-[3px]",
+    modal: dark
+      ? "w-full rounded-[24px] border border-white/10 bg-[#1c1c1c] shadow-[0_32px_80px_rgba(0,0,0,0.5)]"
+      : "w-full rounded-[24px] border border-black/8 bg-white shadow-[0_32px_80px_rgba(15,23,42,0.18)]",
   };
 
+  const monthDays = useMemo(() => createMonthGrid(currentMonth), [currentMonth]);
+  const selectedDateObject = selectedDate ? parseDateKey(selectedDate) : null;
+  const selectedDateStatus = selectedDate ? getDateStatus(selectedDate) : "none";
+  const canPlanSelected = selectedDate && (selectedDateStatus === "available" || selectedDateStatus === "partial");
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
-    <div className={themeClasses.page} style={{ colorScheme: themeMode }}>
-      <div className={themeClasses.shell}>
-        <div className="grid lg:grid-cols-[260px_minmax(0,1fr)_310px]">
-          <aside className={`flex flex-col gap-5 border-b p-5 sm:p-6 lg:border-b-0 lg:border-r ${themeClasses.panelBorder}`}>
+    <div className={tc.page} style={{ colorScheme: themeMode }}>
+      <div className={tc.shell}>
+        <div className={`grid lg:grid-cols-[272px_minmax(0,1fr)]`}>
+
+          {/* ── Left sidebar ─────────────────────────────────────────────── */}
+          <aside className={`flex flex-col gap-5 border-b p-5 sm:p-6 lg:border-b-0 lg:border-r ${tc.panelBorder}`}>
+            {/* Brand */}
             <div className="flex items-center gap-3">
               <div
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-sm"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl shadow-sm"
                 style={{ backgroundColor: effectiveColor }}
               >
-                <Play className="h-5 w-5 fill-current text-white" />
+                <Play className="h-4 w-4 fill-current text-white" />
               </div>
-              <p className={`text-sm font-semibold ${themeClasses.muted}`}>{brandName}</p>
+              <p className={`text-sm font-semibold ${tc.muted}`}>{brandName}</p>
             </div>
 
+            {/* Title + description */}
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight sm:text-[1.65rem]">
-                {effectiveMeetingName}
-              </h1>
-              <p className={`mt-2 text-sm leading-6 ${themeClasses.muted}`}>{effectiveDescription}</p>
+              <h1 className="text-xl font-semibold tracking-tight leading-snug">{effectiveMeetingName}</h1>
+              <p className={`mt-1.5 text-sm leading-relaxed ${tc.muted}`}>{effectiveDescription}</p>
             </div>
 
-            <div className={`space-y-2.5 rounded-2xl border p-3.5 text-sm ${themeClasses.card}`}>
+            {/* Info pills */}
+            <div className={`space-y-2 rounded-2xl border p-3.5 text-sm ${tc.card}`}>
               <div className="flex items-center gap-2.5">
-                <Clock3 className="h-4 w-4 shrink-0" style={{ color: effectiveColor }} />
+                <Clock3 className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
                 <span>{effectiveDuration} minuten</span>
               </div>
               <div className="flex items-center gap-2.5">
-                <Video className="h-4 w-4 shrink-0" style={{ color: effectiveColor }} />
+                <Video className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
                 <span>{effectiveLocation}</span>
               </div>
               <div className="flex items-center gap-2.5">
-                <Globe2 className="h-4 w-4 shrink-0" style={{ color: effectiveColor }} />
+                <Globe2 className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
                 <span className="truncate" title={visitorTimezone}>{visitorTimezone}</span>
               </div>
             </div>
 
-            <div className="mt-auto space-y-2">
-              <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${themeClasses.muted}`}>
-                Voortgang
-              </p>
+            {/* Legend */}
+            <div className={`space-y-1.5 rounded-2xl border p-3 text-xs ${tc.card}`}>
+              <p className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${tc.muted}`}>Legenda</p>
               {[
-                {
-                  step: 1,
-                  label: "Datum",
-                  value: selectedDate ? formatLongDate(selectedDate) : null,
-                  placeholder: "Kies een dag",
-                  done: Boolean(selectedDate),
-                },
-                {
-                  step: 2,
-                  label: "Tijdslot",
-                  value: selectedTime ? formatTimeDisplay(selectedTime, timeMode) : null,
-                  placeholder: "Kies een tijdslot",
-                  done: Boolean(selectedTime),
-                },
-                {
-                  step: 3,
-                  label: "Gegevens",
-                  value: isReadyForForm ? "Formulier invullen" : null,
-                  placeholder: "Na tijdkeuze",
-                  done: false,
-                },
-              ].map(({ step, label, value, placeholder, done }) => (
-                <div
-                  key={step}
-                  className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-all ${done || (step === 3 && isReadyForForm) ? "" : `opacity-60 ${themeClasses.card}`}`}
-                  style={done || (step === 3 && isReadyForForm) ? { borderColor: effectiveColor + "55", backgroundColor: effectiveColor + "10" } : {}}
-                >
-                  <div
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold"
-                    style={{
-                      backgroundColor: done ? effectiveColor : "transparent",
-                      color: done ? "#fff" : undefined,
-                      borderWidth: done ? 0 : 1.5,
-                      borderColor: done ? undefined : "currentColor",
-                    }}
-                  >
-                    {done ? <CheckCircle2 className="h-4 w-4" /> : step}
-                  </div>
-                  <div className="min-w-0">
-                    <p className={`text-xs ${themeClasses.muted}`}>{label}</p>
-                    <p className="truncate text-sm font-medium">{value ?? placeholder}</p>
-                  </div>
+                { color: STATUS_DOT.available!, label: "Beschikbaar" },
+                { color: STATUS_DOT.partial!, label: "Gedeeltelijk vol" },
+                { color: STATUS_DOT.full!, label: "Volledig vol" },
+              ].map(({ color: c, label }) => (
+                <div key={label} className="flex items-center gap-2">
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: c }} />
+                  <span className={tc.muted}>{label}</span>
                 </div>
               ))}
             </div>
+
+            {/* CTA area */}
+            <div className="mt-auto space-y-2.5">
+              {selectedDate ? (
+                <div
+                  className="rounded-2xl border p-3.5"
+                  style={{ borderColor: effectiveColor + "44", backgroundColor: effectiveColor + "0d" }}
+                >
+                  <p className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${tc.muted}`}>Geselecteerd</p>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <CalendarDays className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
+                    <p className="text-sm font-semibold capitalize">{formatLongDate(selectedDate)}</p>
+                  </div>
+                </div>
+              ) : (
+                <p className={`text-sm ${tc.muted}`}>Kies een datum in de kalender.</p>
+              )}
+
+              <button
+                type="button"
+                disabled={!canPlanSelected}
+                onClick={() => setActiveStep("time")}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold transition disabled:opacity-35"
+                style={{
+                  backgroundColor: canPlanSelected ? effectiveColor : undefined,
+                  color: canPlanSelected ? "#1e1e1e" : undefined,
+                  border: canPlanSelected ? "none" : `1.5px solid ${dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.15)"}`,
+                }}
+              >
+                <CalendarDays className="h-4 w-4" />
+                Afspraak plannen
+              </button>
+            </div>
           </aside>
 
-          <section className={`border-b p-5 sm:p-6 lg:border-b-0 lg:border-r ${themeClasses.panelBorder}`}>
+          {/* ── Calendar ─────────────────────────────────────────────────── */}
+          <section className="p-5 sm:p-7">
+            {/* Month navigation */}
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2">
-                <h2 className="text-2xl font-semibold tracking-tight sm:text-[1.65rem]">{formatMonthTitle(currentMonth)}</h2>
-                {loadingAvailability ? (
-                  <Loader2 className="h-4 w-4 animate-spin opacity-50" />
-                ) : null}
+                <h2 className="text-xl font-semibold tracking-tight">{formatMonthTitle(currentMonth)}</h2>
+                {loadingAvailability ? <Loader2 className="h-4 w-4 animate-spin opacity-40" /> : null}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setCurrentMonth((current) => addMonths(current, -1))}
-                  className={`flex h-9 w-9 items-center justify-center rounded-full border transition ${themeClasses.slot}`}
+                  onClick={() => setCurrentMonth((m) => addMonths(m, -1))}
+                  className={`flex h-8 w-8 items-center justify-center rounded-full border transition ${tc.slot}`}
                   aria-label="Vorige maand"
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
-                  onClick={() => setCurrentMonth((current) => addMonths(current, 1))}
-                  className={`flex h-9 w-9 items-center justify-center rounded-full border transition ${themeClasses.slot}`}
+                  onClick={() => setCurrentMonth((m) => addMonths(m, 1))}
+                  className={`flex h-8 w-8 items-center justify-center rounded-full border transition ${tc.slot}`}
                   aria-label="Volgende maand"
                 >
                   <ChevronRight className="h-4 w-4" />
@@ -593,24 +577,23 @@ function BookingEmbedContent() {
               </div>
             </div>
 
-            <div role="row" className="mt-5 grid grid-cols-7 gap-y-2 text-center text-xs font-semibold tracking-wider uppercase">
-              {DAY_LABELS.slice(1).concat(DAY_LABELS.slice(0, 1)).map((label) => (
-                <div key={label} role="columnheader" aria-label={label} className={themeClasses.muted}>
-                  {label}
-                </div>
+            {/* Day headers */}
+            <div className="mt-5 grid grid-cols-7 text-center text-[10px] font-semibold uppercase tracking-widest">
+              {["MA", "DI", "WO", "DO", "VR", "ZA", "ZO"].map((label) => (
+                <div key={label} className={tc.muted}>{label}</div>
               ))}
             </div>
 
-            <div role="grid" aria-label="Kalender" className="mt-3 grid grid-cols-7 gap-1.5">
+            {/* Calendar grid */}
+            <div className="mt-2 grid grid-cols-7 gap-1.5">
               {monthDays.map((day) => {
                 const dateKey = formatDateKey(day);
                 const inCurrentMonth = day.getMonth() === currentMonth.getMonth();
-                const isPast = dateKey < todayKey;
-                const remoteSlots = availability[dateKey]?.filter((slot) => slot.available).map((slot) => slot.time) || [];
-                const slots = remoteSlots.length ? remoteSlots : buildSlotsForDate(dateKey, weeklyHours, effectiveDuration, effectiveSlotMinutes);
-                const isAvailable = !isPast && slots.length > 0;
+                const dateStatus = getDateStatus(dateKey);
+                const isClickable = dateStatus === "available" || dateStatus === "partial";
                 const isSelected = selectedDateObject ? isSameDay(day, selectedDateObject) : false;
                 const isToday = isSameDay(day, today);
+                const dotColor = isSelected ? null : STATUS_DOT[dateStatus];
 
                 return (
                   <button
@@ -619,95 +602,100 @@ function BookingEmbedContent() {
                     data-datekey={dateKey}
                     role="gridcell"
                     aria-selected={isSelected}
-                    aria-label={`${DAY_NAMES[day.getDay()]} ${day.getDate()} ${MONTH_NAMES[day.getMonth()]} ${day.getFullYear()}${isSelected ? ", geselecteerd" : ""}${isToday ? ", vandaag" : ""}${!isAvailable ? ", niet beschikbaar" : ""}`}
+                    aria-label={`${DAY_NAMES[day.getDay()]} ${day.getDate()} ${MONTH_NAMES[day.getMonth()]}${isSelected ? ", geselecteerd" : ""}${isToday ? ", vandaag" : ""}${!isClickable ? ", niet beschikbaar" : ""}`}
+                    disabled={!isClickable}
                     onClick={() => {
-                      if (!isAvailable) return;
+                      if (!isClickable) return;
                       setSelectedDate(dateKey);
                       setCurrentMonth(getMonthStart(day));
                     }}
-                    onKeyDown={(event) => handleCalendarKeyDown(event, day)}
-                    disabled={!isAvailable}
-                    className={`relative flex flex-col items-center justify-center gap-0.5 rounded-[14px] border py-2 text-sm font-semibold transition sm:py-3 ${
-                      isAvailable ? "cursor-pointer" : "cursor-not-allowed opacity-35"
+                    onKeyDown={(e) => handleCalendarKeyDown(e, day)}
+                    className={`relative flex flex-col items-center justify-center gap-0.5 rounded-[12px] border py-3 text-sm font-semibold transition sm:py-4 ${
+                      !isClickable
+                        ? `cursor-not-allowed ${inCurrentMonth ? "opacity-30" : "opacity-15"}`
+                        : "cursor-pointer"
                     } ${
                       isSelected
                         ? "border-transparent text-slate-950"
                         : inCurrentMonth
-                          ? themeClasses.slot
-                          : `${themeClasses.slot} opacity-40`
+                          ? tc.slot
+                          : `${tc.slot} opacity-40`
                     }`}
                     style={{
                       backgroundColor: isSelected ? effectiveColor : undefined,
-                      boxShadow: isSelected ? `0 8px 24px ${effectiveColor}44` : undefined,
-                      touchAction: "manipulation",
+                      boxShadow: isSelected ? `0 6px 20px ${effectiveColor}55` : undefined,
                     }}
                   >
-                    <span>{day.getDate()}</span>
-                    {isToday && !isSelected ? (
-                      <span
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{ backgroundColor: effectiveColor }}
-                      />
-                    ) : isAvailable && !isSelected && inCurrentMonth ? (
-                      <span className="h-1.5 w-1.5 rounded-full opacity-40" style={{ backgroundColor: effectiveColor }} />
-                    ) : (
-                      <span className="h-1.5 w-1.5" />
-                    )}
+                    <span className={isToday && !isSelected ? "underline underline-offset-2" : ""}>{day.getDate()}</span>
+                    <span
+                      className="h-1.5 w-1.5 rounded-full transition-colors"
+                      style={{
+                        backgroundColor: dotColor ?? (isToday && !isSelected ? effectiveColor + "88" : "transparent"),
+                      }}
+                    />
                   </button>
                 );
               })}
             </div>
           </section>
+        </div>
+      </div>
 
-          <section className="flex flex-col gap-5 p-5 sm:p-6">
-            <div className="flex items-start justify-between gap-4">
+      {/* ── Modal: Step 1 — Time picker ─────────────────────────────────────── */}
+      {activeStep === "time" && (
+        <div className={tc.overlay} onClick={() => setActiveStep(null)}>
+          <div className={`${tc.modal} max-w-sm p-5`} onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-semibold tracking-tight sm:text-[1.65rem]">{selectedDayLabel.toLowerCase()}</h2>
-                <p className={`mt-1.5 text-sm ${themeClasses.muted}`}>
-                  {selectedDate ? formatLongDate(selectedDate) : "Kies eerst een datum in de kalender"}
-                </p>
+                <p className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${tc.muted}`}>Stap 1 van 3 — Tijdslot</p>
+                <h3 className="mt-0.5 text-base font-semibold capitalize">{formatLongDate(selectedDate)}</h3>
               </div>
-              <div className={`inline-flex shrink-0 rounded-[14px] p-1 ${themeClasses.softStrong}`}>
+              <div className="flex items-center gap-2">
+                <div className={`inline-flex shrink-0 rounded-xl p-0.5 ${tc.softStrong}`}>
+                  {(["12", "24"] as TimeMode[]).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setTimeMode(m)}
+                      className={`rounded-[10px] px-2.5 py-1 text-xs font-medium transition ${
+                        timeMode === m
+                          ? dark ? "bg-black text-white shadow-sm" : "bg-white text-slate-950 shadow-sm"
+                          : tc.muted
+                      }`}
+                    >
+                      {m}u
+                    </button>
+                  ))}
+                </div>
                 <button
                   type="button"
-                  onClick={() => setTimeMode("12")}
-                  className={`rounded-[12px] px-3 py-1.5 text-xs font-medium transition ${
-                    timeMode === "12" ? (themeMode === "dark" ? "bg-black text-white" : "bg-white text-slate-950 shadow-sm") : themeClasses.muted
-                  }`}
+                  onClick={() => setActiveStep(null)}
+                  className={`flex h-7 w-7 items-center justify-center rounded-full transition ${tc.soft} ${tc.muted}`}
                 >
-                  12u
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTimeMode("24")}
-                  className={`rounded-[12px] px-3 py-1.5 text-xs font-medium transition ${
-                    timeMode === "24" ? (themeMode === "dark" ? "bg-black text-white" : "bg-white text-slate-950 shadow-sm") : themeClasses.muted
-                  }`}
-                >
-                  24u
+                  <X className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
 
-            <div>
+            {/* Slots */}
+            <div className="mt-4 max-h-[300px] overflow-y-auto pr-0.5">
               {selectedSlots.length ? (
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <div className="grid grid-cols-3 gap-2">
                   {selectedSlots.map((slot) => {
                     const active = selectedTime === slot;
                     return (
                       <button
                         key={slot}
                         type="button"
-                        aria-pressed={active}
-                        aria-label={`Tijdslot ${formatTimeDisplay(slot, timeMode)}`}
                         onClick={() => setSelectedTime(slot)}
-                        className={`flex h-11 items-center justify-center rounded-[14px] border px-3 text-sm font-semibold transition ${
-                          active ? "border-transparent text-slate-950" : themeClasses.slot
+                        className={`flex h-10 items-center justify-center rounded-[12px] border text-sm font-semibold transition ${
+                          active ? "border-transparent" : tc.slot
                         }`}
                         style={{
                           backgroundColor: active ? effectiveColor : undefined,
-                          boxShadow: active ? `0 8px 20px ${effectiveColor}44` : undefined,
-                          touchAction: "manipulation",
+                          color: active ? "#1e1e1e" : undefined,
+                          boxShadow: active ? `0 4px 12px ${effectiveColor}55` : undefined,
                         }}
                       >
                         {formatTimeDisplay(slot, timeMode)}
@@ -716,279 +704,356 @@ function BookingEmbedContent() {
                   })}
                 </div>
               ) : (
-                <div className={`rounded-[20px] border px-5 py-6 text-center ${themeClasses.card}`}>
-                  <CalendarDays className={`mx-auto mb-3 h-8 w-8 ${themeClasses.muted}`} />
-                  <p className="font-medium">Geen tijdsloten beschikbaar</p>
-                  <p className={`mt-1 text-sm ${themeClasses.muted}`}>
-                    Selecteer een dag met een gekleurde stip in de kalender.
-                  </p>
+                <div className={`rounded-2xl border px-4 py-8 text-center ${tc.card}`}>
+                  <CalendarDays className={`mx-auto mb-2 h-7 w-7 ${tc.muted}`} />
+                  <p className="text-sm font-medium">Geen tijdsloten beschikbaar</p>
+                  <p className={`mt-1 text-xs ${tc.muted}`}>Kies een andere dag in de kalender.</p>
                 </div>
               )}
             </div>
 
-            <div ref={formRef}>
-            {isReadyForForm ? (
-              <form onSubmit={handleSubmit} className={`rounded-[20px] border p-4 ${themeClasses.card}`}>
-                <div className="flex items-center gap-3">
-                  <CalendarDays className="h-5 w-5" />
-                  <div>
-                    <p className="font-medium">Geselecteerd moment</p>
-                    <p className={`text-sm ${themeClasses.muted}`}>
-                      {formatLongDate(selectedDate)} om {formatTimeDisplay(selectedTime, timeMode)}
-                    </p>
-                  </div>
+            {/* Actions */}
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveStep(null)}
+                className={`flex h-10 flex-1 items-center justify-center rounded-full border text-sm font-medium transition ${tc.slot}`}
+              >
+                Annuleren
+              </button>
+              <button
+                type="button"
+                disabled={!selectedTime}
+                onClick={() => { setStatus(null); setActiveStep("form"); }}
+                className="flex h-10 flex-1 items-center justify-center rounded-full text-sm font-semibold transition disabled:opacity-40"
+                style={{ backgroundColor: effectiveColor, color: "#1e1e1e" }}
+              >
+                Volgende →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Step 2 — Form ─────────────────────────────────────────────── */}
+      {activeStep === "form" && (
+        <div className={tc.overlay}>
+          <div className={`${tc.modal} max-w-md`} style={{ maxHeight: "92vh", overflowY: "auto" }}>
+            <div className="p-5">
+              {/* Header */}
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${tc.muted}`}>Stap 2 van 3 — Uw gegevens</p>
+                  <h3 className="mt-0.5 text-base font-semibold">Vul uw gegevens in</h3>
+                  <p className={`mt-0.5 text-sm capitalize ${tc.muted}`}>
+                    {formatLongDate(selectedDate)} om {formatTimeDisplay(selectedTime, timeMode)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveStep("time")}
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition ${tc.soft} ${tc.muted}`}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {/* Form fields */}
+              <div className="mt-5 space-y-3.5">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Naam *</label>
+                  <input
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
+                    placeholder="Jan Janssen"
+                    className={`h-11 w-full rounded-2xl border px-4 text-sm outline-none transition focus:ring-2 ${tc.input}`}
+                    style={{ focusRingColor: effectiveColor } as React.CSSProperties}
+                    onFocus={(e) => (e.target.style.borderColor = effectiveColor)}
+                    onBlur={(e) => (e.target.style.borderColor = "")}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">E-mail *</label>
+                  <input
+                    type="email"
+                    value={clientEmail}
+                    onChange={(e) => setClientEmail(e.target.value)}
+                    placeholder="jan@bedrijf.be"
+                    className={`h-11 w-full rounded-2xl border px-4 text-sm outline-none transition ${tc.input}`}
+                    onFocus={(e) => (e.target.style.borderColor = effectiveColor)}
+                    onBlur={(e) => (e.target.style.borderColor = "")}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Opmerking</label>
+                  <textarea
+                    rows={3}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Vertel kort wat u graag wil bespreken."
+                    className={`w-full rounded-2xl border px-4 py-2.5 text-sm outline-none transition ${tc.input}`}
+                    onFocus={(e) => (e.target.style.borderColor = effectiveColor)}
+                    onBlur={(e) => (e.target.style.borderColor = "")}
+                  />
                 </div>
 
-                <div className="mt-5 space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Naam</label>
-                    <input
-                      required
-                      value={clientName}
-                      onChange={(event) => setClientName(event.target.value)}
-                      className={`h-12 w-full rounded-2xl border px-4 text-sm outline-none transition focus:border-slate-400 ${themeClasses.input}`}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">E-mail</label>
-                    <input
-                      required
-                      type="email"
-                      value={clientEmail}
-                      onChange={(event) => setClientEmail(event.target.value)}
-                      className={`h-12 w-full rounded-2xl border px-4 text-sm outline-none transition focus:border-slate-400 ${themeClasses.input}`}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Opmerking</label>
-                    <textarea
-                      rows={4}
-                      value={notes}
-                      onChange={(event) => setNotes(event.target.value)}
-                      placeholder="Vertel kort wat u graag wil bespreken."
-                      className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition focus:border-slate-400 ${themeClasses.input}`}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Tijdzone</label>
-                    <div className={`flex h-12 items-center gap-2 rounded-2xl border px-4 text-sm ${themeClasses.input}`}>
-                      <Globe2 className="h-4 w-4 shrink-0 opacity-50" />
-                      <span className="truncate opacity-70">{visitorTimezone}</span>
-                    </div>
-                  </div>
-                  {eventType?.questions.map((question) => (
-                    <div key={question.id} className="space-y-2">
-                      <label className="text-sm font-medium">
-                        {question.label}{question.required ? " *" : ""}
-                      </label>
-                      {question.type === "textarea" ? (
-                        <textarea
-                          required={question.required}
-                          rows={3}
-                          value={questionAnswers[question.id] || ""}
-                          onChange={(event) => setQuestionAnswers((current) => ({ ...current, [question.id]: event.target.value }))}
-                          className={`w-full rounded-2xl border px-4 py-3 text-sm outline-none transition focus:border-slate-400 ${themeClasses.input}`}
-                        />
-                      ) : (
-                        <input
-                          required={question.required}
-                          type={question.type === "checkbox" ? "checkbox" : question.type === "phone" ? "tel" : question.type}
-                          checked={question.type === "checkbox" ? questionAnswers[question.id] === "yes" : undefined}
-                          value={question.type === "checkbox" ? "yes" : questionAnswers[question.id] || ""}
-                          onChange={(event) =>
-                            setQuestionAnswers((current) => ({
-                              ...current,
-                              [question.id]: question.type === "checkbox" ? (event.target.checked ? "yes" : "") : event.target.value,
-                            }))
-                          }
-                          className={question.type === "checkbox" ? "h-5 w-5" : `h-12 w-full rounded-2xl border px-4 text-sm outline-none transition focus:border-slate-400 ${themeClasses.input}`}
-                        />
-                      )}
-                    </div>
-                  ))}
-                  {eventType?.privacyText ? (
-                    <label className={`flex gap-3 rounded-2xl border p-3 text-sm ${themeClasses.card}`}>
-                      <input
-                        type="checkbox"
-                        required={eventType.requireConsent}
-                        checked={consentAccepted}
-                        onChange={(event) => setConsentAccepted(event.target.checked)}
-                        className="mt-1 h-4 w-4"
+                {/* Tijdzone (read-only) */}
+                <div className={`flex h-10 items-center gap-2.5 rounded-2xl border px-4 text-sm ${dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
+                  <Globe2 className={`h-3.5 w-3.5 shrink-0 ${tc.muted}`} />
+                  <span className={`truncate text-sm ${tc.muted}`}>{visitorTimezone}</span>
+                </div>
+
+                {/* Custom questions */}
+                {eventType?.questions.map((q) => (
+                  <div key={q.id} className="space-y-1.5">
+                    <label className="text-sm font-medium">{q.label}{q.required ? " *" : ""}</label>
+                    {q.type === "textarea" ? (
+                      <textarea
+                        required={q.required}
+                        rows={3}
+                        value={questionAnswers[q.id] || ""}
+                        onChange={(e) => setQuestionAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                        className={`w-full rounded-2xl border px-4 py-2.5 text-sm outline-none transition ${tc.input}`}
+                        onFocus={(e) => (e.target.style.borderColor = effectiveColor)}
+                        onBlur={(e) => (e.target.style.borderColor = "")}
                       />
-                      <span className={themeClasses.muted}>{eventType.privacyText}</span>
-                    </label>
-                  ) : null}
-                </div>
+                    ) : q.type === "checkbox" ? (
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={questionAnswers[q.id] === "yes"}
+                          onChange={(e) => setQuestionAnswers((prev) => ({ ...prev, [q.id]: e.target.checked ? "yes" : "" }))}
+                          className="h-4 w-4 rounded"
+                        />
+                        <span className={tc.muted}>{q.label}</span>
+                      </label>
+                    ) : (
+                      <input
+                        required={q.required}
+                        type={q.type === "phone" ? "tel" : q.type}
+                        value={questionAnswers[q.id] || ""}
+                        onChange={(e) => setQuestionAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                        className={`h-11 w-full rounded-2xl border px-4 text-sm outline-none transition ${tc.input}`}
+                        onFocus={(e) => (e.target.style.borderColor = effectiveColor)}
+                        onBlur={(e) => (e.target.style.borderColor = "")}
+                      />
+                    )}
+                  </div>
+                ))}
 
+                {/* Privacy consent */}
+                {eventType?.privacyText ? (
+                  <label className={`flex gap-3 rounded-2xl border p-3 text-sm ${tc.card}`}>
+                    <input
+                      type="checkbox"
+                      required={eventType.requireConsent}
+                      checked={consentAccepted}
+                      onChange={(e) => setConsentAccepted(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded"
+                    />
+                    <span className={tc.muted}>{eventType.privacyText}</span>
+                  </label>
+                ) : null}
+
+                {/* Honeypot */}
                 <input
                   tabIndex={-1}
                   autoComplete="off"
                   aria-hidden="true"
                   value={website}
-                  onChange={(event) => setWebsite(event.target.value)}
+                  onChange={(e) => setWebsite(e.target.value)}
                   className="hidden"
                   name="website"
                 />
 
-                <div role="alert" aria-live="polite">
-                  {status ? (
-                    <div
-                      className={`mt-4 rounded-2xl px-4 py-3 text-sm ${
-                        status.type === "success"
-                          ? themeMode === "dark"
-                            ? "bg-emerald-500/15 text-emerald-200"
-                            : "bg-emerald-50 text-emerald-700"
-                          : themeMode === "dark"
-                            ? "bg-red-500/15 text-red-200"
-                            : "bg-red-50 text-red-700"
-                      }`}
-                    >
-                      {status.message}
-                    </div>
-                  ) : null}
-                </div>
-
-                {suggestedSlots.length > 0 && status?.type === "error" ? (
-                  <div className={`mt-3 rounded-2xl border p-4 ${themeClasses.card}`}>
-                    <p className={`mb-2.5 text-xs font-semibold uppercase tracking-wider ${themeClasses.muted}`}>
-                      Volgende beschikbare momenten
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {suggestedSlots.map((slot) => (
-                        <button
-                          key={slot.start}
-                          type="button"
-                          onClick={() => {
-                            setSelectedDate(slot.date);
-                            setSelectedTime(slot.time);
-                            setCurrentMonth(getMonthStart(parseDateKey(slot.date)));
-                            setStatus(null);
-                            setSuggestedSlots([]);
-                          }}
-                          className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition hover:opacity-80"
-                          style={{ borderColor: effectiveColor + "88", color: effectiveColor }}
-                        >
-                          <CalendarDays className="h-3.5 w-3.5" />
-                          {formatLongDate(slot.date)} om {formatTimeDisplay(slot.time, timeMode)}
-                        </button>
-                      ))}
-                    </div>
+                {/* Form error */}
+                {formError && (
+                  <div className={`rounded-2xl px-4 py-3 text-sm ${dark ? "bg-red-500/15 text-red-300" : "bg-red-50 text-red-700"}`}>
+                    {formError}
                   </div>
-                ) : null}
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold text-slate-950 transition disabled:opacity-50"
-                  style={{ backgroundColor: effectiveColor }}
-                >
-                  {loading ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" /><span>Bezig...</span></>
-                  ) : (
-                    submitText
-                  )}
-                </button>
-              </form>
-            ) : (
-              <div className={`rounded-[20px] border px-5 py-5 ${themeClasses.card}`}>
-                <div className="flex items-center gap-3">
-                  <div
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
-                    style={{ backgroundColor: effectiveColor + "22" }}
-                  >
-                    <CalendarDays className="h-4 w-4" style={{ color: effectiveColor }} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Kies eerst een datum en tijdslot</p>
-                    <p className={`text-xs ${themeClasses.muted}`}>Het formulier verschijnt hier daarna automatisch.</p>
-                  </div>
-                </div>
+                )}
               </div>
-            )}
-            </div>
-          </section>
-        </div>
-        {resultModal ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
-            <div className={`w-full max-w-md rounded-[20px] border p-5 shadow-2xl ${themeClasses.card}`}>
-              <div className="flex items-center gap-3">
-                <div
-                  className={`flex h-11 w-11 items-center justify-center rounded-full ${
-                    resultModal.type === "success"
-                      ? "bg-emerald-500/15 text-emerald-500"
-                      : "bg-red-500/15 text-red-500"
-                  }`}
-                >
-                  <CheckCircle2 className="h-6 w-6" />
-                </div>
-                <div>
-                  <p className="text-base font-semibold">
-                    {resultModal.type === "success" ? "Aanvraag verstuurd" : "Verzenden mislukt"}
-                  </p>
-                  <p className={`text-sm ${themeClasses.muted}`}>{resultModal.message}</p>
-                </div>
-              </div>
-              <div className="mt-4 flex justify-end">
+
+              {/* Actions */}
+              <div className="mt-5 flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setResultModal(null)}
-                  className="h-10 rounded-full px-4 text-sm font-semibold text-slate-950"
-                  style={{ backgroundColor: effectiveColor }}
+                  onClick={() => setActiveStep("time")}
+                  className={`flex h-11 flex-1 items-center justify-center rounded-full border text-sm font-medium transition ${tc.slot}`}
                 >
-                  Sluiten
+                  ← Terug
+                </button>
+                <button
+                  type="button"
+                  onClick={handleGoToConfirm}
+                  className="flex h-11 flex-1 items-center justify-center rounded-full text-sm font-semibold transition"
+                  style={{ backgroundColor: effectiveColor, color: "#1e1e1e" }}
+                >
+                  Controleren →
                 </button>
               </div>
             </div>
           </div>
-        ) : null}
-      </div>
+        </div>
+      )}
+
+      {/* ── Modal: Step 3 — Confirmation ─────────────────────────────────────── */}
+      {activeStep === "confirm" && (
+        <div className={tc.overlay}>
+          <div className={`${tc.modal} max-w-sm p-5`}>
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${tc.muted}`}>Stap 3 van 3 — Bevestigen</p>
+                <h3 className="mt-0.5 text-base font-semibold">Overzicht boeking</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveStep("form")}
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition ${tc.soft} ${tc.muted}`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Summary */}
+            <div className={`mt-4 space-y-3 rounded-2xl border p-4 text-sm ${tc.soft}`}>
+              <div className="flex items-center gap-2.5">
+                <CalendarDays className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
+                <span className="font-semibold capitalize">{formatLongDate(selectedDate)}</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <Clock3 className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
+                <span>{formatTimeDisplay(selectedTime, timeMode)} &middot; {effectiveDuration} min</span>
+              </div>
+              <div className={`h-px ${dark ? "bg-white/10" : "bg-slate-200"}`} />
+              <div className="flex items-center gap-2.5">
+                <Video className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
+                <span>{effectiveLocation}</span>
+              </div>
+              <div className={`h-px ${dark ? "bg-white/10" : "bg-slate-200"}`} />
+              <div>
+                <p className="font-semibold">{clientName}</p>
+                <p className={`text-xs ${tc.muted}`}>{clientEmail}</p>
+              </div>
+              {notes.trim() ? <p className={`text-xs ${tc.muted}`}>{notes}</p> : null}
+            </div>
+
+            {/* Error + suggestions */}
+            {status?.type === "error" && (
+              <div className={`mt-3 rounded-2xl px-4 py-3 text-sm ${dark ? "bg-red-500/15 text-red-300" : "bg-red-50 text-red-700"}`}>
+                {status.message}
+                {suggestedSlots.length > 0 && (
+                  <div className="mt-3 space-y-1">
+                    <p className="font-semibold">Andere beschikbare momenten:</p>
+                    {suggestedSlots.map((slot) => (
+                      <button
+                        key={slot.start}
+                        type="button"
+                        onClick={() => {
+                          setSelectedDate(slot.date);
+                          setSelectedTime(slot.time);
+                          setCurrentMonth(getMonthStart(parseDateKey(slot.date)));
+                          setStatus(null);
+                          setSuggestedSlots([]);
+                          setActiveStep("time");
+                        }}
+                        className="block text-left underline underline-offset-2"
+                        style={{ color: effectiveColor }}
+                      >
+                        {formatLongDate(slot.date)} om {formatTimeDisplay(slot.time, timeMode)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setStatus(null); setActiveStep("form"); }}
+                className={`flex h-11 flex-1 items-center justify-center rounded-full border text-sm font-medium transition ${tc.slot}`}
+              >
+                Wijzigen
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={submitBooking}
+                className="flex h-11 flex-1 items-center justify-center gap-2 rounded-full text-sm font-semibold transition disabled:opacity-50"
+                style={{ backgroundColor: effectiveColor, color: "#1e1e1e" }}
+              >
+                {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Bezig...</> : submitText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Success modal ─────────────────────────────────────────────────────── */}
+      {resultModal?.type === "success" && (
+        <div className={tc.overlay}>
+          <div className={`${tc.modal} max-w-sm p-6 text-center`}>
+            <div
+              className="mx-auto flex h-14 w-14 items-center justify-center rounded-full"
+              style={{ backgroundColor: effectiveColor + "22" }}
+            >
+              <CheckCircle2 className="h-7 w-7" style={{ color: effectiveColor }} />
+            </div>
+            <h3 className="mt-4 text-lg font-semibold">Aanvraag verstuurd!</h3>
+            <p className={`mt-2 text-sm ${tc.muted}`}>{resultModal.message}</p>
+            <button
+              type="button"
+              onClick={() => setResultModal(null)}
+              className="mt-5 flex h-11 w-full items-center justify-center rounded-full text-sm font-semibold transition"
+              style={{ backgroundColor: effectiveColor, color: "#1e1e1e" }}
+            >
+              Sluiten
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+// ─── Skeleton fallback ────────────────────────────────────────────────────────
 
 function BookingEmbedFallback() {
   return (
     <div className="min-h-screen bg-[#f3f1ee] p-2 sm:p-3">
-      <div className="mx-auto max-w-[1180px] overflow-hidden rounded-[24px] border border-black/8 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
-        <div className="grid animate-pulse lg:grid-cols-[260px_minmax(0,1fr)_310px]">
+      <div className="mx-auto max-w-[980px] overflow-hidden rounded-[24px] border border-black/8 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.10)]">
+        <div className="grid animate-pulse lg:grid-cols-[272px_minmax(0,1fr)]">
           <div className="border-b border-black/8 p-5 lg:border-b-0 lg:border-r">
             <div className="flex items-center gap-3">
-              <div className="h-11 w-11 rounded-2xl bg-slate-100" />
+              <div className="h-10 w-10 rounded-xl bg-slate-100" />
               <div className="h-4 w-20 rounded-lg bg-slate-100" />
             </div>
-            <div className="mt-5 h-7 w-3/4 rounded-lg bg-slate-100" />
-            <div className="mt-3 h-4 w-full rounded bg-slate-100" />
+            <div className="mt-5 h-6 w-3/4 rounded-lg bg-slate-100" />
+            <div className="mt-2 h-4 w-full rounded bg-slate-100" />
             <div className="mt-1 h-4 w-2/3 rounded bg-slate-100" />
             <div className="mt-5 rounded-2xl border p-3.5">
-              <div className="space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-2.5">
-                    <div className="h-4 w-4 rounded bg-slate-100" />
-                    <div className="h-4 w-24 rounded bg-slate-100" />
-                  </div>
-                ))}
-              </div>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="mb-2 flex items-center gap-2.5">
+                  <div className="h-3.5 w-3.5 rounded bg-slate-100" />
+                  <div className="h-3.5 w-24 rounded bg-slate-100" />
+                </div>
+              ))}
             </div>
           </div>
-          <div className="border-b border-black/8 p-5 lg:border-b-0 lg:border-r">
+          <div className="p-5 sm:p-7">
             <div className="flex items-center justify-between">
-              <div className="h-7 w-32 rounded-lg bg-slate-100" />
-              <div className="flex gap-2">
-                <div className="h-9 w-9 rounded-full bg-slate-100" />
-                <div className="h-9 w-9 rounded-full bg-slate-100" />
+              <div className="h-6 w-32 rounded-lg bg-slate-100" />
+              <div className="flex gap-1.5">
+                <div className="h-8 w-8 rounded-full bg-slate-100" />
+                <div className="h-8 w-8 rounded-full bg-slate-100" />
               </div>
             </div>
             <div className="mt-5 grid grid-cols-7 gap-1.5">
               {Array.from({ length: 42 }).map((_, i) => (
-                <div key={i} className="aspect-square rounded-[14px] bg-slate-100" />
-              ))}
-            </div>
-          </div>
-          <div className="p-5">
-            <div className="h-7 w-20 rounded-lg bg-slate-100" />
-            <div className="mt-5 grid grid-cols-3 gap-2">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="h-11 rounded-[14px] bg-slate-100" />
+                <div key={i} className="rounded-[12px] bg-slate-100 py-3 sm:py-4" />
               ))}
             </div>
           </div>
@@ -998,15 +1063,12 @@ function BookingEmbedFallback() {
   );
 }
 
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export default function BookingEmbedPage() {
   const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
+  useEffect(() => { setMounted(true); }, []);
   if (!mounted) return <BookingEmbedFallback />;
-
   return (
     <Suspense fallback={<BookingEmbedFallback />}>
       <BookingEmbedContent />
