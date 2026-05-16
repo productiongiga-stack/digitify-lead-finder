@@ -117,6 +117,7 @@ export async function hasBookingOverlap(
 }
 
 export async function ensureDefaultBookingEventType(db: PrismaClient, userId: string) {
+  // 1. Try to find the existing default event type
   const existing = await db.bookingEventType.findFirst({
     where: { createdById: userId, isDefault: true },
     include: { availabilityRules: true, questions: { orderBy: { sortOrder: "asc" } } },
@@ -138,6 +139,7 @@ export async function ensureDefaultBookingEventType(db: PrismaClient, userId: st
   ]);
   const settings = settingsRowsToMap(settingsRows);
   const name = getSettingString(settings, "bookings.embed_meeting_name", "Kennismaking");
+  const targetSlug = normalizeSlug(name);
   const duration = Number(getSettingString(settings, "bookings.embed_duration", "60")) || 60;
   const slotMinutes = Number(getSettingString(settings, "bookings.slot_minutes", "30")) || 30;
   const start = getSettingString(settings, "bookings.availability_start_time", "09:00");
@@ -147,31 +149,50 @@ export async function ensureDefaultBookingEventType(db: PrismaClient, userId: st
     .map((day) => Number(day.trim()))
     .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6);
 
-  const created = await db.bookingEventType.create({
-    data: {
-      createdById: userId,
-      slug: normalizeSlug(name),
-      name,
-      description: getSettingString(settings, "bookings.embed_description", "Vraag eenvoudig een afspraak aan."),
-      duration,
-      slotMinutes,
-      color: getSettingString(settings, "bookings.embed_color", "#f9ae5a"),
-      location: getSettingString(settings, "bookings.embed_location_label", "Google Meet"),
-      timezone: getSettingString(settings, "bookings.google_calendar_timezone", DEFAULT_BOOKING_TIMEZONE),
-      isDefault: true,
-      hostUserIds: [userId],
-      availabilityRules: {
-        create: Array.from({ length: 7 }, (_, weekday) => ({
-          weekday,
-          enabled: days.includes(weekday),
-          startTime: start,
-          endTime: end,
-        })),
+  // 2. Try to create the default event type
+  try {
+    const created = await db.bookingEventType.create({
+      data: {
+        createdById: userId,
+        slug: targetSlug,
+        name,
+        description: getSettingString(settings, "bookings.embed_description", "Vraag eenvoudig een afspraak aan."),
+        duration,
+        slotMinutes,
+        color: getSettingString(settings, "bookings.embed_color", "#f9ae5a"),
+        location: getSettingString(settings, "bookings.embed_location_label", "Google Meet"),
+        timezone: getSettingString(settings, "bookings.google_calendar_timezone", DEFAULT_BOOKING_TIMEZONE),
+        isDefault: true,
+        hostUserIds: [userId],
+        availabilityRules: {
+          create: Array.from({ length: 7 }, (_, weekday) => ({
+            weekday,
+            enabled: days.includes(weekday),
+            startTime: start,
+            endTime: end,
+          })),
+        },
       },
-    },
-    include: { availabilityRules: true, questions: { orderBy: { sortOrder: "asc" } } },
-  });
-  return created;
+      include: { availabilityRules: true, questions: { orderBy: { sortOrder: "asc" } } },
+    });
+    return created;
+  } catch {
+    // Slug conflict (another event type with the same slug exists, not marked as default).
+    // Find any active event type and mark it as the default.
+    const fallback = await db.bookingEventType.findFirst({
+      where: { createdById: userId, isActive: true },
+      include: { availabilityRules: true, questions: { orderBy: { sortOrder: "asc" } } },
+      orderBy: { createdAt: "asc" },
+    });
+    if (fallback) {
+      await db.bookingEventType.update({
+        where: { id: fallback.id },
+        data: { isDefault: true },
+      }).catch(() => null);
+      return fallback;
+    }
+    return null;
+  }
 }
 
 export function buildIcsAttachment(input: {
