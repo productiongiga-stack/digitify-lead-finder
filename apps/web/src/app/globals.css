@@ -77,6 +77,54 @@
   .app-page-filters {
     @apply flex flex-wrap items-center gap-1.5 rounded-xl border bg-card/80 p-2.5 shadow-sm sm:gap-2 sm:p-3;
   }
+
+  .dashboard-hero {
+    @apply relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-card via-card to-card/80 p-4 shadow-sm sm:p-6;
+  }
+
+  .dashboard-hero-stat {
+    @apply transition-colors duration-200;
+  }
+
+  .dashboard-widget {
+    @apply h-full;
+  }
+
+  .dashboard-widget-header {
+    @apply space-y-0;
+  }
+
+  .dashboard-bento {
+    @apply grid gap-3 lg:grid-cols-12;
+  }
+
+  .dashboard-bento-4 {
+    @apply lg:col-span-4;
+  }
+
+  .dashboard-bento-5 {
+    @apply lg:col-span-5;
+  }
+
+  .dashboard-bento-7 {
+    @apply lg:col-span-7;
+  }
+
+  .dashboard-bento-6 {
+    @apply lg:col-span-6;
+  }
+
+  .dashboard-bento-8 {
+    @apply lg:col-span-8;
+  }
+
+  .dashboard-kpi-strip .grid {
+    @apply gap-2 sm:gap-2.5;
+  }
+
+  .dashboard-kpi-strip [class*="Card"] {
+    @apply border-border/40 bg-background/50 backdrop-blur-sm;
+  }
 }
 
 @layer base {
