@@ -3,12 +3,18 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   formatCurrency,
-  isImageIcon,
   isValidEmail,
   normalizeKey,
   parseEmojiMap,
   sanitizeNumber,
 } from "@/lib/quote-configurator-utils";
+import {
+  ConfiguratorIcon,
+  QuoteEmbedHeader,
+  QuoteStepProgress,
+  QuoteStudioBar,
+  QuoteSummaryAside,
+} from "@/components/quotes/quote-embed-layout";
 import {
   buildFallbackSpecs,
   parseProductSpecs,
@@ -186,13 +192,6 @@ function getServiceIcon(service: Service, productIcons: Record<string, string>) 
   if (value.includes("video") || value.includes("film")) return "🎥";
   if (value.includes("print") || value.includes("druk")) return "🖨️";
   return "🧩";
-}
-
-function renderConfiguratorIcon(value: string, label: string) {
-  if (isImageIcon(value)) {
-    return <img src={value} alt={label} className="h-full w-full rounded-lg object-cover" />;
-  }
-  return <span aria-hidden="true">{value}</span>;
 }
 
 function QuoteEmbedFallback() {
@@ -857,10 +856,11 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
           total: entry.unitPrice * entry.quantity,
           packageLabel: entry.packageLabel,
           packageKey: entry.packageKey,
+          isConfirmed: Boolean(confirmedProducts[cartKey]),
         };
       })
       .filter((item) => item.quantity > 0 && item.unitPrice >= 0);
-  }, [cart, payload?.services]);
+  }, [cart, confirmedProducts, payload?.services]);
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.total, 0);
   const discountRaw = sanitizeNumber(discountInput);
@@ -1052,142 +1052,30 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
     <div className="h-screen overflow-hidden px-2 py-2 text-[#17181c] sm:px-4" style={{ backgroundColor: bgColor }}>
       <div className="mx-auto flex h-[calc(100vh-1rem)] max-w-[1500px] flex-col overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_20px_60px_rgba(0,0,0,0.12)]">
         {isPreviewRoute ? (
-          <div className="border-b border-[#e4dcc8] bg-[#f6f0df] px-3 py-2 text-[11px] text-[#5d5648] sm:px-5">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold">Studio</span>
-              <span>Stap {currentStep}</span>
-              <span>•</span>
-              <span>{selectedCategory || "Geen categorie"}</span>
-              <span>•</span>
-              <span>{selectedProductId || "Geen product"}</span>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "set-mode", mode: "simple" })}
-                className="rounded-md border px-2 py-1 text-[11px]"
-                style={{
-                  borderColor: settings.embedMode === "simple" ? accentColor : "#d6d1c2",
-                  backgroundColor: settings.embedMode === "simple" ? `${accentColor}2a` : "#fff",
-                }}
-              >
-                Simple
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "set-mode", mode: "advanced" })}
-                className="rounded-md border px-2 py-1 text-[11px]"
-                style={{
-                  borderColor: settings.embedMode === "advanced" ? accentColor : "#d6d1c2",
-                  backgroundColor: settings.embedMode === "advanced" ? `${accentColor}2a` : "#fff",
-                }}
-              >
-                Advanced
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "set-viewport", viewport: "desktop" })}
-                className="rounded-md border px-2 py-1 text-[11px]"
-                style={{
-                  borderColor: studioState.viewport === "desktop" ? accentColor : "#d6d1c2",
-                  backgroundColor: studioState.viewport === "desktop" ? `${accentColor}2a` : "#fff",
-                }}
-              >
-                Desktop
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "set-viewport", viewport: "tablet" })}
-                className="rounded-md border px-2 py-1 text-[11px]"
-                style={{
-                  borderColor: studioState.viewport === "tablet" ? accentColor : "#d6d1c2",
-                  backgroundColor: studioState.viewport === "tablet" ? `${accentColor}2a` : "#fff",
-                }}
-              >
-                Tablet
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "set-viewport", viewport: "mobile" })}
-                className="rounded-md border px-2 py-1 text-[11px]"
-                style={{
-                  borderColor: studioState.viewport === "mobile" ? accentColor : "#d6d1c2",
-                  backgroundColor: studioState.viewport === "mobile" ? `${accentColor}2a` : "#fff",
-                }}
-              >
-                Mobile
-              </button>
-              <label className="ml-1 inline-flex items-center gap-1 rounded-md border bg-white px-2 py-1 text-[11px]">
-                <input
-                  type="checkbox"
-                  checked={Boolean(studioState.syncBuilderWithPreview)}
-                  onChange={(event) =>
-                    sendPreviewAction({
-                      action: "set-sync",
-                      value: event.target.checked,
-                    })
-                  }
-                />
-                Sync
-              </label>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "undo" })}
-                disabled={!studioState.canUndo}
-                className="rounded-md border bg-white px-2 py-1 text-[11px] disabled:opacity-40"
-              >
-                Undo
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "redo" })}
-                disabled={!studioState.canRedo}
-                className="rounded-md border bg-white px-2 py-1 text-[11px] disabled:opacity-40"
-              >
-                Redo
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "save-all" })}
-                className="rounded-md px-2 py-1 text-[11px] font-semibold"
-                style={{ backgroundColor: accentColor, color: darkColor }}
-              >
-                {studioState.hasUnpublishedChanges ? "Publiceer" : "Gepubliceerd"}
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "restore-published" })}
-                className="rounded-md border bg-white px-2 py-1 text-[11px] disabled:opacity-40"
-                disabled={!studioState.hasUnpublishedChanges}
-              >
-                Reset Draft
-              </button>
-              <span className="text-[11px] text-[#6a6152]">
-                Status: {studioState.publishState === "draft" ? "Draft" : "Live"}
-              </span>
-            </div>
-          </div>
+          <QuoteStudioBar
+            currentStep={currentStep}
+            selectedCategory={selectedCategory}
+            selectedProductId={selectedProductId}
+            embedMode={settings.embedMode}
+            viewport={studioState.viewport}
+            syncBuilderWithPreview={studioState.syncBuilderWithPreview}
+            canUndo={studioState.canUndo}
+            canRedo={studioState.canRedo}
+            hasUnpublishedChanges={studioState.hasUnpublishedChanges}
+            publishState={studioState.publishState}
+            accentColor={accentColor}
+            darkColor={darkColor}
+            sendPreviewAction={sendPreviewAction}
+          />
         ) : null}
-        <header className="px-3 py-2 text-white sm:px-5" style={{ background: `linear-gradient(135deg, ${darkColor} 0%, #1f2228 100%)` }}>
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              {settings.logoUrl ? (
-                <img src={settings.logoUrl} alt={companyName} className="h-8 w-auto rounded" />
-              ) : (
-                <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: accentColor }}>
-                  ▶
-                </div>
-              )}
-              <div>
-                <p className="text-base font-semibold leading-none">{companyName}</p>
-                <p className="mt-1 text-xs text-white/60">{companyTagline}</p>
-              </div>
-            </div>
-            <div className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: accentColor, color: darkColor }}>
-              {currentStep}
-            </div>
-          </div>
-        </header>
+        <QuoteEmbedHeader
+          companyName={companyName}
+          companyTagline={companyTagline}
+          logoUrl={settings.logoUrl}
+          currentStep={currentStep}
+          accentColor={accentColor}
+          darkColor={darkColor}
+        />
 
         {isLivePreview ? (
           <div className="border-b border-[#eadfca] bg-[#fbf6ea] px-3 py-2 text-xs text-[#6e6249] sm:px-6">
@@ -1200,39 +1088,12 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
           </div>
         ) : null}
 
-        <div className="border-b border-black/10 bg-[#fbfaf7] px-3 py-2 sm:px-6">
-          <div className="grid grid-cols-4 items-center gap-3">
-            {[
-              { n: 1, label: stepLabels.service },
-              { n: 2, label: stepLabels.product },
-              { n: 3, label: stepLabels.specs },
-              { n: 4, label: stepLabels.details },
-            ].map((step, index, array) => {
-              const active = currentStep >= step.n;
-              const current = currentStep === step.n;
-              return (
-                <div key={step.n} className="flex items-center gap-2">
-                  <div
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-bold"
-                    style={{
-                      borderColor: current ? accentColor : "#d5d7dd",
-                      backgroundColor: current ? accentColor : active ? darkColor : "#fff",
-                      color: current ? darkColor : active ? "#fff" : "#9498a3",
-                    }}
-                  >
-                    {step.n}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[11px] font-semibold tracking-wide text-[#7a7f88]">{step.label}</div>
-                    {index < array.length - 1 ? (
-                      <div className="mt-1 h-[2px] w-full rounded" style={{ backgroundColor: currentStep > step.n ? accentColor : "#e3e5ea" }} />
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <QuoteStepProgress
+          currentStep={currentStep}
+          stepLabels={stepLabels}
+          accentColor={accentColor}
+          darkColor={darkColor}
+        />
 
         <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_360px]">
           <section className="min-h-0 overflow-y-auto border-r border-black/10 px-3 py-3 sm:px-6">
@@ -1267,7 +1128,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-[#f5f6f8] text-lg">
-                              {renderConfiguratorIcon(getCategoryIcon(group.category, categoryIconsMap), group.category)}
+                              <ConfiguratorIcon value={getCategoryIcon(group.category, categoryIconsMap)} label={group.category} />
                             </div>
                             {selected ? (
                               <div className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: accentColor, color: darkColor }}>
@@ -1299,7 +1160,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-[#f5f6f8] text-lg">
-                              {renderConfiguratorIcon(getCategoryIcon(group.category, categoryIconsMap), group.category)}
+                              <ConfiguratorIcon value={getCategoryIcon(group.category, categoryIconsMap)} label={group.category} />
                             </div>
                             {selected ? (
                               <div className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: accentColor, color: darkColor }}>
@@ -1495,7 +1356,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                               onClick={() => setProduct(service)}
                               className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#f5f6f8] text-xl"
                             >
-                              {renderConfiguratorIcon(getServiceIcon(service, productIconsMap), service.name)}
+                              <ConfiguratorIcon value={getServiceIcon(service, productIconsMap)} label={service.name} />
                             </button>
                             <button
                               type="button"
@@ -1600,7 +1461,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                         style={{ borderColor: isSelected ? accentColor : "#e2e3e7", boxShadow: isSelected ? `0 0 0 2px ${accentColor}33 inset` : "none" }}
                       >
                         <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-[#f5f6f8] text-xl">
-                          {renderConfiguratorIcon(getServiceIcon(service, productIconsMap), service.name)}
+                          <ConfiguratorIcon value={getServiceIcon(service, productIconsMap)} label={service.name} />
                         </div>
                         <p className="mt-4 text-base font-semibold sm:text-lg">{service.name}</p>
                         <p className="mt-1 line-clamp-2 text-sm text-[#7b818c]">{service.description || "Selecteer om verder te configureren."}</p>
@@ -2544,95 +2405,24 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
             ) : null}
           </section>
 
-          <aside className="min-h-0 overflow-y-auto bg-[#f4f1e8] px-3 py-3 sm:px-4">
-            <div className="rounded-[14px] border border-black/10 bg-white shadow-sm">
-              <div className="rounded-t-[14px] px-3 py-2 text-xs font-semibold text-white" style={{ background: `linear-gradient(135deg, ${darkColor} 0%, #1f2228 100%)` }}>
-                Offerte-items ({cartItems.length}) {isPreviewRoute ? "" : `· ${Object.keys(confirmedProducts).length} bevestigd`}
-              </div>
-              <div className="max-h-[34vh] space-y-1 overflow-auto p-1.5">
-                {cartItems.length === 0 ? (
-                  <div className="rounded-lg border border-dashed p-3 text-xs text-[#767c87]">Nog geen items geselecteerd.</div>
-                ) : (
-                  cartItems.map((item) => (
-                    <div key={item.cartKey} className="rounded-lg border bg-white px-2 py-1.5">
-                      <div className="grid grid-cols-[1fr_auto] gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-semibold">{item.name}</p>
-                          <p className="truncate text-[11px] text-[#7b818c]">
-                            {item.packageLabel} · {item.quantity}x
-                            {item.source === "product" && !isPreviewRoute && !confirmedProducts[item.cartKey]
-                              ? " · niet bevestigd"
-                              : ""}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <button type="button" onClick={() => removeFromCart(item.cartKey)} className="text-[11px] text-[#8a909b] hover:text-[#272a30]">✕</button>
-                          <p className="mt-0.5 text-xs font-semibold" style={{ color: "#c9811b" }}>{formatCurrency(item.total)}</p>
-                        </div>
-                      </div>
-                      <div className="mt-1 flex items-center justify-between gap-2">
-                        <span className="truncate text-[11px] text-[#7b818c]">
-                          {item.quantity > 1 ? `${formatCurrency(item.unitPrice)} / stuk` : formatCurrency(item.unitPrice)}
-                        </span>
-                        {(item.source === "product" || payload.editingQuote) ? (
-                          <div className="flex items-center overflow-hidden rounded-md border">
-                            <button type="button" onClick={() => adjustQuantity(item.cartKey, -1)} className="h-5 w-6 text-xs">-</button>
-                            <span className="min-w-6 border-x px-1 text-center text-[11px]">{item.quantity}</span>
-                            <button type="button" onClick={() => adjustQuantity(item.cartKey, 1)} className="h-5 w-6 text-xs">+</button>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-              <div className="flex items-center justify-between border-t px-3 py-2 text-xs font-semibold">
-                <span>Totaal incl. BTW</span>
-                <span>{formatCurrency(total)}</span>
-              </div>
-            </div>
-
-            <div className="mt-3 rounded-[14px] border border-black/10 bg-white p-3 text-sm">
-              <div className="flex items-center justify-between text-xs uppercase tracking-wide text-[#7d838d]">
-                <span>Categorie</span>
-                <span className="font-semibold text-[#3c4149] normal-case">{selectedCategory || "-"}</span>
-              </div>
-              <div className="mt-2 flex items-center justify-between text-xs uppercase tracking-wide text-[#7d838d]">
-                <span>Product</span>
-                <span className="font-semibold text-[#3c4149] normal-case">{selectedProduct?.name || "-"}</span>
-              </div>
-              <div className="mt-2 flex items-center justify-between text-xs uppercase tracking-wide text-[#7d838d]">
-                <span>Aantal in cart</span>
-                <span className="font-semibold text-[#3c4149]">{cartItems.length}</span>
-              </div>
-              {!isPreviewRoute ? (
-                <div className="mt-2 flex items-center justify-between text-xs uppercase tracking-wide text-[#7d838d]">
-                  <span>Bevestigd</span>
-                  <span className="font-semibold text-[#3c4149]">
-                    {Object.keys(confirmedProducts).length}
-                  </span>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="mt-3 overflow-hidden rounded-[14px] border border-black/10 bg-white text-sm">
-              <div className="space-y-2 px-3 py-3">
-                <div className="flex items-center justify-between"><span>Subtotaal excl. BTW</span><span className="font-semibold">{formatCurrency(subtotal)}</span></div>
-                {discount > 0 ? (
-                  <div className="flex items-center justify-between text-[#b15f1b]"><span>Korting</span><span className="font-semibold">-{formatCurrency(discount)}</span></div>
-                ) : null}
-                <div className="flex items-center justify-between"><span>BTW {vatRate}%</span><span className="font-semibold">{formatCurrency(vatAmount)}</span></div>
-              </div>
-              <div className="px-3 py-3 text-sm font-semibold text-white" style={{ background: `linear-gradient(135deg, ${darkColor} 0%, #1f2228 100%)` }}>
-                Totaal incl. BTW <span className="float-right" style={{ color: accentColor }}>{formatCurrency(total)}</span>
-              </div>
-            </div>
-
-            <div className="mt-3 rounded-[14px] border border-[#e8dcc4] bg-[#f7f0df] px-3 py-3 text-xs text-[#6f6655]">
-              <p className="font-semibold text-[#3f3b33]">Indicatieve prijs - Definitieve offerte op aanvraag</p>
-              <p className="mt-1">{settings.disclaimer}</p>
-            </div>
-          </aside>
+          <QuoteSummaryAside
+            cartItems={cartItems}
+            isPreviewRoute={isPreviewRoute}
+            confirmedCount={Object.keys(confirmedProducts).length}
+            isEditingQuote={Boolean(payload.editingQuote)}
+            selectedCategory={selectedCategory}
+            selectedProductName={selectedProduct?.name || ""}
+            subtotal={subtotal}
+            discount={discount}
+            vatRate={vatRate}
+            vatAmount={vatAmount}
+            total={total}
+            disclaimer={settings.disclaimer}
+            accentColor={accentColor}
+            darkColor={darkColor}
+            onRemoveFromCart={removeFromCart}
+            onAdjustQuantity={adjustQuantity}
+          />
         </div>
 
         <footer className="px-4 py-3 text-xs text-white" style={{ background: `linear-gradient(135deg, ${darkColor} 0%, #1f2228 100%)` }}>
