@@ -36,7 +36,7 @@ export default function AuditPage() {
   });
 
   return (
-    <div className="app-page space-y-4">
+    <div className="app-page">
       <div className="app-page-header">
         <div className="app-page-heading">
           <h1 className="app-page-title">Website Audit</h1>
@@ -44,7 +44,7 @@ export default function AuditPage() {
         </div>
       </div>
 
-      <Card>
+      <Card className="app-surface">
         <CardHeader>
           <CardTitle className="text-sm">Nieuwe audit</CardTitle>
         </CardHeader>
@@ -85,7 +85,7 @@ export default function AuditPage() {
       </Card>
 
       {result ? (
-        <Card>
+        <Card className="app-surface">
           <CardHeader>
             <CardTitle className="text-sm">Audit resultaat</CardTitle>
           </CardHeader>
@@ -99,7 +99,7 @@ export default function AuditPage() {
               <Badge variant="outline">Contact {result.metrics.contactScore}</Badge>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-lg border p-3">
+              <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
                 <p className="text-sm font-medium">Checks</p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Status {result.checks.statusCode} · SSL {result.checks.ssl ? "ja" : "nee"} ·
@@ -107,7 +107,7 @@ export default function AuditPage() {
                   Laadtijd {result.checks.loadTimeMs} ms
                 </p>
               </div>
-              <div className="rounded-lg border p-3">
+              <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
                 <p className="text-sm font-medium">Google reviews</p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Rating {result.checks.reviews.rating ?? "-"} ·
@@ -116,7 +116,7 @@ export default function AuditPage() {
                 </p>
               </div>
             </div>
-            <div className="rounded-lg border p-3">
+            <div className="rounded-2xl border border-border/60 bg-background/45 p-3">
               <p className="text-sm font-medium">Verbetersuggesties</p>
               <Textarea
                 readOnly
@@ -128,7 +128,7 @@ export default function AuditPage() {
         </Card>
       ) : null}
 
-      <Card>
+      <Card className="app-surface">
         <CardHeader>
           <CardTitle className="text-sm">Recente audits</CardTitle>
         </CardHeader>
@@ -140,7 +140,7 @@ export default function AuditPage() {
               {(audits.data || []).map((item) => {
                 const metrics = (item.data as any)?.metrics as Record<string, number> | undefined;
                 return (
-                  <div key={item.id} className="rounded-lg border p-3">
+                  <div key={item.id} className="rounded-2xl border border-border/60 bg-background/45 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="text-sm font-medium">{item.title}</p>

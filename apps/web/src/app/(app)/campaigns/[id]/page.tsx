@@ -255,17 +255,17 @@ export default function CampaignDetailPage({
   }
 
   return (
-    <div className="space-y-5">
+    <div className="app-page">
       {/* Header */}
-      <div className="flex items-center gap-4">
+      <div className="app-page-header">
         <Link href="/campaigns">
-          <Button variant="ghost" size="icon">
+          <Button variant="ghost" size="icon" className="rounded-xl">
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>
         <div className="flex-1">
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold">{campaign.name}</h1>
+            <h1 className="app-page-title">{campaign.name}</h1>
             <Badge variant={getCampaignStatusVariant(campaign.status)}>
               {CAMPAIGN_STATUS_LABELS[campaign.status] || campaign.status}
             </Badge>

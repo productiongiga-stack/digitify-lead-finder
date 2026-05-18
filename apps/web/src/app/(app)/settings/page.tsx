@@ -24,12 +24,14 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-bold tracking-tight">Instellingen</h1>
-        <p className="text-sm text-muted-foreground">
+    <div className="app-page">
+      <div className="app-page-header">
+        <div className="app-page-heading">
+        <h1 className="app-page-title">Instellingen</h1>
+        <p className="app-page-subtitle">
           Premium configuratiecentrum voor branding, communicatie, bookingflows en integraties.
         </p>
+        </div>
       </div>
 
       <div className="grid gap-3 xl:grid-cols-4">
@@ -79,7 +81,7 @@ export default function SettingsPage() {
         ))}
       </div>
 
-      <Card className="border-border/60">
+      <Card className="app-surface">
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-center gap-2">
             <CardTitle className="text-base">Instellingen per domein</CardTitle>
@@ -91,7 +93,7 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="essentials" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid h-10 w-full grid-cols-3 rounded-full bg-muted/60 p-1">
               <TabsTrigger value="essentials">Basis</TabsTrigger>
               <TabsTrigger value="communication">Communicatie</TabsTrigger>
               <TabsTrigger value="operations">Operatie</TabsTrigger>

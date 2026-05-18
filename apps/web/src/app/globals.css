@@ -4,8 +4,8 @@
 
 @layer base {
   :root {
-    --background: 210 33% 98%;
-    --foreground: 224 71.4% 4.1%;
+    --background: 214 36% 97%;
+    --foreground: 222 47% 7%;
     --card: 0 0% 100%;
     --card-foreground: 224 71.4% 4.1%;
     --popover: 0 0% 100%;
@@ -14,9 +14,9 @@
     --primary-foreground: 210 20% 98%;
     --secondary: 210 20% 94%;
     --secondary-foreground: 220.9 39.3% 11%;
-    --muted: 210 20% 95%;
-    --muted-foreground: 220 8.9% 42%;
-    --accent: 210 20% 95%;
+    --muted: 214 28% 93%;
+    --muted-foreground: 220 10% 42%;
+    --accent: 214 28% 94%;
     --accent-foreground: 220.9 39.3% 11%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 20% 98%;
@@ -24,12 +24,19 @@
     --input: 214 21% 89%;
     --ring: 31 93% 66%;
     --radius: 0.75rem;
+    --surface: 0 0% 100%;
+    --surface-muted: 214 28% 96%;
+    --surface-elevated: 0 0% 100%;
+    --success: 153 60% 38%;
+    --warning: 38 92% 50%;
+    --info: 214 82% 56%;
+    --shadow-soft: 0 18px 55px rgba(15, 23, 42, 0.08);
   }
 
   .dark {
-    --background: 224 71.4% 4.1%;
+    --background: 222 47% 5%;
     --foreground: 210 20% 98%;
-    --card: 224 71.4% 6%;
+    --card: 224 45% 7%;
     --card-foreground: 210 20% 98%;
     --popover: 224 71.4% 6%;
     --popover-foreground: 210 20% 98%;
@@ -46,16 +53,23 @@
     --border: 215 27.9% 16.9%;
     --input: 215 27.9% 16.9%;
     --ring: 31 93% 66%;
+    --surface: 224 45% 7%;
+    --surface-muted: 222 36% 10%;
+    --surface-elevated: 222 36% 12%;
+    --success: 153 60% 45%;
+    --warning: 38 92% 58%;
+    --info: 214 82% 62%;
+    --shadow-soft: 0 22px 65px rgba(0, 0, 0, 0.35);
   }
 }
 
 @layer components {
   .app-page {
-    @apply space-y-3 sm:space-y-4 lg:space-y-5;
+    @apply space-y-4 sm:space-y-5 lg:space-y-6;
   }
 
   .app-page-header {
-    @apply flex flex-col gap-2.5 sm:gap-3 sm:flex-row sm:items-start sm:justify-between;
+    @apply flex flex-col gap-3 rounded-2xl border border-border/60 bg-card/80 p-4 shadow-sm backdrop-blur-sm sm:p-5 lg:flex-row lg:items-start lg:justify-between;
   }
 
   .app-page-heading {
@@ -63,11 +77,11 @@
   }
 
   .app-page-title {
-    @apply truncate text-lg font-bold tracking-tight sm:text-xl;
+    @apply truncate text-xl font-bold tracking-tight sm:text-2xl;
   }
 
   .app-page-subtitle {
-    @apply max-w-3xl text-xs text-muted-foreground sm:text-sm;
+    @apply max-w-3xl text-sm text-muted-foreground;
   }
 
   .app-page-actions {
@@ -75,11 +89,27 @@
   }
 
   .app-page-filters {
-    @apply flex flex-wrap items-center gap-1.5 rounded-xl border bg-card/80 p-2.5 shadow-sm sm:gap-2 sm:p-3;
+    @apply flex flex-wrap items-center gap-2 rounded-2xl border border-border/60 bg-card/85 p-3 shadow-sm backdrop-blur-sm sm:p-4;
+  }
+
+  .app-surface {
+    @apply rounded-2xl border border-border/60 bg-card/85 shadow-sm backdrop-blur-sm;
+  }
+
+  .app-surface-muted {
+    @apply rounded-2xl border border-border/50 bg-muted/35;
+  }
+
+  .app-section-title {
+    @apply text-sm font-semibold tracking-tight text-foreground;
+  }
+
+  .app-section-description {
+    @apply text-xs leading-relaxed text-muted-foreground sm:text-sm;
   }
 
   .dashboard-hero {
-    @apply relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-card via-card to-card/80 p-4 shadow-sm sm:p-6;
+    @apply relative overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-card via-card to-muted/35 p-4 shadow-sm backdrop-blur-sm sm:p-6;
   }
 
   .dashboard-hero-stat {
@@ -87,7 +117,7 @@
   }
 
   .dashboard-widget {
-    @apply h-full;
+    @apply h-full rounded-2xl;
   }
 
   .dashboard-widget-header {
@@ -157,8 +187,9 @@
     font-feature-settings: "rlig" 1, "calt" 1;
     overflow-x: hidden;
     background-image:
-      radial-gradient(circle at top left, rgba(249, 174, 90, 0.12), transparent 28%),
-      radial-gradient(circle at top right, rgba(18, 166, 106, 0.06), transparent 22%);
+      radial-gradient(circle at top left, rgba(249, 174, 90, 0.10), transparent 28%),
+      radial-gradient(circle at top right, rgba(18, 166, 106, 0.05), transparent 24%),
+      linear-gradient(180deg, hsl(var(--background)), hsl(var(--background)));
     min-height: 100vh;
   }
   ::selection {

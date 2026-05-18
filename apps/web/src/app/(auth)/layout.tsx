@@ -11,27 +11,27 @@ const benefits = [
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen bg-[#fffdf9]">
+    <div className="flex min-h-screen bg-background">
       {/* Left branding panel — hidden on mobile */}
-      <div className="hidden lg:flex lg:w-[480px] xl:w-[520px] flex-col justify-between bg-[#0d1520] px-12 py-14 relative overflow-hidden">
+      <div className="relative hidden overflow-hidden border-r border-border/60 bg-card/95 px-12 py-14 shadow-xl lg:flex lg:w-[480px] xl:w-[520px] flex-col justify-between">
         {/* Glow blobs */}
-        <div className="pointer-events-none absolute -top-32 -left-32 h-96 w-96 rounded-full bg-[#f9ae5a] opacity-10 blur-3xl" />
-        <div className="pointer-events-none absolute bottom-0 right-0 h-80 w-80 rounded-full bg-[#f9ae5a] opacity-[0.06] blur-3xl" />
+        <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-primary/15 blur-3xl" />
+        <div className="pointer-events-none absolute bottom-0 right-0 h-80 w-80 rounded-full bg-emerald-500/10 blur-3xl" />
 
         {/* Logo */}
         <Link href="/" className="relative z-10 flex items-center gap-3">
-          <AuthLogo size="sm" showText textClassName="text-white" />
+          <AuthLogo size="sm" showText />
         </Link>
 
         {/* Center content */}
         <div className="relative z-10 space-y-8">
           <div className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-widest text-[#f9ae5a]">Lead Finder Suite</p>
-            <h2 className="text-3xl font-bold leading-snug text-white">
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary">Lead Finder Suite</p>
+            <h2 className="text-3xl font-bold leading-snug text-foreground">
               Groei sneller met<br />
-              <span className="text-[#f9ae5a]">slimme lead generatie</span>
+              <span className="text-primary">slimme lead generatie</span>
             </h2>
-            <p className="text-sm leading-relaxed text-white/60">
+            <p className="text-sm leading-relaxed text-muted-foreground">
               Vind, scoor en benader de juiste klanten automatisch — zodat jij je focust op afsluiten.
             </p>
           </div>
@@ -39,29 +39,29 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <ul className="space-y-3">
             {benefits.map((b) => (
               <li key={b} className="flex items-start gap-3">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#f9ae5a]" />
-                <span className="text-sm text-white/75">{b}</span>
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <span className="text-sm text-muted-foreground">{b}</span>
               </li>
             ))}
           </ul>
 
           {/* Mini stat bar */}
-          <div className="grid grid-cols-3 gap-4 rounded-xl border border-white/10 bg-white/5 p-5">
+          <div className="grid grid-cols-3 gap-4 rounded-2xl border border-border/60 bg-muted/35 p-5">
             {[
               { val: "8+", label: "modules" },
               { val: "100%", label: "Belgisch" },
               { val: "24/7", label: "automation" },
             ].map(({ val, label }) => (
               <div key={label} className="text-center">
-                <p className="text-xl font-bold text-[#f9ae5a]">{val}</p>
-                <p className="mt-0.5 text-xs text-white/50">{label}</p>
+                <p className="text-xl font-bold text-primary">{val}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{label}</p>
               </div>
             ))}
           </div>
         </div>
 
         {/* Bottom disclaimer */}
-        <p className="relative z-10 text-xs text-white/30">
+        <p className="relative z-10 text-xs text-muted-foreground">
           © {new Date().getFullYear()} Digitify · BTW BE0685.556.507
         </p>
       </div>
@@ -75,9 +75,9 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
 
         <div className="w-full max-w-md">{children}</div>
 
-        <p className="mt-8 text-center text-xs text-[#0d1520]/40">
+        <p className="mt-8 text-center text-xs text-muted-foreground">
           Terug naar{" "}
-          <Link href="/" className="font-medium text-[#f9ae5a] hover:underline">
+          <Link href="/" className="font-medium text-primary hover:underline">
             de website
           </Link>
         </p>

@@ -289,7 +289,7 @@ export default function QuotesPage() {
       </div>
 
       <Tabs defaultValue="overview" className="space-y-3">
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
+        <TabsList className="grid h-10 w-full max-w-xs grid-cols-2 rounded-full bg-muted/60 p-1">
           <TabsTrigger value="overview">Overzicht</TabsTrigger>
           <TabsTrigger value="info">Info</TabsTrigger>
         </TabsList>

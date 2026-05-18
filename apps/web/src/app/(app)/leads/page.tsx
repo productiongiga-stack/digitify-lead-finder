@@ -557,15 +557,15 @@ export default function LeadsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-3">
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
+      <Tabs defaultValue="overview" className="space-y-4">
+        <TabsList className="grid h-10 w-full max-w-xs grid-cols-2 rounded-full bg-muted/60 p-1">
           <TabsTrigger value="overview">Overzicht</TabsTrigger>
           <TabsTrigger value="info">Info</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="space-y-3">
+        <TabsContent value="overview" className="space-y-4">
           {/* Filters */}
-          <Card className="p-3">
+          <Card className="app-surface">
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative min-w-[170px] flex-1 sm:min-w-[220px]">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

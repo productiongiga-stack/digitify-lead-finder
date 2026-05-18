@@ -22,7 +22,19 @@ import {
 } from "@digitify/ui";
 import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/components/feedback/toast-provider";
+import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 import { getAppUrl } from "@/lib/config";
+import { normalizeKey, parseEmojiMap, stringifyEmojiMap } from "@/lib/quote-configurator-utils";
+import type {
+  PackageOption as BuilderPackage,
+  ProductSpecConfig as BuilderSpec,
+  SpecOption as BuilderOption,
+  SpecOptionSection as BuilderOptionSection,
+  SpecQuestion as BuilderQuestion,
+  SpecQuestionType as BuilderQuestionType,
+  SpecSlider as BuilderSlider,
+  SpecsByProduct as BuilderSpecsMap,
+} from "@/lib/quote-configurator-specs";
 
 type EditableService = {
   id?: string;
@@ -35,70 +47,6 @@ type EditableService = {
   isActive: boolean;
 };
 
-type BuilderPackage = {
-  key: string;
-  label: string;
-  subtitle: string;
-  price: number;
-  features: string[];
-  defaultSelected?: boolean;
-};
-
-type BuilderOption = {
-  key: string;
-  label: string;
-  price: number;
-  unit?: string;
-  description?: string;
-  quantity?: number;
-  defaultSelected?: boolean;
-};
-
-type BuilderOptionSection = {
-  title: string;
-  options: BuilderOption[];
-};
-
-type BuilderSlider = {
-  key: string;
-  label: string;
-  min: number;
-  max: number;
-  step?: number;
-  included?: number;
-  pricePerUnit?: number;
-  unitLabel?: string;
-  hint?: string;
-  defaultValue?: number;
-};
-
-type BuilderQuestionType = "text" | "select" | "checkbox";
-
-type BuilderQuestion = {
-  key: string;
-  label: string;
-  type: BuilderQuestionType;
-  required?: boolean;
-  placeholder?: string;
-  helpText?: string;
-  options?: string[];
-  showWhenPackageKey?: string;
-  showWhenOptionKey?: string;
-};
-
-type BuilderSpec = {
-  headline?: string;
-  subheadline?: string;
-  packageSectionTitle?: string;
-  packages?: BuilderPackage[];
-  optionSections?: BuilderOptionSection[];
-  sliders?: BuilderSlider[];
-  questionsCard?: { title?: string; subtitle?: string };
-  questions?: BuilderQuestion[];
-  notesPlaceholder?: string;
-};
-
-type BuilderSpecsMap = Record<string, BuilderSpec>;
 type ReusableBlockTemplateType = "web" | "media" | "marketing" | "addons";
 type PreviewViewport = "desktop" | "tablet" | "mobile";
 type SettingsTab = "studio" | "config" | "catalog" | "all";
@@ -240,14 +188,6 @@ function hexToRgb(hex: string) {
 function rgbToHex(r: number, g: number, b: number) {
   const clamp = (value: number) => Math.max(0, Math.min(255, Math.round(value)));
   return `#${[clamp(r), clamp(g), clamp(b)].map((item) => item.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
-}
-
-function normalizeKey(value: string) {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "");
 }
 
 function shouldUseTravelByService(service: { category: string; name: string }) {
@@ -857,25 +797,6 @@ function parseJsonEditorValue(raw: string) {
   }
 }
 
-function parseEmojiMap(raw: string): Record<string, string> {
-  if (!raw.trim()) return {};
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>)
-        .map(([key, value]) => [String(key).trim(), typeof value === "string" ? value.trim() : ""])
-        .filter(([key, value]) => key.length > 0 && value.length > 0),
-    );
-  } catch {
-    return {};
-  }
-}
-
-function stringifyEmojiMap(map: Record<string, string>) {
-  return JSON.stringify(map, null, 2);
-}
-
 const DEFAULT_PDF_SERVICES_CARDS_JSON = JSON.stringify(
   [
     {
@@ -1031,6 +952,7 @@ export default function QuoteSettingsPage() {
   const [hasUnpublishedChanges, setHasUnpublishedChanges] = useState(false);
   const [lastPublishedAt, setLastPublishedAt] = useState<string | null>(null);
   const [logoUploading, setLogoUploading] = useState(false);
+  const [pendingTemplateKey, setPendingTemplateKey] = useState<keyof typeof SERVICE_TEMPLATES | null>(null);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const applyingHistoryRef = useRef(false);
@@ -3377,10 +3299,6 @@ export default function QuoteSettingsPage() {
   }
 
   async function applyTemplate(templateKey: keyof typeof SERVICE_TEMPLATES) {
-    if (typeof window !== "undefined" && !window.confirm(`Template "${templateKey}" laden en huidige catalogus vervangen?`)) {
-      return;
-    }
-
     setSyncingCatalog(true);
     try {
       await Promise.all(
@@ -3405,6 +3323,7 @@ export default function QuoteSettingsPage() {
       });
     } finally {
       setSyncingCatalog(false);
+      setPendingTemplateKey(null);
     }
   }
 
@@ -3422,6 +3341,24 @@ export default function QuoteSettingsPage() {
 
   return (
     <div className="space-y-5">
+      <ConfirmDialog
+        open={Boolean(pendingTemplateKey)}
+        title="Catalogustemplate laden?"
+        description={
+          pendingTemplateKey
+            ? `Template "${pendingTemplateKey}" vervangt de huidige catalogus met voorgeladen diensten.`
+            : undefined
+        }
+        confirmLabel="Template laden"
+        destructive={false}
+        loading={syncingCatalog}
+        onOpenChange={(open) => {
+          if (!open) setPendingTemplateKey(null);
+        }}
+        onConfirm={() => {
+          if (pendingTemplateKey) void applyTemplate(pendingTemplateKey);
+        }}
+      />
       <div>
         <Link href="/settings" className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" />
@@ -4456,7 +4393,7 @@ export default function QuoteSettingsPage() {
               <button
                 key={templateKey}
                 type="button"
-                onClick={() => void applyTemplate(templateKey as keyof typeof SERVICE_TEMPLATES)}
+                onClick={() => setPendingTemplateKey(templateKey as keyof typeof SERVICE_TEMPLATES)}
                 className="flex w-full items-center justify-between rounded-2xl border px-4 py-4 text-left transition hover:bg-muted/40"
                 disabled={syncingCatalog}
               >

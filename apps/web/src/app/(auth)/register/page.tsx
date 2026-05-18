@@ -21,9 +21,9 @@ export default function RegisterPage() {
 
   if (submitted) {
     return (
-      <Card className="border-0 shadow-2xl">
+      <Card className="border-border/60 shadow-2xl shadow-slate-950/10">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-md bg-[#f9ae5a] text-[#14100b]">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
             <CheckCircle2 className="h-6 w-6" />
           </div>
           <CardTitle>Check je inbox</CardTitle>
@@ -39,7 +39,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <Card className="border-0 shadow-2xl">
+    <Card className="border-border/60 shadow-2xl shadow-slate-950/10">
       <CardHeader className="space-y-1 text-center">
         <div className="mx-auto mb-4">
           <AuthLogo size="lg" />
@@ -78,7 +78,7 @@ export default function RegisterPage() {
           {requestAccess.isError && (
             <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{requestAccess.error.message}</p>
           )}
-          <Button className="w-full bg-[#f9ae5a] text-[#14100b] hover:bg-[#eca04e]" disabled={requestAccess.isPending}>
+          <Button className="w-full rounded-full shadow-sm" disabled={requestAccess.isPending}>
             {requestAccess.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Aanvraag versturen
           </Button>

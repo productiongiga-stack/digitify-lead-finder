@@ -37,6 +37,7 @@ import {
   OUTBOUND_STATUS_VARIANTS,
   canSendOutboundDraft,
 } from "@/lib/contact-status";
+import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 
 export default function ContactsPage() {
   const searchParams = useSearchParams();
@@ -45,6 +46,7 @@ export default function ContactsPage() {
   const [searchFilter, setSearchFilter] = useState("");
   const [selectedDraftIds, setSelectedDraftIds] = useState<string[]>([]);
   const [sendingDraftId, setSendingDraftId] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<null | { mode: "single"; id: string } | { mode: "bulk" }>(null);
   const utils = trpc.useUtils();
 
   const { data, isLoading } = trpc.contact.listDrafts.useQuery({
@@ -134,14 +136,12 @@ export default function ContactsPage() {
   }
 
   function handleDeleteDraft(id: string) {
-    if (!window.confirm("Wil je deze outbound e-mail verwijderen?")) return;
-    deleteDraft.mutate({ id });
+    setDeleteConfirm({ mode: "single", id });
   }
 
   function handleBulkDelete() {
     if (selectedDraftIds.length === 0) return;
-    if (!window.confirm(`${selectedDraftIds.length} outbound e-mail(s) verwijderen?`)) return;
-    bulkDeleteDrafts.mutate({ ids: selectedDraftIds });
+    setDeleteConfirm({ mode: "bulk" });
   }
 
   function handleBulkSend() {
@@ -152,6 +152,29 @@ export default function ContactsPage() {
 
   return (
     <div className="app-page">
+      <ConfirmDialog
+        open={Boolean(deleteConfirm)}
+        title={deleteConfirm?.mode === "bulk" ? "Outbound e-mails verwijderen?" : "Outbound e-mail verwijderen?"}
+        description={
+          deleteConfirm?.mode === "bulk"
+            ? `${selectedDraftIds.length} geselecteerde e-mail(s) worden permanent verwijderd.`
+            : "Deze e-mail wordt permanent verwijderd uit het outbound center."
+        }
+        confirmLabel="Verwijderen"
+        loading={deleteDraft.isPending || bulkDeleteDrafts.isPending}
+        onOpenChange={(open) => {
+          if (!open) setDeleteConfirm(null);
+        }}
+        onConfirm={() => {
+          if (!deleteConfirm) return;
+          if (deleteConfirm.mode === "single") {
+            deleteDraft.mutate({ id: deleteConfirm.id });
+          } else {
+            bulkDeleteDrafts.mutate({ ids: selectedDraftIds });
+          }
+          setDeleteConfirm(null);
+        }}
+      />
       <div className="app-page-header">
         <div className="app-page-heading">
           <h1 className="app-page-title">Outbound Center</h1>
@@ -182,13 +205,13 @@ export default function ContactsPage() {
       </div>
 
       <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
+        <TabsList className="grid h-10 w-full max-w-xs grid-cols-2 rounded-full bg-muted/60 p-1">
           <TabsTrigger value="overview">Overzicht</TabsTrigger>
           <TabsTrigger value="info">Info</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
-      <Card className="p-3">
+      <Card className="app-surface">
         <div className="flex flex-wrap items-center gap-3">
           <Input
             value={searchFilter}

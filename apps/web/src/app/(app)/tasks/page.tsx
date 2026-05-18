@@ -80,7 +80,7 @@ export default function TasksPage() {
   }, [items]);
 
   return (
-    <div className="app-page space-y-4">
+    <div className="app-page">
       <div className="app-page-header">
         <div className="app-page-heading">
           <h1 className="app-page-title">Taken</h1>
@@ -94,7 +94,7 @@ export default function TasksPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="app-page-filters">
         {(["ALL", "TODO", "IN_PROGRESS", "DONE"] as const).map((status) => (
           <Button
             key={status}
@@ -117,7 +117,7 @@ export default function TasksPage() {
       </div>
 
       {isLoading ? (
-        <Card>
+        <Card className="app-surface">
           <CardContent className="p-6 text-sm text-muted-foreground">Taken laden...</CardContent>
         </Card>
       ) : items.length === 0 ? (
@@ -135,7 +135,7 @@ export default function TasksPage() {
       ) : (
         <div className="grid gap-3 lg:grid-cols-3">
           {(Object.keys(grouped) as TaskStatus[]).map((status) => (
-            <Card key={status}>
+            <Card key={status} className="app-surface">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">{STATUS_LABEL[status]}</CardTitle>
               </CardHeader>
@@ -144,7 +144,7 @@ export default function TasksPage() {
                   <p className="text-xs text-muted-foreground">Geen taken</p>
                 ) : (
                   grouped[status].map((task) => (
-                    <div key={task.id} className="rounded-lg border p-3">
+                    <div key={task.id} className="rounded-2xl border border-border/60 bg-background/45 p-3">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="text-sm font-medium">{task.title}</p>
@@ -229,7 +229,7 @@ export default function TasksPage() {
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Prioriteit</Label>
-              <Select value={priority} onValueChange={(value) => setPriority(value as any)}>
+              <Select value={priority} onValueChange={(value) => setPriority(value as "LOW" | "MEDIUM" | "HIGH")}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="LOW">LOW</SelectItem>
@@ -246,7 +246,10 @@ export default function TasksPage() {
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Koppel type</Label>
-              <Select value={relatedType} onValueChange={(value) => setRelatedType(value as any)}>
+              <Select
+                value={relatedType}
+                onValueChange={(value) => setRelatedType(value as "NONE" | "LEAD" | "QUOTE" | "BOOKING" | "CLIENT")}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="NONE">Geen koppeling</SelectItem>

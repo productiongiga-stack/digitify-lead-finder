@@ -39,7 +39,7 @@ export default function LoginPage() {
   }
 
   return (
-    <Card className="border-0 shadow-2xl">
+    <Card className="border-border/60 shadow-2xl shadow-slate-950/10">
       <CardHeader className="space-y-1 text-center">
         <div className="mx-auto mb-4">
           <AuthLogo size="lg" />
@@ -74,7 +74,7 @@ export default function LoginPage() {
           {error && (
             <p className="text-sm text-destructive">{error}</p>
           )}
-          <Button type="submit" className="w-full bg-[#f9ae5a] text-[#14100b] hover:bg-[#eca04e]" disabled={loading}>
+          <Button type="submit" className="w-full rounded-full shadow-sm" disabled={loading}>
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Inloggen
           </Button>

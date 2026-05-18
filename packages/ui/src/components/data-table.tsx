@@ -223,7 +223,7 @@ export function DataTable<T>({
   );
 
   const mobileEl = renderMobileCard ? (
-    <div className="grid gap-2.5 p-3 md:hidden">
+      <div className="grid gap-3 p-3 md:hidden">
       {loading ? (
         Array.from({ length: 4 }).map((_, i) => (
           <Skeleton key={i} className="h-28 w-full rounded-xl" />
@@ -240,7 +240,7 @@ export function DataTable<T>({
 
   const paginationEl =
     pagination && pagination.totalPages > 1 ? (
-      <div className="flex items-center justify-between border-t px-3 py-2 text-sm">
+      <div className="flex items-center justify-between border-t bg-muted/20 px-4 py-3 text-sm">
         <p className="text-muted-foreground">
           {(pagination.page - 1) * pagination.pageSize + 1}
           &ndash;
@@ -279,5 +279,5 @@ export function DataTable<T>({
   );
 
   if (!bordered) return <div className={className}>{inner}</div>;
-  return <Card className={cn("overflow-hidden", className)}>{inner}</Card>;
+  return <Card className={cn("overflow-hidden border-border/60 bg-card/90 shadow-sm", className)}>{inner}</Card>;
 }

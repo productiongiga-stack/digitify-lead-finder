@@ -67,6 +67,22 @@ function getSyncBadge(state: string | null | undefined) {
   return { label: "Sync uit", variant: "secondary" as const };
 }
 
+function readStringProperty(source: unknown, key: string) {
+  if (!source || typeof source !== "object") return "";
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
+}
+
+function readNumberProperty(source: unknown, key: string) {
+  if (!source || typeof source !== "object") return undefined;
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function getGoogleSyncState(source: unknown) {
+  return readStringProperty(source, "googleSyncState") || undefined;
+}
+
 export default function BookingsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -107,6 +123,8 @@ export default function BookingsPage() {
   const { data: stats } = trpc.booking.getStats.useQuery();
   const { data: settingsData } = trpc.settings.getAll.useQuery();
   const { data: eventTypes } = trpc.booking.listEventTypes.useQuery();
+  type EventType = NonNullable<NonNullable<typeof eventTypes>[number]>;
+  const eventTypeItems = (eventTypes ?? []).filter((item): item is EventType => Boolean(item));
   const { data: unifiedReminders } = trpc.dashboard.getUnifiedReminders.useQuery(undefined, {
     staleTime: 60_000,
   });
@@ -119,7 +137,7 @@ export default function BookingsPage() {
       utils.booking.list.invalidate();
       utils.booking.getStats.invalidate();
       setCreateOpen(false);
-      const sync = getSyncBadge((result as any)?.googleSyncState);
+      const sync = getSyncBadge(getGoogleSyncState(result));
       showToast({ title: "Boeking opgeslagen", description: sync.label === "Synced" ? "De boeking is succesvol toegevoegd." : `Boeking opgeslagen. Google sync: ${sync.label}.` });
     },
     onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
@@ -129,7 +147,7 @@ export default function BookingsPage() {
       utils.booking.list.invalidate();
       utils.booking.getStats.invalidate();
       setEditOpen(false);
-      const sync = getSyncBadge((result as any)?.googleSyncState);
+      const sync = getSyncBadge(getGoogleSyncState(result));
       showToast({ title: "Boeking bijgewerkt", description: sync.label === "Synced" ? "De boeking is succesvol aangepast." : `Boeking aangepast. Google sync: ${sync.label}.` });
     },
     onError: (error) => showToast({ title: "Bijwerken mislukt", description: error.message, variant: "error" }),
@@ -138,7 +156,7 @@ export default function BookingsPage() {
     onSuccess: (result) => {
       utils.booking.list.invalidate();
       utils.booking.getStats.invalidate();
-      const sync = getSyncBadge((result as any)?.googleSyncState);
+      const sync = getSyncBadge(getGoogleSyncState(result));
       showToast({ title: "Boeking bevestigd", description: sync.label === "Synced" ? "De klant kreeg een bevestiging met kalenderbestand." : `Bevestigd. Google sync: ${sync.label}.` });
     },
     onError: (error) => showToast({ title: "Bevestigen mislukt", description: error.message, variant: "error" }),
@@ -147,7 +165,7 @@ export default function BookingsPage() {
     onSuccess: (result) => {
       utils.booking.list.invalidate();
       utils.booking.getStats.invalidate();
-      const sync = getSyncBadge((result as any)?.googleSyncState);
+      const sync = getSyncBadge(getGoogleSyncState(result));
       showToast({ title: "Boeking afgewezen", description: `De klant kreeg een update. Google sync: ${sync.label}.` });
     },
     onError: (error) => showToast({ title: "Afwijzen mislukt", description: error.message, variant: "error" }),
@@ -233,7 +251,7 @@ export default function BookingsPage() {
     setConfirmTargetId(booking.id);
     setConfirmClientName(booking.clientName || "");
     setConfirmClientEmail(booking.clientEmail || "");
-    setConfirmLocation((booking as any).location || "");
+    setConfirmLocation(readStringProperty(booking, "location"));
     setConfirmNotes(booking.notes || "");
     setConfirmStep(1);
     setConfirmOpen(true);
@@ -267,15 +285,20 @@ export default function BookingsPage() {
     ? [...data.bookings].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     : [];
 
+  const pendingCount = readNumberProperty(stats, "pending") ?? 0;
+  const confirmedCount = readNumberProperty(stats, "confirmed") ?? 0;
+  const rejectedCount = readNumberProperty(stats, "rejected") ?? 0;
+  const noShowCount = readNumberProperty(stats, "noShow") ?? 0;
+
   const filterTabs: Array<{ key: BookingStatus | undefined; label: string; count: number | undefined }> = [
     { key: undefined, label: "Alle", count: stats?.total },
-    { key: "PENDING", label: "In Afwachting", count: (stats as any)?.pending },
+    { key: "PENDING", label: "In Afwachting", count: pendingCount },
     { key: "SCHEDULED", label: "Gepland", count: stats?.scheduled },
-    { key: "CONFIRMED", label: "Bevestigd", count: (stats as any)?.confirmed },
+    { key: "CONFIRMED", label: "Bevestigd", count: confirmedCount },
     { key: "COMPLETED", label: "Voltooid", count: stats?.completed },
     { key: "CANCELLED", label: "Geannuleerd", count: stats?.cancelled },
-    { key: "REJECTED", label: "Afgewezen", count: (stats as any)?.rejected },
-    { key: "NO_SHOW", label: "Niet Verschenen", count: (stats as any)?.noShow },
+    { key: "REJECTED", label: "Afgewezen", count: rejectedCount },
+    { key: "NO_SHOW", label: "Niet Verschenen", count: noShowCount },
   ];
   const now = new Date();
   const upcomingBookingsCount = sortedBookings.filter((booking) => new Date(booking.date) >= now).length;
@@ -353,7 +376,7 @@ export default function BookingsPage() {
       </div>
 
       {/* Pending bookings alert */}
-      {(stats as any)?.pending > 0 ? (
+      {pendingCount > 0 ? (
         <div className="flex items-center justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-950/20">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500/20">
@@ -361,7 +384,7 @@ export default function BookingsPage() {
             </div>
             <div>
               <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-                {(stats as any).pending} boeking{(stats as any).pending !== 1 ? "en" : ""} wacht op bevestiging
+                {pendingCount} boeking{pendingCount !== 1 ? "en" : ""} wacht op bevestiging
               </p>
               <p className="text-xs text-amber-600 dark:text-amber-500">
                 Controleer en bevestig of wijs af via de lijst hieronder.
@@ -380,7 +403,7 @@ export default function BookingsPage() {
       ) : null}
 
       {/* Shared filters rendered once, used by both List and Overview tabs */}
-      <Card className="border-border/60 shadow-sm">
+      <Card className="app-surface">
         <CardContent className={cn("grid gap-3 md:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,0.8fr))]", effectiveCompactMode ? "p-3" : "p-4")}>
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Zoek op klant, e-mail of notitie..." />
           <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
@@ -391,7 +414,7 @@ export default function BookingsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all">Alle bookingtypes</SelectItem>
-              {eventTypes?.map((item: NonNullable<typeof eventTypes>[number]) => (
+              {eventTypeItems.map((item) => (
                 <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
               ))}
             </SelectContent>
@@ -409,15 +432,15 @@ export default function BookingsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="list" className="space-y-3">
-        <TabsList className="grid w-full max-w-md grid-cols-3">
+      <Tabs defaultValue="list" className="space-y-4">
+        <TabsList className="grid h-10 w-full max-w-md grid-cols-3 rounded-full bg-muted/60 p-1">
           <TabsTrigger value="list">Lijst</TabsTrigger>
           <TabsTrigger value="overview">Overzicht</TabsTrigger>
           <TabsTrigger value="automations">Automations</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="list" className="space-y-3">
-          <Card className="border-border/50 shadow-sm">
+        <TabsContent value="list" className="space-y-4">
+          <Card className="app-surface">
             <CardContent className="p-0">
               {isLoading ? (
                 <div className="space-y-3 p-6">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
@@ -427,10 +450,10 @@ export default function BookingsPage() {
                 <div className={cn("grid gap-3", effectiveCompactMode ? "p-3" : "p-4")}>
                   {sortedBookings.map((booking) => {
                     const statusInfo = STATUS_MAP[booking.status] ?? { label: booking.status, variant: "secondary" as const };
-                    const syncInfo = getSyncBadge((booking as any).googleSyncState);
+                    const syncInfo = getSyncBadge(getGoogleSyncState(booking));
                     const bookingDate = new Date(booking.date);
                     return (
-                      <div key={booking.id} className={cn("rounded-2xl border", effectiveCompactMode ? "p-3" : "p-4")} role="article" aria-label={`Boeking ${booking.clientName}`}>
+                      <div key={booking.id} className={cn("rounded-2xl border border-border/60 bg-background/45 shadow-sm", effectiveCompactMode ? "p-3" : "p-4")} role="article" aria-label={`Boeking ${booking.clientName}`}>
                         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
@@ -936,40 +959,44 @@ export default function BookingsPage() {
             {[
               {
                 label: "In afwachting",
-                value: (stats as any)?.pending ?? 0,
-                color: "amber",
+                value: pendingCount,
+                cardClass: "border-amber-200 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20",
+                iconClass: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
                 icon: <Clock className="h-4 w-4" />,
                 action: () => setStatusFilter("PENDING"),
               },
               {
                 label: "Bevestigd",
-                value: (stats as any)?.confirmed ?? 0,
-                color: "blue",
+                value: confirmedCount,
+                cardClass: "border-blue-200 bg-blue-50/60 dark:border-blue-900/40 dark:bg-blue-950/20",
+                iconClass: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
                 icon: <CheckCircle2 className="h-4 w-4" />,
                 action: () => setStatusFilter("CONFIRMED"),
               },
               {
                 label: "Voltooid",
                 value: stats?.completed ?? 0,
-                color: "emerald",
+                cardClass: "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/40 dark:bg-emerald-950/20",
+                iconClass: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
                 icon: <CalendarCheck className="h-4 w-4" />,
                 action: () => setStatusFilter("COMPLETED"),
               },
               {
                 label: "Niet verschenen",
-                value: (stats as any)?.noShow ?? 0,
-                color: "red",
+                value: noShowCount,
+                cardClass: "border-red-200 bg-red-50/60 dark:border-red-900/40 dark:bg-red-950/20",
+                iconClass: "bg-red-500/15 text-red-600 dark:text-red-400",
                 icon: <CalendarX className="h-4 w-4" />,
                 action: () => setStatusFilter("NO_SHOW"),
               },
-            ].map(({ label, value, color, icon, action }) => (
+            ].map(({ label, value, cardClass, iconClass, icon, action }) => (
               <button
                 key={label}
                 type="button"
                 onClick={action}
-                className={`rounded-2xl border p-4 text-left transition hover:shadow-sm border-${color}-200 bg-${color}-50/60 dark:border-${color}-900/40 dark:bg-${color}-950/20`}
+                className={cn("rounded-2xl border p-4 text-left transition hover:shadow-sm", cardClass)}
               >
-                <div className={`mb-2 flex h-9 w-9 items-center justify-center rounded-xl bg-${color}-500/15 text-${color}-600 dark:text-${color}-400`}>
+                <div className={cn("mb-2 flex h-9 w-9 items-center justify-center rounded-xl", iconClass)}>
                   {icon}
                 </div>
                 <p className="text-2xl font-bold">{value}</p>

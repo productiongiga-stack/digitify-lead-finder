@@ -52,16 +52,16 @@ export function Topbar() {
   const canOpen = (href: string) => canAccessSettingsPath(role, href);
 
   return (
-    <header className="sticky top-0 z-20 flex h-12 items-center justify-between border-b bg-background/90 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/65 sm:px-4">
+    <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border/60 bg-background/85 px-3 shadow-sm shadow-slate-950/5 backdrop-blur-xl supports-[backdrop-filter]:bg-background/70 sm:px-5">
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg border-border/70 lg:hidden" onClick={toggleMobileSidebar}>
+        <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl border-border/70 bg-card/70 lg:hidden" onClick={toggleMobileSidebar}>
           <Menu className="h-4 w-4" />
         </Button>
         <div className="min-w-0">
           <p className="hidden text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70 sm:block">
             Werkruimte
           </p>
-          <h2 className="truncate text-sm font-semibold sm:text-[15px]">
+          <h2 className="truncate text-sm font-semibold tracking-tight sm:text-[15px]">
             {pageTitle}
           </h2>
         </div>
@@ -70,7 +70,7 @@ export function Topbar() {
       <div className="flex items-center gap-2">
         {followUpCount > 0 ? (
           <Link href="/contacts" className="hidden md:block">
-            <Badge variant="warning" className="h-8 rounded-full px-3">
+            <Badge variant="warning" className="h-8 px-3">
               {followUpCount} reminders
             </Badge>
           </Link>
@@ -78,7 +78,7 @@ export function Topbar() {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg sm:hidden">
+            <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl bg-card/70 sm:hidden">
               <Plus className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -108,7 +108,7 @@ export function Topbar() {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="hidden sm:inline-flex">
+            <Button variant="outline" size="sm" className="hidden rounded-full bg-card/70 sm:inline-flex">
               <Plus className="mr-2 h-4 w-4" />
               Snel starten
             </Button>
@@ -137,7 +137,7 @@ export function Topbar() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Button asChild variant="ghost" size="icon" className="relative h-8 w-8 rounded-lg" aria-label="Goedkeuringswachtrij">
+        <Button asChild variant="ghost" size="icon" className="relative h-9 w-9 rounded-xl" aria-label="Goedkeuringswachtrij">
           <Link href="/contacts/approval">
             <Bell className="h-4 w-4" />
             {(topbarStats?.pendingDrafts ?? 0) > 0 ? (
@@ -151,14 +151,14 @@ export function Topbar() {
           </Link>
         </Button>
 
-        <Button variant="ghost" size="icon" className="hidden h-8 w-8 rounded-lg md:inline-flex" onClick={toggleOpenClaw}>
+        <Button variant="ghost" size="icon" className="hidden h-9 w-9 rounded-xl md:inline-flex" onClick={toggleOpenClaw}>
           <Bot className="h-4 w-4" />
         </Button>
 
         <Button
           variant="ghost"
           size="icon"
-          className="hidden h-8 w-8 rounded-lg md:inline-flex"
+          className="hidden h-9 w-9 rounded-xl md:inline-flex"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
@@ -167,8 +167,8 @@ export function Topbar() {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-              <Avatar className="h-8 w-8">
+            <Button variant="ghost" className="relative h-9 w-9 rounded-full">
+              <Avatar className="h-9 w-9 ring-1 ring-border/70">
                 {profile?.image ? <AvatarImage src={profile.image} alt={displayName || displayEmail || "Account"} /> : null}
                 <AvatarFallback className="text-xs">{initials}</AvatarFallback>
               </Avatar>

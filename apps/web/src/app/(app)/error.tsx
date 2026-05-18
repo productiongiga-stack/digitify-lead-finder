@@ -2,7 +2,7 @@
 
 import { RouteErrorState } from "@/components/layout/route-states";
 
-export default function IntegrationsError({
+export default function AppError({
   reset,
 }: {
   error: Error & { digest?: string };
@@ -10,8 +10,8 @@ export default function IntegrationsError({
 }) {
   return (
     <RouteErrorState
-      title="Integraties konden niet geladen worden"
-      description="Er liep iets fout bij het laden van externe diensten en API-sleutels."
+      title="Werkruimte kon niet geladen worden"
+      description="Er liep iets fout in deze appmodule. Probeer opnieuw of keer terug naar het dashboard."
       reset={reset}
     />
   );

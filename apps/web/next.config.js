@@ -1,5 +1,7 @@
 const path = require("path");
 
+const workspaceRoot = path.join(__dirname, "../../");
+
 function resolveAppUrl() {
   if (process.env.NEXTAUTH_URL) return process.env.NEXTAUTH_URL;
   if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
@@ -10,7 +12,10 @@ function resolveAppUrl() {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  outputFileTracingRoot: path.join(__dirname, "../../"),
+  outputFileTracingRoot: workspaceRoot,
+  turbopack: {
+    root: workspaceRoot,
+  },
   env: {
     NEXTAUTH_URL: resolveAppUrl(),
   },

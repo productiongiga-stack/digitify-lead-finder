@@ -442,21 +442,23 @@ export default function LeadSearchPage() {
   );
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-bold tracking-tight">Leads Zoeken</h1>
-        <p className="text-sm text-muted-foreground">
+    <div className="app-page">
+      <div className="app-page-header">
+        <div className="app-page-heading">
+        <h1 className="app-page-title">Leads zoeken</h1>
+        <p className="app-page-subtitle">
           Zoek nieuwe leads op basis van niche, locatie en zoekwoorden via Google Places
         </p>
+        </div>
       </div>
 
       <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
+        <TabsList className="grid h-10 w-full max-w-xs grid-cols-2 rounded-full bg-muted/60 p-1">
           <TabsTrigger value="overview">Overzicht</TabsTrigger>
           <TabsTrigger value="info">Info</TabsTrigger>
         </TabsList>
 
-      <TabsContent value="overview" className="space-y-5">
+      <TabsContent value="overview" className="space-y-4">
       {/* API key missing warning */}
       {apiKeyMissing && (
         <Card className="border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30">
@@ -502,7 +504,7 @@ export default function LeadSearchPage() {
       )}
 
       {/* Compact search bar */}
-      <Card>
+      <Card className="app-surface">
         <CardContent className="p-4">
           <form onSubmit={handleSearch} className="flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[180px] space-y-1.5">

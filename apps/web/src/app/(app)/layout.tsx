@@ -16,12 +16,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <SessionProvider>
-      <div className="flex min-h-screen">
+      <div className="flex min-h-screen bg-background/95">
         <Sidebar />
         <AppShell>
           <Topbar />
           <main className="flex-1 overflow-x-clip">
-            <div className="mx-auto w-full max-w-[1680px] overflow-x-clip p-3 sm:p-4 lg:p-5">
+            <div className="mx-auto w-full max-w-[1680px] overflow-x-clip px-3 py-4 sm:px-5 lg:px-6 lg:py-6">
               {children}
             </div>
           </main>

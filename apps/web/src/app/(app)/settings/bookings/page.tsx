@@ -174,6 +174,8 @@ function BookingEventTypeManager({ publicTenantToken }: { publicTenantToken: str
   const utils = trpc.useUtils();
   const { showToast } = useToast();
   const { data: eventTypes, isLoading } = trpc.booking.listEventTypes.useQuery();
+  type EventType = NonNullable<NonNullable<typeof eventTypes>[number]>;
+  const eventTypeItems = (eventTypes ?? []).filter((item): item is EventType => Boolean(item));
   const [editTarget, setEditTarget] = useState<null | {
     id?: string;
     name: string;
@@ -220,7 +222,7 @@ function BookingEventTypeManager({ publicTenantToken }: { publicTenantToken: str
     });
   }
 
-  function openEdit(et: NonNullable<typeof eventTypes>[number]) {
+  function openEdit(et: EventType) {
     setEditTarget({
       id: et.id,
       name: et.name,
@@ -269,7 +271,7 @@ function BookingEventTypeManager({ publicTenantToken }: { publicTenantToken: str
       </div>
 
       <div className="space-y-2">
-        {(eventTypes || []).map((et) => {
+        {eventTypeItems.map((et) => {
           const embedUrl = `${getAppUrl()}/embed/bookings${publicTenantToken ? `?tenant=${encodeURIComponent(publicTenantToken)}&eventType=${encodeURIComponent(et.slug)}` : ""}`;
           return (
             <div key={et.id} className="flex items-center gap-3 rounded-xl border px-4 py-3">

@@ -393,14 +393,14 @@ export default function IntegrationsSettingsPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center gap-3">
+    <div className="app-page">
+      <div className="app-page-header">
         <Link href="/settings">
-          <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" className="rounded-xl"><ArrowLeft className="h-4 w-4" /></Button>
         </Link>
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">Integraties & API Keys</h1>
-          <p className="text-sm text-muted-foreground">Configureer externe diensten en API-sleutels</p>
+        <div className="app-page-heading">
+          <h1 className="app-page-title">Integraties & API Keys</h1>
+          <p className="app-page-subtitle">Configureer externe diensten en API-sleutels</p>
         </div>
       </div>
 
@@ -432,7 +432,7 @@ export default function IntegrationsSettingsPage() {
       </div>
 
       <Tabs defaultValue="providers" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid h-10 w-full grid-cols-4 rounded-full bg-muted/60 p-1">
           <TabsTrigger value="providers">API & AI</TabsTrigger>
           <TabsTrigger value="calendar">Google OAuth</TabsTrigger>
           <TabsTrigger value="mail">SMTP & DNS</TabsTrigger>

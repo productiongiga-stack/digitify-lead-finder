@@ -288,18 +288,18 @@ export default function LeadDetailPage() {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="space-y-5 p-1">
+      <div className="app-page">
         {/* ===== HEADER ===== */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <div className="app-page-header">
           <Link href="/leads">
-            <Button variant="ghost" size="icon" className="shrink-0">
+            <Button variant="ghost" size="icon" className="shrink-0 rounded-xl">
               <ArrowLeft className="h-4 w-4" />
             </Button>
           </Link>
 
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-bold tracking-tight">{lead.companyName}</h1>
+              <h1 className="app-page-title">{lead.companyName}</h1>
               {lead.industry && <Badge variant="outline" className="font-normal">{lead.industry}</Badge>}
               <Badge variant={getStatusBadgeVariant(lead.status)}>{STATUS_LABELS[lead.status] ?? lead.status}</Badge>
               {lead.scorePriority && (
@@ -327,7 +327,7 @@ export default function LeadDetailPage() {
             </p>
 
             {/* Quick Actions */}
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-4 flex flex-wrap gap-2">
               <Link href={`/leads/${id}/edit`}>
                 <Button variant="outline" size="sm">
                   <Edit className="mr-1.5 h-3.5 w-3.5" /> Bewerken

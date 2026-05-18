@@ -121,8 +121,8 @@ function ReviewEmbedContent() {
   }
 
   return (
-    <div className="min-h-screen bg-[#fffaf2] p-4 text-slate-900">
-      <div className="mx-auto max-w-xl rounded-[28px] border border-black/5 bg-white p-6 shadow-[0_25px_80px_rgba(15,23,42,0.08)]">
+    <div className="min-h-screen bg-slate-50 p-4 text-slate-900">
+      <div className="mx-auto max-w-xl rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_25px_80px_rgba(15,23,42,0.08)]">
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full text-3xl text-white" style={{ backgroundColor: color }}>
             ★
@@ -132,7 +132,7 @@ function ReviewEmbedContent() {
           <p className="mt-3 text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{company}</p>
         </div>
 
-        <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5">
+        <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-5">
           <div className="mb-4 flex items-center justify-center">
             <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-500">
               {stepLabel}

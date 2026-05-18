@@ -42,14 +42,14 @@ export function StatsCards({
   };
 
   return (
-    <div className={cn("grid gap-2 sm:gap-3", gridCols[columns], className)} {...props}>
+    <div className={cn("grid gap-3", gridCols[columns], className)} {...props}>
       {items.map((item, i) => {
         const interactive = item.onClick || item.href;
         const Inner = (
           <Card
             className={cn(
-              "min-w-0 p-2.5 transition-colors sm:p-3",
-              interactive && "cursor-pointer hover:bg-accent/40",
+              "min-w-0 p-3 transition-all duration-200 sm:p-4",
+              interactive && "cursor-pointer hover:-translate-y-0.5 hover:border-primary/25 hover:bg-accent/35 hover:shadow-md",
             )}
           >
             <div className="flex items-start justify-between gap-2">
@@ -57,12 +57,12 @@ export function StatsCards({
                 {item.label}
               </p>
               {item.icon ? (
-                <span className="shrink-0 text-muted-foreground [&_svg]:h-3.5 [&_svg]:w-3.5 sm:[&_svg]:h-4 sm:[&_svg]:w-4">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-muted/60 text-muted-foreground [&_svg]:h-4 [&_svg]:w-4">
                   {item.icon}
                 </span>
               ) : null}
             </div>
-            <p className="mt-1 text-lg font-semibold leading-tight sm:mt-1.5 sm:text-xl">
+            <p className="mt-2 text-xl font-bold leading-tight tracking-tight sm:text-2xl">
               {loading ? <span className="inline-block h-5 w-12 animate-pulse rounded bg-muted" /> : item.value}
             </p>
             {item.delta || item.hint ? (

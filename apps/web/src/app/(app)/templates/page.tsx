@@ -52,7 +52,7 @@ export default function TemplatesPage() {
   const custom = list.data?.custom || [];
 
   return (
-    <div className="app-page space-y-4">
+    <div className="app-page">
       <div className="app-page-header">
         <div className="app-page-heading">
           <h1 className="app-page-title">Template Library</h1>
@@ -66,7 +66,7 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      <Card>
+      <Card className="app-surface">
         <CardHeader>
           <CardTitle className="text-sm">Custom templates</CardTitle>
         </CardHeader>
@@ -80,7 +80,7 @@ export default function TemplatesPage() {
           ) : (
             <div className="grid gap-3">
               {custom.map((item) => (
-                <div key={item.id} className="rounded-lg border p-3">
+                <div key={item.id} className="rounded-2xl border border-border/60 bg-background/45 p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -103,13 +103,13 @@ export default function TemplatesPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="app-surface">
         <CardHeader>
           <CardTitle className="text-sm">Bestaande systeemtemplates</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           {(list.data?.builtIn?.email || []).slice(0, 6).map((item) => (
-            <div key={`email-${item.id}`} className="rounded-lg border p-3">
+            <div key={`email-${item.id}`} className="rounded-2xl border border-border/60 bg-background/45 p-3">
               <div className="flex items-center gap-2">
                 <Badge variant="secondary">EMAIL</Badge>
                 <p className="text-sm font-medium">{item.name}</p>
@@ -118,7 +118,7 @@ export default function TemplatesPage() {
             </div>
           ))}
           {(list.data?.builtIn?.report || []).slice(0, 4).map((item) => (
-            <div key={`report-${item.id}`} className="rounded-lg border p-3">
+            <div key={`report-${item.id}`} className="rounded-2xl border border-border/60 bg-background/45 p-3">
               <div className="flex items-center gap-2">
                 <Badge variant="secondary">REPORT</Badge>
                 <p className="text-sm font-medium">{item.name}</p>
