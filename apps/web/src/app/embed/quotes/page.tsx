@@ -15,6 +15,7 @@ import {
   QuoteStudioBar,
   QuoteSummaryAside,
 } from "@/components/quotes/quote-embed-layout";
+import { QuoteDetailsStep } from "@/components/quotes/quote-embed-steps";
 import {
   buildFallbackSpecs,
   parseProductSpecs,
@@ -2329,79 +2330,36 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
             ) : null}
 
             {currentStep === 4 ? (
-              <form className="space-y-4 sm:space-y-5" onSubmit={handleSubmit}>
-                <div>
-                  <h2 className="text-[22px] font-black leading-tight tracking-tight sm:text-[27px] lg:text-[32px]" style={{ color: darkColor }}>
-                    {settings.detailsTitle}
-                  </h2>
-                  <p className="mt-2 text-sm text-[#6e747e]">{settings.stepDetailsHint || "Voor uw persoonlijke offerte op maat"}</p>
-                </div>
-
-                <div className="rounded-[12px] border border-[#ece1c6] bg-[#f8f4e8] px-3 py-2 text-sm text-[#7c6a42]">
-                  Bijna klaar! Vul uw gegevens in om de gepersonaliseerde offerte te ontvangen.
-                </div>
-
-                <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">Voornaam *</label>
-                    <input value={firstName} onChange={(event) => setFirstName(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" required={!isInternalMode} />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">
-                      Achternaam {isInternalMode ? "" : "*"}
-                    </label>
-                    <input value={lastName} onChange={(event) => setLastName(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" required={!isInternalMode} />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">E-mailadres *</label>
-                    <input value={email} onChange={(event) => setEmail(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" type="email" required />
-                    {email && !isValidEmail(email) ? <p className="mt-1 text-xs text-red-600">Ongeldig e-mailadres.</p> : null}
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">Telefoonnummer</label>
-                    <input value={phone} onChange={(event) => setPhone(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" />
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">Bedrijfsnaam</label>
-                    <input value={company} onChange={(event) => setCompany(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">Adres</label>
-                    <input value={address} onChange={(event) => setAddress(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">BTW-nummer</label>
-                    <input value={vatNumber} onChange={(event) => setVatNumber(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">Bijkomende opmerkingen</label>
-                    <textarea value={remarks} onChange={(event) => setRemarks(event.target.value)} rows={3} className="w-full rounded-lg border border-[#d8dbe2] px-3 py-2 text-sm" />
-                  </div>
-                </div>
-
-                {status ? (
-                  <div className={`rounded-lg px-3 py-2 text-sm ${status.type === "success" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
-                    {status.message}
-                  </div>
-                ) : null}
-
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={prevStep} className="rounded-xl border px-3 py-2 text-xs text-[#616671] sm:px-4 sm:text-sm">
-                    Terug
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting || !stepReady[4]}
-                    className="rounded-xl px-3 py-2 text-xs font-semibold text-[#15171c] disabled:opacity-50 sm:px-4 sm:text-sm"
-                    style={{ backgroundColor: accentColor }}
-                  >
-                    {isLivePreview ? "Preview (niet versturen)" : submitting ? "Bezig..." : settings.ctaLabel}
-                  </button>
-                </div>
-              </form>
+              <QuoteDetailsStep
+                title={settings.detailsTitle}
+                hint={settings.stepDetailsHint || "Voor uw persoonlijke offerte op maat"}
+                ctaLabel={settings.ctaLabel}
+                firstName={firstName}
+                lastName={lastName}
+                email={email}
+                phone={phone}
+                company={company}
+                address={address}
+                vatNumber={vatNumber}
+                remarks={remarks}
+                status={status}
+                submitting={submitting}
+                isInternalMode={isInternalMode}
+                isLivePreview={isLivePreview}
+                canSubmit={stepReady[4]}
+                accentColor={accentColor}
+                darkColor={darkColor}
+                onFirstNameChange={setFirstName}
+                onLastNameChange={setLastName}
+                onEmailChange={setEmail}
+                onPhoneChange={setPhone}
+                onCompanyChange={setCompany}
+                onAddressChange={setAddress}
+                onVatNumberChange={setVatNumber}
+                onRemarksChange={setRemarks}
+                onBack={prevStep}
+                onSubmit={handleSubmit}
+              />
             ) : null}
           </section>
 
