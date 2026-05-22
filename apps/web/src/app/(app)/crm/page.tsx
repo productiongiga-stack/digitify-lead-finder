@@ -53,6 +53,7 @@ import {
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useToast } from "@/components/feedback/toast-provider";
+import { QueryErrorState } from "@/components/feedback/query-error-state";
 
 const SEGMENT_OPTIONS = [
   { value: "ALL", label: "Alle relaties" },
@@ -160,6 +161,9 @@ export default function CrmPage() {
         </TabsList>
 
       <TabsContent value="overview" className="space-y-4">
+      {query.isError ? (
+        <QueryErrorState onRetry={() => void query.refetch()} />
+      ) : null}
       <Card className="p-3 sm:p-4">
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative min-w-[180px] flex-1">

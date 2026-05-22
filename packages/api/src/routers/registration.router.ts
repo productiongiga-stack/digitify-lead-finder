@@ -7,6 +7,7 @@ import { sendBrandedEmail } from "../lib/email-sender";
 import { canApproveRole } from "../lib/permissions";
 import { ensureUserWorkspace } from "../lib/user-workspace";
 import { passwordPolicySchema } from "../lib/password-policy";
+import { notifyWorkspaceAdmins } from "../lib/workspace-members";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -22,20 +23,17 @@ function appUrl() {
   ).replace(/\/$/, "");
 }
 
-async function notifyAdmins(db: any, subject: string, body: string) {
-  const admins = await db.user.findMany({
-    where: { role: { in: ["OWNER", "ADMIN"] }, email: { not: "" } },
-    select: { email: true },
-  });
+async function notifyRegistrationAdmins(db: any, subject: string, body: string) {
+  const workspaceId = process.env.REGISTRATION_NOTIFY_WORKSPACE_ID?.trim();
+  if (!workspaceId) return;
 
-  await Promise.allSettled(
-    admins.map((admin: { email: string }) =>
-      sendBrandedEmail(db, {
-        toEmail: admin.email,
-        subject,
-        body,
-      })
-    )
+  await notifyWorkspaceAdmins(db, workspaceId, subject, body, (args) =>
+    sendBrandedEmail(db, {
+      toEmail: args.toEmail,
+      subject: args.subject,
+      body: args.body,
+      userId: workspaceId,
+    }),
   );
 }
 
@@ -100,10 +98,10 @@ export const registrationRouter = router({
         },
       });
 
-      await notifyAdmins(
+      await notifyRegistrationAdmins(
         ctx.db,
         "Nieuwe registratieaanvraag voor Digitify Lead Finder",
-        `Er is een nieuwe geverifieerde registratieaanvraag.\n\nNaam: ${updated.name}\nE-mail: ${updated.email}\nBedrijf: ${updated.company || "-"}\n\nBekijk de aanvraag bij Instellingen > Team & Rollen.`
+        `Er is een nieuwe geverifieerde registratieaanvraag.\n\nNaam: ${updated.name}\nE-mail: ${updated.email}\nBedrijf: ${updated.company || "-"}\n\nBekijk de aanvraag bij Instellingen > Team & Rollen.`,
       );
 
       return { success: true, status: updated.status };
@@ -140,6 +138,7 @@ export const registrationRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "Deze aanvraag kan niet worden goedgekeurd." });
       }
 
+      const workspaceId = ctx.user.workspaceId ?? ctx.user.id;
       const user = await ctx.db.user.create({
         data: {
           name: request.name,
@@ -147,9 +146,10 @@ export const registrationRouter = router({
           passwordHash: request.passwordHash,
           role: input.role,
           emailVerified: request.emailVerifiedAt || new Date(),
+          workspaceOwnerId: workspaceId,
         },
       });
-      await ensureUserWorkspace(ctx.db, user.id, user.name);
+      await ensureUserWorkspace(ctx.db, workspaceId, user.name);
 
       await ctx.db.registrationRequest.update({
         where: { id: request.id },
@@ -265,10 +265,19 @@ export const registrationRouter = router({
         throw error;
       }
 
-      await notifyAdmins(
+      const feedbackWorkspaceId = ctx.user.workspaceId ?? ctx.user.id;
+      await notifyWorkspaceAdmins(
         ctx.db,
+        feedbackWorkspaceId,
         `Feedback: ${input.subject}`,
-        `Nieuwe feedback van ${ctx.user.name || ctx.user.email}.\n\nPagina: ${input.pageUrl || "-"}\n\n${input.message}`
+        `Nieuwe feedback van ${ctx.user.name || ctx.user.email}.\n\nPagina: ${input.pageUrl || "-"}\n\n${input.message}`,
+        (args) =>
+          sendBrandedEmail(ctx.db, {
+            toEmail: args.toEmail,
+            subject: args.subject,
+            body: args.body,
+            userId: feedbackWorkspaceId,
+          }),
       );
 
       return feedback;

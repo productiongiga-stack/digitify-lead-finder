@@ -17,10 +17,14 @@ export const LEAD_STATUS_LABELS: Record<string, string> = Object.fromEntries(
 );
 
 export const LEAD_PRIORITY_OPTIONS = [
-  { value: "Hot", label: "Hot" },
+  { value: "Hot", label: "Heet" },
   { value: "Warm", label: "Warm" },
-  { value: "Low", label: "Low" },
+  { value: "Low", label: "Laag" },
 ] as const;
+
+const LEAD_PRIORITY_LABELS: Record<string, string> = Object.fromEntries(
+  LEAD_PRIORITY_OPTIONS.map((option) => [option.value, option.label]),
+);
 
 export function getLeadStatusLabel(status: string | null | undefined): string {
   if (!status) return "Onbekend";
@@ -69,5 +73,5 @@ export function getLeadPriorityBadgeVariant(priority: string | null | undefined)
 
 export function getLeadPriorityLabel(priority: string | null | undefined): string {
   if (!priority) return "Geen prioriteit";
-  return priority;
+  return LEAD_PRIORITY_LABELS[priority] ?? priority;
 }

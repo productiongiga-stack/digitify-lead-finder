@@ -126,10 +126,23 @@ export async function POST(request: Request) {
 
     const domain = await prisma.domain.findUnique({
       where: { id: domainId },
-      select: { id: true, domainName: true, leadId: true },
+      select: {
+        id: true,
+        domainName: true,
+        leadId: true,
+        status: true,
+        createdById: true,
+        lead: { select: { id: true, createdById: true } },
+      },
     });
 
-    if (!domain || !domain.leadId) {
+    if (
+      !domain ||
+      !domain.leadId ||
+      domain.status !== "ACTIVE" ||
+      !domain.lead ||
+      domain.lead.createdById !== domain.createdById
+    ) {
       return NextResponse.json({ success: false }, { headers: corsHeaders });
     }
 

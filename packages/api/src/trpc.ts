@@ -118,7 +118,7 @@ const withWorkspaceRlsContext = t.middleware(async ({ ctx, next }) => {
 
 const isAuthenticated = t.middleware(({ ctx, next }) => {
   if (!ctx.user) {
-    throw new TRPCError({ code: "UNAUTHORIZED", message: "Not authenticated" });
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "Niet ingelogd." });
   }
   return next({ ctx: { ...ctx, user: ctx.user } });
 });
@@ -169,10 +169,10 @@ export const aiRateLimitedProcedure = t.procedure
 const hasRole = (...roles: string[]) =>
   t.middleware(({ ctx, next }) => {
     if (!ctx.user) {
-      throw new TRPCError({ code: "UNAUTHORIZED" });
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "Niet ingelogd." });
     }
     if (!roles.includes(ctx.user.role)) {
-      throw new TRPCError({ code: "FORBIDDEN", message: "Insufficient permissions" });
+      throw new TRPCError({ code: "FORBIDDEN", message: "Onvoldoende rechten." });
     }
     return next({ ctx: { ...ctx, user: ctx.user } });
   });

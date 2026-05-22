@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
+import { leadStatusLabelNl } from "../lib/lead-status-labels";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 import { ownedChatSessionWhere } from "../lib/tenant";
 import { readDashboardCache, writeDashboardCache } from "../lib/dashboard-cache";
@@ -334,16 +335,26 @@ export const dashboardRouter = router({
         id: `lead-${lead.id}`,
         type: "lead_followup",
         title: `Lead opvolgen: ${lead.companyName}`,
-        subtitle: `Status ${lead.status.toLowerCase()} vraagt nieuwe actie`,
+        subtitle: `Status ${leadStatusLabelNl(lead.status)} — opvolging nodig`,
         href: `/leads/${lead.id}`,
         dueAt: lead.updatedAt,
         tone: "rose",
       })),
-    ]
+    ];
+
+    const dedupedItems: typeof items = [];
+    const seen = new Set<string>();
+    for (const item of items) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      dedupedItems.push(item);
+    }
+
+    const sortedItems = dedupedItems
       .sort((left, right) => new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime())
       .slice(0, 12);
 
-    const result: UnifiedRemindersResult = { followupDays, items };
+    const result: UnifiedRemindersResult = { followupDays, items: sortedItems };
     writeDashboardCache(cacheKey, result);
     return result;
   }),
@@ -479,10 +490,10 @@ export const dashboardRouter = router({
   }),
 
   getTopLeads: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.db.lead.findMany({
+    const rows = await ctx.db.lead.findMany({
       where: { overallScore: { not: null }, createdById: ctx.user.workspaceId! },
       orderBy: { overallScore: "desc" },
-      take: 5,
+      take: 24,
       select: {
         id: true,
         companyName: true,
@@ -492,6 +503,16 @@ export const dashboardRouter = router({
         status: true,
       },
     });
+    const seen = new Set<string>();
+    const unique: typeof rows = [];
+    for (const row of rows) {
+      const key = row.companyName.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(row);
+      if (unique.length >= 5) break;
+    }
+    return unique;
   }),
 
   getQuoteStats: protectedProcedure.query(async ({ ctx }) => {

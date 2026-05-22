@@ -3,6 +3,7 @@ import { router, protectedProcedure } from "../trpc";
 import { computeScore, type ScoringWeightConfig, type LeadData, type EnrichmentPayload } from "@digitify/scoring";
 import { analyzeWebsite } from "@digitify/connectors";
 import { assertLeadAccess } from "../lib/tenant";
+import { loadMergedScoringWeights } from "../lib/scoring-weights";
 
 export const scoringRouter = router({
   /**
@@ -18,7 +19,8 @@ export const scoringRouter = router({
         include: { enrichmentData: true, scoringFactors: true },
       });
 
-      const weights = await ctx.db.scoringWeight.findMany({ where: { enabled: true } });
+      const merged = await loadMergedScoringWeights(ctx.db, ctx.user.workspaceId!);
+      const weights = merged.filter((w) => w.enabled);
 
       const enrichmentRaw = lead.enrichmentData?.[0]?.data as Record<string, unknown> | null;
 
@@ -132,7 +134,8 @@ export const scoringRouter = router({
         onlyMissing: input?.onlyMissing ?? false,
         limit: input?.limit ?? 500,
       };
-      const weights = await ctx.db.scoringWeight.findMany({ where: { enabled: true } });
+      const merged = await loadMergedScoringWeights(ctx.db, ctx.user.workspaceId!);
+      const weights = merged.filter((w) => w.enabled);
 
       const where: Record<string, unknown> = {
         createdById: ctx.user.workspaceId!,
@@ -393,7 +396,8 @@ export const scoringRouter = router({
         include: { enrichmentData: true },
       });
 
-      const weights = await ctx.db.scoringWeight.findMany({ where: { enabled: true } });
+      const merged = await loadMergedScoringWeights(ctx.db, ctx.user.workspaceId!);
+      const weights = merged.filter((w) => w.enabled);
 
       const enrichmentRaw = enrichedLead.enrichmentData?.[0]?.data as Record<string, unknown> | null;
 
@@ -541,7 +545,8 @@ export const scoringRouter = router({
             include: { enrichmentData: true },
           });
 
-          const weights = await ctx.db.scoringWeight.findMany({ where: { enabled: true } });
+          const merged = await loadMergedScoringWeights(ctx.db, ctx.user.workspaceId!);
+      const weights = merged.filter((w) => w.enabled);
           const enrichmentRaw = enrichedLead.enrichmentData?.[0]?.data as Record<string, unknown> | null;
 
           const leadData: LeadData = {

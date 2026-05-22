@@ -2,11 +2,8 @@
 
 import { useMemo } from "react";
 import { trpc } from "@/lib/trpc/client";
-import {
-  getLeadPriorityBadgeVariant,
-  getLeadStatusDotClass,
-  getLeadStatusLabel,
-} from "@/lib/lead-status";
+import { getLeadStatusDotClass, getLeadStatusLabel } from "@/lib/lead-status";
+import { QueryErrorState } from "@/components/feedback/query-error-state";
 import {
   Card,
   CardContent,
@@ -186,7 +183,12 @@ function ActionCenter({
     if (reminders?.items) {
       list.push(...(reminders.items as ReminderItem[]));
     }
-    return list;
+    const seen = new Set<string>();
+    return list.filter((item) => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
   }, [reminders, kpis]);
 
   const grouped = useMemo(() => {
@@ -564,10 +566,13 @@ function PipelineOverview() {
 }
 
 /* ================================================================
-   Follow-Up Widget — leads without follow-up
+   Lead follow-up snippet — same source as actiecentrum (no duplicate query)
    ================================================================ */
-function FollowUpWidget() {
-  const { data: leads, isLoading } = trpc.dashboard.getLeadsNeedingFollowUp.useQuery();
+function LeadFollowUpSnippet() {
+  const { data: reminders, isLoading } = trpc.dashboard.getUnifiedReminders.useQuery(undefined, {
+    staleTime: 60_000,
+  });
+  const items = (reminders?.items ?? []).filter((item) => item.type === "lead_followup").slice(0, 5);
 
   if (isLoading) {
     return (
@@ -579,14 +584,13 @@ function FollowUpWidget() {
               <Skeleton className="h-3 w-40" />
               <Skeleton className="h-2.5 w-24" />
             </div>
-            <Skeleton className="h-6 w-14 rounded-md" />
           </div>
         ))}
       </div>
     );
   }
 
-  if (!leads || leads.length === 0) {
+  if (items.length === 0) {
     return (
       <EmptyState
         icon={<TrendingUp />}
@@ -599,40 +603,21 @@ function FollowUpWidget() {
 
   return (
     <div className="space-y-0.5">
-      {leads.slice(0, 5).map((lead: NonNullable<typeof leads>[number]) => (
-        <div
-          key={lead.id}
+      {items.map((item) => (
+        <Link
+          key={item.id}
+          href={item.href}
           className="flex items-center gap-2.5 rounded-md p-1.5 transition-colors hover:bg-muted/50"
         >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-900/30">
             <Clock className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-semibold">{lead.companyName}</p>
-            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span>{getLeadStatusLabel(lead.status)}</span>
-              {lead.city ? <span>· {lead.city}</span> : null}
-              {lead.scorePriority && (
-                <Badge
-                  variant={getLeadPriorityBadgeVariant(lead.scorePriority)}
-                  className="h-3.5 px-1 text-[9px]"
-                >
-                  {lead.scorePriority}
-                </Badge>
-              )}
-            </div>
+            <p className="truncate text-xs font-semibold">{item.title.replace(/^Lead opvolgen:\s*/i, "")}</p>
+            <p className="truncate text-[11px] text-muted-foreground">{item.subtitle}</p>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
-              {lead.daysSinceLastContact}d
-            </span>
-            <Link href={`/leads/${lead.id}`}>
-              <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]">
-                Open
-              </Button>
-            </Link>
-          </div>
-        </div>
+          <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </Link>
       ))}
     </div>
   );
@@ -886,7 +871,12 @@ function ExpiringDomains() {
    Dashboard Page
    ================================================================ */
 export default function DashboardPage() {
-  const { data: kpis, isLoading } = trpc.dashboard.getKpis.useQuery();
+  const {
+    data: kpis,
+    isLoading,
+    isError,
+    refetch,
+  } = trpc.dashboard.getKpis.useQuery();
   const queueCount =
     (kpis?.pendingDrafts ?? 0) + (kpis?.failedEmails ?? 0) + (kpis?.pendingReviews ?? 0);
 
@@ -995,6 +985,14 @@ export default function DashboardPage() {
     },
   ];
 
+  if (isError) {
+    return (
+      <div className="app-page space-y-4">
+        <QueryErrorState onRetry={() => void refetch()} />
+      </div>
+    );
+  }
+
   return (
     <div className="app-page">
       <DashboardHero
@@ -1030,10 +1028,6 @@ export default function DashboardPage() {
             loading={isLoading}
           />
 
-          <div className="dashboard-kpi-strip">
-            <StatsCards items={primaryKpis} columns={4} loading={isLoading && !kpis} />
-          </div>
-
           <div className="dashboard-bento">
             <WidgetCard title="Taken vandaag" icon={Bell} className="dashboard-bento-4">
               <TasksToday />
@@ -1045,7 +1039,7 @@ export default function DashboardPage() {
               iconClassName="bg-amber-500/10 [&_svg]:text-amber-600"
               className="dashboard-bento-4"
             >
-              <FollowUpWidget />
+              <LeadFollowUpSnippet />
             </WidgetCard>
 
             <WidgetCard title="Top leads" icon={TrendingUp} href="/leads" className="dashboard-bento-4">
@@ -1101,6 +1095,7 @@ export default function DashboardPage() {
         </TabsContent>
 
         <TabsContent value="info" className="space-y-4">
+          <StatsCards items={primaryKpis} columns={4} loading={isLoading && !kpis} />
           <StatsCards items={secondaryKpis} columns={3} loading={isLoading && !kpis} />
         </TabsContent>
       </Tabs>

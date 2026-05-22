@@ -10,16 +10,11 @@ async function runDripWorker(request: Request) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const actor = await prisma.user.findFirst({
-    orderBy: { createdAt: "asc" },
-    select: { id: true },
-  });
-
   try {
-    log.job.info("Drip cron started", { actorId: actor?.id || null });
-    const summary = await runAllDueDripsWorker(prisma, actor?.id);
+    log.job.info("Drip cron started");
+    const summary = await runAllDueDripsWorker(prisma);
     log.job.info("Drip cron completed", {
-      actorId: actor?.id || null,
+      workspaces: summary.workspaces,
       sequences: summary.sequences,
       due: summary.due,
       sent: summary.sent,
@@ -28,7 +23,7 @@ async function runDripWorker(request: Request) {
     });
     return NextResponse.json({ success: true, ...summary });
   } catch (error) {
-    log.job.error("Drip cron failed", { actorId: actor?.id || null }, error);
+    log.job.error("Drip cron failed", {}, error);
     return NextResponse.json({ success: false, error: "Worker failed" }, { status: 500 });
   }
 }

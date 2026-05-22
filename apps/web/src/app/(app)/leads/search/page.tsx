@@ -50,8 +50,11 @@ import {
   FolderPlus,
   BookmarkPlus,
   Trash2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
+import { QueryErrorState } from "@/components/feedback/query-error-state";
 
 type SearchResult = {
   placeId: string;
@@ -181,7 +184,10 @@ export default function LeadSearchPage() {
   const [campaignLeadId, setCampaignLeadId] = useState<string | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [savedSearchName, setSavedSearchName] = useState("");
+  const [showAllPopular, setShowAllPopular] = useState(false);
   const { showToast } = useToast();
+
+  const searchCriteriaEmpty = !query.trim() && !niche.trim() && !city.trim();
 
   // Campaigns list
   const campaignsQuery = trpc.campaign.list.useQuery();
@@ -189,6 +195,15 @@ export default function LeadSearchPage() {
     staleTime: 300_000,
   });
   const savedSearchesQuery = trpc.search.listSavedSearches.useQuery();
+
+  const popularTerms = useMemo(
+    () =>
+      popularSearchesQuery.data && popularSearchesQuery.data.length > 0
+        ? popularSearchesQuery.data
+        : FALLBACK_POPULAR_TERMS,
+    [popularSearchesQuery.data],
+  );
+  const visiblePopularTerms = showAllPopular ? popularTerms : popularTerms.slice(0, 8);
 
   // Duplicate detection
   const placeIds = useMemo(() => results.map((r: SearchResult) => r.placeId), [results]);
@@ -459,6 +474,15 @@ export default function LeadSearchPage() {
         </TabsList>
 
       <TabsContent value="overview" className="space-y-4">
+      {(campaignsQuery.isError || popularSearchesQuery.isError || savedSearchesQuery.isError) && (
+        <QueryErrorState
+          onRetry={() => {
+            void campaignsQuery.refetch();
+            void popularSearchesQuery.refetch();
+            void savedSearchesQuery.refetch();
+          }}
+        />
+      )}
       {/* API key missing warning */}
       {apiKeyMissing && (
         <Card className="border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30">
@@ -579,7 +603,7 @@ export default function LeadSearchPage() {
             <div className="flex gap-2">
               <Button
                 type="submit"
-                disabled={searchMutation.isPending || (!query.trim() && !niche.trim() && !city.trim())}
+                disabled={searchMutation.isPending || searchCriteriaEmpty}
               >
                 {searchMutation.isPending ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -602,26 +626,46 @@ export default function LeadSearchPage() {
               )}
             </div>
           </form>
+          {searchCriteriaEmpty && !searchMutation.isPending ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Vul minstens een zoekterm, niche of stad in om te zoeken.
+            </p>
+          ) : null}
 
           {/* Popular search chips */}
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
-            <span className="text-xs font-medium text-muted-foreground">
-              Populair:
-            </span>
-            {[
-              ...(popularSearchesQuery.data && popularSearchesQuery.data.length > 0
-                ? popularSearchesQuery.data
-                : FALLBACK_POPULAR_TERMS),
-            ].map((q) => (
-              <Badge
-                key={q}
-                variant="outline"
-                className="cursor-pointer hover:bg-accent"
-                onClick={() => handleQuickSearch(q)}
-              >
-                {q}
-              </Badge>
-            ))}
+          <div className="mt-3 border-t pt-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Populair:</span>
+              {visiblePopularTerms.map((q) => (
+                <Badge
+                  key={q}
+                  variant="outline"
+                  className="cursor-pointer hover:bg-accent"
+                  onClick={() => handleQuickSearch(q)}
+                >
+                  {q}
+                </Badge>
+              ))}
+              {popularTerms.length > 8 ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => setShowAllPopular((open) => !open)}
+                >
+                  {showAllPopular ? (
+                    <>
+                      Minder <ChevronUp className="ml-1 h-3 w-3" />
+                    </>
+                  ) : (
+                    <>
+                      +{popularTerms.length - 8} meer <ChevronDown className="ml-1 h-3 w-3" />
+                    </>
+                  )}
+                </Button>
+              ) : null}
+            </div>
           </div>
 
           {recentSearches.length > 0 ? (

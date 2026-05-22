@@ -434,44 +434,34 @@ export default function ComposePage() {
         </Card>
       )}
 
-      <OutboundWorkflowHelp variant="compact" className="rounded-lg border border-blue-200/60 bg-blue-50/40 px-4 py-3 dark:border-blue-900/40 dark:bg-blue-950/20" />
-
-      <div className="grid gap-3 xl:grid-cols-3">
-        <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Volgende stap</p>
-            <p className="mt-2 text-sm font-medium">
-              {isComposeReady
-                ? "Deze mail is klaar om als concept op te slaan of ter goedkeuring in te dienen."
-                : "Werk eerst lead, geldig e-mailadres en placeholders netjes af."}
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Follow-up planning</p>
-            <p className="mt-2 text-sm font-medium">
-              Standaard opvolginterval: {followupDays} dagen
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Als je vandaag verzendt, komt de natuurlijke opvolgmoment rond {suggestedFollowUpDate}.
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gerelateerd</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button asChild size="sm" variant="outline">
-                <Link href="/templates">Templates</Link>
-              </Button>
-              <Button asChild size="sm" variant="ghost">
-                <Link href="/settings/email">E-mail instellingen</Link>
-              </Button>
+      <Card className="border-border/60 bg-muted/30">
+        <CardContent className="space-y-3 p-4">
+          <p className="text-sm text-muted-foreground">
+            {isComposeReady
+              ? "Klaar om op te slaan of ter goedkeuring in te dienen. Verzending gebeurt via Outbound Center."
+              : "Vul lead, geldig e-mailadres en placeholders in voordat je opslaat."}
+            {" "}
+            Opvolginterval: {followupDays} dagen
+            {suggestedFollowUpDate ? ` (rond ${suggestedFollowUpDate})` : ""}.
+          </p>
+          <details className="group text-sm">
+            <summary className="cursor-pointer font-medium text-primary hover:underline">
+              Workflow &amp; snelkoppelingen
+            </summary>
+            <div className="mt-3 space-y-3">
+              <OutboundWorkflowHelp variant="compact" className="rounded-lg border border-blue-200/60 bg-blue-50/40 px-3 py-2 dark:border-blue-900/40 dark:bg-blue-950/20" />
+              <div className="flex flex-wrap gap-2">
+                <Button asChild size="sm" variant="outline">
+                  <Link href="/templates">E-mailtemplates</Link>
+                </Button>
+                <Button asChild size="sm" variant="ghost">
+                  <Link href="/settings/email">E-mailinstellingen</Link>
+                </Button>
+              </div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </details>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
         {/* Left: Compose Form */}

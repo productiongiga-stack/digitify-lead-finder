@@ -62,9 +62,9 @@ async function runScheduledSequence(params: {
   db: PrismaClient;
   sequenceId: string;
   sequenceName: string;
-  activityUserId?: string;
+  workspaceId: string;
 }) : Promise<DripSequenceRunResult> {
-  const { db, sequenceId, sequenceName, activityUserId } = params;
+  const { db, sequenceId, sequenceName, workspaceId } = params;
   const sequenceMeta = parseSequenceMeta(sequenceName);
   const now = new Date();
   const dueDrafts = await db.emailDraft.findMany({
@@ -73,6 +73,7 @@ async function runScheduledSequence(params: {
       status: "SCHEDULED",
       sequenceStep: { in: [2, 3] },
       scheduledFor: { lte: now },
+      lead: { createdById: workspaceId },
     },
     include: {
       lead: {
@@ -82,6 +83,7 @@ async function runScheduledSequence(params: {
           email: true,
           status: true,
           doNotContact: true,
+          createdById: true,
           emailDrafts: {
             where: { sequenceId },
             select: { repliedAt: true, status: true },
@@ -134,7 +136,7 @@ async function runScheduledSequence(params: {
       body: draft.body,
       recipientCompany: draft.lead.companyName,
       leadId: draft.lead.id,
-      userId: activityUserId,
+      userId: workspaceId,
     });
 
     if (sendResult.success) {
@@ -161,10 +163,10 @@ async function runScheduledSequence(params: {
     }
   }
 
-  if (activityUserId && dueDrafts.length > 0) {
+  if (dueDrafts.length > 0) {
     await db.activity.create({
       data: {
-        userId: activityUserId,
+        userId: workspaceId,
         type: "EMAIL_SENT",
         title: `Drip queue verwerkt (${sequenceMeta.campaignName})`,
         metadata: {
@@ -195,7 +197,7 @@ async function runScheduledSequence(params: {
 
 export async function runAllDueDripsWorker(
   db: PrismaClient,
-  activityUserId?: string
+  options?: { workspaceId?: string },
 ): Promise<{
   sequences: number;
   due: number;
@@ -204,32 +206,41 @@ export async function runAllDueDripsWorker(
   stopped: number;
   errors: string[];
   campaigns: DripSequenceRunResult[];
+  workspaces: number;
 }> {
-  const dueSequenceRows = await db.emailDraft.findMany({
+  const now = new Date();
+  const dueDraftRows = await db.emailDraft.findMany({
     where: {
       status: "SCHEDULED",
       sequenceId: { not: null },
       sequenceStep: { in: [2, 3] },
-      scheduledFor: { lte: new Date() },
+      scheduledFor: { lte: now },
     },
     select: {
       sequenceId: true,
-      sequence: {
-        select: {
-          name: true,
-        },
-      },
+      lead: { select: { createdById: true } },
+      sequence: { select: { name: true } },
     },
-    distinct: ["sequenceId"],
   });
 
-  const sequenceRows = dueSequenceRows
-    .filter(
-      (row): row is { sequenceId: string; sequence: { name: string } } =>
-        Boolean(row.sequenceId) &&
-        Boolean(row.sequence?.name) &&
-        parseSequenceMeta(row.sequence!.name).campaignId !== null
-    );
+  type WorkspaceSequence = { workspaceId: string; sequenceId: string; sequenceName: string };
+  const byWorkspaceSequence = new Map<string, WorkspaceSequence>();
+
+  for (const row of dueDraftRows) {
+    if (!row.sequenceId || !row.sequence?.name) continue;
+    const meta = parseSequenceMeta(row.sequence.name);
+    if (!meta.campaignId) continue;
+    const workspaceId = row.lead.createdById;
+    if (options?.workspaceId && workspaceId !== options.workspaceId) continue;
+    const key = `${workspaceId}:${row.sequenceId}`;
+    if (!byWorkspaceSequence.has(key)) {
+      byWorkspaceSequence.set(key, {
+        workspaceId,
+        sequenceId: row.sequenceId,
+        sequenceName: row.sequence.name,
+      });
+    }
+  }
 
   const campaigns: DripSequenceRunResult[] = [];
   let due = 0;
@@ -237,13 +248,15 @@ export async function runAllDueDripsWorker(
   let failed = 0;
   let stopped = 0;
   const errors: string[] = [];
+  const workspaceIds = new Set<string>();
 
-  for (const row of sequenceRows) {
+  for (const entry of byWorkspaceSequence.values()) {
+    workspaceIds.add(entry.workspaceId);
     const result = await runScheduledSequence({
       db,
-      sequenceId: row.sequenceId,
-      sequenceName: row.sequence.name,
-      activityUserId,
+      sequenceId: entry.sequenceId,
+      sequenceName: entry.sequenceName,
+      workspaceId: entry.workspaceId,
     });
     campaigns.push(result);
     due += result.due;
@@ -255,6 +268,7 @@ export async function runAllDueDripsWorker(
 
   return {
     sequences: campaigns.length,
+    workspaces: workspaceIds.size,
     due,
     sent,
     failed,
@@ -1041,7 +1055,7 @@ export const campaignRouter = router({
         db: ctx.db,
         sequenceId: sequence.id,
         sequenceName: sequence.name,
-        activityUserId: ctx.user.id,
+        workspaceId: ctx.user.workspaceId!,
       });
 
       return {
@@ -1054,7 +1068,7 @@ export const campaignRouter = router({
     }),
 
   runAllDueDrip: protectedProcedure.mutation(async ({ ctx }) => {
-    return runAllDueDripsWorker(ctx.db, ctx.user.id);
+    return runAllDueDripsWorker(ctx.db, { workspaceId: ctx.user.workspaceId! });
   }),
 
   searchLeads: protectedProcedure

@@ -162,11 +162,11 @@ export const settingsRouter = router({
   }),
 
   getPublicMarketingFooter: publicProcedure.query(async ({ ctx }) => {
-    const owner = await ctx.db.user.findFirst({
-      where: { role: "OWNER" },
-      orderBy: { createdAt: "asc" },
-      select: { id: true },
-    });
+    const { resolveMarketingWorkspaceOwnerId } = await import("../lib/public-tenant");
+    const ownerId = await resolveMarketingWorkspaceOwnerId(ctx.db);
+    const owner = ownerId
+      ? await ctx.db.user.findUnique({ where: { id: ownerId }, select: { id: true } })
+      : null;
 
     if (!owner) {
       return {
@@ -356,7 +356,8 @@ export const settingsRouter = router({
     }),
 
   getScoringWeights: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.db.scoringWeight.findMany({ orderBy: { sortOrder: "asc" } });
+    const { loadMergedScoringWeights } = await import("../lib/scoring-weights");
+    return loadMergedScoringWeights(ctx.db, ctx.user.workspaceId!);
   }),
 
   updateScoringWeight: adminProcedure
@@ -370,8 +371,17 @@ export const settingsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { id, ...data } = input;
-      return ctx.db.scoringWeight.update({ where: { id }, data });
+      const { resolveWorkspaceScoringWeightForUpdate } = await import("../lib/scoring-weights");
+      const target = await resolveWorkspaceScoringWeightForUpdate(
+        ctx.db,
+        ctx.user.workspaceId!,
+        input.id,
+      );
+      if (!target) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Scoringfactor niet gevonden." });
+      }
+      const { id: _ignored, ...data } = input;
+      return ctx.db.scoringWeight.update({ where: { id: target.id }, data });
     }),
 
   /* ---------- test connection endpoints ---------- */

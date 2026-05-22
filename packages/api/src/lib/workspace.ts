@@ -21,13 +21,7 @@ export async function resolveWorkspaceOwnerId(
   if (!user) return userId;
   if (user.workspaceOwnerId) return user.workspaceOwnerId;
   if (user.role === "OWNER") return user.id;
-
-  const owner = await db.user.findFirst({
-    where: { role: "OWNER" },
-    orderBy: { createdAt: "asc" },
-    select: { id: true },
-  });
-  return owner?.id ?? user.id;
+  return user.id;
 }
 
 export function isWorkspaceOwner(user: WorkspaceUser, workspaceId: string) {
@@ -47,3 +41,9 @@ export function workspaceMemberRoles(): UserRole[] {
 
 export type { WorkspaceScope } from "./workspace-settings";
 export { workspaceScopeFromUser } from "./workspace-settings";
+export {
+  assertWorkspaceMember,
+  countWorkspaceOwners,
+  notifyWorkspaceAdmins,
+  workspaceMemberWhere,
+} from "./workspace-members";

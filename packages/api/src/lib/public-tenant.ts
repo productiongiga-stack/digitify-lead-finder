@@ -107,6 +107,13 @@ export async function resolvePublicTenantUserId(
   rawTenant: string | null | undefined,
 ) {
   const token = normalizePublicTenantToken(rawTenant);
-  if (token) return resolveUserIdFromPublicTenantToken(db, token);
+  if (!token) return null;
+  return resolveUserIdFromPublicTenantToken(db, token);
+}
+
+/** Single-tenant marketing/footer fallback when PUBLIC_MARKETING_WORKSPACE_ID is unset. */
+export async function resolveMarketingWorkspaceOwnerId(db: PrismaClient) {
+  const fromEnv = process.env.PUBLIC_MARKETING_WORKSPACE_ID?.trim();
+  if (fromEnv) return fromEnv;
   return resolveDefaultPublicTenantUserId(db);
 }

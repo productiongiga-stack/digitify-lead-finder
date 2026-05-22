@@ -102,9 +102,11 @@ async function main() {
 
   for (const w of weights) {
     await prisma.scoringWeight.upsert({
-      where: { factorKey: w.factorKey },
+      where: {
+        createdById_factorKey: { createdById: "_global", factorKey: w.factorKey },
+      },
       update: w,
-      create: w,
+      create: { ...w, createdById: "_global" },
     });
   }
 

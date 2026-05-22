@@ -61,6 +61,7 @@ import {
 } from "lucide-react";
 import { cn, formatScore, formatDate, safeExternalUrl } from "@/lib/utils";
 import { LEADS_WORKFLOW_ITEMS } from "@/lib/navigation";
+import { QueryErrorState } from "@/components/feedback/query-error-state";
 
 type Lead = {
   id: string;
@@ -140,7 +141,7 @@ export default function LeadsPage() {
     setPage(Number.isFinite(nextPage) && nextPage > 0 ? nextPage : 1);
   }, [searchParams]);
 
-  const { data, isLoading } = trpc.lead.list.useQuery({
+  const { data, isLoading, isError, refetch } = trpc.lead.list.useQuery({
     filters: {
       search: search || undefined,
       status: statusFilter ? [statusFilter] : undefined,
@@ -512,15 +513,20 @@ export default function LeadsPage() {
               event.currentTarget.value = "";
             }}
           />
-          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="hidden sm:inline-flex"
+            onClick={() => fileInputRef.current?.click()}
+          >
             <FileUp className="mr-2 h-4 w-4" />
             CSV import
           </Button>
-          <Button variant="outline" size="sm" onClick={handleExportCsv}>
+          <Button variant="outline" size="sm" className="hidden sm:inline-flex" onClick={handleExportCsv}>
             <FileDown className="mr-2 h-4 w-4" />
             CSV export
           </Button>
-          <Button variant="outline" size="sm" onClick={handleExportPdf}>
+          <Button variant="outline" size="sm" className="hidden md:inline-flex" onClick={handleExportPdf}>
             <FileDown className="mr-2 h-4 w-4" />
             PDF export
           </Button>
@@ -532,7 +538,21 @@ export default function LeadsPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>Leads Dropdown</DropdownMenuLabel>
+              <DropdownMenuLabel>Acties</DropdownMenuLabel>
+              <DropdownMenuItem className="sm:hidden" onClick={() => fileInputRef.current?.click()}>
+                <FileUp className="mr-2 h-4 w-4" />
+                CSV import
+              </DropdownMenuItem>
+              <DropdownMenuItem className="sm:hidden" onClick={handleExportCsv}>
+                <FileDown className="mr-2 h-4 w-4" />
+                CSV export
+              </DropdownMenuItem>
+              <DropdownMenuItem className="md:hidden" onClick={handleExportPdf}>
+                <FileDown className="mr-2 h-4 w-4" />
+                PDF export
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="sm:hidden" />
+              <DropdownMenuLabel>Workflow</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {LEADS_WORKFLOW_ITEMS.map((item) => (
                 <DropdownMenuItem key={item.href} asChild>
@@ -564,19 +584,22 @@ export default function LeadsPage() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
+          {isError ? (
+            <QueryErrorState onRetry={() => void refetch()} />
+          ) : null}
           {/* Filters */}
           <Card className="app-surface">
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative min-w-[170px] flex-1 sm:min-w-[220px]">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Zoek op naam, email, stad..."
+                  placeholder="Zoek naam, e-mail, stad…"
                   value={search}
                   onChange={(e) => {
                     setSearch(e.target.value);
                     setPage(1);
                   }}
-                  className="pl-9"
+                  className="min-w-0 pl-9 placeholder:text-clip sm:placeholder:truncate"
                 />
               </div>
               <Select
