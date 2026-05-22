@@ -25,6 +25,8 @@ Set these in **Vercel → Project → Settings → Environment Variables**:
 | `CRON_SECRET` | Min. 16 characters; Vercel Cron sends `Authorization: Bearer …` |
 | `REDIS_URL` or Upstash | `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` for Edge rate limits |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob — logo/branding uploads (avoid data URLs in prod) |
+| `SENTRY_DSN` | Sentry project DSN (server errors + tRPC 500s) |
+| `NEXT_PUBLIC_SENTRY_DSN` | Same DSN for client `global-error` boundary |
 
 Optional staging:
 

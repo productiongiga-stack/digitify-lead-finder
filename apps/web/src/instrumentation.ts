@@ -9,4 +9,7 @@ export async function register() {
 
   const { validateServerEnv } = await import("@digitify/api/src/lib/server-env");
   validateServerEnv();
+
+  const { initSentry } = await import("@digitify/api/src/lib/sentry");
+  await initSentry();
 }

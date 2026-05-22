@@ -50,8 +50,8 @@ Status bijgewerkt na implementatie in repo. Vink af in PR / bij deploy.
 | 5.2 | Taken: JSON → `workspace_tasks` tabel + auto-migratie | ✅ |
 | 5.3 | README / `.env.example` bijgewerkt | ✅ |
 | 5.4 | E2E: compose draft opslaan | ✅ |
-| 5.5 | Facturen JSON → DB | ⬜ volgende iteratie |
-| 5.6 | Sentry / structured logging | ⬜ volgende iteratie |
+| 5.5 | Facturen JSON → `workspace_invoices` + auto-migratie | ✅ |
+| 5.6 | Sentry (`SENTRY_DSN`) + global-error | ✅ |
 
 ---
 

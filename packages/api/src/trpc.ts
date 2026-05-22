@@ -56,14 +56,20 @@ const withLogging = t.middleware(async ({ ctx, path, type, next }) => {
 
   if (!result.ok) {
     const errorCode = result.error instanceof TRPCError ? result.error.code : undefined;
-    log.api.error(`tRPC ${type} ${path} failed`, {
+    const errorContext = {
       requestId: ctx.requestId,
       path,
       type,
       durationMs,
       code: errorCode,
       userId: ctx.user?.id,
-    }, result.error);
+    };
+    log.api.error(`tRPC ${type} ${path} failed`, errorContext, result.error);
+    if (errorCode === "INTERNAL_SERVER_ERROR" || !errorCode) {
+      void import("./lib/sentry")
+        .then(({ captureException }) => captureException(result.error, errorContext))
+        .catch(() => {});
+    }
   } else if (durationMs > 2000) {
     log.api.warn(`tRPC ${type} ${path} slow`, {
       requestId: ctx.requestId,

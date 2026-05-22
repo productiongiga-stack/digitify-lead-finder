@@ -63,6 +63,17 @@ function defaultSink(entry: LogEntry): void {
 function emit(entry: LogEntry): void {
   if (sink) sink(entry);
   else defaultSink(entry);
+
+  if (entry.level === "error" && entry.error && process.env.NODE_ENV !== "test") {
+    void import("./sentry")
+      .then(({ captureException }) =>
+        captureException(new Error(entry.error!.message), {
+          channel: entry.channel,
+          ...entry.context,
+        }),
+      )
+      .catch(() => {});
+  }
 }
 
 function entry(
