@@ -1,37 +1,37 @@
 # Prisma migrations
 
-## Huidige structuur
+## Chain (apply in order)
 
 | Migratie | Doel |
 |----------|------|
-| `20260522120000_add_email_template_metadata` | Kolommen `type`, `layout`, CTA op `email_templates` |
-| `20260522140000_add_workspace_owner` | `users.workspaceOwnerId` + backfill |
-| `20260522160000_workspace_row_level_security` | Postgres RLS policies (opt-in via env) |
-
-Deze migraties zijn **incrementeel**: ze verwachten dat tabellen al bestaan (historisch via `prisma db push`).
+| `20260522100000_init` | Volledig schema (greenfield) |
+| `20260522120000_add_email_template_metadata` | No-op (legacy naam; zit in init) |
+| `20260522140000_add_workspace_owner` | No-op (legacy naam; zit in init) |
+| `20260522160000_workspace_row_level_security` | Postgres RLS policies |
 
 ## Nieuwe / lege database
 
 ```bash
 pnpm db:generate
-pnpm --filter @digitify/db exec prisma db push --skip-generate
 pnpm db:migrate
 ```
 
-CI volgt hetzelfde patroon (zie `.github/workflows/ci.yml`).
+CI en `pnpm setup:db` gebruiken alleen `db:migrate` (geen `db push` meer).
 
-## Bestaande productie (al live met db:push)
+## Bestaande database (vóór init-migratie)
 
-1. **Niet** opnieuw `db push --force-reset` op productie.
-2. Alleen: `pnpm db:migrate` (past ontbrekende SQL toe).
-3. Daarna: `pnpm db:migrate-workspace-settings` en optioneel `pnpm db:migrate-legacy-templates`.
+Als `_prisma_migrations` al `20260522120000` / `140000` / `160000` bevat maar **niet** `20260522100000_init`:
 
-## Toekomst: baseline squash (Fase 1.8)
+```bash
+pnpm --filter @digitify/db exec prisma migrate resolve --applied 20260522100000_init
+pnpm db:migrate
+```
 
-Voor greenfield installs zonder `db push`-geschiedenis:
+Schema staat al in de DB (via eerdere `db push` of oude migraties); init overslaan voorkomt dubbele `CREATE TABLE`.
 
-1. `prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma` → één `init` migratie.
-2. Behoud alleen RLS als aparte migratie.
-3. Bestaande DB’s: `prisma migrate resolve --applied <init>` zonder SQL uit te voeren.
+## Bestaande productie
 
-Tot die squash: **db push + migrate** blijft de ondersteunde weg.
+1. **Geen** `db push --force-reset`.
+2. `migrate resolve` voor init indien nodig (zie hierboven).
+3. `pnpm db:migrate` → RLS + resterende pending.
+4. `pnpm db:migrate-workspace-settings` (+ optioneel legacy templates).

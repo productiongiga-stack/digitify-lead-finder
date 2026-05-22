@@ -14,10 +14,7 @@ fi
 echo "==> Generate Prisma client"
 pnpm db:generate
 
-echo "==> Sync schema (safe for existing DBs — no reset)"
-pnpm --filter @digitify/db exec prisma db push --skip-generate
-
-echo "==> Apply incremental migrations (metadata, workspace owner, RLS policies)"
+echo "==> Apply migrations (init schema + RLS policies)"
 pnpm db:migrate
 
 echo "==> Migrate workspace settings (user:* → workspace:*)"

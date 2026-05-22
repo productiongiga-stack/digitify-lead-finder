@@ -13,7 +13,7 @@ Status bijgewerkt na implementatie in repo. Vink af in PR / bij deploy.
 | 1.5 | Twee OWNER seed + `pnpm rls:smoke` | ✅ seed + CI step |
 | 1.6 | **Jij:** één Vercel-project + env vars invullen | ⬜ handmatig |
 | 1.7 | **Jij:** Neon/productie-DB script draaien | ⬜ handmatig |
-| 1.8 | Volledige `init`-migratie (squash) | ⬜ later — zie migrations README |
+| 1.8 | Volledige `init`-migratie (squash) | ✅ `20260522100000_init` + no-op legacy |
 
 ## Fase 2 — Kwaliteit & vertrouwen
 
@@ -24,7 +24,7 @@ Status bijgewerkt na implementatie in repo. Vink af in PR / bij deploy.
 | 2.3 | Playwright: cross-tenant RLS (OWNER B) | ✅ `e2e/rls-cross-tenant.spec.ts` |
 | 2.4 | CI env voor OWNER B in e2e | ✅ |
 | 2.5 | Build `/bookings` — layout voor public subroutes | ✅ `app/bookings/layout.tsx` |
-| 2.6 | `ignoreBuildErrors` uitzetten | ⬜ na groene typecheck op hele app |
+| 2.6 | `ignoreBuildErrors` uitzetten | ✅ `next.config.js` strict build |
 
 ## Fase 3 — Observability & workspace
 

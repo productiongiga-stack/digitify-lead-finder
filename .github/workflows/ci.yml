@@ -72,10 +72,7 @@ jobs:
       - name: Generate Prisma client
         run: pnpm db:generate
 
-      # Schema was bootstrapped with db:push historically; incremental migrations assume existing tables.
-      - name: Prepare database schema
-        run: pnpm --filter @digitify/db exec prisma db push --skip-generate
-      - name: Apply incremental migrations (RLS, metadata)
+      - name: Apply database migrations (init + RLS)
         run: pnpm db:migrate
 
       - name: Migrate workspace settings (dry-run)
@@ -183,7 +180,7 @@ jobs:
         run: pnpm db:generate
 
       - name: Prepare database
-        run: pnpm --filter @digitify/db exec prisma db push --skip-generate && pnpm db:migrate && pnpm db:seed
+        run: pnpm db:migrate && pnpm db:seed
 
       - name: Build web app
         run: pnpm --filter @digitify/web build

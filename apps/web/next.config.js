@@ -23,10 +23,10 @@ const nextConfig = {
     NEXTAUTH_URL: resolveAppUrl(),
   },
   eslint: {
-    ignoreDuringBuilds: true,
+    ignoreDuringBuilds: false,
   },
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   transpilePackages: [
     "@digitify/api",
