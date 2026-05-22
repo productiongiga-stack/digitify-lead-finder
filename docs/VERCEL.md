@@ -2,6 +2,8 @@
 
 Git integration is active on branch `cursor/dashboard-modern-layout` (see [PR #1](https://github.com/productiongiga-stack/digitify-lead-finder/pull/1)).
 
+**Fase-plan:** [docs/PHASES.md](PHASES.md) · **Eén project gebruiken:** koppel alleen `digitify-lead-finder` en verwijder dubbele Vercel-projecten (`project-ubm6y`, `productiongiga-stack-…`) om verwarring te voorkomen.
+
 ## Preview URL (latest push)
 
 - https://digitify-lead-finder-git-c-54986e-productiongiga-7978s-projects.vercel.app

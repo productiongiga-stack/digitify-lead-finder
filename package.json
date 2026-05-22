@@ -18,6 +18,7 @@
     "test": "turbo test && pnpm --filter @digitify/web test",
     "test:integration": "pnpm --filter @digitify/api test:integration",
     "rls:smoke": "pnpm --filter @digitify/db db:rls-smoke",
+    "setup:db": "bash scripts/setup-production-db.sh",
     "test:redis": "pnpm --filter @digitify/api test:redis",
     "test:e2e": "pnpm --filter @digitify/web test:e2e"
   },

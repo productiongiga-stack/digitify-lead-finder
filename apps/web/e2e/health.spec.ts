@@ -10,6 +10,7 @@ test.describe("public probes", () => {
       status: "ok",
       db: "ok",
     });
+    expect(["ok", "skipped"]).toContain(body.redis);
     expect(typeof body.latencyMs).toBe("number");
     expect(body.ts).toBeTruthy();
   });

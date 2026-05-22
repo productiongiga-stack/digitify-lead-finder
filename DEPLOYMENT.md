@@ -4,6 +4,13 @@
 
 Deze guide beschrijft hoe je Digitify Lead Search deployt naar een subdomein `leads.digitify.be` op een VPS of cloud provider.
 
+## Verbeterplan (fases)
+
+Zie **[docs/PHASES.md](docs/PHASES.md)** voor de volledige roadmap (DB, CI, RLS, Vercel, E2E).  
+Productie-setup: `./scripts/setup-production-db.sh` · Vercel env: **[docs/VERCEL.md](docs/VERCEL.md)**
+
+---
+
 ## CI (GitHub Actions)
 
 Elke push en pull request naar `main` / `master` / `cursor/**` draait `.github/workflows/ci.yml`:

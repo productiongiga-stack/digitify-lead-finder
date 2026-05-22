@@ -135,6 +135,9 @@ jobs:
       SEED_RLS_OWNER_B_PASSWORD: DigitifyCiSeed2026!
       PLAYWRIGHT_LOGIN_EMAIL: admin@digitify.ci
       PLAYWRIGHT_LOGIN_PASSWORD: DigitifyCiSeed2026!
+      PLAYWRIGHT_OWNER_B_EMAIL: owner-b@digitify.ci
+      PLAYWRIGHT_OWNER_B_PASSWORD: DigitifyCiSeed2026!
+      REDIS_URL: redis://localhost:6379
 
     services:
       postgres:
@@ -147,6 +150,16 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U ci -d digitify_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
