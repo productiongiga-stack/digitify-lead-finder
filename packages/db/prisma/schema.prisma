@@ -49,6 +49,7 @@ model User {
   chatAssignments ChatSession[] @relation("ChatAssignee")
   reviewedRegistrationRequests RegistrationRequest[] @relation("RegistrationReviewer")
   reviewedFeedbackItems FeedbackItem[] @relation("FeedbackReviewer")
+  workspaceTasks       WorkspaceTask[]
 
   @@index([workspaceOwnerId])
   @@map("users")
@@ -727,6 +728,46 @@ model Report {
 
   @@index([generatedById])
   @@map("reports")
+}
+
+// WORKSPACE TASKS (per workspace owner)
+enum WorkspaceTaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum WorkspaceTaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum WorkspaceTaskRelatedType {
+  LEAD
+  QUOTE
+  BOOKING
+  CLIENT
+}
+
+model WorkspaceTask {
+  id          String                    @id @default(cuid())
+  createdById String
+  title       String
+  description String                    @default("")
+  status      WorkspaceTaskStatus       @default(TODO)
+  priority    WorkspaceTaskPriority     @default(MEDIUM)
+  dueAt       DateTime?
+  relatedType WorkspaceTaskRelatedType?
+  relatedId   String?
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([createdById, status])
+  @@index([createdById, updatedAt])
+  @@map("workspace_tasks")
 }
 
 // SETTINGS

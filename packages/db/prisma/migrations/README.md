@@ -8,6 +8,7 @@
 | `20260522120000_add_email_template_metadata` | No-op (legacy naam; zit in init) |
 | `20260522140000_add_workspace_owner` | No-op (legacy naam; zit in init) |
 | `20260522160000_workspace_row_level_security` | Postgres RLS policies |
+| `20260523120000_workspace_tasks` | Taken per workspace (`workspace_tasks`) + RLS |
 
 ## Nieuwe / lege database
 

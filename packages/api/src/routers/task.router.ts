@@ -1,41 +1,17 @@
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
-import { readWorkspaceJsonSetting, writeWorkspaceJsonSetting } from "../lib/user-json-setting";
 import { assertLeadAccess } from "../lib/tenant";
-import { workspaceScopeFromUser, type WorkspaceScope } from "../lib/workspace-settings";
-
-const TASKS_KEY = "tasks.items_json";
-
-const taskSchema = z.object({
-  id: z.string(),
-  title: z.string().min(1),
-  description: z.string().default(""),
-  status: z.enum(["TODO", "IN_PROGRESS", "DONE"]).default("TODO"),
-  priority: z.enum(["LOW", "MEDIUM", "HIGH"]).default("MEDIUM"),
-  dueAt: z.string().nullable().default(null),
-  relatedType: z.enum(["LEAD", "QUOTE", "BOOKING", "CLIENT"]).nullable().default(null),
-  relatedId: z.string().nullable().default(null),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-
-type TaskItem = z.infer<typeof taskSchema>;
-
-async function loadTasks(db: any, scope: WorkspaceScope): Promise<TaskItem[]> {
-  const raw = await readWorkspaceJsonSetting<unknown[]>(db, scope, TASKS_KEY, []);
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item) => taskSchema.safeParse(item))
-    .filter((item) => item.success)
-    .map((item) => item.data);
-}
+import { migrateLegacyWorkspaceTasks } from "../lib/migrate-workspace-tasks";
+import { workspaceScopeFromUser } from "../lib/workspace-settings";
 
 async function resolveRelatedLabels(
   db: any,
   workspaceId: string,
-  tasks: TaskItem[],
+  tasks: Array<{
+    relatedType: string | null;
+    relatedId: string | null;
+  }>,
 ) {
   const leadIds = new Set<string>();
   const quoteIds = new Set<string>();
@@ -92,14 +68,40 @@ async function resolveRelatedLabels(
   );
   const clientMap = new Map(clients.map((item: any) => [item.id, item.companyName]));
 
-  return tasks.map((task) => {
+  return (task: { relatedType: string | null; relatedId: string | null }) => {
     let relatedLabel: string | null = null;
     if (task.relatedType === "LEAD" && task.relatedId) relatedLabel = String(leadMap.get(task.relatedId) || "") || null;
     if (task.relatedType === "QUOTE" && task.relatedId) relatedLabel = String(quoteMap.get(task.relatedId) || "") || null;
     if (task.relatedType === "BOOKING" && task.relatedId) relatedLabel = String(bookingMap.get(task.relatedId) || "") || null;
     if (task.relatedType === "CLIENT" && task.relatedId) relatedLabel = String(clientMap.get(task.relatedId) || "") || null;
-    return { ...task, relatedLabel };
-  });
+    return relatedLabel;
+  };
+}
+
+function serializeTask(row: {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  priority: string;
+  dueAt: Date | null;
+  relatedType: string | null;
+  relatedId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    status: row.status as "TODO" | "IN_PROGRESS" | "DONE",
+    priority: row.priority as "LOW" | "MEDIUM" | "HIGH",
+    dueAt: row.dueAt ? row.dueAt.toISOString() : null,
+    relatedType: row.relatedType as "LEAD" | "QUOTE" | "BOOKING" | "CLIENT" | null,
+    relatedId: row.relatedId,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
 
 export const taskRouter = router({
@@ -114,27 +116,40 @@ export const taskRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
-      let tasks = await loadTasks(ctx.db, scope);
-      if (input.status) tasks = tasks.filter((task) => task.status === input.status);
-      if (input.relatedType) tasks = tasks.filter((task) => task.relatedType === input.relatedType);
-      tasks.sort((a, b) => {
+      await migrateLegacyWorkspaceTasks(ctx.db, scope);
+
+      let rows = await ctx.db.workspaceTask.findMany({
+        where: {
+          createdById: scope.workspaceId,
+          ...(input.status ? { status: input.status } : {}),
+          ...(input.relatedType ? { relatedType: input.relatedType } : {}),
+        },
+      });
+
+      rows.sort((a, b) => {
         if (a.status !== b.status) {
           const order = ["TODO", "IN_PROGRESS", "DONE"];
           return order.indexOf(a.status) - order.indexOf(b.status);
         }
-        const aDue = a.dueAt ? new Date(a.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
-        const bDue = b.dueAt ? new Date(b.dueAt).getTime() : Number.MAX_SAFE_INTEGER;
+        const aDue = a.dueAt ? a.dueAt.getTime() : Number.MAX_SAFE_INTEGER;
+        const bDue = b.dueAt ? b.dueAt.getTime() : Number.MAX_SAFE_INTEGER;
         if (aDue !== bDue) return aDue - bDue;
-        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        return b.updatedAt.getTime() - a.updatedAt.getTime();
       });
-      const withRelations = await resolveRelatedLabels(ctx.db, scope.workspaceId, tasks);
+
+      const labelFor = await resolveRelatedLabels(ctx.db, scope.workspaceId, rows);
+      const items = rows.map((row) => ({
+        ...serializeTask(row),
+        relatedLabel: labelFor(row),
+      }));
+
       const summary = {
-        total: tasks.length,
-        todo: tasks.filter((task) => task.status === "TODO").length,
-        inProgress: tasks.filter((task) => task.status === "IN_PROGRESS").length,
-        done: tasks.filter((task) => task.status === "DONE").length,
+        total: items.length,
+        todo: items.filter((task) => task.status === "TODO").length,
+        inProgress: items.filter((task) => task.status === "IN_PROGRESS").length,
+        done: items.filter((task) => task.status === "DONE").length,
       };
-      return { items: withRelations, summary };
+      return { items, summary };
     }),
 
   create: protectedProcedure
@@ -176,24 +191,18 @@ export const taskRouter = router({
         if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Boeking niet gevonden." });
       }
 
-      const now = new Date().toISOString();
-      const task: TaskItem = {
-        id: randomUUID(),
-        title: input.title.trim(),
-        description: input.description?.trim() || "",
-        status: "TODO",
-        priority: input.priority,
-        dueAt: input.dueAt || null,
-        relatedType: input.relatedType || null,
-        relatedId: input.relatedId || null,
-        createdAt: now,
-        updatedAt: now,
-      };
-      const scope = workspaceScopeFromUser(ctx.user);
-      const tasks = await loadTasks(ctx.db, scope);
-      tasks.unshift(task);
-      await writeWorkspaceJsonSetting(ctx.db, scope, TASKS_KEY, tasks.slice(0, 3000));
-      return task;
+      const row = await ctx.db.workspaceTask.create({
+        data: {
+          createdById: ctx.user.workspaceId!,
+          title: input.title.trim(),
+          description: input.description?.trim() || "",
+          priority: input.priority,
+          dueAt: input.dueAt ? new Date(input.dueAt) : null,
+          relatedType: input.relatedType ?? null,
+          relatedId: input.relatedId ?? null,
+        },
+      });
+      return serializeTask(row);
     }),
 
   update: protectedProcedure
@@ -208,37 +217,33 @@ export const taskRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const scope = workspaceScopeFromUser(ctx.user);
-      const tasks = await loadTasks(ctx.db, scope);
-      const index = tasks.findIndex((task) => task.id === input.id);
-      if (index < 0) throw new TRPCError({ code: "NOT_FOUND", message: "Taak niet gevonden." });
-      const current = tasks[index];
-      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Taak niet gevonden." });
+      const existing = await ctx.db.workspaceTask.findFirst({
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
+      });
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Taak niet gevonden." });
 
-      const next: TaskItem = {
-        ...current,
-        title: input.title?.trim() || current.title,
-        description: input.description !== undefined ? input.description.trim() : current.description,
-        status: input.status || current.status,
-        priority: input.priority || current.priority,
-        dueAt: input.dueAt !== undefined ? input.dueAt : current.dueAt,
-        updatedAt: new Date().toISOString(),
-      };
-      tasks[index] = next;
-      await writeWorkspaceJsonSetting(ctx.db, scope, TASKS_KEY, tasks);
-      return next;
+      const row = await ctx.db.workspaceTask.update({
+        where: { id: input.id },
+        data: {
+          ...(input.title !== undefined ? { title: input.title.trim() } : {}),
+          ...(input.description !== undefined ? { description: input.description.trim() } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.priority !== undefined ? { priority: input.priority } : {}),
+          ...(input.dueAt !== undefined ? { dueAt: input.dueAt ? new Date(input.dueAt) : null } : {}),
+        },
+      });
+      return serializeTask(row);
     }),
 
   remove: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const scope = workspaceScopeFromUser(ctx.user);
-      const tasks = await loadTasks(ctx.db, scope);
-      const filtered = tasks.filter((task) => task.id !== input.id);
-      if (filtered.length === tasks.length) {
+      const result = await ctx.db.workspaceTask.deleteMany({
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
+      });
+      if (result.count === 0) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Taak niet gevonden." });
       }
-      await writeWorkspaceJsonSetting(ctx.db, scope, TASKS_KEY, filtered);
       return { success: true };
     }),
 });

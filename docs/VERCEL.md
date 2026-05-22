@@ -24,6 +24,7 @@ Set these in **Vercel → Project → Settings → Environment Variables**:
 | `SETTINGS_ENCRYPTION_KEY` | Min. 32 characters (production) |
 | `CRON_SECRET` | Min. 16 characters; Vercel Cron sends `Authorization: Bearer …` |
 | `REDIS_URL` or Upstash | `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` for Edge rate limits |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob — logo/branding uploads (avoid data URLs in prod) |
 
 Optional staging:
 

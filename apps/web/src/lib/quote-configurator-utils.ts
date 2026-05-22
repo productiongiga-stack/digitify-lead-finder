@@ -44,5 +44,10 @@ export function stringifyEmojiMap(map: Record<string, string>) {
 
 export function isImageIcon(value: string) {
   const trimmed = value.trim();
-  return /^https?:\/\//i.test(trimmed) || trimmed.startsWith("data:image/") || trimmed.startsWith("/uploads/");
+  return (
+    /^https?:\/\//i.test(trimmed) ||
+    trimmed.startsWith("data:image/") ||
+    trimmed.startsWith("/uploads/") ||
+    /\.public\.blob\.vercel-storage\.com\//i.test(trimmed)
+  );
 }
