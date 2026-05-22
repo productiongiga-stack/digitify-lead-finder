@@ -52,6 +52,7 @@ Status bijgewerkt na implementatie in repo. Vink af in PR / bij deploy.
 | 5.4 | E2E: compose draft opslaan | ✅ |
 | 5.5 | Facturen JSON → `workspace_invoices` + auto-migratie | ✅ |
 | 5.6 | Sentry (`SENTRY_DSN`) + global-error | ✅ |
+| 5.7 | Opgeslagen zoekopdrachten JSON → `workspace_saved_searches` | ✅ |
 
 ---
 

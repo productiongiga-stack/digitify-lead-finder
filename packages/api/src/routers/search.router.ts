@@ -4,8 +4,9 @@ import { TRPCError } from "@trpc/server";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { enforceRateLimit } from "../lib/rate-limit";
 import { log } from "../lib/logger";
-import { readWorkspaceJsonSetting, writeWorkspaceJsonSetting } from "../lib/user-json-setting";
-import { loadWorkspaceSettingRows, workspaceScopeFromUser, type WorkspaceScope } from "../lib/workspace-settings";
+import { migrateLegacyWorkspaceSavedSearches } from "../lib/migrate-workspace-saved-searches";
+import { serializeSavedSearch } from "../lib/saved-search-serializer";
+import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 
 const searchStringSchema = z
   .string()
@@ -24,31 +25,6 @@ const searchResultSchema = z.object({
   types: z.array(z.string()).optional(),
   primaryType: z.string().optional(),
 });
-
-const SAVED_SEARCHES_KEY = "search.saved_searches_json";
-
-const savedSearchSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  query: z.string().default(""),
-  city: z.string().default(""),
-  country: z.string().default("België"),
-  niche: z.string().default(""),
-  pageSize: z.number().min(5).max(80).default(20),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-
-type SavedSearchItem = z.infer<typeof savedSearchSchema>;
-
-async function loadSavedSearches(db: any, scope: WorkspaceScope): Promise<SavedSearchItem[]> {
-  const raw = await readWorkspaceJsonSetting<unknown[]>(db, scope, SAVED_SEARCHES_KEY, []);
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item) => savedSearchSchema.safeParse(item))
-    .filter((item) => item.success)
-    .map((item) => item.data);
-}
 
 function extractCity(formattedAddress: string | undefined): string | undefined {
   if (!formattedAddress) return undefined;
@@ -306,8 +282,13 @@ export const searchRouter = router({
 
   listSavedSearches: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);
-    const items = await loadSavedSearches(ctx.db, scope);
-    return items.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    await migrateLegacyWorkspaceSavedSearches(ctx.db, scope);
+    const rows = await ctx.db.workspaceSavedSearch.findMany({
+      where: { createdById: scope.workspaceId },
+      orderBy: { updatedAt: "desc" },
+      take: 100,
+    });
+    return rows.map(serializeSavedSearch);
   }),
 
   saveSearch: protectedProcedure
@@ -324,42 +305,47 @@ export const searchRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
-      const items = await loadSavedSearches(ctx.db, scope);
-      const now = new Date().toISOString();
-      const nextItem: SavedSearchItem = {
-        id: input.id || `search_${Math.random().toString(36).slice(2, 10)}`,
+      await migrateLegacyWorkspaceSavedSearches(ctx.db, scope);
+
+      const data = {
         name: input.name.trim(),
         query: input.query || "",
         city: input.city || "",
         country: input.country || "België",
         niche: input.niche || "",
         pageSize: input.pageSize,
-        createdAt: now,
-        updatedAt: now,
       };
 
-      const existingIndex = items.findIndex((item) => item.id === nextItem.id);
-      if (existingIndex >= 0) {
-        const current = items[existingIndex];
-        items[existingIndex] = {
-          ...current!,
-          ...nextItem,
-          createdAt: current!.createdAt,
-        };
-      } else {
-        items.unshift(nextItem);
+      if (input.id) {
+        const existing = await ctx.db.workspaceSavedSearch.findFirst({
+          where: { id: input.id, createdById: scope.workspaceId },
+        });
+        if (!existing) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Opgeslagen zoekopdracht niet gevonden." });
+        }
+        const row = await ctx.db.workspaceSavedSearch.update({
+          where: { id: input.id },
+          data,
+        });
+        return serializeSavedSearch(row);
       }
-      await writeWorkspaceJsonSetting(ctx.db, scope, SAVED_SEARCHES_KEY, items.slice(0, 100));
-      return nextItem;
+
+      const row = await ctx.db.workspaceSavedSearch.create({
+        data: { ...data, createdById: scope.workspaceId },
+      });
+      return serializeSavedSearch(row);
     }),
 
   deleteSavedSearch: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
-      const items = await loadSavedSearches(ctx.db, scope);
-      const filtered = items.filter((item) => item.id !== input.id);
-      await writeWorkspaceJsonSetting(ctx.db, scope, SAVED_SEARCHES_KEY, filtered);
+      const result = await ctx.db.workspaceSavedSearch.deleteMany({
+        where: { id: input.id, createdById: scope.workspaceId },
+      });
+      if (result.count === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Opgeslagen zoekopdracht niet gevonden." });
+      }
       return { success: true };
     }),
 

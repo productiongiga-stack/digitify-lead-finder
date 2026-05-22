@@ -51,6 +51,7 @@ model User {
   reviewedFeedbackItems FeedbackItem[] @relation("FeedbackReviewer")
   workspaceTasks       WorkspaceTask[]
   workspaceInvoices    WorkspaceInvoice[]
+  workspaceSavedSearches WorkspaceSavedSearch[]
 
   @@index([workspaceOwnerId])
   @@map("users")
@@ -833,6 +834,25 @@ model WorkspaceInvoiceItem {
 
   @@index([invoiceId])
   @@map("workspace_invoice_items")
+}
+
+// WORKSPACE SAVED SEARCHES (lead search presets)
+model WorkspaceSavedSearch {
+  id          String   @id @default(cuid())
+  createdById String
+  name        String
+  query       String   @default("")
+  city        String   @default("")
+  country     String   @default("België")
+  niche       String   @default("")
+  pageSize    Int      @default(20)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([createdById, updatedAt])
+  @@map("workspace_saved_searches")
 }
 
 // SETTINGS

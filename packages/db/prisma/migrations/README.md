@@ -10,6 +10,7 @@
 | `20260522160000_workspace_row_level_security` | Postgres RLS policies |
 | `20260523120000_workspace_tasks` | Taken per workspace (`workspace_tasks`) + RLS |
 | `20260523140000_workspace_invoices` | Facturen (`workspace_invoices` + regels) + RLS |
+| `20260523160000_workspace_saved_searches` | Opgeslagen lead-zoekopdrachten + RLS |
 
 ## Nieuwe / lege database
 

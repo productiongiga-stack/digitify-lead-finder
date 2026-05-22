@@ -10,6 +10,14 @@ export async function register() {
   const { validateServerEnv } = await import("@digitify/api/src/lib/server-env");
   validateServerEnv();
 
-  const { initSentry } = await import("@digitify/api/src/lib/sentry");
-  await initSentry();
+  const dsn = process.env.SENTRY_DSN?.trim() || process.env.NEXT_PUBLIC_SENTRY_DSN?.trim();
+  if (!dsn) return;
+
+  const Sentry = await import("@sentry/nextjs");
+  Sentry.init({
+    dsn,
+    environment: process.env.SENTRY_ENVIRONMENT || process.env.VERCEL_ENV || process.env.NODE_ENV,
+    tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? "0.1"),
+    enabled: process.env.NODE_ENV !== "test",
+  });
 }

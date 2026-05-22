@@ -17,7 +17,7 @@ export async function initSentry() {
   if (!isSentryEnabled()) return;
   if (!initPromise) {
     initPromise = (async () => {
-      const Sentry = await import("@sentry/node");
+      const Sentry = await import(/* webpackIgnore: true */ "@sentry/node");
       Sentry.init({
         dsn: dsn(),
         environment: process.env.SENTRY_ENVIRONMENT || process.env.VERCEL_ENV || process.env.NODE_ENV,
@@ -35,7 +35,7 @@ export async function captureException(
 ) {
   if (!isSentryEnabled() || process.env.NODE_ENV === "test") return;
   await initSentry();
-  const Sentry = await import("@sentry/node");
+  const Sentry = await import(/* webpackIgnore: true */ "@sentry/node");
   Sentry.withScope((scope: SentryScope) => {
     if (context) scope.setContext("extra", context);
     Sentry.captureException(error);

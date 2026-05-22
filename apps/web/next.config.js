@@ -37,7 +37,13 @@ const nextConfig = {
     "@digitify/scoring",
     "@digitify/connectors",
   ],
-  serverExternalPackages: ["@prisma/client", "prisma", "bcryptjs"],
+  serverExternalPackages: [
+    "@prisma/client",
+    "prisma",
+    "bcryptjs",
+    "@sentry/node",
+    "@sentry/nextjs",
+  ],
 };
 
 module.exports = nextConfig;
