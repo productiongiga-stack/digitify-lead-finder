@@ -1,6 +1,6 @@
 import { createSign } from "node:crypto";
 import { getSettingBoolean, getSettingString, settingsRowsToMap, type SettingRow } from "./settings";
-import { loadUserSettingRows } from "./user-settings";
+import { loadWorkspaceSettingRows } from "./workspace-settings";
 
 type SettingsDb = {
   setting: {
@@ -98,10 +98,11 @@ export async function loadGoogleOAuthClientConfig(db?: SettingsDb) {
       select: { id: true },
     });
     if (owner?.id) {
-      const rows = await loadUserSettingRows(db as any, owner.id, [
-        "integrations.google_oauth_client_id",
-        "integrations.google_oauth_client_secret",
-      ]);
+      const rows = await loadWorkspaceSettingRows(
+        db as any,
+        { workspaceId: owner.id, memberId: owner.id },
+        ["integrations.google_oauth_client_id", "integrations.google_oauth_client_secret"],
+      );
       const settings = settingsRowsToMap(rows);
       ownerClientId = getSettingString(settings, "integrations.google_oauth_client_id");
       ownerClientSecret = getSettingString(settings, "integrations.google_oauth_client_secret");

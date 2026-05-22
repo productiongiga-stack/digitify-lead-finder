@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   try {
     const forwarded = request.headers.get("x-forwarded-for") || "";
     const ip = forwarded.split(",")[0]?.trim() || "unknown";
-    const limiter = checkRateLimit({
+    const limiter = await checkRateLimit({
       key: `public-review-embed:${ip}`,
       limit: 15,
       windowMs: 60 * 60 * 1000,

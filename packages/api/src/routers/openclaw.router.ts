@@ -4,11 +4,16 @@ import { OpenClawClient, type OpenClawContext } from "@digitify/openclaw";
 import { normalizeAiPlaceholderSyntax } from "../lib/email-utils";
 import { type PrismaClient } from "@digitify/db";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
-import { loadUserSettingRows } from "../lib/user-settings";
+import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
 import { assertLeadAccess } from "../lib/tenant";
 
-async function getClient(db: PrismaClient, userId: string): Promise<{ client: OpenClawClient | null; model: string }> {
-  const rows = await loadUserSettingRows(db, userId, ["api.ai_provider", "openclaw.model", "api.anthropic_key", "api.openai_key"]);
+async function getClient(db: PrismaClient, workspaceId: string): Promise<{ client: OpenClawClient | null; model: string }> {
+  const rows = await loadWorkspaceSettingRows(db, { workspaceId, memberId: workspaceId }, [
+    "api.ai_provider",
+    "openclaw.model",
+    "api.anthropic_key",
+    "api.openai_key",
+  ]);
   const settings = settingsRowsToMap(rows);
   const provider = getSettingString(settings, "api.ai_provider", "anthropic");
   const model = getSettingString(settings, "openclaw.model", "claude-sonnet-4-20250514");
@@ -47,8 +52,8 @@ function splitLines(value: string) {
     .filter(Boolean);
 }
 
-async function loadBusinessContext(db: PrismaClient, userId: string) {
-  const rows = await loadUserSettingRows(db, userId, [
+async function loadBusinessContext(db: PrismaClient, workspaceId: string) {
+  const rows = await loadWorkspaceSettingRows(db, { workspaceId, memberId: workspaceId }, [
     "branding.company_name",
     "company.name",
     "company.niche",
@@ -102,7 +107,7 @@ export const openclawRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { client, model } = await getClient(ctx.db, ctx.user.id);
+      const { client, model } = await getClient(ctx.db, ctx.user.workspaceId!);
       if (!client) {
         return {
           response: "OpenClaw is nog niet geconfigureerd. Ga naar Instellingen → Integraties om je API key in te stellen.",
@@ -114,12 +119,12 @@ export const openclawRouter = router({
       const openclawContext: OpenClawContext = {
         currentPage: input.context.currentPage,
       };
-      const businessContextData = await loadBusinessContext(ctx.db, ctx.user.id);
+      const businessContextData = await loadBusinessContext(ctx.db, ctx.user.workspaceId!);
       openclawContext.businessContext = businessContextData.businessContext;
 
       if (input.context.leadId) {
         const lead = await ctx.db.lead.findFirst({
-          where: { id: input.context.leadId, createdById: ctx.user.id },
+          where: { id: input.context.leadId, createdById: ctx.user.workspaceId! },
           include: { scoringFactors: { include: { scoringWeight: true } } },
         });
         if (lead) {
@@ -148,7 +153,7 @@ export const openclawRouter = router({
 
       if (input.context.campaignId) {
         const campaign = await ctx.db.campaign.findFirst({
-          where: { id: input.context.campaignId, createdById: ctx.user.id },
+          where: { id: input.context.campaignId, createdById: ctx.user.workspaceId! },
         });
         if (campaign) {
           openclawContext.campaignData = {
@@ -161,7 +166,11 @@ export const openclawRouter = router({
       }
 
       // Get settings for OpenClaw behavior
-      const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["openclaw_aggressiveness", "openclaw_tone", "openclaw_language"]);
+      const settings = await loadWorkspaceSettingRows(
+        ctx.db,
+        { workspaceId: ctx.user.workspaceId!, memberId: ctx.user.id },
+        ["openclaw_aggressiveness", "openclaw_tone", "openclaw_language"],
+      );
       const localSettingsMap = new Map(settings.map((item) => [item.key, item.value]));
       openclawContext.settings = {
         aggressiveness: readSettingValue(localSettingsMap.get("openclaw_aggressiveness"), "medium"),
@@ -194,14 +203,14 @@ export const openclawRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { client } = await getClient(ctx.db, ctx.user.id);
+      const { client } = await getClient(ctx.db, ctx.user.workspaceId!);
       if (!client) {
         return { draft: null, error: "API key niet geconfigureerd. Ga naar Instellingen → Integraties." };
       }
 
-      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       const lead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.id },
+        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
         include: { scoringFactors: { include: { scoringWeight: true } } },
       });
 
@@ -227,7 +236,7 @@ export const openclawRouter = router({
           suggestedServices,
         },
       };
-      const businessContextData = await loadBusinessContext(ctx.db, ctx.user.id);
+      const businessContextData = await loadBusinessContext(ctx.db, ctx.user.workspaceId!);
       openclawContext.businessContext = businessContextData.businessContext;
       openclawContext.settings = {
         aggressiveness: "balanced",
@@ -238,7 +247,7 @@ export const openclawRouter = router({
 
       if (input.campaignId) {
         const campaign = await ctx.db.campaign.findFirst({
-          where: { id: input.campaignId, createdById: ctx.user.id },
+          where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
         });
         if (campaign) {
           openclawContext.campaignData = {
@@ -299,13 +308,13 @@ export const openclawRouter = router({
       style: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { client } = await getClient(ctx.db, ctx.user.id);
+      const { client } = await getClient(ctx.db, ctx.user.workspaceId!);
       if (!client) {
         return { rewritten: null, error: "API key niet geconfigureerd." };
       }
 
       const draft = await ctx.db.emailDraft.findFirstOrThrow({
-        where: { id: input.draftId, lead: { createdById: ctx.user.id } },
+        where: { id: input.draftId, lead: { createdById: ctx.user.workspaceId! } },
         include: { lead: { select: { companyName: true, city: true, industry: true } } },
       });
 
@@ -342,7 +351,7 @@ ONDERWERP: [nieuwe onderwerpregel]
             gmbRating: null,
             gmbReviewCount: null,
           },
-          businessContext: (await loadBusinessContext(ctx.db, ctx.user.id)).businessContext,
+          businessContext: (await loadBusinessContext(ctx.db, ctx.user.workspaceId!)).businessContext,
         }
       );
 
@@ -361,14 +370,14 @@ ONDERWERP: [nieuwe onderwerpregel]
   analyzeLead: protectedProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const { client } = await getClient(ctx.db, ctx.user.id);
+      const { client } = await getClient(ctx.db, ctx.user.workspaceId!);
       if (!client) {
         return { analysis: null, error: "API key niet geconfigureerd. Ga naar Instellingen → Integraties." };
       }
 
-      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       const lead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.id },
+        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
         include: {
           scoringFactors: { include: { scoringWeight: true } },
           enrichmentData: true,
@@ -384,7 +393,7 @@ ONDERWERP: [nieuwe onderwerpregel]
         .filter(Boolean);
 
       const analysis = await client.analyzeLead({
-        businessContext: (await loadBusinessContext(ctx.db, ctx.user.id)).businessContext,
+        businessContext: (await loadBusinessContext(ctx.db, ctx.user.workspaceId!)).businessContext,
         leadData: {
           companyName: lead.companyName,
           website: lead.website,

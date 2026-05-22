@@ -12,9 +12,9 @@ export const scoringRouter = router({
   computeForLead: protectedProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       const lead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.id },
+        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
         include: { enrichmentData: true, scoringFactors: true },
       });
 
@@ -135,7 +135,7 @@ export const scoringRouter = router({
       const weights = await ctx.db.scoringWeight.findMany({ where: { enabled: true } });
 
       const where: Record<string, unknown> = {
-        createdById: ctx.user.id,
+        createdById: ctx.user.workspaceId!,
       };
       if (params.leadIds?.length) {
         where.id = { in: params.leadIds };
@@ -267,9 +267,9 @@ export const scoringRouter = router({
   enrichLead: protectedProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       const lead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.id },
+        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
       });
 
       if (!lead.website) {
@@ -389,7 +389,7 @@ export const scoringRouter = router({
       // Now compute the score with the fresh enrichment data
       // Re-fetch lead with enrichment
       const enrichedLead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.id },
+        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
         include: { enrichmentData: true },
       });
 
@@ -483,7 +483,7 @@ export const scoringRouter = router({
       for (const leadId of input.leadIds) {
         try {
           const lead = await ctx.db.lead.findFirstOrThrow({
-            where: { id: leadId, createdById: ctx.user.id },
+            where: { id: leadId, createdById: ctx.user.workspaceId! },
           });
 
           if (lead.website) {
@@ -537,7 +537,7 @@ export const scoringRouter = router({
 
           // Compute score
           const enrichedLead = await ctx.db.lead.findFirstOrThrow({
-            where: { id: leadId, createdById: ctx.user.id },
+            where: { id: leadId, createdById: ctx.user.workspaceId! },
             include: { enrichmentData: true },
           });
 

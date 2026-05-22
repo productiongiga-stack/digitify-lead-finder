@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
-import { readUserJsonSetting, writeUserJsonSetting } from "../lib/user-json-setting";
+import { readWorkspaceJsonSetting, writeWorkspaceJsonSetting } from "../lib/user-json-setting";
 import { sendBrandedEmail } from "../lib/email-sender";
+import { workspaceScopeFromUser, type WorkspaceScope } from "../lib/workspace-settings";
 
 const INVOICES_KEY = "invoices.items_json";
 
@@ -46,8 +47,8 @@ const invoiceSchema = z.object({
 
 type InvoiceItem = z.infer<typeof invoiceSchema>;
 
-async function loadInvoices(db: any, userId: string): Promise<InvoiceItem[]> {
-  const raw = await readUserJsonSetting<unknown[]>(db, userId, INVOICES_KEY, []);
+async function loadInvoices(db: any, scope: WorkspaceScope): Promise<InvoiceItem[]> {
+  const raw = await readWorkspaceJsonSetting<unknown[]>(db, scope, INVOICES_KEY, []);
   if (!Array.isArray(raw)) return [];
   return raw
     .map((item) => invoiceSchema.safeParse(item))
@@ -88,7 +89,8 @@ export const invoiceRouter = router({
         .default({}),
     )
     .query(async ({ ctx, input }) => {
-      let invoices = await loadInvoices(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      let invoices = await loadInvoices(ctx.db, scope);
       invoices = invoices.map((item) => ({ ...item, status: computeInvoiceStatus(item) }));
       if (input.status) invoices = invoices.filter((item) => item.status === input.status);
       invoices.sort((a, b) => new Date(b.issueDate).getTime() - new Date(a.issueDate).getTime());
@@ -108,7 +110,8 @@ export const invoiceRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const invoices = await loadInvoices(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      const invoices = await loadInvoices(ctx.db, scope);
       const item = invoices.find((invoice) => invoice.id === input.id);
       if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
       return { ...item, status: computeInvoiceStatus(item) };
@@ -123,7 +126,7 @@ export const invoiceRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const quote = await ctx.db.quote.findFirst({
-        where: { id: input.quoteId, createdById: ctx.user.id },
+        where: { id: input.quoteId, createdById: ctx.user.workspaceId! },
         include: { items: { orderBy: { sortOrder: "asc" } } },
       });
       if (!quote) throw new TRPCError({ code: "NOT_FOUND", message: "Offerte niet gevonden." });
@@ -134,7 +137,8 @@ export const invoiceRouter = router({
         });
       }
 
-      const invoices = await loadInvoices(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      const invoices = await loadInvoices(ctx.db, scope);
       const existing = invoices.find((invoice) => invoice.quoteId === quote.id);
       if (existing) return existing;
 
@@ -142,7 +146,7 @@ export const invoiceRouter = router({
       const dueDate = input.dueDate ? new Date(input.dueDate) : new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
       const invoice: InvoiceItem = {
         id: randomUUID(),
-        invoiceNumber: nextInvoiceNumber(ctx.user.id, invoices),
+        invoiceNumber: nextInvoiceNumber(scope.workspaceId, invoices),
         quoteId: quote.id,
         leadId: quote.leadId,
         clientName: quote.clientName,
@@ -175,7 +179,7 @@ export const invoiceRouter = router({
         })),
       };
       invoices.unshift(invoice);
-      await writeUserJsonSetting(ctx.db, ctx.user.id, INVOICES_KEY, invoices.slice(0, 3000));
+      await writeWorkspaceJsonSetting(ctx.db, scope, INVOICES_KEY, invoices.slice(0, 3000));
 
       await ctx.db.activity.create({
         data: {
@@ -198,7 +202,8 @@ export const invoiceRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const invoices = await loadInvoices(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      const invoices = await loadInvoices(ctx.db, scope);
       const index = invoices.findIndex((invoice) => invoice.id === input.id);
       if (index < 0) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
       const current = invoices[index];
@@ -210,14 +215,15 @@ export const invoiceRouter = router({
         updatedAt: new Date().toISOString(),
       };
       invoices[index] = next;
-      await writeUserJsonSetting(ctx.db, ctx.user.id, INVOICES_KEY, invoices);
+      await writeWorkspaceJsonSetting(ctx.db, scope, INVOICES_KEY, invoices);
       return next;
     }),
 
   sendReminder: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const invoices = await loadInvoices(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      const invoices = await loadInvoices(ctx.db, scope);
       const index = invoices.findIndex((invoice) => invoice.id === input.id);
       if (index < 0) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
       const current = invoices[index];
@@ -259,19 +265,20 @@ export const invoiceRouter = router({
         updatedAt: new Date().toISOString(),
       };
       invoices[index] = updated;
-      await writeUserJsonSetting(ctx.db, ctx.user.id, INVOICES_KEY, invoices);
+      await writeWorkspaceJsonSetting(ctx.db, scope, INVOICES_KEY, invoices);
       return updated;
     }),
 
   remove: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const invoices = await loadInvoices(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      const invoices = await loadInvoices(ctx.db, scope);
       const filtered = invoices.filter((invoice) => invoice.id !== input.id);
       if (filtered.length === invoices.length) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
       }
-      await writeUserJsonSetting(ctx.db, ctx.user.id, INVOICES_KEY, filtered);
+      await writeWorkspaceJsonSetting(ctx.db, scope, INVOICES_KEY, filtered);
       return { success: true };
     }),
 });

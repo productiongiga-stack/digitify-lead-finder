@@ -12,7 +12,7 @@ type BadgeVariant =
 export const OUTBOUND_STATUS_LABELS: Record<string, string> = {
   DRAFT: "Concept",
   PENDING_APPROVAL: "Wacht op goedkeuring",
-  APPROVED: "Goedgekeurd",
+  APPROVED: "Klaar om te verzenden",
   REJECTED: "Afgekeurd",
   SCHEDULED: "Ingepland",
   SENDING: "Wordt verzonden",
@@ -44,6 +44,69 @@ export const OUTBOUND_STATUS_OPTIONS = [
   { value: "FAILED", label: OUTBOUND_STATUS_LABELS.FAILED },
   { value: "BOUNCED", label: OUTBOUND_STATUS_LABELS.BOUNCED },
 ] as const;
+
+/** KPI cards on Outbound Center — same labels as badges */
+export const OUTBOUND_STAT_CARD_STATUSES = [
+  "DRAFT",
+  "PENDING_APPROVAL",
+  "APPROVED",
+  "SENT",
+  "FAILED",
+] as const;
+
+export type OutboundStatCardStatus = (typeof OUTBOUND_STAT_CARD_STATUSES)[number];
+
+export function getOutboundStatusLabel(status: string) {
+  return OUTBOUND_STATUS_LABELS[status] ?? status;
+}
+
+export const SEND_OUTBOUND_TOOLTIP =
+  "Verstuurt via SMTP. Goedkeuren zet de mail alleen op “Klaar om te verzenden” — dat is nog geen verzending.";
+
+export const OUTBOUND_FLOW_SUMMARY =
+  "Concept → goedkeuren (niet verzenden) → Verzenden via SMTP.";
+
+export function getSendButtonLabel(status: string, isPending = false) {
+  if (isPending) return "Verzenden...";
+  if (status === "FAILED") return "Opnieuw verzenden";
+  return "Verzenden";
+}
+
+export function formatWorkqueueSummary(stats: {
+  pending: number;
+  approved: number;
+  failed: number;
+}) {
+  return `${stats.pending} ${OUTBOUND_STATUS_LABELS.PENDING_APPROVAL!.toLowerCase()} · ${stats.approved} ${OUTBOUND_STATUS_LABELS.APPROVED!.toLowerCase()} · ${stats.failed} ${OUTBOUND_STATUS_LABELS.FAILED!.toLowerCase()}`;
+}
+
+export function getOutboundNextActionHint(status: string): string {
+  switch (status) {
+    case "DRAFT":
+      return "Werk inhoud af en dien in ter goedkeuring.";
+    case "PENDING_APPROVAL":
+      return `${OUTBOUND_STATUS_LABELS.PENDING_APPROVAL}. Goedkeuren verstuurt de mail nog niet.`;
+    case "APPROVED":
+      return `${OUTBOUND_STATUS_LABELS.APPROVED} — klik Verzenden om de mail via SMTP te versturen.`;
+    case "SENT":
+      return "Volg de reactie op en plan indien nodig een opvolgmail.";
+    case "FAILED":
+    case "BOUNCED":
+      return "Controleer foutmelding en probeer opnieuw te verzenden.";
+    case "REJECTED":
+      return `${OUTBOUND_STATUS_LABELS.REJECTED}. Pas de inhoud aan en dien opnieuw in.`;
+    default:
+      return "Controleer deze draft en bepaal de volgende stap.";
+  }
+}
+
+export function getApprovedNotSentBanner() {
+  return {
+    title: `${OUTBOUND_STATUS_LABELS.APPROVED} — nog niet verzonden`,
+    detail: (approvedAtLabel: string) =>
+      `Beoordeeld op ${approvedAtLabel}. Gebruik de knop Verzenden om de mail te versturen.`,
+  };
+}
 
 export type OutboundTimelineStep = {
   key: string;

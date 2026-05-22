@@ -3,6 +3,8 @@
  * All layouts are table-based HTML for maximum email client compatibility.
  */
 
+import { sanitizeCtaUrl } from "./safe-url";
+
 export type EmailLayout = "modern" | "minimal" | "business" | "proposal" | "followup";
 type TypographyMode = "compact" | "normal";
 
@@ -53,14 +55,15 @@ function bodyToHtml(body: string, style?: string, typographyMode?: TypographyMod
 }
 
 function ctaToHtml(options: LayoutOptions): string {
-  if (!options.ctaText || !options.ctaUrl) return "";
+  const safeUrl = sanitizeCtaUrl(options.ctaUrl);
+  if (!options.ctaText || !safeUrl) return "";
 
   return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 28px 0;">
       <tr>
         <td align="center">
           <a
-            href="${escapeHtml(options.ctaUrl)}"
+            href="${escapeHtml(safeUrl)}"
             target="_blank"
             rel="noopener noreferrer"
             style="display:inline-block;background-color:${options.primaryColor};color:#ffffff;text-decoration:none;padding:14px 26px;border-radius:999px;font-size:${fontSize(options.typographyMode, 15, 16)}px;font-weight:700;"
@@ -319,12 +322,13 @@ function generateProposal(o: LayoutOptions): string {
     `margin:0 0 12px 0;line-height:1.6;color:#4b5563;font-size:${fontSize(o.typographyMode, 15, 16)}px;`,
     o.typographyMode,
   );
-  const ctaHtml = o.ctaText && o.ctaUrl
+  const safeCtaUrl = sanitizeCtaUrl(o.ctaUrl);
+  const ctaHtml = o.ctaText && safeCtaUrl
     ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 8px 0;">
       <tr>
         <td align="center">
           <a
-            href="${escapeHtml(o.ctaUrl)}"
+            href="${escapeHtml(safeCtaUrl)}"
             target="_blank"
             rel="noopener noreferrer"
             style="display:inline-block;background:${accent};color:#12151a;text-decoration:none;padding:12px 24px;border-radius:999px;font-size:${fontSize(o.typographyMode, 15, 16)}px;font-weight:800;"
@@ -335,7 +339,7 @@ function generateProposal(o: LayoutOptions): string {
       </tr>
     </table>`
     : "";
-  const websiteHost = safeUrlHost(o.ctaUrl);
+  const websiteHost = safeUrlHost(safeCtaUrl);
   const refLabel = parsed.reference || o.subject;
   const totalLabel = parsed.total || "";
   const validUntilLabel = parsed.validUntil || "";

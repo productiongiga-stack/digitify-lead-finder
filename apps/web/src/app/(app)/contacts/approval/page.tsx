@@ -22,7 +22,9 @@ import { CheckCircle, XCircle, Eye, Inbox } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import Link from "next/link";
 import { EmailPreview } from "@/components/email/preview";
+import { OutboundWorkflowHelp } from "@/components/outbound/outbound-workflow-help";
 import { extractEmailTemplateMetadata } from "@/lib/email-content";
+import { OUTBOUND_STATUS_LABELS, OUTBOUND_STATUS_VARIANTS } from "@/lib/contact-status";
 
 export default function ApprovalPage() {
   const utils = trpc.useUtils();
@@ -81,9 +83,11 @@ export default function ApprovalPage() {
       <div>
         <h1 className="text-xl font-bold tracking-tight">Goedkeuringswachtrij</h1>
         <p className="text-sm text-muted-foreground">
-          E-mails die wachten op goedkeuring voor verzending
+          Keur inhoud goed — verzending gebeurt apart via Outbound Center
         </p>
       </div>
+
+      <OutboundWorkflowHelp />
 
       <div className="grid gap-3 xl:grid-cols-3">
         <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
@@ -99,7 +103,7 @@ export default function ApprovalPage() {
           <CardContent className="p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Beslis sneller</p>
             <p className="mt-2 text-sm font-medium">
-              Preview de mail, keur goed als de toon klopt en geef een korte reden mee bij afkeuren.
+              Goedkeuren maakt de mail klaar om te verzenden. Klik daarna op Verzenden in Outbound Center.
             </p>
           </CardContent>
         </Card>
@@ -111,7 +115,7 @@ export default function ApprovalPage() {
                 <Link href="/contacts">Outbound center</Link>
               </Button>
               <Button asChild size="sm" variant="ghost">
-                <Link href="/contacts/templates">Templates</Link>
+                <Link href="/templates">Templates</Link>
               </Button>
             </div>
           </CardContent>
@@ -145,7 +149,9 @@ export default function ApprovalPage() {
                       <Link href={`/leads/${draft.lead.id}`} className="font-medium hover:text-primary">
                         {draft.lead.companyName}
                       </Link>
-                      <Badge variant="warning">Wacht op goedkeuring</Badge>
+                      <Badge variant={OUTBOUND_STATUS_VARIANTS.PENDING_APPROVAL}>
+                        {OUTBOUND_STATUS_LABELS.PENDING_APPROVAL}
+                      </Badge>
                     </div>
                     <p className="text-sm font-semibold">{draft.subject}</p>
                     <p className="text-xs text-muted-foreground">Naar: {draft.toEmail}</p>
@@ -188,7 +194,7 @@ export default function ApprovalPage() {
                       disabled={approve.isPending}
                     >
                       <CheckCircle className="mr-1 h-3.5 w-3.5" />
-                      {approve.isPending ? "..." : "Goedkeuren"}
+                      {approve.isPending ? "..." : "Goedkeuren (niet verzenden)"}
                     </Button>
 
                     <Button

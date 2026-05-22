@@ -1,19 +1,25 @@
 import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
 
-export function leadAccessWhere(userId: string) {
+/** Scope for shared workspace resources (leads, campaigns, templates, …). */
+export function workspaceDataWhere(workspaceId: string) {
   return {
-    createdById: userId,
+    createdById: workspaceId,
   };
 }
 
-export function ownedLeadWhere(userId: string, extra: Record<string, unknown> = {}) {
-  return { ...extra, ...leadAccessWhere(userId) };
+/** @deprecated Use workspaceDataWhere — kept as alias for leads. */
+export function leadAccessWhere(workspaceId: string) {
+  return workspaceDataWhere(workspaceId);
 }
 
-export async function assertLeadAccess(db: PrismaClient, userId: string, leadId: string) {
+export function ownedLeadWhere(workspaceId: string, extra: Record<string, unknown> = {}) {
+  return { ...extra, ...workspaceDataWhere(workspaceId) };
+}
+
+export async function assertLeadAccess(db: PrismaClient, workspaceId: string, leadId: string) {
   const lead = await db.lead.findFirst({
-    where: ownedLeadWhere(userId, { id: leadId }),
+    where: ownedLeadWhere(workspaceId, { id: leadId }),
     select: { id: true },
   });
   if (!lead) {
@@ -30,12 +36,12 @@ export async function assertOwnedRecord(
   return record;
 }
 
-export function ownedChatSessionWhere(userId: string) {
+export function ownedChatSessionWhere(workspaceId: string, memberId?: string) {
   return {
     OR: [
-      { lead: { createdById: userId } },
-      { assignedToId: userId },
-      { tags: { has: `tenant:${userId}` } },
+      { lead: { createdById: workspaceId } },
+      ...(memberId ? [{ assignedToId: memberId }] : []),
+      { tags: { has: `tenant:${workspaceId}` } },
     ],
   };
 }

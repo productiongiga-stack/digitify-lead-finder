@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
-import { readUserJsonSetting, writeUserJsonSetting } from "../lib/user-json-setting";
+import { readWorkspaceJsonSetting, writeWorkspaceJsonSetting } from "../lib/user-json-setting";
 import { assertLeadAccess } from "../lib/tenant";
+import { workspaceScopeFromUser, type WorkspaceScope } from "../lib/workspace-settings";
 
 const TASKS_KEY = "tasks.items_json";
 
@@ -22,8 +23,8 @@ const taskSchema = z.object({
 
 type TaskItem = z.infer<typeof taskSchema>;
 
-async function loadTasks(db: any, userId: string): Promise<TaskItem[]> {
-  const raw = await readUserJsonSetting<unknown[]>(db, userId, TASKS_KEY, []);
+async function loadTasks(db: any, scope: WorkspaceScope): Promise<TaskItem[]> {
+  const raw = await readWorkspaceJsonSetting<unknown[]>(db, scope, TASKS_KEY, []);
   if (!Array.isArray(raw)) return [];
   return raw
     .map((item) => taskSchema.safeParse(item))
@@ -33,7 +34,7 @@ async function loadTasks(db: any, userId: string): Promise<TaskItem[]> {
 
 async function resolveRelatedLabels(
   db: any,
-  userId: string,
+  workspaceId: string,
   tasks: TaskItem[],
 ) {
   const leadIds = new Set<string>();
@@ -52,25 +53,25 @@ async function resolveRelatedLabels(
   const [leads, quotes, bookings, clients] = await Promise.all([
     leadIds.size > 0
       ? db.lead.findMany({
-          where: { id: { in: Array.from(leadIds) }, createdById: userId },
+          where: { id: { in: Array.from(leadIds) }, createdById: workspaceId },
           select: { id: true, companyName: true },
         })
       : Promise.resolve([]),
     quoteIds.size > 0
       ? db.quote.findMany({
-          where: { id: { in: Array.from(quoteIds) }, createdById: userId },
+          where: { id: { in: Array.from(quoteIds) }, createdById: workspaceId },
           select: { id: true, quoteNumber: true, clientCompany: true, clientName: true },
         })
       : Promise.resolve([]),
     bookingIds.size > 0
       ? db.booking.findMany({
-          where: { id: { in: Array.from(bookingIds) }, createdById: userId },
+          where: { id: { in: Array.from(bookingIds) }, createdById: workspaceId },
           select: { id: true, clientName: true, date: true },
         })
       : Promise.resolve([]),
     clientIds.size > 0
       ? db.lead.findMany({
-          where: { id: { in: Array.from(clientIds) }, createdById: userId },
+          where: { id: { in: Array.from(clientIds) }, createdById: workspaceId },
           select: { id: true, companyName: true },
         })
       : Promise.resolve([]),
@@ -112,7 +113,8 @@ export const taskRouter = router({
         .default({}),
     )
     .query(async ({ ctx, input }) => {
-      let tasks = await loadTasks(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      let tasks = await loadTasks(ctx.db, scope);
       if (input.status) tasks = tasks.filter((task) => task.status === input.status);
       if (input.relatedType) tasks = tasks.filter((task) => task.relatedType === input.relatedType);
       tasks.sort((a, b) => {
@@ -125,7 +127,7 @@ export const taskRouter = router({
         if (aDue !== bDue) return aDue - bDue;
         return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
       });
-      const withRelations = await resolveRelatedLabels(ctx.db, ctx.user.id, tasks);
+      const withRelations = await resolveRelatedLabels(ctx.db, scope.workspaceId, tasks);
       const summary = {
         total: tasks.length,
         todo: tasks.filter((task) => task.status === "TODO").length,
@@ -154,21 +156,21 @@ export const taskRouter = router({
         });
       }
       if (input.relatedType === "LEAD" && input.relatedId) {
-        await assertLeadAccess(ctx.db, ctx.user.id, input.relatedId);
+        await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.relatedId);
       }
       if (input.relatedType === "CLIENT" && input.relatedId) {
-        await assertLeadAccess(ctx.db, ctx.user.id, input.relatedId);
+        await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.relatedId);
       }
       if (input.relatedType === "QUOTE" && input.relatedId) {
         const quote = await ctx.db.quote.findFirst({
-          where: { id: input.relatedId, createdById: ctx.user.id },
+          where: { id: input.relatedId, createdById: ctx.user.workspaceId! },
           select: { id: true },
         });
         if (!quote) throw new TRPCError({ code: "NOT_FOUND", message: "Offerte niet gevonden." });
       }
       if (input.relatedType === "BOOKING" && input.relatedId) {
         const booking = await ctx.db.booking.findFirst({
-          where: { id: input.relatedId, createdById: ctx.user.id },
+          where: { id: input.relatedId, createdById: ctx.user.workspaceId! },
           select: { id: true },
         });
         if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Boeking niet gevonden." });
@@ -187,9 +189,10 @@ export const taskRouter = router({
         createdAt: now,
         updatedAt: now,
       };
-      const tasks = await loadTasks(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      const tasks = await loadTasks(ctx.db, scope);
       tasks.unshift(task);
-      await writeUserJsonSetting(ctx.db, ctx.user.id, TASKS_KEY, tasks.slice(0, 3000));
+      await writeWorkspaceJsonSetting(ctx.db, scope, TASKS_KEY, tasks.slice(0, 3000));
       return task;
     }),
 
@@ -205,7 +208,8 @@ export const taskRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const tasks = await loadTasks(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      const tasks = await loadTasks(ctx.db, scope);
       const index = tasks.findIndex((task) => task.id === input.id);
       if (index < 0) throw new TRPCError({ code: "NOT_FOUND", message: "Taak niet gevonden." });
       const current = tasks[index];
@@ -221,19 +225,20 @@ export const taskRouter = router({
         updatedAt: new Date().toISOString(),
       };
       tasks[index] = next;
-      await writeUserJsonSetting(ctx.db, ctx.user.id, TASKS_KEY, tasks);
+      await writeWorkspaceJsonSetting(ctx.db, scope, TASKS_KEY, tasks);
       return next;
     }),
 
   remove: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const tasks = await loadTasks(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      const tasks = await loadTasks(ctx.db, scope);
       const filtered = tasks.filter((task) => task.id !== input.id);
       if (filtered.length === tasks.length) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Taak niet gevonden." });
       }
-      await writeUserJsonSetting(ctx.db, ctx.user.id, TASKS_KEY, filtered);
+      await writeWorkspaceJsonSetting(ctx.db, scope, TASKS_KEY, filtered);
       return { success: true };
     }),
 });

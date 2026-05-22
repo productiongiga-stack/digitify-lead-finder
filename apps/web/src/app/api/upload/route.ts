@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Niet geauthenticeerd." }, { status: 401 });
   }
   const ip = getClientIp(req);
-  const limiter = enforceRateLimit(req, {
+  const limiter = await enforceRateLimit(req, {
     key: `upload:${userId}:${ip}`,
     limit: 80,
     windowMs: 60 * 60 * 1000,

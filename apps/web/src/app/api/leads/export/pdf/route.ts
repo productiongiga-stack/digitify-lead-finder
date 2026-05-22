@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { getCurrentUser } from "@/lib/auth/session";
+import { getCurrentUser, workspaceIdFor } from "@/lib/auth/session";
 import { buildLeadsPdfHtml } from "@/lib/leads-pdf";
 import { renderQuotePdfBuffer } from "@/lib/quote-pdf";
 
@@ -20,9 +20,10 @@ export async function GET(request: Request) {
     .map((item) => item.trim())
     .filter(Boolean);
 
+  const workspaceId = workspaceIdFor(currentUser as { id: string; workspaceId?: string });
   const leads = await prisma.lead.findMany({
     where: {
-      createdById: userId,
+      createdById: workspaceId,
       ...(ids.length > 0 ? { id: { in: ids } } : {}),
     },
     orderBy: { createdAt: "desc" },

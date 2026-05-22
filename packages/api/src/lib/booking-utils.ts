@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { type PrismaClient } from "@digitify/db";
 import { extractGoogleEventId } from "./google-calendar";
 import { getSettingString, settingsRowsToMap } from "./settings";
-import { loadUserSettingRows } from "./user-settings";
+import { loadWorkspaceSettingRows } from "./workspace-settings";
 
 export const ACTIVE_BOOKING_STATUSES = ["PENDING", "SCHEDULED", "CONFIRMED"] as const;
 export const DEFAULT_BOOKING_TIMEZONE = "Europe/Brussels";
@@ -116,15 +116,16 @@ export async function hasBookingOverlap(
   });
 }
 
-export async function ensureDefaultBookingEventType(db: PrismaClient, userId: string) {
+/** @param workspaceId Workspace owner id (shared booking configuration). */
+export async function ensureDefaultBookingEventType(db: PrismaClient, workspaceId: string) {
   // 1. Try to find the existing default event type
   const existing = await db.bookingEventType.findFirst({
-    where: { createdById: userId, isDefault: true },
+    where: { createdById: workspaceId, isDefault: true },
     include: { availabilityRules: true, questions: { orderBy: { sortOrder: "asc" } } },
   });
   if (existing) return existing;
 
-  const settingsRows = await loadUserSettingRows(db, userId, [
+  const settingsRows = await loadWorkspaceSettingRows(db, { workspaceId, memberId: workspaceId }, [
     "bookings.embed_meeting_name",
     "bookings.embed_description",
     "bookings.embed_color",
@@ -153,7 +154,7 @@ export async function ensureDefaultBookingEventType(db: PrismaClient, userId: st
   try {
     const created = await db.bookingEventType.create({
       data: {
-        createdById: userId,
+        createdById: workspaceId,
         slug: targetSlug,
         name,
         description: getSettingString(settings, "bookings.embed_description", "Vraag eenvoudig een afspraak aan."),
@@ -163,7 +164,7 @@ export async function ensureDefaultBookingEventType(db: PrismaClient, userId: st
         location: getSettingString(settings, "bookings.embed_location_label", "Google Meet"),
         timezone: getSettingString(settings, "bookings.google_calendar_timezone", DEFAULT_BOOKING_TIMEZONE),
         isDefault: true,
-        hostUserIds: [userId],
+        hostUserIds: [workspaceId],
         availabilityRules: {
           create: Array.from({ length: 7 }, (_, weekday) => ({
             weekday,
@@ -180,7 +181,7 @@ export async function ensureDefaultBookingEventType(db: PrismaClient, userId: st
     // Slug conflict (another event type with the same slug exists, not marked as default).
     // Find any active event type and mark it as the default.
     const fallback = await db.bookingEventType.findFirst({
-      where: { createdById: userId, isActive: true },
+      where: { createdById: workspaceId, isActive: true },
       include: { availabilityRules: true, questions: { orderBy: { sortOrder: "asc" } } },
       orderBy: { createdAt: "asc" },
     });

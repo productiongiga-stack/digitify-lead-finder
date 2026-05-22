@@ -354,7 +354,7 @@ export async function GET(request: Request) {
     log.security.warn("Public chatbot session GET rejected: invalid tenant token", { ip });
     return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
   }
-  const limiter = enforceRateLimit(request, {
+  const limiter = await enforceRateLimit(request, {
     key: `public-chatbot-get:${tenantUserId}:${sessionId}:${ip}`,
     limit: 180,
     windowMs: 60 * 60 * 1000,
@@ -416,14 +416,14 @@ export async function POST(request: Request) {
       log.security.warn("Public chatbot POST rejected: invalid tenant token", { ip });
       return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
     }
-    const burstLimiter = enforceRateLimit(request, {
+    const burstLimiter = await enforceRateLimit(request, {
       key: `public-chatbot-burst:${tenantUserId}:${ip}`,
       limit: 8,
       windowMs: 60_000,
       message: "Te veel berichten op korte tijd. Probeer binnen enkele minuten opnieuw.",
     });
     if (burstLimiter) return burstLimiter;
-    const hourlyLimiter = enforceRateLimit(request, {
+    const hourlyLimiter = await enforceRateLimit(request, {
       key: `public-chatbot:${tenantUserId}:${ip}`,
       limit: 100,
       windowMs: 60 * 60 * 1000,

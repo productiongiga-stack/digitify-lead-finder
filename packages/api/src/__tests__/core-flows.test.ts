@@ -7,14 +7,27 @@ import { searchRouter } from "../routers/search.router";
 import { invoiceRouter } from "../routers/invoice.router";
 import { taskRouter } from "../routers/task.router";
 
+const TEST_USER_ID = "user_abcd1234";
+
 function makeCtx(db: Record<string, unknown>) {
+  const userFindUnique = vi.fn().mockResolvedValue({
+    id: TEST_USER_ID,
+    role: "OWNER",
+    workspaceOwnerId: null,
+  });
+  const userFindFirst = vi.fn().mockResolvedValue(null);
+
   return {
-    db: db as any,
+    db: {
+      user: { findUnique: userFindUnique, findFirst: userFindFirst },
+      ...db,
+    } as any,
     user: {
-      id: "user_abcd1234",
+      id: TEST_USER_ID,
       email: "owner@example.com",
       name: "Owner",
       role: "OWNER",
+      workspaceId: TEST_USER_ID,
     },
     requestId: "req_test",
   };
@@ -25,7 +38,7 @@ describe("lead flow", () => {
     const leadCreate = vi.fn().mockResolvedValue({
       id: "lead_1",
       companyName: "Acme BV",
-      createdById: "user_abcd1234",
+      createdById: TEST_USER_ID,
     });
     const activityCreate = vi.fn().mockResolvedValue({ id: "act_1" });
     const caller = leadRouter.createCaller(
@@ -46,7 +59,7 @@ describe("lead flow", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           companyName: "Acme BV",
-          createdById: "user_abcd1234",
+          createdById: TEST_USER_ID,
         }),
       }),
     );

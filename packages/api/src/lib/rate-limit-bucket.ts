@@ -8,8 +8,8 @@
  * `${rule}:${userId}`). Each bucket has a count and a reset timestamp.
  *
  * Limitations:
- *  - Per-process. For multi-instance deployments swap this for Redis/Upstash
- *    while keeping the same {allowed, remaining, resetAt} shape.
+ *  - Per-process. Server routes use `rate-limit.ts` (Redis when REDIS_URL is set).
+ *    Edge middleware imports this module directly for sync in-memory limits.
  *  - No bounded memory. The check() function opportunistically prunes expired
  *    buckets every call; that's enough at typical request rates.
  */

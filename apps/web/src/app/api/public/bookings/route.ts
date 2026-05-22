@@ -122,14 +122,14 @@ export async function POST(request: Request) {
     }
 
     _phase = "rate-limit";
-    const burstLimiter = enforceRateLimit(request, {
+    const burstLimiter = await enforceRateLimit(request, {
       key: `public-booking-burst:${tenantUserId}:${ip}`,
       limit: 4,
       windowMs: 60_000,
       message: "Te veel aanvragen. Wacht even en probeer opnieuw.",
     });
     if (burstLimiter) return burstLimiter;
-    const hourlyLimiter = enforceRateLimit(request, {
+    const hourlyLimiter = await enforceRateLimit(request, {
       key: `public-booking:${tenantUserId}:${ip}`,
       limit: 12,
       windowMs: 60 * 60 * 1000,

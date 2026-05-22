@@ -111,7 +111,7 @@ export async function POST(request: Request) {
     if (!domainId || !pageUrl) {
       return NextResponse.json({ error: "Domein en pagina zijn verplicht." }, { status: 400, headers: corsHeaders });
     }
-    const limiter = enforceRateLimit(request, {
+    const limiter = await enforceRateLimit(request, {
       key: `public-tracker:${domainId}:${ip}`,
       limit: 1200,
       windowMs: 60 * 60 * 1000,

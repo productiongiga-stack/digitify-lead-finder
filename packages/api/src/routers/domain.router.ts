@@ -15,7 +15,7 @@ export const domainRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const { status, page = 1, pageSize = 25 } = input ?? {};
-      const where: Record<string, unknown> = { createdById: ctx.user.id };
+      const where: Record<string, unknown> = { createdById: ctx.user.workspaceId! };
       if (status) where.status = status;
 
       const [domains, total] = await Promise.all([
@@ -53,7 +53,7 @@ export const domainRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const domain = await ctx.db.domain.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
         include: {
           lead: {
             select: {
@@ -94,7 +94,7 @@ export const domainRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      if (input.leadId) await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      if (input.leadId) await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       return ctx.db.domain.create({
         data: {
           domainName: input.domainName,
@@ -103,7 +103,7 @@ export const domainRouter = router({
           expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
           notes: input.notes || null,
           leadId: input.leadId || null,
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
         },
       });
     }),
@@ -125,11 +125,11 @@ export const domainRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
       const existing = await ctx.db.domain.findFirst({
-        where: { id, createdById: ctx.user.id },
+        where: { id, createdById: ctx.user.workspaceId! },
         select: { id: true },
       });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Domein niet gevonden" });
-      if (data.leadId) await assertLeadAccess(ctx.db, ctx.user.id, data.leadId);
+      if (data.leadId) await assertLeadAccess(ctx.db, ctx.user.workspaceId!, data.leadId);
       const updateData: Record<string, unknown> = {};
       if (data.domainName !== undefined) updateData.domainName = data.domainName;
       if (data.registrar !== undefined) updateData.registrar = data.registrar || null;
@@ -147,7 +147,7 @@ export const domainRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.domain.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
         select: { id: true },
       });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Domein niet gevonden" });
@@ -162,13 +162,13 @@ export const domainRouter = router({
       // Update domain SSL status based on analysis
       const sslStatus = analysis.hasSSL ? "VALID" : "NONE";
       await ctx.db.domain.updateMany({
-        where: { domainName: input.domainName, createdById: ctx.user.id },
+        where: { domainName: input.domainName, createdById: ctx.user.workspaceId! },
         data: { sslStatus },
       });
 
       // Find the domain to get its leadId
       const domain = await ctx.db.domain.findFirst({
-        where: { domainName: input.domainName, createdById: ctx.user.id },
+        where: { domainName: input.domainName, createdById: ctx.user.workspaceId! },
         select: { leadId: true },
       });
 
@@ -200,7 +200,7 @@ export const domainRouter = router({
     .input(z.object({ domainName: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       const domain = await ctx.db.domain.findFirst({
-        where: { domainName: input.domainName, createdById: ctx.user.id },
+        where: { domainName: input.domainName, createdById: ctx.user.workspaceId! },
         select: { leadId: true },
       });
 

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
-import { loadUserSettingRows } from "../lib/user-settings";
+import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 import { ownedChatSessionWhere } from "../lib/tenant";
 import { readDashboardCache, writeDashboardCache } from "../lib/dashboard-cache";
 
@@ -53,7 +53,7 @@ type UnifiedRemindersResult = {
 
 export const dashboardRouter = router({
   getKpis: protectedProcedure.query(async ({ ctx }) => {
-    const cacheKey = `getKpis:${ctx.user.id}`;
+    const cacheKey = `getKpis:${ctx.user.workspaceId!}`;
     const cached = readDashboardCache<KpiResult>(cacheKey);
     if (cached) return cached;
 
@@ -75,42 +75,42 @@ export const dashboardRouter = router({
       pendingReviews,
       quoteStatusBuckets,
     ] = await Promise.all([
-      ctx.db.lead.count({ where: { createdById: ctx.user.id } }),
-      ctx.db.lead.count({ where: { createdById: ctx.user.id, createdAt: { gte: weekAgo } } }),
-      ctx.db.lead.count({ where: { createdById: ctx.user.id, scorePriority: "Hot" } }),
+      ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId! } }),
+      ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId!, createdAt: { gte: weekAgo } } }),
+      ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId!, scorePriority: "Hot" } }),
       ctx.db.lead.groupBy({
         by: ["status"],
-        where: { createdById: ctx.user.id },
+        where: { createdById: ctx.user.workspaceId! },
         _count: { _all: true },
       }),
-      ctx.db.campaign.count({ where: { createdById: ctx.user.id } }),
+      ctx.db.campaign.count({ where: { createdById: ctx.user.workspaceId! } }),
       ctx.db.emailDraft.groupBy({
         by: ["status"],
-        where: { lead: { createdById: ctx.user.id } },
+        where: { lead: { createdById: ctx.user.workspaceId! } },
         _count: { _all: true },
       }),
       ctx.db.lead.aggregate({
         _avg: { overallScore: true },
-        where: { createdById: ctx.user.id, overallScore: { not: null } },
+        where: { createdById: ctx.user.workspaceId!, overallScore: { not: null } },
       }),
-      ctx.db.quote.count({ where: { createdById: ctx.user.id, status: { in: ["DRAFT", "SENT", "VIEWED"] } } }),
+      ctx.db.quote.count({ where: { createdById: ctx.user.workspaceId!, status: { in: ["DRAFT", "SENT", "VIEWED"] } } }),
       ctx.db.quote.aggregate({
         _sum: { total: true },
-        where: { createdById: ctx.user.id, status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] } },
+        where: { createdById: ctx.user.workspaceId!, status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] } },
       }),
-      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), isRead: false } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), isRead: false } }),
       ctx.db.campaignLead.count({
         where: {
           campaign: {
             status: "ACTIVE",
-            createdById: ctx.user.id,
+            createdById: ctx.user.workspaceId!,
           },
         },
       }),
-      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.id } }),
+      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.workspaceId! } }),
       ctx.db.quote.groupBy({
         by: ["status"],
-        where: { createdById: ctx.user.id },
+        where: { createdById: ctx.user.workspaceId! },
         _count: { _all: true },
       }),
     ]);
@@ -178,7 +178,7 @@ export const dashboardRouter = router({
       where: {
         OR: [
           { userId: ctx.user.id },
-          { lead: { createdById: ctx.user.id } },
+          { lead: { createdById: ctx.user.workspaceId! } },
         ],
       },
       take: 20,
@@ -191,11 +191,12 @@ export const dashboardRouter = router({
   }),
 
   getUnifiedReminders: protectedProcedure.query(async ({ ctx }) => {
-    const cacheKey = `getUnifiedReminders:${ctx.user.id}`;
+    const cacheKey = `getUnifiedReminders:${ctx.user.workspaceId!}`;
     const cached = readDashboardCache<UnifiedRemindersResult>(cacheKey);
     if (cached) return cached;
 
-    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["email.followup_days"]);
+    const scope = workspaceScopeFromUser(ctx.user);
+    const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["email.followup_days"]);
     const followupDays = Math.max(
       1,
       Number.parseInt(getSettingString(settings, "email.followup_days", "3"), 10) || 3,
@@ -212,7 +213,7 @@ export const dashboardRouter = router({
           status: "SENT",
           sentAt: { lte: emailThreshold },
           lead: {
-            createdById: ctx.user.id,
+            createdById: ctx.user.workspaceId!,
             status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
           },
         },
@@ -231,7 +232,7 @@ export const dashboardRouter = router({
       }),
       ctx.db.booking.findMany({
         where: {
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
           OR: [
             { status: "PENDING" },
             {
@@ -251,7 +252,7 @@ export const dashboardRouter = router({
       }),
       ctx.db.quote.findMany({
         where: {
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
           status: { in: ["SENT", "VIEWED"] },
           OR: [
             { sentAt: { lte: quoteThreshold } },
@@ -271,7 +272,7 @@ export const dashboardRouter = router({
       }),
       ctx.db.lead.findMany({
         where: {
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
           status: { in: ["CONTACTED", "RESPONDED", "QUALIFIED"] },
           activities: {
             none: {
@@ -350,14 +351,14 @@ export const dashboardRouter = router({
   getPipelineOverview: protectedProcedure.query(async ({ ctx }) => {
     const [stages, leadCounts] = await Promise.all([
       ctx.db.pipelineStage.findMany({
-        where: { createdById: ctx.user.id },
+        where: { createdById: ctx.user.workspaceId! },
         orderBy: { sortOrder: "asc" },
         select: { id: true, name: true, color: true },
       }),
       ctx.db.lead.groupBy({
         by: ["pipelineStageId"],
         _count: { id: true },
-        where: { createdById: ctx.user.id, pipelineStageId: { not: null } },
+        where: { createdById: ctx.user.workspaceId!, pipelineStageId: { not: null } },
       }),
     ]);
     const countMap = new Map(
@@ -384,7 +385,7 @@ export const dashboardRouter = router({
 
     const counts = await Promise.all(
       ranges.map((b) =>
-        ctx.db.lead.count({ where: { createdById: ctx.user.id, overallScore: { gte: b.min, lte: b.max } } })
+        ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId!, overallScore: { gte: b.min, lte: b.max } } })
       )
     );
 
@@ -395,7 +396,7 @@ export const dashboardRouter = router({
     const leads = await ctx.db.lead.groupBy({
       by: ["industry"],
       _count: { id: true },
-      where: { industry: { not: null }, createdById: ctx.user.id },
+      where: { industry: { not: null }, createdById: ctx.user.workspaceId! },
       orderBy: { _count: { id: "desc" } },
       take: 10,
     });
@@ -410,7 +411,7 @@ export const dashboardRouter = router({
     const leads = await ctx.db.lead.groupBy({
       by: ["city"],
       _count: { id: true },
-      where: { city: { not: null }, createdById: ctx.user.id },
+      where: { city: { not: null }, createdById: ctx.user.workspaceId! },
       orderBy: { _count: { id: "desc" } },
       take: 10,
     });
@@ -427,7 +428,7 @@ export const dashboardRouter = router({
 
     const leads = await ctx.db.lead.findMany({
       where: {
-        createdById: ctx.user.id,
+        createdById: ctx.user.workspaceId!,
         status: { in: ["CONTACTED", "RESPONDED", "QUALIFIED"] },
         activities: {
           none: {
@@ -472,14 +473,14 @@ export const dashboardRouter = router({
 
   getSavedSearchCount: protectedProcedure.query(async ({ ctx }) => {
     const count = await ctx.db.lead.count({
-      where: { source: { not: null }, createdById: ctx.user.id },
+      where: { source: { not: null }, createdById: ctx.user.workspaceId! },
     });
     return count;
   }),
 
   getTopLeads: protectedProcedure.query(async ({ ctx }) => {
     return ctx.db.lead.findMany({
-      where: { overallScore: { not: null }, createdById: ctx.user.id },
+      where: { overallScore: { not: null }, createdById: ctx.user.workspaceId! },
       orderBy: { overallScore: "desc" },
       take: 5,
       select: {
@@ -495,12 +496,12 @@ export const dashboardRouter = router({
 
   getQuoteStats: protectedProcedure.query(async ({ ctx }) => {
     const [draftCount, sentCount, acceptedCount, totalValue] = await Promise.all([
-      ctx.db.quote.count({ where: { status: "DRAFT", createdById: ctx.user.id } }),
-      ctx.db.quote.count({ where: { status: "SENT", createdById: ctx.user.id } }),
-      ctx.db.quote.count({ where: { status: "ACCEPTED", createdById: ctx.user.id } }),
+      ctx.db.quote.count({ where: { status: "DRAFT", createdById: ctx.user.workspaceId! } }),
+      ctx.db.quote.count({ where: { status: "SENT", createdById: ctx.user.workspaceId! } }),
+      ctx.db.quote.count({ where: { status: "ACCEPTED", createdById: ctx.user.workspaceId! } }),
       ctx.db.quote.aggregate({
         _sum: { total: true },
-        where: { status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] }, createdById: ctx.user.id },
+        where: { status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] }, createdById: ctx.user.workspaceId! },
       }),
     ]);
 
@@ -514,9 +515,9 @@ export const dashboardRouter = router({
 
   getChatStats: protectedProcedure.query(async ({ ctx }) => {
     const [openCount, waitingCount, unreadCount] = await Promise.all([
-      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), status: "OPEN" } }),
-      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), status: "WAITING" } }),
-      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), isRead: false } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), status: "OPEN" } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), status: "WAITING" } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), isRead: false } }),
     ]);
 
     return { openCount, waitingCount, unreadCount };
@@ -526,7 +527,7 @@ export const dashboardRouter = router({
     const now = new Date();
     return ctx.db.booking.findMany({
       where: {
-        createdById: ctx.user.id,
+        createdById: ctx.user.workspaceId!,
         date: { gte: now },
         status: { in: ["PENDING", "SCHEDULED", "CONFIRMED"] },
       },
@@ -551,7 +552,7 @@ export const dashboardRouter = router({
 
     return ctx.db.domain.findMany({
       where: {
-        createdById: ctx.user.id,
+        createdById: ctx.user.workspaceId!,
         expiresAt: {
           gte: now,
           lte: thirtyDaysFromNow,
@@ -572,7 +573,7 @@ export const dashboardRouter = router({
 
   getDomainMonitor: protectedProcedure.query(async ({ ctx }) => {
     const domains = await ctx.db.domain.findMany({
-      where: { createdById: ctx.user.id },
+      where: { createdById: ctx.user.workspaceId! },
       orderBy: { updatedAt: "desc" },
       take: 6,
       include: {
@@ -629,9 +630,9 @@ export const dashboardRouter = router({
 
   getReviewStats: protectedProcedure.query(async ({ ctx }) => {
     const [pendingCount, sentCount, reviewedCount] = await Promise.all([
-      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.id } }),
-      ctx.db.reviewRequest.count({ where: { status: "SENT", createdById: ctx.user.id } }),
-      ctx.db.reviewRequest.count({ where: { status: "REVIEWED", createdById: ctx.user.id } }),
+      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.workspaceId! } }),
+      ctx.db.reviewRequest.count({ where: { status: "SENT", createdById: ctx.user.workspaceId! } }),
+      ctx.db.reviewRequest.count({ where: { status: "REVIEWED", createdById: ctx.user.workspaceId! } }),
     ]);
 
     return { pendingCount, sentCount, reviewedCount };
@@ -640,7 +641,7 @@ export const dashboardRouter = router({
   getOpenChats: protectedProcedure.query(async ({ ctx }) => {
     const sessions = await ctx.db.chatSession.findMany({
       where: {
-        ...ownedChatSessionWhere(ctx.user.id),
+        ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id),
         status: { in: ["OPEN", "WAITING"] },
       },
       orderBy: { updatedAt: "desc" },

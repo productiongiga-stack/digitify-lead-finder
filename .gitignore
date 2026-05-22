@@ -17,6 +17,8 @@ apps/web/.vercel/
 *.zip
 
 coverage/
+test-results/
+playwright-report/
 .claude/
 .vercel
 

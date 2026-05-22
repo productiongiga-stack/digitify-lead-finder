@@ -19,7 +19,7 @@ export const reportRouter = router({
 
       const [reports, total] = await Promise.all([
         ctx.db.report.findMany({
-          where: { generatedById: ctx.user.id },
+          where: { generatedById: ctx.user.workspaceId! },
           orderBy: { createdAt: "desc" },
           skip,
           take: perPage,
@@ -28,7 +28,7 @@ export const reportRouter = router({
             generatedBy: { select: { id: true, name: true } },
           },
         }),
-        ctx.db.report.count({ where: { generatedById: ctx.user.id } }),
+        ctx.db.report.count({ where: { generatedById: ctx.user.workspaceId! } }),
       ]);
 
       return {
@@ -44,7 +44,7 @@ export const reportRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const report = await ctx.db.report.findFirst({
-        where: { id: input.id, generatedById: ctx.user.id },
+        where: { id: input.id, generatedById: ctx.user.workspaceId! },
         include: {
           campaign: { select: { id: true, name: true } },
           generatedBy: { select: { id: true, name: true } },
@@ -71,7 +71,7 @@ export const reportRouter = router({
 
       if (campaignId) {
         const campaign = await ctx.db.campaign.findFirst({
-          where: { id: campaignId, createdById: ctx.user.id },
+          where: { id: campaignId, createdById: ctx.user.workspaceId! },
           include: {
             campaignLeads: {
               include: {
@@ -93,7 +93,7 @@ export const reportRouter = router({
         leads = campaign.campaignLeads.map((cl) => cl.lead);
       } else {
         leads = await ctx.db.lead.findMany({
-          where: { createdById: ctx.user.id },
+          where: { createdById: ctx.user.workspaceId! },
           include: {
             pipelineStage: true,
             tags: { include: { tag: true } },
@@ -210,7 +210,7 @@ export const reportRouter = router({
           type: campaignId ? "campaign" : "all",
           data: reportData,
           campaignId: campaignId ?? null,
-          generatedById: ctx.user.id,
+          generatedById: ctx.user.workspaceId!,
         },
         include: {
           campaign: { select: { id: true, name: true } },
@@ -224,9 +224,9 @@ export const reportRouter = router({
   generateLeadReport: protectedProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       const lead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.id },
+        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
         include: {
           scoringFactors: { include: { scoringWeight: true } },
           enrichmentData: true,
@@ -354,7 +354,7 @@ export const reportRouter = router({
       };
 
       const existing = await ctx.db.report.findFirst({
-        where: { leadId: lead.id, type: "lead_proposal", generatedById: ctx.user.id },
+        where: { leadId: lead.id, type: "lead_proposal", generatedById: ctx.user.workspaceId! },
         orderBy: { createdAt: "desc" },
         select: { id: true },
       });
@@ -366,7 +366,7 @@ export const reportRouter = router({
             data: {
               title,
               data: reportData,
-              generatedById: ctx.user.id,
+              generatedById: ctx.user.workspaceId!,
             },
             include: {
               generatedBy: { select: { id: true, name: true } },
@@ -378,7 +378,7 @@ export const reportRouter = router({
               type: "lead_proposal",
               leadId: lead.id,
               data: reportData,
-              generatedById: ctx.user.id,
+              generatedById: ctx.user.workspaceId!,
             },
             include: {
               generatedBy: { select: { id: true, name: true } },
@@ -408,7 +408,7 @@ export const reportRouter = router({
 
       if (!report) throw new TRPCError({ code: "NOT_FOUND", message: "Rapport niet gevonden" });
 
-      if (report.generatedById !== ctx.user.id) {
+      if (report.generatedById !== ctx.user.workspaceId!) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Rapport niet gevonden" });
       }
 

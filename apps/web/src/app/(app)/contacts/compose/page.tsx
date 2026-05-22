@@ -40,6 +40,10 @@ import { EmailPreview } from "@/components/email/preview";
 import { MailVariablesHelp } from "@/components/email/mail-variables-help";
 import { MAIL_VARIABLE_REGISTRY, extractMailVariableKeys, findUnknownMailVariables } from "@/lib/mail-variables";
 import { extractEmailTemplateMetadata, injectEmailTemplateMetadata, type EmailLayout } from "@/lib/email-content";
+import { applyEmailTemplateSelection } from "@/lib/apply-email-template";
+import { TemplatePicker } from "@/components/templates/template-picker";
+import { TemplateScopeHelp } from "@/components/templates/template-scope-help";
+import { OutboundWorkflowHelp } from "@/components/outbound/outbound-workflow-help";
 // Inline placeholder data/functions to avoid importing @digitify/email (which pulls in nodemailer/server deps)
 type PlaceholderContext = Record<string, string | number | undefined>;
 
@@ -107,6 +111,8 @@ export default function ComposePage() {
   const [previewWithPlaceholders, setPreviewWithPlaceholders] = useState(false);
   const [ctaText, setCtaText] = useState("");
   const [ctaUrl, setCtaUrl] = useState("");
+  const [layoutFromTemplate, setLayoutFromTemplate] = useState(false);
+  const [campaignFilterId, setCampaignFilterId] = useState("");
 
   // Fetch leads for the dropdown
   const { data: leadsData, isLoading: leadsLoading } = trpc.lead.list.useQuery({
@@ -117,8 +123,12 @@ export default function ComposePage() {
     sortDir: "asc",
   });
 
-  // Fetch templates
-  const { data: templates } = trpc.contact.listTemplates.useQuery();
+  const { data: campaigns } = trpc.campaign.list.useQuery();
+  const { data: templateData } = trpc.template.list.useQuery({
+    forOutbound: true,
+    campaignId: campaignFilterId || undefined,
+  });
+  const templates = templateData?.templates ?? [];
 
   // Branding settings for email preview
   const { data: brandingSettings } = trpc.settings.getAll.useQuery(undefined, {
@@ -306,21 +316,21 @@ export default function ComposePage() {
     }
   }
 
-  // Handle template selection
   function handleTemplateSelect(templateId: string) {
     setSelectedTemplateId(templateId);
     if (templateId === "none") {
+      setLayoutFromTemplate(false);
       return;
     }
-    const template = templates?.find((t: NonNullable<typeof templates>[number]) => t.id === templateId);
-    if (template) {
-      setSubject(template.subject);
-      const parsed = extractEmailTemplateMetadata(template.body);
-      setBody(parsed.cleanBody);
-      setCtaText(parsed.ctaText);
-      setCtaUrl(parsed.ctaUrl);
-      if (parsed.layout) setEmailLayout(parsed.layout);
-    }
+    const template = templates.find((t) => t.id === templateId);
+    if (!template) return;
+    const applied = applyEmailTemplateSelection(template);
+    setSubject(applied.subject);
+    setBody(applied.body);
+    setCtaText(applied.ctaText);
+    setCtaUrl(applied.ctaUrl);
+    setEmailLayout(applied.layout);
+    setLayoutFromTemplate(true);
   }
 
   // Save as draft
@@ -375,10 +385,18 @@ export default function ComposePage() {
       if (result.draft) {
         setSubject(result.draft.subject);
         const parsed = extractEmailTemplateMetadata(result.draft.body);
-        setBody(parsed.cleanBody);
-        setCtaText(parsed.ctaText);
-        setCtaUrl(parsed.ctaUrl);
-        if (parsed.layout) setEmailLayout(parsed.layout);
+        const applied = applyEmailTemplateSelection({
+          subject: result.draft.subject,
+          cleanBody: parsed.cleanBody,
+          ctaText: parsed.ctaText,
+          ctaUrl: parsed.ctaUrl,
+          layout: parsed.layout,
+        });
+        setBody(applied.body);
+        setCtaText(applied.ctaText);
+        setCtaUrl(applied.ctaUrl);
+        if (parsed.layout) setEmailLayout(applied.layout);
+        setLayoutFromTemplate(false);
         if (result.draft.toEmail) {
           setToEmail(result.draft.toEmail);
         }
@@ -404,7 +422,7 @@ export default function ComposePage() {
           <div>
             <h1 className="text-xl font-bold tracking-tight">Nieuwe E-mail</h1>
             <p className="text-sm text-muted-foreground">
-              Schrijf en verzend een gepersonaliseerde e-mail
+              Concept opslaan of ter goedkeuring indienen — verzending gebeurt later via Outbound Center
             </p>
           </div>
         </div>
@@ -415,6 +433,8 @@ export default function ComposePage() {
           <p className="text-sm font-medium text-green-800">{successMessage}</p>
         </Card>
       )}
+
+      <OutboundWorkflowHelp variant="compact" className="rounded-lg border border-blue-200/60 bg-blue-50/40 px-4 py-3 dark:border-blue-900/40 dark:bg-blue-950/20" />
 
       <div className="grid gap-3 xl:grid-cols-3">
         <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
@@ -443,7 +463,7 @@ export default function ComposePage() {
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gerelateerd</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button asChild size="sm" variant="outline">
-                <Link href="/contacts/templates">Templates</Link>
+                <Link href="/templates">Templates</Link>
               </Button>
               <Button asChild size="sm" variant="ghost">
                 <Link href="/settings/email">E-mail instellingen</Link>
@@ -519,7 +539,14 @@ export default function ComposePage() {
               {/* Layout selector */}
               <div className="space-y-2">
                 <Label>E-mail layout</Label>
-                <Select value={emailLayout} onValueChange={(v) => setEmailLayout(v as typeof emailLayout)}>
+                <Select
+                  value={emailLayout}
+                  onValueChange={(v) => {
+                    setEmailLayout(v as typeof emailLayout);
+                    setLayoutFromTemplate(false);
+                  }}
+                  disabled={layoutFromTemplate}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Kies een layout..." />
                   </SelectTrigger>
@@ -532,7 +559,9 @@ export default function ComposePage() {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Deze layout wordt mee opgeslagen in het template of concept en ook zo verzonden.
+                  {layoutFromTemplate
+                    ? "Layout komt uit het gekozen Template Studio-template. Kies “Geen template” om handmatig te wijzigen."
+                    : "Deze layout wordt mee opgeslagen in het concept en zo verzonden."}
                 </p>
               </div>
 
@@ -559,22 +588,42 @@ export default function ComposePage() {
                 </Button>
               </div>
 
-              {/* Template selector */}
               <div className="space-y-2">
-                <Label>Template (optioneel)</Label>
-                <Select value={selectedTemplateId} onValueChange={handleTemplateSelect}>
+                <Label>Campagne (template-filter)</Label>
+                <Select
+                  value={campaignFilterId || "all"}
+                  onValueChange={(value) => {
+                    setCampaignFilterId(value === "all" ? "" : value);
+                    setSelectedTemplateId("");
+                  }}
+                >
                   <SelectTrigger>
-                    <SelectValue placeholder="Kies een template..." />
+                    <SelectValue placeholder="Alle campagnes" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">Geen template</SelectItem>
-                    {templates?.map((t: NonNullable<typeof templates>[number]) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        {t.name}
+                    <SelectItem value="all">Alle campagnes + globale templates</SelectItem>
+                    {(campaigns ?? []).map((campaign: { id: string; name: string }) => (
+                      <SelectItem key={campaign.id} value={campaign.id}>
+                        {campaign.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                <TemplateScopeHelp variant="compose" className="border-0 bg-transparent p-0 shadow-none" />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label>Template Studio</Label>
+                  <Link href="/templates" className="text-xs text-primary hover:underline">
+                    Beheren
+                  </Link>
+                </div>
+                <TemplatePicker
+                  value={selectedTemplateId || "none"}
+                  onValueChange={handleTemplateSelect}
+                  templates={templates}
+                />
               </div>
 
               <div className="space-y-2">

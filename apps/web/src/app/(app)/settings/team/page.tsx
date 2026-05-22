@@ -7,7 +7,7 @@ import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Skeleton, Inpu
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@digitify/ui";
-import { ArrowLeft, UserPlus, Loader2, Trash2, AlertTriangle, CheckCircle2, XCircle, CalendarDays, Layers } from "lucide-react";
+import { ArrowLeft, UserPlus, Loader2, Trash2, AlertTriangle, CheckCircle2, XCircle, CalendarDays, Layers, Users2 } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { ALL_MODULES } from "@/lib/navigation";
@@ -57,6 +57,7 @@ export default function TeamSettingsPage() {
   const { data: session } = useSession();
   const currentRole = (session?.user as { role?: string } | undefined)?.role;
   const canManageUsers = currentRole === "OWNER";
+  const { data: workspaceInfo } = trpc.user.getWorkspaceInfo.useQuery();
   const { data: users, isLoading } = trpc.user.list.useQuery();
   const { data: requests, isLoading: requestsLoading } = trpc.registration.listRequests.useQuery();
   const utils = trpc.useUtils();
@@ -120,6 +121,39 @@ export default function TeamSettingsPage() {
           </Button>
         ) : null}
       </div>
+
+      {workspaceInfo ? (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                <Users2 className="h-5 w-5 text-primary" />
+              </div>
+              <div className="space-y-1">
+                <p className="font-medium">Gedeelde workspace</p>
+                <p className="text-sm text-muted-foreground">
+                  {workspaceInfo.isOwner
+                    ? "Jij bent de eigenaar van deze workspace. Teamleden zien dezelfde leads, campagnes en templates."
+                    : `Je werkt in de workspace van ${workspaceInfo.ownerName}. Leads, campagnes en templates zijn gedeeld.`}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Gedeeld: {workspaceInfo.sharedResources.join(" · ")} · {workspaceInfo.memberCount}{" "}
+                  {workspaceInfo.memberCount === 1 ? "account" : "accounts"}
+                </p>
+              </div>
+            </div>
+            {!workspaceInfo.isOwner ? (
+              <Badge variant="secondary" className="w-fit shrink-0">
+                Teamlid
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="w-fit shrink-0">
+                Eigenaar
+              </Badge>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <Table>

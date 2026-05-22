@@ -11,7 +11,15 @@ import { formatSmtpErrorMessage, normalizeAiPlaceholderSyntax, normalizeLegacyPl
 import { log } from "./logger";
 import { getSettingBoolean, getSettingNumber, getSettingString, settingsRowsToMap } from "./settings";
 import { extractEmailTemplateMetadata } from "./email-content";
-import { loadUserSettingRows } from "./user-settings";
+import { loadWorkspaceSettingRows, type WorkspaceScope } from "./workspace-settings";
+
+export type EmailSettingsScope = string | WorkspaceScope;
+
+function resolveEmailSettingsScope(scope?: EmailSettingsScope): WorkspaceScope | null {
+  if (!scope) return null;
+  if (typeof scope === "string") return { workspaceId: scope, memberId: scope };
+  return scope;
+}
 
 interface EmailSettings {
   providerName: string;
@@ -72,7 +80,7 @@ function resolveAppUrl() {
 /**
  * Load email and branding settings from the database.
  */
-export async function loadEmailSettings(db: PrismaClient, userId?: string): Promise<EmailSettings> {
+export async function loadEmailSettings(db: PrismaClient, scope?: EmailSettingsScope): Promise<EmailSettings> {
   const settingKeys = [
     "email.provider",
     "email.smtp_host",
@@ -98,8 +106,9 @@ export async function loadEmailSettings(db: PrismaClient, userId?: string): Prom
     "company.website",
   ];
 
-  const settingRows = userId
-    ? await loadUserSettingRows(db, userId, settingKeys)
+  const resolved = resolveEmailSettingsScope(scope);
+  const settingRows = resolved
+    ? await loadWorkspaceSettingRows(db, resolved, settingKeys)
     : await db.setting.findMany({ where: { key: { in: settingKeys } } });
   const settings = settingsRowsToMap(settingRows);
 

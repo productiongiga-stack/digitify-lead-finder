@@ -5,7 +5,7 @@ import { router, protectedProcedure, adminProcedure } from "../trpc";
 export const pipelineRouter = router({
   getStages: protectedProcedure.query(async ({ ctx }) => {
     return ctx.db.pipelineStage.findMany({
-      where: { createdById: ctx.user.id },
+      where: { createdById: ctx.user.workspaceId! },
       orderBy: { sortOrder: "asc" },
       include: { _count: { select: { leads: true } } },
     });
@@ -15,11 +15,11 @@ export const pipelineRouter = router({
     .input(z.object({ name: z.string().min(1), color: z.string().default("#6366f1") }))
     .mutation(async ({ ctx, input }) => {
       const maxOrder = await ctx.db.pipelineStage.aggregate({
-        where: { createdById: ctx.user.id },
+        where: { createdById: ctx.user.workspaceId! },
         _max: { sortOrder: true },
       });
       return ctx.db.pipelineStage.create({
-        data: { ...input, createdById: ctx.user.id, sortOrder: (maxOrder._max.sortOrder ?? -1) + 1 },
+        data: { ...input, createdById: ctx.user.workspaceId!, sortOrder: (maxOrder._max.sortOrder ?? -1) + 1 },
       });
     }),
 
@@ -28,7 +28,7 @@ export const pipelineRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
       const stage = await ctx.db.pipelineStage.findFirst({
-        where: { id, createdById: ctx.user.id },
+        where: { id, createdById: ctx.user.workspaceId! },
         select: { id: true },
       });
       if (!stage) {
@@ -41,7 +41,7 @@ export const pipelineRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const stage = await ctx.db.pipelineStage.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
         select: { id: true },
       });
       if (!stage) {
@@ -57,7 +57,7 @@ export const pipelineRouter = router({
       await Promise.all(
         input.stageIds.map((id, index) =>
           ctx.db.pipelineStage.updateMany({
-            where: { id, createdById: ctx.user.id },
+            where: { id, createdById: ctx.user.workspaceId! },
             data: { sortOrder: index },
           })
         )

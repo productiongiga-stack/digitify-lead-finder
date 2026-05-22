@@ -2,27 +2,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { runAllDueDripsWorker } from "@digitify/api/src/routers/campaign.router";
 import { log } from "@digitify/api/src/lib/logger";
-
-function isAuthorized(request: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  const authHeader = request.headers.get("authorization") || "";
-  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-  const isVercelCron = request.headers.get("x-vercel-cron") === "1";
-
-  if (cronSecret) {
-    return bearerToken.length > 0 && bearerToken === cronSecret;
-  }
-
-  if (process.env.NODE_ENV !== "production") {
-    return true;
-  }
-
-  return isVercelCron;
-}
+import { cronAuthFailureReason, isCronAuthorized } from "@digitify/api/src/lib/cron-auth";
 
 async function runDripWorker(request: Request) {
-  if (!isAuthorized(request)) {
-    log.security.warn("Drip cron unauthorized request");
+  if (!isCronAuthorized(request)) {
+    log.security.warn("Drip cron unauthorized request", { reason: cronAuthFailureReason() });
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 

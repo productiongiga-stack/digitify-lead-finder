@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { getCurrentUser } from "@/lib/auth/session";
+import { getCurrentUser, workspaceIdFor } from "@/lib/auth/session";
 
 function userSettingKey(userId: string, key: string) {
   return `user:${userId}:${key.trim()}`;
@@ -62,9 +62,10 @@ export async function GET(request: Request) {
   const chatSessionId = url.searchParams.get("chatSessionId")?.trim() || "";
   const quoteId = url.searchParams.get("quoteId")?.trim() || "";
 
+  const workspaceId = workspaceIdFor(user);
   const [services, settings, lead, chatSession, editingQuote] = await Promise.all([
     prisma.serviceCatalog.findMany({
-      where: { isActive: true, createdById: user.id },
+      where: { isActive: true, createdById: workspaceId },
       orderBy: [{ category: "asc" }, { sortOrder: "asc" }],
     }),
     prisma.setting.findMany({
@@ -76,7 +77,7 @@ export async function GET(request: Request) {
     }),
     leadId
       ? prisma.lead.findFirst({
-          where: { id: leadId, createdById: user.id },
+          where: { id: leadId, createdById: workspaceId },
           select: {
             id: true,
             companyName: true,
@@ -93,7 +94,11 @@ export async function GET(request: Request) {
       ? prisma.chatSession.findFirst({
           where: {
             id: chatSessionId,
-            OR: [{ assignedToId: user.id }, { tags: { has: `tenant:${user.id}` } }],
+            OR: [
+              { lead: { createdById: workspaceId } },
+              { assignedToId: user.id },
+              { tags: { has: `tenant:${workspaceId}` } },
+            ],
           },
           select: {
             id: true,
@@ -107,7 +112,7 @@ export async function GET(request: Request) {
       : null,
     quoteId
       ? prisma.quote.findFirst({
-          where: { id: quoteId, createdById: user.id },
+          where: { id: quoteId, createdById: workspaceId },
           select: {
             id: true,
             quoteNumber: true,

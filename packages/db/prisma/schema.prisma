@@ -17,8 +17,12 @@ model User {
   image          String?
   emailVerified  DateTime?
   role           UserRole  @default(MEMBER)
+  workspaceOwnerId String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+
+  workspaceOwner   User?  @relation("WorkspaceMembers", fields: [workspaceOwnerId], references: [id], onDelete: SetNull)
+  workspaceMembers User[] @relation("WorkspaceMembers")
 
   accounts       Account[]
   sessions       Session[]
@@ -46,6 +50,7 @@ model User {
   reviewedRegistrationRequests RegistrationRequest[] @relation("RegistrationReviewer")
   reviewedFeedbackItems FeedbackItem[] @relation("FeedbackReviewer")
 
+  @@index([workspaceOwnerId])
   @@map("users")
 }
 
@@ -430,22 +435,48 @@ model CampaignLead {
 }
 
 // EMAIL / CONTACT
+enum EmailTemplateType {
+  OUTREACH
+  FOLLOW_UP
+  PROPOSAL
+  REPORT
+  BOOKING
+  REVIEW
+  REENGAGEMENT
+  CUSTOM
+}
+
+enum EmailTemplateLayout {
+  modern
+  minimal
+  business
+  proposal
+  followup
+}
+
 model EmailTemplate {
-  id          String   @id @default(cuid())
+  id          String              @id @default(cuid())
   createdById String?
   name        String
   subject     String
-  body        String   @db.Text
+  body        String              @db.Text
+  type        EmailTemplateType   @default(CUSTOM)
+  layout      EmailTemplateLayout @default(modern)
+  description String              @default("")
+  ctaText     String              @default("")
+  ctaUrl      String              @default("")
   campaignId  String?
-  isGlobal    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isGlobal    Boolean             @default(false)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
 
   createdBy User?     @relation(fields: [createdById], references: [id], onDelete: Cascade)
   campaign  Campaign? @relation(fields: [campaignId], references: [id])
   drafts    EmailDraft[]
 
   @@index([createdById])
+  @@index([createdById, type])
+  @@index([createdById, layout])
   @@unique([createdById, name])
   @@map("email_templates")
 }

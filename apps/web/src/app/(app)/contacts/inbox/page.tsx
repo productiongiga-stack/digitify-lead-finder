@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { trpc } from "@/lib/trpc/client";
+import { buildInboxHtmlDocument, sanitizeInboxHtml } from "@/lib/sanitize-inbox-html";
 import {
   Button,
   Card,
@@ -36,6 +37,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { findUnknownMailVariables } from "@/lib/mail-variables";
+import { injectEmailTemplateMetadata, type EmailLayout } from "@/lib/email-content";
+import { applyEmailTemplateSelection } from "@/lib/apply-email-template";
+import { TemplatePicker } from "@/components/templates/template-picker";
 import Link from "next/link";
 
 const MAIL_TYPES = [
@@ -97,7 +101,9 @@ export default function InboxPage() {
   const [composeBody, setComposeBody] = useState("");
   const [composeStatus, setComposeStatus] = useState<"draft" | "queued" | "sent" | "failed" | "replied" | null>(null);
   const [composeError, setComposeError] = useState("");
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [composeLayout, setComposeLayout] = useState<EmailLayout>("modern");
+  const [composeCtaText, setComposeCtaText] = useState("");
+  const [composeCtaUrl, setComposeCtaUrl] = useState("");
 
   const utils = trpc.useUtils();
 
@@ -115,9 +121,11 @@ export default function InboxPage() {
     refetchOnWindowFocus: false,
     retry: false,
   });
-  const { data: savedTemplates } = trpc.contact.listTemplates.useQuery(undefined, {
-    refetchOnWindowFocus: false,
-  });
+  const { data: templateData } = trpc.template.list.useQuery(
+    { forOutbound: true },
+    { refetchOnWindowFocus: false },
+  );
+  const savedTemplates = templateData?.templates ?? [];
   const composeLeadsQuery = trpc.lead.list.useQuery(
     {
       filters: { search: composeLeadSearch || undefined, hasEmail: true },
@@ -171,30 +179,9 @@ export default function InboxPage() {
     },
   });
 
-  // Write HTML into sandboxed iframe
-  useEffect(() => {
-    if (message?.html && iframeRef.current) {
-      const doc = iframeRef.current.contentDocument;
-      if (doc) {
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; color: #333; padding: 16px; margin: 0; line-height: 1.6; }
-              img { max-width: 100%; height: auto; }
-              a { color: #6366f1; }
-              pre, code { white-space: pre-wrap; word-break: break-all; }
-            </style>
-          </head>
-          <body>${message.html}</body>
-          </html>
-        `);
-        doc.close();
-      }
-    }
+  const sanitizedMessageHtml = useMemo(() => {
+    if (!message?.html) return null;
+    return buildInboxHtmlDocument(sanitizeInboxHtml(message.html));
   }, [message?.html]);
 
   useEffect(() => {
@@ -283,11 +270,19 @@ export default function InboxPage() {
 
   function handleApplySavedTemplate(templateId: string) {
     setComposeTemplateId(templateId);
-    if (templateId === "none") return;
-    const template = (savedTemplates || []).find((item) => item.id === templateId);
+    if (templateId === "none") {
+      setComposeCtaText("");
+      setComposeCtaUrl("");
+      return;
+    }
+    const template = savedTemplates.find((item) => item.id === templateId);
     if (!template) return;
-    setComposeSubject(template.subject || "");
-    setComposeBody(template.body || "");
+    const applied = applyEmailTemplateSelection(template);
+    setComposeSubject(applied.subject);
+    setComposeBody(applied.body);
+    setComposeLayout(applied.layout);
+    setComposeCtaText(applied.ctaText);
+    setComposeCtaUrl(applied.ctaUrl);
     setComposeStatus("draft");
   }
 
@@ -313,7 +308,11 @@ export default function InboxPage() {
     sendEmail.mutate({
       to: composeTo.trim(),
       subject: composeSubject.trim(),
-      body: composeBody,
+      body: injectEmailTemplateMetadata(composeBody, {
+        layout: composeLayout,
+        ctaText: composeCtaText,
+        ctaUrl: composeCtaUrl,
+      }),
       type: composeType,
       leadId: composeLeadId,
     });
@@ -659,21 +658,18 @@ export default function InboxPage() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="space-y-1">
-                        <Label>Template</Label>
-                        <Select value={composeTemplateId} onValueChange={handleApplySavedTemplate}>
-                          <SelectTrigger className="h-9">
-                            <SelectValue placeholder="Geen template" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">Geen template</SelectItem>
-                            {(savedTemplates || []).map((template) => (
-                              <SelectItem key={template.id} value={template.id}>
-                                {template.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                      <div className="space-y-1 md:col-span-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <Label>Template Studio</Label>
+                          <Link href="/templates" className="text-xs text-primary hover:underline">
+                            Beheren
+                          </Link>
+                        </div>
+                        <TemplatePicker
+                          value={composeTemplateId}
+                          onValueChange={handleApplySavedTemplate}
+                          templates={savedTemplates}
+                        />
                       </div>
                       <div className="space-y-1">
                         <Label>Lead koppeling (verplicht)</Label>
@@ -874,10 +870,10 @@ export default function InboxPage() {
 
                 {/* Body */}
                 <div className="flex-1 overflow-hidden">
-                  {message.html ? (
+                  {sanitizedMessageHtml ? (
                     <iframe
-                      ref={iframeRef}
-                      sandbox="allow-same-origin"
+                      srcDoc={sanitizedMessageHtml}
+                      sandbox=""
                       title="E-mail inhoud"
                       className="w-full h-full border-0"
                     />

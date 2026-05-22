@@ -14,14 +14,14 @@ export async function POST(request: Request) {
     }
 
     const ip = getClientIp(request);
-    const burstLimiter = enforceRateLimit(request, {
+    const burstLimiter = await enforceRateLimit(request, {
       key: `public-quote-burst:${tenantUserId}:${ip}`,
       limit: 3,
       windowMs: 60_000,
       message: "Te veel aanvragen. Wacht even en probeer opnieuw.",
     });
     if (burstLimiter) return burstLimiter;
-    const hourlyLimiter = enforceRateLimit(request, {
+    const hourlyLimiter = await enforceRateLimit(request, {
       key: `public-quote:${tenantUserId}:${ip}`,
       limit: 5,
       windowMs: 60 * 60 * 1000,

@@ -1,9 +1,11 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
-import { type PrismaClient } from "@digitify/db";
+import { type PrismaClient, withWorkspaceRls, isWorkspaceRlsEnabled } from "@digitify/db";
 import { patchRequestContext, recordRouteMetric } from "@digitify/db";
+import { enforceRateLimit } from "./lib/rate-limit";
 import { invalidateDashboardCacheForUser } from "./lib/dashboard-cache";
 import { log } from "./lib/logger";
+import { resolveWorkspaceOwnerId } from "./lib/workspace";
 
 export type Context = {
   db: PrismaClient;
@@ -12,6 +14,8 @@ export type Context = {
     email: string;
     name: string | null;
     role: string;
+    /** Set by withWorkspace middleware on authenticated requests. */
+    workspaceId?: string;
   } | null;
   requestId: string;
 };
@@ -25,37 +29,6 @@ const t = initTRPC.context<Context>().create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 export const createCallerFactory = t.createCallerFactory;
-
-// --- Rate limiter (in-memory, per user) ---
-// Note: resets on server restart and does not sync across multiple instances.
-// Replace with Redis (e.g. Upstash) for production multi-instance deployments.
-const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
-
-function checkRateLimit(key: string, maxRequests: number, windowMs: number) {
-  const now = Date.now();
-  const entry = rateLimitStore.get(key);
-
-  if (!entry || now > entry.resetAt) {
-    rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
-    return;
-  }
-
-  entry.count++;
-  if (entry.count > maxRequests) {
-    throw new TRPCError({
-      code: "TOO_MANY_REQUESTS",
-      message: "Te veel verzoeken. Probeer het over een moment opnieuw.",
-    });
-  }
-}
-
-// Clean up stale entries every 5 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of rateLimitStore) {
-    if (now > entry.resetAt) rateLimitStore.delete(key);
-  }
-}, 5 * 60 * 1000);
 
 const DASHBOARD_INVALIDATION_PREFIXES = [
   "lead.",
@@ -101,21 +74,42 @@ const withLogging = t.middleware(async ({ ctx, path, type, next }) => {
     });
   }
 
-  if (result.ok && type === "mutation" && ctx.user?.id && shouldInvalidateDashboardCache(path)) {
-    invalidateDashboardCacheForUser(ctx.user.id);
+  if (result.ok && type === "mutation" && ctx.user?.workspaceId && shouldInvalidateDashboardCache(path)) {
+    invalidateDashboardCacheForUser(ctx.user.workspaceId);
   }
 
   return result;
 });
 
-// --- General rate limit middleware (100 req/min per user or IP) ---
-const withRateLimit = t.middleware(({ ctx, next }) => {
+// --- General rate limit middleware (100 req/min per user; Redis when REDIS_URL is set) ---
+const withRateLimit = t.middleware(async ({ ctx, next }) => {
   const key = ctx.user?.id ?? "anonymous";
-  checkRateLimit(`general:${key}`, 100, 60_000);
+  await enforceRateLimit({ key: `general:${key}`, limit: 100, windowMs: 60_000 });
   return next();
 });
 
 // --- Auth middleware ---
+const withWorkspace = t.middleware(async ({ ctx, next }) => {
+  if (!ctx.user) return next();
+  const workspaceId = await resolveWorkspaceOwnerId(ctx.db, ctx.user.id);
+  return next({
+    ctx: {
+      ...ctx,
+      user: { ...ctx.user, workspaceId },
+    },
+  });
+});
+
+/** Postgres RLS (opt-in: ENABLE_WORKSPACE_RLS=true). Sets app.workspace_id per transaction. */
+const withWorkspaceRlsContext = t.middleware(async ({ ctx, next }) => {
+  if (!ctx.user?.workspaceId || !isWorkspaceRlsEnabled()) {
+    return next();
+  }
+  return withWorkspaceRls(ctx.db, ctx.user.workspaceId, async (db) =>
+    next({ ctx: { ...ctx, db: db as PrismaClient } }),
+  );
+});
+
 const isAuthenticated = t.middleware(({ ctx, next }) => {
   if (!ctx.user) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "Not authenticated" });
@@ -147,17 +141,23 @@ export const protectedProcedure = t.procedure
   .use(withLogging)
   .use(withRateLimit)
   .use(isAuthenticated)
+  .use(withWorkspace)
+  .use(withWorkspaceRlsContext)
   .use(enforceTrialAccess);
 
 // Stricter rate limit for AI/email endpoints (20 req/min)
 export const aiRateLimitedProcedure = t.procedure
   .use(withLogging)
-  .use(t.middleware(({ ctx, next }) => {
-    const key = ctx.user?.id ?? "anonymous";
-    checkRateLimit(`ai:${key}`, 20, 60_000);
-    return next();
-  }))
+  .use(
+    t.middleware(async ({ ctx, next }) => {
+      const key = ctx.user?.id ?? "anonymous";
+      await enforceRateLimit({ key: `ai:${key}`, limit: 20, windowMs: 60_000 });
+      return next();
+    }),
+  )
   .use(isAuthenticated)
+  .use(withWorkspace)
+  .use(withWorkspaceRlsContext)
   .use(enforceTrialAccess);
 
 const hasRole = (...roles: string[]) =>
@@ -175,6 +175,8 @@ export const adminProcedure = t.procedure
   .use(withLogging)
   .use(withRateLimit)
   .use(isAuthenticated)
+  .use(withWorkspace)
+  .use(withWorkspaceRlsContext)
   .use(enforceTrialAccess)
   .use(hasRole("OWNER", "ADMIN"));
 
@@ -182,5 +184,7 @@ export const ownerProcedure = t.procedure
   .use(withLogging)
   .use(withRateLimit)
   .use(isAuthenticated)
+  .use(withWorkspace)
+  .use(withWorkspaceRlsContext)
   .use(enforceTrialAccess)
   .use(hasRole("OWNER"));

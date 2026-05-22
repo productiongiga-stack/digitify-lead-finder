@@ -1,5 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createBucketStore } from "../lib/rate-limit-bucket";
+import { checkRateLimit } from "../lib/rate-limit";
+import { resetRedisRateLimitClient } from "../lib/rate-limit-redis";
 
 describe("rate-limit bucket", () => {
   it("allows requests under the limit", () => {
@@ -57,4 +59,26 @@ describe("rate-limit bucket", () => {
     // Stale bucket pruned, fresh bucket retained.
     expect(store.size()).toBe(1);
   });
+});
+
+describe("checkRateLimit facade", () => {
+  beforeEach(() => {
+    delete process.env.REDIS_URL;
+    resetRedisRateLimitClient();
+  });
+
+  afterEach(() => {
+    delete process.env.REDIS_URL;
+    resetRedisRateLimitClient();
+  });
+
+  it("falls back to memory when REDIS_URL is unset", async () => {
+    const r1 = await checkRateLimit({ key: "facade", limit: 2, windowMs: 60_000 });
+    const r2 = await checkRateLimit({ key: "facade", limit: 2, windowMs: 60_000 });
+    const r3 = await checkRateLimit({ key: "facade", limit: 2, windowMs: 60_000 });
+    expect(r1.allowed).toBe(true);
+    expect(r2.allowed).toBe(true);
+    expect(r3.allowed).toBe(false);
+  });
+
 });

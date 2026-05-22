@@ -4,7 +4,7 @@ import { analyzeWebsite } from "@digitify/connectors";
 import { protectedProcedure, router } from "../trpc";
 import { assertLeadAccess } from "../lib/tenant";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
-import { loadUserSettingRows } from "../lib/user-settings";
+import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
 
 function normalizeUrl(raw: string) {
   const trimmed = raw.trim();
@@ -54,9 +54,9 @@ export const auditRouter = router({
         gmbReviewCount: number | null;
       } | null = null;
       if (input.leadId) {
-        await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+        await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
         lead = await ctx.db.lead.findFirst({
-          where: { id: input.leadId, createdById: ctx.user.id },
+          where: { id: input.leadId, createdById: ctx.user.workspaceId! },
           select: {
             id: true,
             companyName: true,
@@ -76,7 +76,11 @@ export const auditRouter = router({
 
       const placeId = input.placeId || lead?.gmbPlaceId || undefined;
       if (placeId && (!reviews.rating || !reviews.reviewCount)) {
-        const rows = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.google_places_key"]);
+        const rows = await loadWorkspaceSettingRows(
+          ctx.db,
+          { workspaceId: ctx.user.workspaceId!, memberId: ctx.user.id },
+          ["api.google_places_key"],
+        );
         const apiKey = getSettingString(settingsRowsToMap(rows), "api.google_places_key");
         if (apiKey) {
           const remote = await lookupGoogleReviews(apiKey, placeId);
@@ -173,7 +177,7 @@ export const auditRouter = router({
           title: `Website audit: ${lead?.companyName || analysis.url}`,
           type: "website_audit",
           leadId: lead?.id || null,
-          generatedById: ctx.user.id,
+          generatedById: ctx.user.workspaceId!,
           data: payload,
         },
       });
@@ -197,7 +201,7 @@ export const auditRouter = router({
       const limit = input?.limit ?? 12;
       return ctx.db.report.findMany({
         where: {
-          generatedById: ctx.user.id,
+          generatedById: ctx.user.workspaceId!,
           type: "website_audit",
         },
         orderBy: { createdAt: "desc" },

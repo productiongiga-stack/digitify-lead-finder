@@ -12,6 +12,9 @@ function resolveAppUrl() {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  experimental: {
+    instrumentationHook: true,
+  },
   outputFileTracingRoot: workspaceRoot,
   turbopack: {
     root: workspaceRoot,

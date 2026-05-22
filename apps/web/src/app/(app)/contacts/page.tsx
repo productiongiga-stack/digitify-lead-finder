@@ -32,10 +32,16 @@ import { formatDate } from "@/lib/utils";
 import { EmailPreview } from "@/components/email/preview";
 import { extractEmailTemplateMetadata } from "@/lib/email-content";
 import {
+  OUTBOUND_FLOW_SUMMARY,
+  OUTBOUND_STAT_CARD_STATUSES,
   OUTBOUND_STATUS_LABELS,
   OUTBOUND_STATUS_OPTIONS,
   OUTBOUND_STATUS_VARIANTS,
+  SEND_OUTBOUND_TOOLTIP,
   canSendOutboundDraft,
+  formatWorkqueueSummary,
+  getOutboundStatusLabel,
+  getSendButtonLabel,
 } from "@/lib/contact-status";
 import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 
@@ -179,7 +185,7 @@ export default function ContactsPage() {
         <div className="app-page-heading">
           <h1 className="app-page-title">Outbound Center</h1>
           <p className="app-page-subtitle">
-            Opstellen, goedkeuren en verzenden van outreach. Inkomende mail loopt via Inbox.
+            Concept → goedkeuren → verzenden. Goedkeuren stuurt nog niet; gebruik Verzenden voor SMTP.
           </p>
         </div>
         <div className="app-page-actions">
@@ -189,7 +195,7 @@ export default function ContactsPage() {
               Nieuwe E-mail
             </Button>
           </Link>
-          <Link href="/contacts/templates">
+          <Link href="/templates">
             <Button variant="outline" size="sm">
               <FileText className="mr-2 h-4 w-4" />
               Templates
@@ -270,12 +276,15 @@ export default function ContactsPage() {
             <div className="text-sm">
               <span className="font-semibold">{selectedDraftIds.length}</span> e-mail(s) geselecteerd
               {sendableSelectedCount > 0 ? (
-                <span className="ml-2 text-muted-foreground">{sendableSelectedCount} klaar om te verzenden</span>
+                <span className="ml-2 text-muted-foreground">
+                  {sendableSelectedCount} {OUTBOUND_STATUS_LABELS.APPROVED!.toLowerCase()}
+                </span>
               ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
+                title={SEND_OUTBOUND_TOOLTIP}
                 onClick={handleBulkSend}
                 disabled={bulkSendDrafts.isPending || sendableSelectedCount === 0}
               >
@@ -300,36 +309,28 @@ export default function ContactsPage() {
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-6">
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Concept</p>
-            <p className="mt-1 text-lg font-semibold">{stats.draft}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Wacht op goedkeuring</p>
-            <p className="mt-1 text-lg font-semibold">{stats.pending}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Goedgekeurd</p>
-            <p className="mt-1 text-lg font-semibold">{stats.approved}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Verzonden</p>
-            <p className="mt-1 text-lg font-semibold">{stats.sent}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Mislukt</p>
-            <p className="mt-1 text-lg font-semibold">{stats.failed}</p>
-          </CardContent>
-        </Card>
+        {OUTBOUND_STAT_CARD_STATUSES.map((status) => {
+          const count =
+            status === "DRAFT"
+              ? stats.draft
+              : status === "PENDING_APPROVAL"
+                ? stats.pending
+                : status === "APPROVED"
+                  ? stats.approved
+                  : status === "SENT"
+                    ? stats.sent
+                    : stats.failed;
+          return (
+            <Card key={status}>
+              <CardContent className="p-3">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  {getOutboundStatusLabel(status)}
+                </p>
+                <p className="mt-1 text-lg font-semibold">{count}</p>
+              </CardContent>
+            </Card>
+          );
+        })}
         <Card>
           <CardContent className="p-3">
             <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Inkomend</p>
@@ -346,8 +347,9 @@ export default function ContactsPage() {
       <TabsContent value="info" className="space-y-4">
       <Card className="border-dashed">
         <CardContent className="p-3 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Flow:</span> Concept -&gt; Goedkeuring -&gt; Verzenden.{" "}
-          <span className="font-medium text-foreground">Tip:</span> status <span className="font-medium">Mislukt</span> kan je opnieuw verzenden na correctie van SMTP/domein.
+          <span className="font-medium text-foreground">Flow:</span> {OUTBOUND_FLOW_SUMMARY}{" "}
+          <span className="font-medium text-foreground">Tip:</span> status{" "}
+          <span className="font-medium">{OUTBOUND_STATUS_LABELS.FAILED}</span> kan je opnieuw verzenden na correctie van SMTP/domein.
         </CardContent>
       </Card>
 
@@ -367,7 +369,7 @@ export default function ContactsPage() {
           <CardContent className="p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Werkqueue</p>
             <p className="mt-2 text-sm font-medium">
-              {stats.pending} wachten op goedkeuring · {stats.approved} klaar om te verzenden · {stats.failed} mislukt
+              {formatWorkqueueSummary(stats)}
             </p>
             <p className="mt-2 text-xs text-muted-foreground">
               Zo zie je sneller waar de outreachflow vandaag blijft hangen.
@@ -379,7 +381,7 @@ export default function ContactsPage() {
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gerelateerd</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button asChild size="sm" variant="outline">
-                <Link href="/contacts/templates">Templates</Link>
+                <Link href="/templates">Templates</Link>
               </Button>
               <Button asChild size="sm" variant="ghost">
                 <Link href="/settings/integrations">SMTP & inbox</Link>
@@ -477,6 +479,7 @@ export default function ContactsPage() {
                     <Button
                       variant="default"
                       size="sm"
+                      title={SEND_OUTBOUND_TOOLTIP}
                       disabled={sendEmail.isPending}
                       onClick={() => {
                         setSendingDraftId(draft.id);
@@ -491,11 +494,10 @@ export default function ContactsPage() {
                       }}
                     >
                       <Send className="mr-1.5 h-3.5 w-3.5" />
-                      {sendEmail.isPending && sendingDraftId === draft.id
-                        ? "Verzenden..."
-                        : draft.status === "FAILED"
-                          ? "Opnieuw verzenden"
-                          : "Verzenden"}
+                      {getSendButtonLabel(
+                        draft.status,
+                        sendEmail.isPending && sendingDraftId === draft.id,
+                      )}
                     </Button>
                   ) : null}
                   <Button
@@ -605,6 +607,7 @@ export default function ContactsPage() {
                         <Button
                           variant="default"
                           size="sm"
+                          title={SEND_OUTBOUND_TOOLTIP}
                           disabled={sendEmail.isPending}
                           onClick={() => {
                             setSendingDraftId(draft.id);
@@ -619,11 +622,10 @@ export default function ContactsPage() {
                           }}
                         >
                           <Send className="mr-1 h-3.5 w-3.5" />
-                          {sendEmail.isPending && sendingDraftId === draft.id
-                            ? "Verzenden..."
-                            : draft.status === "FAILED"
-                              ? "Opnieuw verzenden"
-                              : "Verzenden"}
+                          {getSendButtonLabel(
+                            draft.status,
+                            sendEmail.isPending && sendingDraftId === draft.id,
+                          )}
                         </Button>
                       )}
                       <Button

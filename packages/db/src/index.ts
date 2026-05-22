@@ -74,5 +74,6 @@ if (process.env.NODE_ENV !== "production") {
 export * from "./secure-settings";
 export * from "./request-context";
 export * from "./perf-metrics";
+export * from "./workspace-rls";
 export * from "@prisma/client";
 export type { PrismaClient } from "@prisma/client";

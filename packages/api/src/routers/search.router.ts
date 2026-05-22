@@ -2,10 +2,10 @@ import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
-import { loadUserSettingRows } from "../lib/user-settings";
-import { checkRateLimit } from "../lib/rate-limit-bucket";
+import { enforceRateLimit } from "../lib/rate-limit";
 import { log } from "../lib/logger";
-import { readUserJsonSetting, writeUserJsonSetting } from "../lib/user-json-setting";
+import { readWorkspaceJsonSetting, writeWorkspaceJsonSetting } from "../lib/user-json-setting";
+import { loadWorkspaceSettingRows, workspaceScopeFromUser, type WorkspaceScope } from "../lib/workspace-settings";
 
 const searchStringSchema = z
   .string()
@@ -41,8 +41,8 @@ const savedSearchSchema = z.object({
 
 type SavedSearchItem = z.infer<typeof savedSearchSchema>;
 
-async function loadSavedSearches(db: any, userId: string): Promise<SavedSearchItem[]> {
-  const raw = await readUserJsonSetting<unknown[]>(db, userId, SAVED_SEARCHES_KEY, []);
+async function loadSavedSearches(db: any, scope: WorkspaceScope): Promise<SavedSearchItem[]> {
+  const raw = await readWorkspaceJsonSetting<unknown[]>(db, scope, SAVED_SEARCHES_KEY, []);
   if (!Array.isArray(raw)) return [];
   return raw
     .map((item) => savedSearchSchema.safeParse(item))
@@ -119,19 +119,15 @@ export const searchRouter = router({
         })
     )
     .mutation(async ({ ctx, input }) => {
-      const rateLimit = checkRateLimit({
+      await enforceRateLimit({
         key: `lead-search:${ctx.user.id}`,
         limit: 20,
         windowMs: 60_000,
+        message: "Te veel zoekopdrachten op korte tijd. Wacht even en probeer opnieuw.",
       });
-      if (!rateLimit.allowed) {
-        throw new TRPCError({
-          code: "TOO_MANY_REQUESTS",
-          message: "Te veel zoekopdrachten op korte tijd. Wacht even en probeer opnieuw.",
-        });
-      }
 
-      const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.google_places_key"]);
+      const scope = workspaceScopeFromUser(ctx.user);
+      const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["api.google_places_key"]);
       const apiKey = getSettingString(settingsRowsToMap(settings), "api.google_places_key");
       if (!apiKey) {
         throw new TRPCError({
@@ -309,7 +305,8 @@ export const searchRouter = router({
   }),
 
   listSavedSearches: protectedProcedure.query(async ({ ctx }) => {
-    const items = await loadSavedSearches(ctx.db, ctx.user.id);
+    const scope = workspaceScopeFromUser(ctx.user);
+    const items = await loadSavedSearches(ctx.db, scope);
     return items.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   }),
 
@@ -326,7 +323,8 @@ export const searchRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const items = await loadSavedSearches(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      const items = await loadSavedSearches(ctx.db, scope);
       const now = new Date().toISOString();
       const nextItem: SavedSearchItem = {
         id: input.id || `search_${Math.random().toString(36).slice(2, 10)}`,
@@ -351,16 +349,17 @@ export const searchRouter = router({
       } else {
         items.unshift(nextItem);
       }
-      await writeUserJsonSetting(ctx.db, ctx.user.id, SAVED_SEARCHES_KEY, items.slice(0, 100));
+      await writeWorkspaceJsonSetting(ctx.db, scope, SAVED_SEARCHES_KEY, items.slice(0, 100));
       return nextItem;
     }),
 
   deleteSavedSearch: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const items = await loadSavedSearches(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      const items = await loadSavedSearches(ctx.db, scope);
       const filtered = items.filter((item) => item.id !== input.id);
-      await writeUserJsonSetting(ctx.db, ctx.user.id, SAVED_SEARCHES_KEY, filtered);
+      await writeWorkspaceJsonSetting(ctx.db, scope, SAVED_SEARCHES_KEY, filtered);
       return { success: true };
     }),
 
@@ -368,7 +367,7 @@ export const searchRouter = router({
     .input(z.object({ placeIds: z.array(z.string()) }))
     .query(async ({ ctx, input }) => {
       const existing = await ctx.db.lead.findMany({
-        where: { gmbPlaceId: { in: input.placeIds }, createdById: ctx.user.id },
+        where: { gmbPlaceId: { in: input.placeIds }, createdById: ctx.user.workspaceId! },
         select: { id: true, gmbPlaceId: true, companyName: true, overallScore: true, scorePriority: true },
       });
       return existing;
@@ -403,7 +402,7 @@ export const searchRouter = router({
       // Check by placeId (exact) or company name (fuzzy duplicate prevention)
       const existing = await ctx.db.lead.findFirst({
         where: {
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
           OR: [
             { gmbPlaceId: input.placeId },
             {
@@ -448,7 +447,7 @@ export const searchRouter = router({
           gmbCategories: input.types ?? [],
           source: "google_places",
           sourceQuery: input.displayName,
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
         },
       });
 

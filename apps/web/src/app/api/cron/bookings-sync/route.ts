@@ -6,23 +6,7 @@ import { deleteGoogleBookingEvent, getGoogleBookingEvent, upsertGoogleBookingEve
 import { buildIcsAttachment, getStoredGoogleEventId, removeLegacyGoogleEventId } from "@digitify/api/src/lib/booking-utils";
 import { loadUserSettingRows } from "@digitify/api/src/lib/user-settings";
 import { getSettingBoolean, settingsRowsToMap } from "@digitify/api/src/lib/settings";
-
-function isAuthorized(request: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  const authHeader = request.headers.get("authorization") || "";
-  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-  const isVercelCron = request.headers.get("x-vercel-cron") === "1";
-
-  if (cronSecret) {
-    return bearerToken.length > 0 && bearerToken === cronSecret;
-  }
-
-  if (process.env.NODE_ENV !== "production") {
-    return true;
-  }
-
-  return isVercelCron;
-}
+import { cronAuthFailureReason, isCronAuthorized } from "@digitify/api/src/lib/cron-auth";
 
 function formatBookingDate(value: Date) {
   return value.toLocaleString("nl-BE", {
@@ -83,8 +67,8 @@ async function sendBookingSyncEmails(input: {
 }
 
 async function runBookingsSync(request: Request) {
-  if (!isAuthorized(request)) {
-    log.security.warn("Bookings sync cron unauthorized request");
+  if (!isCronAuthorized(request)) {
+    log.security.warn("Bookings sync cron unauthorized request", { reason: cronAuthFailureReason() });
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 

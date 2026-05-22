@@ -52,8 +52,13 @@ import {
   OUTBOUND_STATUS_LABELS,
   OUTBOUND_STATUS_VARIANTS,
   OUTBOUND_TIMELINE_STEPS,
+  SEND_OUTBOUND_TOOLTIP,
   canSendOutboundDraft,
+  getApprovedNotSentBanner,
+  getOutboundNextActionHint,
+  getOutboundStatusLabel,
   getOutboundTimelineStatus,
+  getSendButtonLabel,
 } from "@/lib/contact-status";
 
 export default function DraftDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -268,7 +273,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
                 ) : (
                   <CheckCircle className="mr-2 h-4 w-4" />
                 )}
-                Goedkeuren
+                Goedkeuren (niet verzenden)
               </Button>
               <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
                 <DialogTrigger asChild>
@@ -310,6 +315,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           )}
           {canSendOutboundDraft(draft.status) && (
             <Button
+              title={SEND_OUTBOUND_TOOLTIP}
               disabled={sendEmail.isPending}
               onClick={() => sendEmail.mutate({ id: draftId })}
             >
@@ -318,7 +324,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
               ) : (
                 <Send className="mr-2 h-4 w-4" />
               )}
-              {sendEmail.isPending ? "Verzenden..." : draft.status === "FAILED" ? "Opnieuw verzenden" : "Verzenden"}
+              {getSendButtonLabel(draft.status, sendEmail.isPending)}
             </Button>
           )}
         </div>
@@ -409,19 +415,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
           <CardContent className="p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Volgende actie</p>
-            <p className="mt-2 text-sm font-medium">
-              {draft.status === "DRAFT"
-                ? "Werk inhoud af en dien in ter goedkeuring."
-                : draft.status === "PENDING_APPROVAL"
-                  ? "Wacht op review of keur dit als admin meteen goed."
-                  : draft.status === "APPROVED"
-                    ? "Deze draft is klaar om te verzenden."
-                    : draft.status === "SENT"
-                      ? "Volg de reactie op en plan indien nodig een opvolgmail."
-                      : draft.status === "FAILED"
-                        ? "Controleer foutmelding en probeer opnieuw te verzenden."
-                        : "Controleer deze draft en bepaal de volgende stap."}
-            </p>
+            <p className="mt-2 text-sm font-medium">{getOutboundNextActionHint(draft.status)}</p>
           </CardContent>
         </Card>
         <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
@@ -462,7 +456,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           <CardContent className="flex items-start gap-3 p-4">
             <XCircle className="mt-0.5 h-5 w-5 text-destructive" />
             <div>
-              <p className="text-sm font-medium text-destructive">Afgekeurd</p>
+              <p className="text-sm font-medium text-destructive">{getOutboundStatusLabel("REJECTED")}</p>
               <p className="mt-1 text-sm text-muted-foreground">{draft.rejectionNote}</p>
             </div>
           </CardContent>
@@ -491,9 +485,11 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           <CardContent className="flex items-start gap-3 p-4">
             <CheckCircle className="mt-0.5 h-5 w-5 text-emerald-600" />
             <div>
-              <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Goedgekeurd</p>
+              <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                {getApprovedNotSentBanner().title}
+              </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                op {formatDate(draft.approvedAt)}
+                {getApprovedNotSentBanner().detail(formatDate(draft.approvedAt))}
               </p>
             </div>
           </CardContent>
@@ -723,7 +719,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
                   <Separator />
                   <div className="flex items-center gap-2 text-sm">
                     <CheckCircle className="h-4 w-4 text-emerald-500" />
-                    <span className="text-muted-foreground">Goedgekeurd op</span>
+                    <span className="text-muted-foreground">Beoordeeld op</span>
                     <span className="font-medium">{formatDate(draft.approvedAt)}</span>
                   </div>
                 </>

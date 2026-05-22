@@ -3,6 +3,7 @@ import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
 import { ensureUserWorkspace } from "../lib/user-workspace";
+import { getWorkspaceOwnerProfile, isWorkspaceOwner } from "../lib/workspace";
 import { passwordPolicySchema } from "../lib/password-policy";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadUserSettingRows } from "../lib/user-settings";
@@ -27,8 +28,11 @@ export function verifyPassword(password: string, storedHash: string): boolean {
 
 export const userRouter = router({
   getProfile: protectedProcedure.query(async ({ ctx }) => {
-    await ensureUserWorkspace(ctx.db, ctx.user.id, ctx.user.name);
-    return ctx.db.user.findUnique({
+    const workspaceId = ctx.user.workspaceId!;
+    if (isWorkspaceOwner(ctx.user, workspaceId)) {
+      await ensureUserWorkspace(ctx.db, workspaceId, ctx.user.name);
+    }
+    const profile = await ctx.db.user.findUnique({
       where: { id: ctx.user.id },
       select: {
         id: true,
@@ -37,8 +41,45 @@ export const userRouter = router({
         image: true,
         role: true,
         createdAt: true,
+        workspaceOwnerId: true,
       },
     });
+    const owner = await getWorkspaceOwnerProfile(ctx.db, workspaceId);
+    return {
+      ...profile,
+      workspaceId,
+      workspaceOwnerName: owner?.name || owner?.email || "Workspace",
+      isWorkspaceOwner: ctx.user.id === workspaceId,
+    };
+  }),
+
+  getWorkspaceInfo: protectedProcedure.query(async ({ ctx }) => {
+    const workspaceId = ctx.user.workspaceId!;
+    const owner = await getWorkspaceOwnerProfile(ctx.db, workspaceId);
+    const memberCount = await ctx.db.user.count({
+      where: {
+        OR: [{ id: workspaceId }, { workspaceOwnerId: workspaceId }],
+      },
+    });
+    return {
+      workspaceId,
+      ownerName: owner?.name || owner?.email || "Eigenaar",
+      ownerEmail: owner?.email ?? "",
+      isOwner: ctx.user.id === workspaceId,
+      memberCount,
+      sharedResources: [
+        "Leads & pipeline",
+        "Campagnes & templates",
+        "Offertes & dienstencatalogus",
+        "Bookings & agenda",
+        "Dashboard & KPI's",
+        "Reviews & domeinen",
+        "CRM & chatbot",
+        "Instellingen (branding, e-mail, integraties)",
+        "Inbox (gedeelde mailbox-config)",
+        "Taken & facturen (JSON)",
+      ],
+    };
   }),
 
   updateProfile: protectedProcedure
@@ -178,15 +219,16 @@ export const userRouter = router({
         throw new TRPCError({ code: "CONFLICT", message: "Er bestaat al een gebruiker met dit e-mailadres." });
       }
 
+      const workspaceOwnerId = ctx.user.workspaceId ?? ctx.user.id;
       const user = await ctx.db.user.create({
         data: {
           name: input.name,
           email: input.email,
           passwordHash: hashPassword(input.password),
           role: input.role,
+          workspaceOwnerId,
         },
       });
-      await ensureUserWorkspace(ctx.db, user.id, user.name);
       return user;
     }),
 
