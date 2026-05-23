@@ -507,25 +507,25 @@ export default function LeadSearchPage() {
       )}
 
       {/* Search error (non-API-key) */}
-      {searchMutation.error && !apiKeyMissing && (
-        <Card className="border-destructive/50 bg-destructive/5">
-          <CardContent className="flex items-center gap-3 p-4">
-            <AlertCircle className="h-5 w-5 shrink-0 text-destructive" />
-            <div className="flex-1">
-              <p className="text-sm font-medium text-destructive">Zoekopdracht mislukt</p>
-              <p className="text-xs text-muted-foreground">
-                {formatSearchErrorMessage(searchMutation.error.message)}
-              </p>
-            </div>
-            {lastSearchParams && (
-              <Button size="sm" variant="outline" onClick={handleRefresh}>
-                <RefreshCw className="mr-2 h-3 w-3" />
-                Opnieuw proberen
+      {searchMutation.error && !apiKeyMissing ? (
+        <QueryErrorState
+          variant="inline"
+          title="Zoekopdracht mislukt"
+          message={formatSearchErrorMessage(searchMutation.error.message)}
+          onRetry={
+            lastSearchParams && !/niet ingelogd/i.test(searchMutation.error.message)
+              ? handleRefresh
+              : undefined
+          }
+          action={
+            /niet ingelogd/i.test(searchMutation.error.message) ? (
+              <Button asChild size="sm">
+                <Link href="/login">Inloggen</Link>
               </Button>
-            )}
-          </CardContent>
-        </Card>
-      )}
+            ) : undefined
+          }
+        />
+      ) : null}
 
       {/* Compact search bar */}
       <Card className="app-surface">

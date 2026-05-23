@@ -15,8 +15,10 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  StatsCards,
+  type StatItem,
 } from "@digitify/ui";
-import { Download, Mail, Receipt, RefreshCw } from "lucide-react";
+import { AlertTriangle, Banknote, Clock, Download, Mail, Receipt, RefreshCw } from "lucide-react";
 
 type InvoiceStatus = "DRAFT" | "SENT" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "CANCELLED";
 
@@ -72,6 +74,39 @@ export default function InvoicesPage() {
     [items],
   );
 
+  const statItems = useMemo<StatItem[]>(
+    () => [
+      {
+        label: "Totaal facturen",
+        value: summary?.total ?? 0,
+        icon: <Receipt />,
+        hint: statusFilter !== "ALL" ? `Filter: ${STATUS_LABEL[statusFilter as InvoiceStatus]}` : undefined,
+      },
+      {
+        label: "Openstaand",
+        value: openInvoices.length,
+        icon: <Clock />,
+        hint: "Nog niet betaald of geannuleerd",
+        tone: openInvoices.length > 0 ? "warning" : "neutral",
+      },
+      {
+        label: "Vervallen",
+        value: summary?.overdue ?? 0,
+        icon: <AlertTriangle />,
+        hint: "Na vervaldatum",
+        tone: (summary?.overdue ?? 0) > 0 ? "negative" : "neutral",
+      },
+      {
+        label: "Open bedrag",
+        value: formatCurrency(summary?.totalOpenAmount ?? 0),
+        icon: <Banknote />,
+        hint: "Totaal uitstaand",
+        tone: (summary?.totalOpenAmount ?? 0) > 0 ? "warning" : "neutral",
+      },
+    ],
+    [summary, openInvoices.length, statusFilter],
+  );
+
   return (
     <div className="app-page space-y-4">
       <div className="app-page-header">
@@ -81,32 +116,7 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Totaal</p>
-            <p className="text-2xl font-semibold">{summary?.total || 0}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Openstaande facturen</p>
-            <p className="text-2xl font-semibold">{openInvoices.length}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Vervallen</p>
-            <p className="text-2xl font-semibold">{summary?.overdue || 0}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Openstaand bedrag</p>
-            <p className="text-2xl font-semibold">{formatCurrency(summary?.totalOpenAmount || 0)}</p>
-          </CardContent>
-        </Card>
-      </div>
+      <StatsCards items={statItems} columns={4} loading={list.isLoading} />
 
       <Card>
         <CardHeader className="pb-3">

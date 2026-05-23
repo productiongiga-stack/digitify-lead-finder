@@ -406,7 +406,12 @@ export default function InboxPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {!isConfigError && unreadCount > 0 ? (
+            <Badge variant="secondary" className="h-8 px-2.5 tabular-nums">
+              {unreadCount} ongelezen
+            </Badge>
+          ) : null}
           <Button
             variant={composerOpen ? "default" : "outline"}
             size="sm"
@@ -456,42 +461,6 @@ export default function InboxPage() {
                     : "Failed"}
           </Badge>
           {composeError ? <span className="text-destructive">{composeError}</span> : null}
-        </div>
-      ) : null}
-
-      {!isConfigError ? (
-        <div className="grid gap-3 xl:grid-cols-4">
-          <Card className="border-emerald-200 bg-emerald-50/80 p-4 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Huidige mailbox</p>
-            <p className="mt-2 text-sm font-medium">{selectedMailboxLabel}</p>
-          </Card>
-          <Card className="border-blue-200 bg-blue-50/80 p-4 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ongelezen</p>
-            <p className="mt-2 text-2xl font-bold">{unreadCount}</p>
-          </Card>
-          <Card className="border-amber-200 bg-amber-50/80 p-4 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Compose status</p>
-            <p className="mt-2 text-sm font-medium">
-              {composeStatus === "draft"
-                ? "Je hebt een lokaal inbox-concept openstaan."
-                : composeStatus === "queued"
-                  ? "Bericht wordt verwerkt."
-                  : composeStatus === "failed"
-                    ? "Laatste actie mislukte."
-                    : "Geen open inbox-concept."}
-            </p>
-          </Card>
-          <Card className="border-violet-200 bg-violet-50/80 p-4 shadow-sm dark:border-violet-900/40 dark:bg-violet-950/20">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Snelle acties</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button asChild size="sm" variant="outline">
-                <Link href="/contacts">Outbound center</Link>
-              </Button>
-              <Button asChild size="sm" variant="ghost">
-                <Link href="/settings/integrations">Integraties</Link>
-              </Button>
-            </div>
-          </Card>
         </div>
       ) : null}
 

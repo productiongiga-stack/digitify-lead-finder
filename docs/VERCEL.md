@@ -2,13 +2,14 @@
 
 Git integration is active on branch `cursor/dashboard-modern-layout` (see [PR #1](https://github.com/productiongiga-stack/digitify-lead-finder/pull/1)).
 
-**Fase-plan:** [docs/PHASES.md](PHASES.md) · **Eén project gebruiken:** koppel alleen `digitify-lead-finder` en verwijder dubbele Vercel-projecten (`project-ubm6y`, `productiongiga-stack-…`) om verwarring te voorkomen.
+**Fase-plan:** [docs/PHASES.md](PHASES.md) · **Productie:** gebruik Vercel-project **`project-ubm6y`** voor `leads.digitify.be` (zelfde repo + `vercel.json`). Preview/CI kan ook op `digitify-lead-finder` draaien — deploy productie via `vercel link --project project-ubm6y && vercel deploy --prod`.
 
 ## Preview URL (latest push)
 
 - https://digitify-lead-finder-git-c-54986e-productiongiga-7978s-projects.vercel.app
 
-Dashboard: https://vercel.com/productiongiga-7978s-projects/digitify-lead-finder
+Productie-dashboard: https://vercel.com/productiongiga-7978s-projects/project-ubm6y  
+Productie-URL: https://leads.digitify.be
 
 ## Required environment variables (Production + Preview)
 
@@ -57,6 +58,6 @@ Do **not** run seed on production unless intentional.
 
 ```bash
 npx vercel login
-npx vercel link
-npx vercel --prod
+npx vercel link --project project-ubm6y
+npx vercel deploy --prod
 ```

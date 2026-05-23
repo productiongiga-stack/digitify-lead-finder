@@ -1029,7 +1029,7 @@ export default function DashboardPage() {
           />
 
           <div className="dashboard-bento">
-            <WidgetCard title="Taken vandaag" icon={Bell} className="dashboard-bento-4">
+            <WidgetCard title="Taken vandaag" icon={Bell} className="min-w-0 lg:col-span-4">
               <TasksToday />
             </WidgetCard>
 
@@ -1037,28 +1037,34 @@ export default function DashboardPage() {
               title="Leads zonder opvolging"
               icon={AlertTriangle}
               iconClassName="bg-amber-500/10 [&_svg]:text-amber-600"
-              className="dashboard-bento-4"
+              className="min-w-0 lg:col-span-4"
             >
               <LeadFollowUpSnippet />
             </WidgetCard>
 
-            <WidgetCard title="Top leads" icon={TrendingUp} href="/leads" className="dashboard-bento-4">
+            <WidgetCard title="Top leads" icon={TrendingUp} href="/leads" className="min-w-0 lg:col-span-4">
               <TopLeads />
             </WidgetCard>
           </div>
 
           <div className="dashboard-bento">
-            <div className="dashboard-bento-7 space-y-3">
+            <div className="min-w-0 space-y-3 lg:col-span-7">
               <WidgetCard title="Snelle acties" icon={Zap}>
                 <QuickActions />
               </WidgetCard>
 
-              <WidgetCard title="Recente activiteit" icon={ActivityIcon} href="/leads" linkLabel="Bekijk alles">
+              <WidgetCard
+                title="Recente activiteit"
+                icon={ActivityIcon}
+                href="/leads"
+                linkLabel="Bekijk alles"
+                contentClassName="max-h-[min(28rem,50vh)] overflow-y-auto pr-1"
+              >
                 <ActivityFeed />
               </WidgetCard>
             </div>
 
-            <div className="dashboard-bento-5 space-y-3">
+            <div className="min-w-0 space-y-3 lg:col-span-5">
               <WidgetCard title="Pipeline" icon={Target}>
                 <PipelineOverview />
               </WidgetCard>
@@ -1071,13 +1077,15 @@ export default function DashboardPage() {
                 <ExpiringDomains />
               </WidgetCard>
             </div>
+          </div>
 
+          <div className="dashboard-bento">
             <WidgetCard
               title="Aankomende boekingen"
               icon={Calendar}
               iconClassName="bg-blue-500/10 [&_svg]:text-blue-600"
               href="/bookings"
-              className="dashboard-bento-6 lg:col-span-6"
+              className="min-w-0 lg:col-span-6"
             >
               <UpcomingBookings />
             </WidgetCard>
@@ -1087,7 +1095,7 @@ export default function DashboardPage() {
               icon={MessageSquare}
               iconClassName="bg-indigo-500/10 [&_svg]:text-indigo-600"
               href="/chatbot"
-              className="dashboard-bento-6 lg:col-span-6"
+              className="min-w-0 lg:col-span-6"
             >
               <ActiveChats />
             </WidgetCard>

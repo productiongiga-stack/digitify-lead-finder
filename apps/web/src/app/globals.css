@@ -125,7 +125,7 @@
   }
 
   .dashboard-bento {
-    @apply grid gap-3 lg:grid-cols-12;
+    @apply grid items-start gap-3 lg:grid-cols-12;
   }
 
   .dashboard-bento-4 {
@@ -154,6 +154,129 @@
 
   .dashboard-kpi-strip [class*="Card"] {
     @apply border-border/40 bg-background/50 backdrop-blur-sm;
+  }
+
+  .settings-featured {
+    @apply relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-card via-card/95 to-muted/30 p-4 shadow-sm backdrop-blur-sm sm:p-5;
+  }
+
+  .settings-featured::before {
+    content: "";
+    @apply pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-primary/[0.07] blur-2xl;
+  }
+
+  .settings-featured-grid {
+    @apply relative grid gap-3 sm:grid-cols-2 xl:grid-cols-4;
+  }
+
+  .settings-featured-card {
+    position: relative;
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+    gap: 0.75rem;
+    border-radius: 0.75rem;
+    border: 1px solid hsl(var(--border) / 0.55);
+    background-color: hsl(var(--background) / 0.7);
+    padding: 1rem;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    transition:
+      transform 0.2s ease,
+      border-color 0.2s ease,
+      background-color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+
+  .settings-featured-card:hover {
+    transform: translateY(-2px);
+    border-color: hsl(var(--primary) / 0.3);
+    background-color: hsl(var(--background));
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  }
+
+  .settings-featured-card:hover .settings-featured-icon {
+    background-image: linear-gradient(
+      to bottom right,
+      hsl(var(--primary) / 0.2),
+      hsl(var(--primary) / 0.1)
+    );
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.2);
+  }
+
+  .settings-featured-icon {
+    display: flex;
+    height: 2.75rem;
+    width: 2.75rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.75rem;
+    background-image: linear-gradient(
+      to bottom right,
+      hsl(var(--primary) / 0.15),
+      hsl(var(--primary) / 0.05)
+    );
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.1);
+    transition:
+      background-image 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+
+  .settings-featured-card:hover .settings-featured-arrow {
+    transform: translateX(2px);
+    color: hsl(var(--primary));
+  }
+
+  .settings-featured-arrow {
+    position: absolute;
+    top: 0.875rem;
+    right: 0.875rem;
+    height: 1rem;
+    width: 1rem;
+    color: hsl(var(--muted-foreground) / 0.35);
+    transition:
+      transform 0.2s ease,
+      color 0.2s ease;
+  }
+
+  .settings-domain-tabs {
+    @apply grid h-auto w-full grid-cols-1 gap-2 rounded-2xl border border-border/55 bg-gradient-to-r from-muted/45 via-muted/35 to-muted/25 p-2 sm:h-12 sm:grid-cols-3 sm:gap-1.5 sm:rounded-full sm:p-1.5;
+  }
+
+  .settings-domain-tab {
+    @apply inline-flex h-auto min-h-11 w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-all duration-200 hover:text-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:ring-1 data-[state=active]:ring-border/70 sm:h-full sm:min-h-0 sm:rounded-full sm:px-2 sm:py-0;
+  }
+
+  .settings-domain-tab[data-state="active"] .settings-domain-tab-icon {
+    @apply text-primary;
+  }
+
+  .settings-domain-tab-icon {
+    @apply h-4 w-4 shrink-0 text-muted-foreground/80 transition-colors;
+  }
+
+  .bookings-filters {
+    @apply grid gap-3 rounded-2xl border border-border/55 bg-gradient-to-r from-muted/40 via-card/80 to-muted/25 p-3 sm:p-4 md:grid-cols-2 lg:grid-cols-4;
+  }
+
+  .bookings-filter-field {
+    @apply space-y-1.5;
+  }
+
+  .bookings-filter-label {
+    @apply flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground;
+  }
+
+  .bookings-filter-control {
+    @apply h-10 rounded-xl border-border/60 bg-background/80 shadow-sm transition-colors focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/20;
+  }
+
+  .settings-domain-tab-count {
+    @apply ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground ring-1 ring-border/50 sm:ml-0;
+  }
+
+  .settings-domain-tab[data-state="active"] .settings-domain-tab-count {
+    @apply bg-primary/10 text-primary ring-primary/20;
   }
 }
 

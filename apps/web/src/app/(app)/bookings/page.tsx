@@ -15,6 +15,7 @@ import {
 import {
   Calendar, Plus, Clock, CheckCircle2, XCircle, Trash2, Pencil,
   CalendarCheck, CalendarX, BarChart3, Settings2, ArrowRight, Sparkles, CalendarClock, Activity, Download,
+  Search, Tags, X,
 } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
@@ -403,24 +404,83 @@ export default function BookingsPage() {
       ) : null}
 
       {/* Shared filters rendered once, used by both List and Overview tabs */}
-      <Card className="app-surface">
-        <CardContent className={cn("grid gap-3 md:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,0.8fr))]", effectiveCompactMode ? "p-3" : "p-4")}>
-          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Zoek op klant, e-mail of notitie..." />
-          <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-          <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+      <section className={cn("bookings-filters", effectiveCompactMode && "gap-2 p-3")} aria-label="Boekingen filteren">
+        <div className="flex flex-wrap items-center justify-between gap-2 md:col-span-2 lg:col-span-4">
+          <p className="text-sm font-semibold tracking-tight text-foreground">Filteren</p>
+          {search.trim() || dateFrom || dateTo || eventTypeFilter !== "__all" ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs text-muted-foreground"
+              onClick={() => {
+                setSearch("");
+                setDateFrom("");
+                setDateTo("");
+                setEventTypeFilter("__all");
+              }}
+            >
+              <X className="mr-1.5 h-3.5 w-3.5" />
+              Filters wissen
+            </Button>
+          ) : null}
+        </div>
+        <div className="bookings-filter-field">
+          <span className="bookings-filter-label">
+            <Search className="h-3.5 w-3.5" />
+            Zoeken
+          </span>
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Klant, e-mail of notitie..."
+            className="bookings-filter-control"
+          />
+        </div>
+        <div className="bookings-filter-field">
+          <span className="bookings-filter-label">
+            <Calendar className="h-3.5 w-3.5" />
+            Vanaf
+          </span>
+          <Input
+            type="date"
+            value={dateFrom}
+            onChange={(event) => setDateFrom(event.target.value)}
+            className="bookings-filter-control"
+          />
+        </div>
+        <div className="bookings-filter-field">
+          <span className="bookings-filter-label">
+            <Calendar className="h-3.5 w-3.5" />
+            Tot
+          </span>
+          <Input
+            type="date"
+            value={dateTo}
+            onChange={(event) => setDateTo(event.target.value)}
+            className="bookings-filter-control"
+          />
+        </div>
+        <div className="bookings-filter-field">
+          <span className="bookings-filter-label">
+            <Tags className="h-3.5 w-3.5" />
+            Bookingtype
+          </span>
           <Select value={eventTypeFilter} onValueChange={setEventTypeFilter}>
-            <SelectTrigger>
-              <SelectValue placeholder="Bookingtype" />
+            <SelectTrigger className="bookings-filter-control w-full">
+              <SelectValue placeholder="Alle types" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all">Alle bookingtypes</SelectItem>
               {eventTypeItems.map((item) => (
-                <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
+                <SelectItem key={item.id} value={item.id}>
+                  {item.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
       <div className="-mx-1 overflow-x-auto px-1 pb-1">
         <div className="flex min-w-max gap-2">
           {filterTabs.map((tab) => (

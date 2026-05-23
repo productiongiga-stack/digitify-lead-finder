@@ -8,6 +8,7 @@ import {
   LEAD_PRIORITY_OPTIONS,
   LEAD_STATUS_OPTIONS,
   getLeadPriorityBadgeVariant,
+  getLeadPriorityLabel,
   getLeadStatusBadgeVariant,
   getLeadStatusLabel,
 } from "@/lib/lead-status";
@@ -588,119 +589,131 @@ export default function LeadsPage() {
             <QueryErrorState onRetry={() => void refetch()} />
           ) : null}
           {/* Filters */}
-          <Card className="app-surface">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative min-w-[170px] flex-1 sm:min-w-[220px]">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Zoek naam, e-mail, stad…"
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    setPage(1);
-                  }}
-                  className="min-w-0 pl-9 placeholder:text-clip sm:placeholder:truncate"
-                />
+          <div className="app-page-filters">
+            <div className="flex w-full flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                <div className="relative min-w-0 flex-1 sm:max-w-md">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Zoek naam, e-mail, stad…"
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setPage(1);
+                    }}
+                    className="h-9 min-w-0 border-border/70 bg-background/80 pl-9 shadow-none placeholder:text-clip sm:placeholder:truncate"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={statusFilter || "all"}
+                    onValueChange={(v) => {
+                      setStatusFilter(v === "all" ? "" : v);
+                      setPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-[132px] border-border/70 bg-background/80 shadow-none sm:w-[148px]">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Alle statussen</SelectItem>
+                      {LEAD_STATUS_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select
+                    value={priorityFilter || "all"}
+                    onValueChange={(v) => {
+                      setPriorityFilter(v === "all" ? "" : v);
+                      setPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-[120px] border-border/70 bg-background/80 shadow-none sm:w-[128px]">
+                      <SelectValue placeholder="Prioriteit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Alle prioriteiten</SelectItem>
+                      {LEAD_PRIORITY_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <Select
-                value={statusFilter}
-                onValueChange={(v) => {
-                  setStatusFilter(v === "all" ? "" : v);
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="w-[138px] sm:w-[150px]">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Alle statussen</SelectItem>
-                  {LEAD_STATUS_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select
-                value={priorityFilter}
-                onValueChange={(v) => {
-                  setPriorityFilter(v === "all" ? "" : v);
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="w-[122px] sm:w-[130px]">
-                  <SelectValue placeholder="Prioriteit" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Alle</SelectItem>
-                  {LEAD_PRIORITY_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => recomputeScores.mutate({ onlyMissing: false, limit: 5000 })}
-                disabled={recomputeScores.isPending}
-              >
-                <RefreshCw
-                  className={cn("mr-1.5 h-3.5 w-3.5", recomputeScores.isPending && "animate-spin")}
-                />
-                Scores ophalen
-              </Button>
-              {recomputeScores.data ? (
-                <span className="text-xs text-muted-foreground">
-                  {recomputeScores.data.updated}/{recomputeScores.data.total} bijgewerkt
-                  {recomputeScores.data.failed > 0
-                    ? ` · ${recomputeScores.data.failed} fouten`
-                    : ""}
-                </span>
-              ) : null}
-              {importCsv.data ? (
-                <span className="text-xs text-muted-foreground">
-                  CSV: {importCsv.data.created} toegevoegd · {importCsv.data.skipped} overgeslagen
-                </span>
-              ) : null}
-            </div>
-            {(activeFilterCount > 0 || total > 0) && (
-              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                <Badge variant="secondary" className="h-6 px-2">
-                  {activeFilterCount > 0
-                    ? `${visibleCount} zichtbaar`
-                    : `${total} totaal`}
+
+              <div className="flex flex-wrap items-center gap-2 lg:shrink-0 lg:border-l lg:border-border/50 lg:pl-4">
+                <Badge
+                  variant="secondary"
+                  className="h-9 shrink-0 px-3 text-xs font-medium tabular-nums"
+                >
+                  {activeFilterCount > 0 ? `${visibleCount} van ${total}` : `${total} leads`}
                 </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 shrink-0 border-border/70 bg-background/80 shadow-none"
+                  onClick={() => recomputeScores.mutate({ onlyMissing: false, limit: 5000 })}
+                  disabled={recomputeScores.isPending}
+                >
+                  <RefreshCw
+                    className={cn("mr-1.5 h-3.5 w-3.5", recomputeScores.isPending && "animate-spin")}
+                  />
+                  Scores ophalen
+                </Button>
+              </div>
+            </div>
+
+            {recomputeScores.data || importCsv.data ? (
+              <p className="border-t border-border/40 pt-2.5 text-xs text-muted-foreground">
+                {recomputeScores.data
+                  ? `${recomputeScores.data.updated}/${recomputeScores.data.total} scores bijgewerkt${
+                      recomputeScores.data.failed > 0 ? ` · ${recomputeScores.data.failed} fouten` : ""
+                    }`
+                  : null}
+                {recomputeScores.data && importCsv.data ? " · " : null}
+                {importCsv.data
+                  ? `CSV: ${importCsv.data.created} toegevoegd, ${importCsv.data.skipped} overgeslagen`
+                  : null}
+              </p>
+            ) : null}
+
+            {activeFilterCount > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5 border-t border-border/40 pt-2.5">
+                <span className="mr-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Actief
+                </span>
                 {statusFilter ? (
-                  <Badge variant="outline" className="h-6 px-2">
+                  <Badge variant="outline" className="h-6 gap-1 px-2 text-xs font-normal">
                     Status: {getLeadStatusLabel(statusFilter)}
                   </Badge>
                 ) : null}
                 {priorityFilter ? (
-                  <Badge variant="outline" className="h-6 px-2">
-                    Prioriteit: {priorityFilter}
+                  <Badge variant="outline" className="h-6 gap-1 px-2 text-xs font-normal">
+                    Prioriteit: {getLeadPriorityLabel(priorityFilter)}
                   </Badge>
                 ) : null}
                 {search ? (
-                  <Badge variant="outline" className="h-6 px-2">
-                    Zoekterm: {search}
+                  <Badge variant="outline" className="h-6 max-w-[200px] truncate px-2 text-xs font-normal">
+                    Zoek: {search}
                   </Badge>
                 ) : null}
-                {activeFilterCount > 0 ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 px-2 text-xs"
-                    onClick={clearFilters}
-                  >
-                    <X className="mr-1 h-3 w-3" />
-                    Wissen
-                  </Button>
-                ) : null}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={clearFilters}
+                >
+                  <X className="mr-1 h-3 w-3" />
+                  Alles wissen
+                </Button>
               </div>
-            )}
-          </Card>
+            ) : null}
+          </div>
 
           {/* Bulk Actions */}
           <BulkActions

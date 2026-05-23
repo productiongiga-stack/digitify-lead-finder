@@ -118,13 +118,24 @@ export const taskRouter = router({
       const scope = workspaceScopeFromUser(ctx.user);
       await migrateLegacyWorkspaceTasks(ctx.db, scope);
 
-      let rows = await ctx.db.workspaceTask.findMany({
-        where: {
-          createdById: scope.workspaceId,
-          ...(input.status ? { status: input.status } : {}),
-          ...(input.relatedType ? { relatedType: input.relatedType } : {}),
-        },
-      });
+      const baseWhere = {
+        createdById: scope.workspaceId,
+        ...(input.relatedType ? { relatedType: input.relatedType } : {}),
+      };
+
+      const [rows, statusGroups] = await Promise.all([
+        ctx.db.workspaceTask.findMany({
+          where: {
+            ...baseWhere,
+            ...(input.status ? { status: input.status } : {}),
+          },
+        }),
+        ctx.db.workspaceTask.groupBy({
+          by: ["status"],
+          where: baseWhere,
+          _count: { _all: true },
+        }),
+      ]);
 
       rows.sort((a, b) => {
         if (a.status !== b.status) {
@@ -143,11 +154,12 @@ export const taskRouter = router({
         relatedLabel: labelFor(row),
       }));
 
+      const countByStatus = new Map(statusGroups.map((row) => [row.status, row._count._all]));
       const summary = {
-        total: items.length,
-        todo: items.filter((task) => task.status === "TODO").length,
-        inProgress: items.filter((task) => task.status === "IN_PROGRESS").length,
-        done: items.filter((task) => task.status === "DONE").length,
+        total: statusGroups.reduce((sum, row) => sum + row._count._all, 0),
+        todo: countByStatus.get("TODO") ?? 0,
+        inProgress: countByStatus.get("IN_PROGRESS") ?? 0,
+        done: countByStatus.get("DONE") ?? 0,
       };
       return { items, summary };
     }),

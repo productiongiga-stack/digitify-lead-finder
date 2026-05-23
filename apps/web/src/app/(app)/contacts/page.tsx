@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
@@ -23,17 +23,35 @@ import {
   TabsTrigger,
   Input,
   Checkbox,
+  StatsCards,
+  type StatItem,
 } from "@digitify/ui";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
 import { EmptyState } from "@digitify/ui";
-import { Mail, FileText, CheckCircle, Eye, Send, Inbox, ArrowRight, PenSquare, Trash2, X } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  Eye,
+  FileEdit,
+  FileText,
+  Inbox,
+  Mail,
+  PenSquare,
+  Search,
+  Send,
+  ShieldCheck,
+  Trash2,
+  X,
+} from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { EmailPreview } from "@/components/email/preview";
 import { extractEmailTemplateMetadata } from "@/lib/email-content";
 import {
   OUTBOUND_FLOW_SUMMARY,
   OUTBOUND_STAT_CARD_STATUSES,
+  type OutboundStatCardStatus,
   OUTBOUND_STATUS_LABELS,
   OUTBOUND_STATUS_OPTIONS,
   OUTBOUND_STATUS_VARIANTS,
@@ -127,6 +145,50 @@ export default function ContactsPage() {
     stats.pending > 0 ? "Werk eerst de goedkeuringswachtrij af." : stats.failed > 0 ? "Los mislukte mails eerst op." : "Er is ruimte om nieuwe outreach op te starten.";
   const followUpItems = followUpQueue?.items ?? [];
 
+  const outboundStatItems = useMemo<StatItem[]>(() => {
+    const countByStatus: Record<OutboundStatCardStatus, number> = {
+      DRAFT: stats.draft,
+      PENDING_APPROVAL: stats.pending,
+      APPROVED: stats.approved,
+      SENT: stats.sent,
+      FAILED: stats.failed,
+    };
+    const meta: Record<
+      OutboundStatCardStatus,
+      { icon: React.ReactNode; tone: NonNullable<StatItem["tone"]> }
+    > = {
+      DRAFT: { icon: <FileEdit />, tone: "neutral" },
+      PENDING_APPROVAL: { icon: <Clock />, tone: "warning" },
+      APPROVED: { icon: <ShieldCheck />, tone: "positive" },
+      SENT: { icon: <Send />, tone: "positive" },
+      FAILED: { icon: <AlertCircle />, tone: "negative" },
+    };
+
+    const statusCards: StatItem[] = OUTBOUND_STAT_CARD_STATUSES.map((status) => {
+      const count = countByStatus[status];
+      const active = statusFilter === status;
+      return {
+        label: getOutboundStatusLabel(status),
+        value: count,
+        icon: meta[status].icon,
+        tone: meta[status].tone,
+        hint: active ? "Filter actief" : count > 0 ? "Klik om te filteren" : undefined,
+        onClick: () => setStatusFilter((current) => (current === status ? "" : status)),
+      };
+    });
+
+    return [
+      ...statusCards,
+      {
+        label: "Inkomend",
+        value: "Inbox",
+        icon: <Inbox />,
+        href: "/contacts/inbox",
+        hint: "Ontvangen e-mail",
+      },
+    ];
+  }, [stats.approved, stats.draft, stats.failed, stats.pending, stats.sent, statusFilter]);
+
   function toggleDraftSelection(id: string, checked: boolean) {
     setSelectedDraftIds((current) =>
       checked ? Array.from(new Set([...current, id])) : current.filter((draftId) => draftId !== id),
@@ -217,17 +279,23 @@ export default function ContactsPage() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
-      <Card className="app-surface">
-        <div className="flex flex-wrap items-center gap-3">
-          <Input
-            value={searchFilter}
-            onChange={(event) => setSearchFilter(event.target.value)}
-            placeholder="Zoek op lead, onderwerp of e-mail..."
-            className="w-full sm:w-[280px]"
-          />
-          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v === "all" ? "" : v)}>
-            <SelectTrigger className="w-full sm:w-[190px]">
-              <SelectValue placeholder="Filter op status" />
+      <div className="app-page-filters">
+        <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="relative min-w-0 flex-1 sm:max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchFilter}
+              onChange={(event) => setSearchFilter(event.target.value)}
+              placeholder="Zoek lead, onderwerp of e-mail…"
+              className="h-9 min-w-0 border-border/70 bg-background/80 pl-9 shadow-none"
+            />
+          </div>
+          <Select
+            value={statusFilter || "all"}
+            onValueChange={(v) => setStatusFilter(v === "all" ? "" : v)}
+          >
+            <SelectTrigger className="h-9 w-full border-border/70 bg-background/80 shadow-none sm:w-[210px]">
+              <SelectValue placeholder="Alle statussen" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Alle statussen</SelectItem>
@@ -238,16 +306,20 @@ export default function ContactsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Link href="/contacts/inbox">
-            <Button variant="ghost" size="sm">
-              <Inbox className="mr-1.5 h-3.5 w-3.5" />
-              Naar Inbox
-            </Button>
-          </Link>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 sm:shrink-0 lg:border-l lg:border-border/50 lg:pl-4">
+          <Button asChild variant="outline" size="sm" className="h-9 border-border/70 bg-background/80 shadow-none">
+            <Link href="/contacts/inbox">
+              <Inbox className="mr-1.5 h-4 w-4" />
+              Inbox
+            </Link>
+          </Button>
           {activeFilterCount > 0 ? (
             <Button
               variant="ghost"
               size="sm"
+              className="h-9 text-muted-foreground"
               onClick={() => {
                 setStatusFilter("");
                 setSearchFilter("");
@@ -259,16 +331,16 @@ export default function ContactsPage() {
           ) : null}
           {leadIdFilter ? (
             <>
-              <Badge variant="outline" className="h-9 px-3">
-                Lead filter actief
+              <Badge variant="secondary" className="h-9 px-2.5 text-xs">
+                Leadfilter actief
               </Badge>
-              <Button asChild variant="ghost" size="sm">
+              <Button asChild variant="ghost" size="sm" className="h-9">
                 <Link href={`/leads/${leadIdFilter}`}>Open lead</Link>
               </Button>
             </>
           ) : null}
         </div>
-      </Card>
+      </div>
 
       {selectedDraftIds.length > 0 ? (
         <Card className="border-primary/30 bg-primary/5 p-3">
@@ -308,39 +380,7 @@ export default function ContactsPage() {
         </Card>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-6">
-        {OUTBOUND_STAT_CARD_STATUSES.map((status) => {
-          const count =
-            status === "DRAFT"
-              ? stats.draft
-              : status === "PENDING_APPROVAL"
-                ? stats.pending
-                : status === "APPROVED"
-                  ? stats.approved
-                  : status === "SENT"
-                    ? stats.sent
-                    : stats.failed;
-          return (
-            <Card key={status}>
-              <CardContent className="p-3">
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                  {getOutboundStatusLabel(status)}
-                </p>
-                <p className="mt-1 text-lg font-semibold">{count}</p>
-              </CardContent>
-            </Card>
-          );
-        })}
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Inkomend</p>
-            <Link href="/contacts/inbox" className="mt-1 inline-flex items-center text-sm font-medium text-primary hover:underline">
-              Open Inbox
-              <ArrowRight className="ml-1 h-3.5 w-3.5" />
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
+      <StatsCards items={outboundStatItems} columns={6} loading={isLoading} />
 
       </TabsContent>
 
