@@ -35,16 +35,32 @@ Optional staging:
 |----------|--------|
 | `ENABLE_WORKSPACE_RLS` | `true` only after `pnpm rls:smoke` on staging DB |
 
+## Local development (first run / after pull)
+
+```bash
+set -a && source .env && set +a
+pnpm install
+pnpm db:generate
+pnpm db:resolve-init    # only if migrate fails on existing DB (P3009 on init)
+pnpm db:migrate
+pnpm --filter @digitify/web dev --port 3001
+```
+
+If the app shows a CSS build error, delete `apps/web/.next` and restart the dev server.
+
+Login (seed): `admin@digitify.local` / `DigitifyDev2026!` (after `pnpm db:seed` if needed).
+
 ## Database on deploy
 
 1. Link **Neon** (or Postgres) via Vercel Marketplace.
-2. Run once against the production DB (local or CI shell with `DATABASE_URL`):
+2. Run once against the production DB (shell with non-empty `DATABASE_URL` / `POSTGRES_URL_NON_POOLING`):
 
 ```bash
-pnpm db:push          # if empty project
-pnpm db:migrate       # RLS + incremental SQL
+pnpm db:generate
+pnpm db:resolve-init    # if init migration is marked failed but schema exists
+pnpm db:migrate
 pnpm db:migrate-workspace-settings
-pnpm db:seed          # optional dev/staging only
+pnpm db:seed            # optional dev/staging only
 ```
 
 Do **not** run seed on production unless intentional.
