@@ -1,15 +1,34 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-
-type Service = {
-  id: string;
-  category: string;
-  name: string;
-  description?: string | null;
-  basePrice: number;
-  unit?: string | null;
-};
+import {
+  formatCurrency,
+  isValidEmail,
+  normalizeKey,
+  parseEmojiMap,
+  parseIconLibrary,
+  sanitizeNumber,
+} from "@/lib/quote-configurator-utils";
+import {
+  ConfiguratorIcon,
+  QuoteEmbedHeader,
+  QuoteStepProgress,
+  QuoteStudioBar,
+  QuoteSummaryAside,
+} from "@/components/quotes/quote-embed-layout";
+import { QuoteIconPicker } from "@/components/quotes/quote-icon-picker";
+import { QuoteDetailsStep } from "@/components/quotes/quote-embed-steps";
+import {
+  buildFallbackSpecs,
+  parseProductSpecs,
+  resolveProductSpecs,
+  type PackageOption,
+  type QuoteConfiguratorService as Service,
+  type SpecOption,
+  type SpecOptionSection,
+  type SpecQuestion,
+  type SpecSlider,
+} from "@/lib/quote-configurator-specs";
 
 type RemotePayload = {
   settings: {
@@ -38,6 +57,7 @@ type RemotePayload = {
     stepDetailsHint: string;
     categoryIconsJson: string;
     productIconsJson: string;
+    iconLibraryJson: string;
     serviceTitle: string;
     productTitle: string;
     specsTitle: string;
@@ -103,74 +123,6 @@ type CartEntry = {
   customDescription?: string;
 };
 
-type PackageOption = {
-  key: string;
-  label: string;
-  subtitle: string;
-  price: number;
-  features: string[];
-  defaultSelected?: boolean;
-};
-
-type SpecOption = {
-  key: string;
-  label: string;
-  price: number;
-  unit?: string;
-  description?: string;
-  quantity?: number;
-  defaultSelected?: boolean;
-};
-
-type SpecOptionSection = {
-  title: string;
-  options: SpecOption[];
-};
-
-type SpecSlider = {
-  key: string;
-  label: string;
-  min: number;
-  max: number;
-  step?: number;
-  included?: number;
-  pricePerUnit?: number;
-  unitLabel?: string;
-  hint?: string;
-  defaultValue?: number;
-};
-
-type SpecQuestionType = "text" | "select" | "checkbox";
-
-type SpecQuestion = {
-  key: string;
-  label: string;
-  type: SpecQuestionType;
-  required?: boolean;
-  placeholder?: string;
-  helpText?: string;
-  options?: string[];
-  showWhenPackageKey?: string;
-  showWhenOptionKey?: string;
-};
-
-type ProductSpecConfig = {
-  headline?: string;
-  subheadline?: string;
-  packageSectionTitle?: string;
-  packages?: PackageOption[];
-  optionSections?: SpecOptionSection[];
-  sliders?: SpecSlider[];
-  questionsCard?: {
-    title?: string;
-    subtitle?: string;
-  };
-  questions?: SpecQuestion[];
-  notesPlaceholder?: string;
-};
-
-type SpecsByProduct = Record<string, ProductSpecConfig>;
-
 function isPreviewPayload(value: unknown): value is RemotePayload {
   if (!value || typeof value !== "object") return false;
   const payload = value as Record<string, unknown>;
@@ -189,68 +141,6 @@ function isPreviewPayload(value: unknown): value is RemotePayload {
     );
   });
 }
-
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat("nl-BE", {
-    style: "currency",
-    currency: "EUR",
-  }).format(amount);
-}
-
-function isValidEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function sanitizeNumber(input: string) {
-  const parsed = Number(input.replace(",", "."));
-  if (!Number.isFinite(parsed)) return 0;
-  return parsed;
-}
-
-function normalizeKey(value: string) {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "");
-}
-
-function parseEmojiMap(raw: string): Record<string, string> {
-  if (!raw.trim()) return {};
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>)
-        .map(([key, value]) => [String(key).trim(), typeof value === "string" ? value.trim() : ""])
-        .filter(([key, value]) => key.length > 0 && value.length > 0),
-    );
-  } catch {
-    return {};
-  }
-}
-
-const EMOJI_DROPDOWN_OPTIONS = [
-  "💻",
-  "🛍️",
-  "🎬",
-  "🎥",
-  "📸",
-  "📣",
-  "🔎",
-  "🌐",
-  "⚙️",
-  "🧩",
-  "🧠",
-  "🎨",
-  "🖨️",
-  "📈",
-  "💡",
-  "📦",
-  "📱",
-  "🔧",
-  "🚀",
-];
 
 function getCategoryIcon(category: string, categoryIcons: Record<string, string>) {
   const custom = categoryIcons[category] || categoryIcons[normalizeKey(category)];
@@ -286,18 +176,6 @@ function getServiceIcon(service: Service, productIcons: Record<string, string>) 
   return "🧩";
 }
 
-function isImageIcon(value: string) {
-  const trimmed = value.trim();
-  return /^https?:\/\//i.test(trimmed) || trimmed.startsWith("data:image/") || trimmed.startsWith("/uploads/");
-}
-
-function renderConfiguratorIcon(value: string, label: string) {
-  if (isImageIcon(value)) {
-    return <img src={value} alt={label} className="h-full w-full rounded-lg object-cover" />;
-  }
-  return <span aria-hidden="true">{value}</span>;
-}
-
 function QuoteEmbedFallback() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#f3f2ec] p-6 text-[#1f2228]">
@@ -308,297 +186,6 @@ function QuoteEmbedFallback() {
       </div>
     </div>
   );
-}
-
-function buildPackageOptions(service: Service): PackageOption[] {
-  const base = Math.max(1, service.basePrice);
-  const description = (service.description || "").trim();
-
-  return [
-    {
-      key: "basic",
-      label: "Basis",
-      subtitle: description || `${service.name} startpakket`,
-      price: Math.round(base),
-      features: ["Kick-off en intake", "Basis oplevering", "Standaard support"],
-      defaultSelected: true,
-    },
-    {
-      key: "pro",
-      label: "Pro",
-      subtitle: description || `${service.name} groeipakket`,
-      price: Math.round(base * 1.6),
-      features: ["Alles van Basis", "Uitgebreidere scope", "Snellere oplevering"],
-    },
-    {
-      key: "premium",
-      label: "Premium",
-      subtitle: description || `${service.name} full-service`,
-      price: Math.round(base * 2.2),
-      features: ["Alles van Pro", "Volledig maatwerk", "Prioritaire support"],
-    },
-  ];
-}
-
-function asString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value : fallback;
-}
-
-function asNumber(value: unknown, fallback = 0) {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function asBoolean(value: unknown, fallback = false) {
-  return typeof value === "boolean" ? value : fallback;
-}
-
-function sanitizeSpecConfig(raw: unknown): ProductSpecConfig | null {
-  if (!raw || typeof raw !== "object") return null;
-  const source = raw as Record<string, unknown>;
-
-  const packages = Array.isArray(source.packages)
-    ? source.packages
-        .map((pkg): PackageOption | null => {
-          if (!pkg || typeof pkg !== "object") return null;
-          const item = pkg as Record<string, unknown>;
-          const label = asString(item.label).trim();
-          const price = asNumber(item.price, NaN);
-          if (!label || !Number.isFinite(price)) return null;
-          return {
-            key: asString(item.key, normalizeKey(label) || "package"),
-            label,
-            subtitle: asString(item.subtitle),
-            price,
-            features: Array.isArray(item.features)
-              ? item.features.map((feature) => asString(feature)).filter(Boolean)
-              : [],
-            defaultSelected: asBoolean(item.defaultSelected, false),
-          };
-        })
-        .filter(Boolean) as PackageOption[]
-    : [];
-
-  const optionSections = Array.isArray(source.optionSections)
-    ? source.optionSections
-        .map((section): SpecOptionSection | null => {
-          if (!section || typeof section !== "object") return null;
-          const sec = section as Record<string, unknown>;
-          const title = asString(sec.title).trim();
-          if (!title) return null;
-          const options = Array.isArray(sec.options)
-            ? sec.options
-                .map((opt): SpecOption | null => {
-                  if (!opt || typeof opt !== "object") return null;
-                  const item = opt as Record<string, unknown>;
-                  const label = asString(item.label).trim();
-                  const price = asNumber(item.price, NaN);
-                  if (!label || !Number.isFinite(price)) return null;
-                  return {
-                    key: asString(item.key, normalizeKey(label) || "option"),
-                    label,
-                    price,
-                    unit: asString(item.unit),
-                    description: asString(item.description),
-                    quantity: Math.max(1, asNumber(item.quantity, 1)),
-                    defaultSelected: asBoolean(item.defaultSelected, false),
-                  };
-                })
-                .filter(Boolean) as SpecOption[]
-            : [];
-          return { title, options };
-        })
-        .filter(Boolean) as SpecOptionSection[]
-    : [];
-
-  const sliders = Array.isArray(source.sliders)
-    ? source.sliders
-        .map((slider): SpecSlider | null => {
-          if (!slider || typeof slider !== "object") return null;
-          const item = slider as Record<string, unknown>;
-          const label = asString(item.label).trim();
-          if (!label) return null;
-          const min = 1;
-          const max = 1000;
-          if (max <= min) return null;
-          return {
-            key: asString(item.key, normalizeKey(label) || "slider"),
-            label,
-            min,
-            max,
-            step: Math.max(1, asNumber(item.step, 1)),
-            included: Math.max(0, asNumber(item.included, 0)),
-            pricePerUnit: Math.max(0, asNumber(item.pricePerUnit, 0)),
-            unitLabel: asString(item.unitLabel, "km"),
-            hint: asString(item.hint),
-            defaultValue: Math.min(max, Math.max(min, asNumber(item.defaultValue, min))),
-          };
-        })
-        .filter(Boolean) as SpecSlider[]
-    : [];
-
-  const questions = Array.isArray(source.questions)
-    ? source.questions
-        .map((question): SpecQuestion | null => {
-          if (!question || typeof question !== "object") return null;
-          const item = question as Record<string, unknown>;
-          const label = asString(item.label).trim();
-          if (!label) return null;
-          const type = asString(item.type, "text");
-          const resolvedType: SpecQuestionType =
-            type === "select" || type === "checkbox" || type === "text" ? type : "text";
-          const options =
-            resolvedType === "select" && Array.isArray(item.options)
-              ? item.options
-                  .map((value) => asString(value).trim())
-                  .filter((value) => value.length > 0)
-              : [];
-          return {
-            key: asString(item.key, normalizeKey(label) || "vraag"),
-            label,
-            type: resolvedType,
-            required: asBoolean(item.required, false),
-            placeholder: asString(item.placeholder),
-            helpText: asString(item.helpText),
-            showWhenPackageKey: asString(item.showWhenPackageKey),
-            showWhenOptionKey: asString(item.showWhenOptionKey),
-            options,
-          };
-        })
-        .filter(Boolean) as SpecQuestion[]
-    : [];
-
-  return {
-    headline: asString(source.headline),
-    subheadline: asString(source.subheadline),
-    packageSectionTitle: asString(source.packageSectionTitle),
-    packages,
-    optionSections,
-    sliders,
-    questionsCard:
-      source.questionsCard && typeof source.questionsCard === "object"
-        ? {
-            title: asString((source.questionsCard as Record<string, unknown>).title),
-            subtitle: asString((source.questionsCard as Record<string, unknown>).subtitle),
-          }
-        : undefined,
-    questions,
-    notesPlaceholder: asString(source.notesPlaceholder),
-  };
-}
-
-function parseProductSpecs(json: string): SpecsByProduct {
-  if (!json?.trim()) return {};
-  try {
-    const parsed = JSON.parse(json) as unknown;
-    if (!parsed || typeof parsed !== "object") return {};
-
-    const root = parsed as Record<string, unknown>;
-    const rawProducts =
-      root.products && typeof root.products === "object" && !Array.isArray(root.products)
-        ? (root.products as Record<string, unknown>)
-        : root;
-
-    const entries = Object.entries(rawProducts)
-      .map(([key, value]) => {
-        const config = sanitizeSpecConfig(value);
-        if (!config) return null;
-        return [key, config] as const;
-      })
-      .filter(Boolean) as Array<readonly [string, ProductSpecConfig]>;
-
-    return Object.fromEntries(entries);
-  } catch {
-    return {};
-  }
-}
-
-function resolveProductSpecs(service: Service | null, map: SpecsByProduct): ProductSpecConfig | null {
-  if (!service) return null;
-
-  const candidates = [
-    service.id,
-    normalizeKey(`${service.category}-${service.name}`),
-    service.name,
-    normalizeKey(service.name),
-    `${service.category}:${service.name}`,
-    normalizeKey(`${service.category}:${service.name}`),
-  ];
-
-  for (const candidate of candidates) {
-    if (map[candidate]) return map[candidate] || null;
-  }
-
-  return null;
-}
-
-function buildFallbackSpecs(service: Service, siblingExtras: Service[]): ProductSpecConfig {
-  const needsTravel = (() => {
-    const value = `${service.category} ${service.name}`.toLowerCase();
-    return ["media", "video", "film", "event", "foto", "shoot", "drone"].some((token) =>
-      value.includes(token),
-    );
-  })();
-
-  return {
-    packageSectionTitle: "PAKKET",
-    packages: buildPackageOptions(service),
-    optionSections: siblingExtras.length
-      ? [
-          {
-            title: "EXTRA OPTIES",
-            options: siblingExtras.map((extra) => ({
-              key: normalizeKey(extra.name) || extra.id,
-              label: extra.name,
-              price: extra.basePrice,
-              description: extra.description || "",
-              unit: extra.unit || "",
-            })),
-          },
-        ]
-      : [],
-    sliders: needsTravel
-      ? [
-          {
-            key: "travel",
-            label: "Verplaatsing",
-            min: 1,
-            max: 1000,
-            step: 10,
-            included: 50,
-            pricePerUnit: 0.35,
-            unitLabel: "km",
-            hint: "0km inbegrepen, daarna €0,35/km",
-            defaultValue: 1,
-          },
-        ]
-      : [],
-    questionsCard: {
-      title: "Vragen voor een nauwkeurige offerte",
-      subtitle: "Beantwoord uw voorkeuren voor een betere prijsopgave.",
-    },
-    questions: [
-      {
-        key: "planning",
-        label: "Wanneer wilt u starten?",
-        type: "select",
-        options: ["Zo snel mogelijk", "Binnen 2 weken", "Binnen 1 maand", "Nog te bepalen"],
-        required: true,
-      },
-      {
-        key: "budget",
-        label: "Heeft u al een budgetindicatie?",
-        type: "checkbox",
-        helpText: "Ja, ik heb al een budget in gedachten.",
-      },
-      {
-        key: "focus",
-        label: "Wat is uw belangrijkste doel?",
-        type: "text",
-        placeholder: "Meer leads, betere branding, sneller resultaat...",
-      },
-    ],
-    notesPlaceholder: "Extra info, specifieke wensen of vragen...",
-  };
 }
 
 function optionCartKey(productId: string, optionKey: string) {
@@ -709,6 +296,7 @@ function readQuoteConfiguratorUrlState() {
       leadId: "",
       chatSessionId: "",
       quoteId: "",
+      returnTo: "",
     };
   }
   const params = new URLSearchParams(window.location.search);
@@ -721,6 +309,7 @@ function readQuoteConfiguratorUrlState() {
     leadId: params.get("leadId")?.trim() || "",
     chatSessionId: params.get("chatSessionId")?.trim() || "",
     quoteId: params.get("quoteId")?.trim() || "",
+    returnTo: params.get("returnTo")?.trim() || "",
   };
 }
 
@@ -732,6 +321,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
   const leadIdParam = urlState.leadId;
   const chatSessionIdParam = urlState.chatSessionId;
   const quoteIdParam = urlState.quoteId;
+  const returnToParam = urlState.returnTo;
   const [payload, setPayload] = useState<RemotePayload | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [isLivePreview, setIsLivePreview] = useState(false);
@@ -913,6 +503,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
     stepDetailsHint: "Vul tenslotte uw gegevens in om de offerteaanvraag te versturen.",
     categoryIconsJson: "{}",
     productIconsJson: "{}",
+    iconLibraryJson: "[]",
     serviceTitle: "Welke dienst zoekt u?",
     productTitle: "Kies uw product",
     specsTitle: "Specificaties",
@@ -941,6 +532,10 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
   const productIconsMap = useMemo(
     () => parseEmojiMap(settings.productIconsJson || "{}"),
     [settings.productIconsJson],
+  );
+  const iconLibrary = useMemo(
+    () => parseIconLibrary(settings.iconLibraryJson || "[]"),
+    [settings.iconLibraryJson],
   );
 
   const servicesByCategory = useMemo(() => {
@@ -1114,6 +709,38 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
     });
   }
 
+  function editCartItem(cartKey: string) {
+    const entry = cart[cartKey];
+    if (!entry) return;
+
+    const productId = entry.source === "product" ? cartKey : entry.serviceId;
+    const service = (payload?.services || []).find((item) => item.id === productId);
+    if (!service) return;
+
+    setSelectedCategory(service.category);
+    setSelectedProductId(service.id);
+    setCurrentStep(3);
+  }
+
+  function updateCartItem(
+    cartKey: string,
+    update: { customName?: string; unitPrice?: number; quantity?: number },
+  ) {
+    setCart((current) => {
+      const existing = current[cartKey];
+      if (!existing) return current;
+      return {
+        ...current,
+        [cartKey]: {
+          ...existing,
+          ...(update.customName !== undefined ? { customName: update.customName.trim() || existing.customName } : {}),
+          ...(update.unitPrice !== undefined ? { unitPrice: Math.max(0, update.unitPrice) } : {}),
+          ...(update.quantity !== undefined ? { quantity: Math.max(1, update.quantity) } : {}),
+        },
+      };
+    });
+  }
+
   function toggleSpecOption(section: SpecOptionSection, option: SpecOption) {
     if (!selectedProduct) return;
     const key = optionCartKey(selectedProduct.id, option.key);
@@ -1234,14 +861,22 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
   }
 
   const cartItems = useMemo(() => {
+    const services = payload?.services || [];
     return Object.entries(cart)
       .map(([cartKey, entry]) => {
-        const service = (payload?.services || []).find((item) => item.id === entry.serviceId);
+        const service = services.find((item) => item.id === entry.serviceId);
+        const linkedProduct =
+          entry.source === "product"
+            ? service
+            : services.find((item) => item.id === entry.serviceId);
         const category = entry.customCategory || service?.category || "Extra";
         const name = entry.customName || service?.name || "Optie";
         const description = entry.customDescription || service?.description || "";
+        const isCustomLine = cartKey.startsWith("quote:") || (!linkedProduct && entry.source !== "product");
+        const isConfigurable = Boolean(linkedProduct && !isPreviewRoute);
         return {
           cartKey,
+          serviceId: entry.serviceId,
           source: entry.source,
           category,
           name,
@@ -1251,10 +886,13 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
           total: entry.unitPrice * entry.quantity,
           packageLabel: entry.packageLabel,
           packageKey: entry.packageKey,
+          isConfirmed: Boolean(confirmedProducts[cartKey]),
+          isConfigurable,
+          isCustomLine,
         };
       })
       .filter((item) => item.quantity > 0 && item.unitPrice >= 0);
-  }, [cart, payload?.services]);
+  }, [cart, confirmedProducts, isPreviewRoute, payload?.services]);
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.total, 0);
   const discountRaw = sanitizeNumber(discountInput);
@@ -1418,7 +1056,8 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
 
     setStatus({ type: "success", message: `${data.message} Referentie: ${data.quoteNumber}.` });
     if (isInternalMode && data.quoteId) {
-      window.location.href = `/quotes/${encodeURIComponent(data.quoteId)}`;
+      window.location.href =
+        returnToParam || `/quotes/${encodeURIComponent(data.quoteId)}`;
     }
   }
 
@@ -1446,142 +1085,30 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
     <div className="h-screen overflow-hidden px-2 py-2 text-[#17181c] sm:px-4" style={{ backgroundColor: bgColor }}>
       <div className="mx-auto flex h-[calc(100vh-1rem)] max-w-[1500px] flex-col overflow-hidden rounded-[20px] border border-black/10 bg-white shadow-[0_20px_60px_rgba(0,0,0,0.12)]">
         {isPreviewRoute ? (
-          <div className="border-b border-[#e4dcc8] bg-[#f6f0df] px-3 py-2 text-[11px] text-[#5d5648] sm:px-5">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold">Studio</span>
-              <span>Stap {currentStep}</span>
-              <span>•</span>
-              <span>{selectedCategory || "Geen categorie"}</span>
-              <span>•</span>
-              <span>{selectedProductId || "Geen product"}</span>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "set-mode", mode: "simple" })}
-                className="rounded-md border px-2 py-1 text-[11px]"
-                style={{
-                  borderColor: settings.embedMode === "simple" ? accentColor : "#d6d1c2",
-                  backgroundColor: settings.embedMode === "simple" ? `${accentColor}2a` : "#fff",
-                }}
-              >
-                Simple
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "set-mode", mode: "advanced" })}
-                className="rounded-md border px-2 py-1 text-[11px]"
-                style={{
-                  borderColor: settings.embedMode === "advanced" ? accentColor : "#d6d1c2",
-                  backgroundColor: settings.embedMode === "advanced" ? `${accentColor}2a` : "#fff",
-                }}
-              >
-                Advanced
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "set-viewport", viewport: "desktop" })}
-                className="rounded-md border px-2 py-1 text-[11px]"
-                style={{
-                  borderColor: studioState.viewport === "desktop" ? accentColor : "#d6d1c2",
-                  backgroundColor: studioState.viewport === "desktop" ? `${accentColor}2a` : "#fff",
-                }}
-              >
-                Desktop
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "set-viewport", viewport: "tablet" })}
-                className="rounded-md border px-2 py-1 text-[11px]"
-                style={{
-                  borderColor: studioState.viewport === "tablet" ? accentColor : "#d6d1c2",
-                  backgroundColor: studioState.viewport === "tablet" ? `${accentColor}2a` : "#fff",
-                }}
-              >
-                Tablet
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "set-viewport", viewport: "mobile" })}
-                className="rounded-md border px-2 py-1 text-[11px]"
-                style={{
-                  borderColor: studioState.viewport === "mobile" ? accentColor : "#d6d1c2",
-                  backgroundColor: studioState.viewport === "mobile" ? `${accentColor}2a` : "#fff",
-                }}
-              >
-                Mobile
-              </button>
-              <label className="ml-1 inline-flex items-center gap-1 rounded-md border bg-white px-2 py-1 text-[11px]">
-                <input
-                  type="checkbox"
-                  checked={Boolean(studioState.syncBuilderWithPreview)}
-                  onChange={(event) =>
-                    sendPreviewAction({
-                      action: "set-sync",
-                      value: event.target.checked,
-                    })
-                  }
-                />
-                Sync
-              </label>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "undo" })}
-                disabled={!studioState.canUndo}
-                className="rounded-md border bg-white px-2 py-1 text-[11px] disabled:opacity-40"
-              >
-                Undo
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "redo" })}
-                disabled={!studioState.canRedo}
-                className="rounded-md border bg-white px-2 py-1 text-[11px] disabled:opacity-40"
-              >
-                Redo
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "save-all" })}
-                className="rounded-md px-2 py-1 text-[11px] font-semibold"
-                style={{ backgroundColor: accentColor, color: darkColor }}
-              >
-                {studioState.hasUnpublishedChanges ? "Publiceer" : "Gepubliceerd"}
-              </button>
-              <button
-                type="button"
-                onClick={() => sendPreviewAction({ action: "restore-published" })}
-                className="rounded-md border bg-white px-2 py-1 text-[11px] disabled:opacity-40"
-                disabled={!studioState.hasUnpublishedChanges}
-              >
-                Reset Draft
-              </button>
-              <span className="text-[11px] text-[#6a6152]">
-                Status: {studioState.publishState === "draft" ? "Draft" : "Live"}
-              </span>
-            </div>
-          </div>
+          <QuoteStudioBar
+            currentStep={currentStep}
+            selectedCategory={selectedCategory}
+            selectedProductId={selectedProductId}
+            embedMode={settings.embedMode}
+            viewport={studioState.viewport}
+            syncBuilderWithPreview={studioState.syncBuilderWithPreview}
+            canUndo={studioState.canUndo}
+            canRedo={studioState.canRedo}
+            hasUnpublishedChanges={studioState.hasUnpublishedChanges}
+            publishState={studioState.publishState}
+            accentColor={accentColor}
+            darkColor={darkColor}
+            sendPreviewAction={sendPreviewAction}
+          />
         ) : null}
-        <header className="px-3 py-2 text-white sm:px-5" style={{ background: `linear-gradient(135deg, ${darkColor} 0%, #1f2228 100%)` }}>
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              {settings.logoUrl ? (
-                <img src={settings.logoUrl} alt={companyName} className="h-8 w-auto rounded" />
-              ) : (
-                <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: accentColor }}>
-                  ▶
-                </div>
-              )}
-              <div>
-                <p className="text-base font-semibold leading-none">{companyName}</p>
-                <p className="mt-1 text-xs text-white/60">{companyTagline}</p>
-              </div>
-            </div>
-            <div className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: accentColor, color: darkColor }}>
-              {currentStep}
-            </div>
-          </div>
-        </header>
+        <QuoteEmbedHeader
+          companyName={companyName}
+          companyTagline={companyTagline}
+          logoUrl={settings.logoUrl}
+          currentStep={currentStep}
+          accentColor={accentColor}
+          darkColor={darkColor}
+        />
 
         {isLivePreview ? (
           <div className="border-b border-[#eadfca] bg-[#fbf6ea] px-3 py-2 text-xs text-[#6e6249] sm:px-6">
@@ -1594,39 +1121,12 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
           </div>
         ) : null}
 
-        <div className="border-b border-black/10 bg-[#fbfaf7] px-3 py-2 sm:px-6">
-          <div className="grid grid-cols-4 items-center gap-3">
-            {[
-              { n: 1, label: stepLabels.service },
-              { n: 2, label: stepLabels.product },
-              { n: 3, label: stepLabels.specs },
-              { n: 4, label: stepLabels.details },
-            ].map((step, index, array) => {
-              const active = currentStep >= step.n;
-              const current = currentStep === step.n;
-              return (
-                <div key={step.n} className="flex items-center gap-2">
-                  <div
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs font-bold"
-                    style={{
-                      borderColor: current ? accentColor : "#d5d7dd",
-                      backgroundColor: current ? accentColor : active ? darkColor : "#fff",
-                      color: current ? darkColor : active ? "#fff" : "#9498a3",
-                    }}
-                  >
-                    {step.n}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[11px] font-semibold tracking-wide text-[#7a7f88]">{step.label}</div>
-                    {index < array.length - 1 ? (
-                      <div className="mt-1 h-[2px] w-full rounded" style={{ backgroundColor: currentStep > step.n ? accentColor : "#e3e5ea" }} />
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <QuoteStepProgress
+          currentStep={currentStep}
+          stepLabels={stepLabels}
+          accentColor={accentColor}
+          darkColor={darkColor}
+        />
 
         <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_360px]">
           <section className="min-h-0 overflow-y-auto border-r border-black/10 px-3 py-3 sm:px-6">
@@ -1661,7 +1161,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-[#f5f6f8] text-lg">
-                              {renderConfiguratorIcon(getCategoryIcon(group.category, categoryIconsMap), group.category)}
+                              <ConfiguratorIcon value={getCategoryIcon(group.category, categoryIconsMap)} label={group.category} />
                             </div>
                             {selected ? (
                               <div className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: accentColor, color: darkColor }}>
@@ -1683,17 +1183,25 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                         className="rounded-[18px] border bg-white p-3 text-left transition hover:shadow-sm sm:p-4"
                         style={{ borderColor: selected ? accentColor : "#e2e3e7", boxShadow: selected ? `0 0 0 2px ${accentColor}33 inset` : "none" }}
                       >
-                        <button
-                          type="button"
+                        <div
+                          role="button"
+                          tabIndex={0}
                           onClick={() => {
                             setSelectedCategory(group.category);
                             setSelectedProductId("");
                           }}
-                          className="w-full text-left"
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              setSelectedCategory(group.category);
+                              setSelectedProductId("");
+                            }
+                          }}
+                          className="w-full cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c9811b]/40"
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-[#f5f6f8] text-lg">
-                              {renderConfiguratorIcon(getCategoryIcon(group.category, categoryIconsMap), group.category)}
+                              <ConfiguratorIcon value={getCategoryIcon(group.category, categoryIconsMap)} label={group.category} />
                             </div>
                             {selected ? (
                               <div className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: accentColor, color: darkColor }}>
@@ -1706,28 +1214,21 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                           <p className="mt-2 text-sm font-semibold" style={{ color: accentColor }}>
                             Vanaf {formatCurrency(group.minPrice)}
                           </p>
-                        </button>
+                        </div>
                         <div className="mt-3">
-                          <select
+                          <QuoteIconPicker
+                            compact
                             value={categoryIconsMap[group.category] || ""}
-                            onChange={(event) =>
+                            iconLibrary={iconLibrary}
+                            placeholder="Categorie-icoon"
+                            onChange={(icon) =>
                               sendPreviewAction({
                                 action: "set-category-icon",
                                 category: group.category,
-                                emoji: event.target.value,
+                                emoji: icon,
                               })
                             }
-                            className="h-8 w-full rounded border px-2 text-xs"
-                          >
-                            <option value="">Geen</option>
-                            {[...new Set([categoryIconsMap[group.category] || "", ...EMOJI_DROPDOWN_OPTIONS])]
-                              .filter((emoji) => emoji.length > 0)
-                              .map((emoji) => (
-                                <option key={`cat-emoji-${group.category}-${emoji}`} value={emoji}>
-                                  {emoji}
-                                </option>
-                              ))}
-                          </select>
+                          />
                         </div>
                         <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
                           <input
@@ -1767,46 +1268,32 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                       <p className="text-sm font-semibold" style={{ color: darkColor }}>+ Nieuwe dienst/categorie</p>
                       <p className="mt-1 text-xs text-[#7b818c]">Maak een nieuwe dienst (categorie) met een eerste product.</p>
                       <div className="mt-3 space-y-2">
-                        <div className="grid grid-cols-[1fr_74px] gap-2">
-                          <input
-                            value={newCategoryName}
-                            onChange={(event) => setNewCategoryName(event.target.value)}
-                            className="h-8 rounded border px-2 text-xs"
-                            placeholder="Dienstnaam"
-                          />
-                          <select
-                            value={newCategoryEmoji}
-                            onChange={(event) => setNewCategoryEmoji(event.target.value)}
-                            className="h-8 rounded border px-2 text-xs"
-                          >
-                            <option value="">Geen</option>
-                            {EMOJI_DROPDOWN_OPTIONS.map((emoji) => (
-                              <option key={`new-category-emoji-${emoji}`} value={emoji}>
-                                {emoji}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="grid grid-cols-[1fr_74px] gap-2">
-                          <input
-                            value={newServiceName}
-                            onChange={(event) => setNewServiceName(event.target.value)}
-                            className="h-8 rounded border px-2 text-xs"
-                            placeholder="Eerste productnaam"
-                          />
-                          <select
-                            value={newProductEmoji}
-                            onChange={(event) => setNewProductEmoji(event.target.value)}
-                            className="h-8 rounded border px-2 text-xs"
-                          >
-                            <option value="">Geen</option>
-                            {EMOJI_DROPDOWN_OPTIONS.map((emoji) => (
-                              <option key={`new-product-emoji-${emoji}`} value={emoji}>
-                                {emoji}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                        <input
+                          value={newCategoryName}
+                          onChange={(event) => setNewCategoryName(event.target.value)}
+                          className="h-8 w-full rounded border px-2 text-xs"
+                          placeholder="Dienstnaam"
+                        />
+                        <QuoteIconPicker
+                          compact
+                          value={newCategoryEmoji}
+                          iconLibrary={iconLibrary}
+                          placeholder="Categorie-icoon"
+                          onChange={setNewCategoryEmoji}
+                        />
+                        <input
+                          value={newServiceName}
+                          onChange={(event) => setNewServiceName(event.target.value)}
+                          className="h-8 w-full rounded border px-2 text-xs"
+                          placeholder="Eerste productnaam"
+                        />
+                        <QuoteIconPicker
+                          compact
+                          value={newProductEmoji}
+                          iconLibrary={iconLibrary}
+                          placeholder="Product-icoon"
+                          onChange={setNewProductEmoji}
+                        />
                         <div className="grid grid-cols-[1fr_auto] gap-2">
                           <input
                             type="number"
@@ -1889,7 +1376,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                               onClick={() => setProduct(service)}
                               className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#f5f6f8] text-xl"
                             >
-                              {renderConfiguratorIcon(getServiceIcon(service, productIconsMap), service.name)}
+                              <ConfiguratorIcon value={getServiceIcon(service, productIconsMap)} label={service.name} />
                             </button>
                             <button
                               type="button"
@@ -1900,7 +1387,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                             </button>
                           </div>
                           <div className="mt-3 space-y-2">
-                            <div className="grid grid-cols-[1fr_72px] gap-2">
+                            <div className="grid gap-2 sm:grid-cols-[1fr_140px]">
                               <input
                                 defaultValue={service.name}
                                 onBlur={(event) =>
@@ -1912,26 +1399,19 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                 }
                                 className="h-8 w-full rounded border px-2 text-sm"
                               />
-                              <select
+                              <QuoteIconPicker
+                                compact
                                 value={getServiceIcon(service, productIconsMap)}
-                                onChange={(event) =>
+                                iconLibrary={iconLibrary}
+                                placeholder="Product-icoon"
+                                onChange={(icon) =>
                                   sendPreviewAction({
                                     action: "set-product-icon",
                                     productId: service.id,
-                                    emoji: event.target.value,
+                                    emoji: icon,
                                   })
                                 }
-                                className="h-8 w-full rounded border px-2 text-xs"
-                              >
-                                <option value="">Geen</option>
-                                {[...new Set([getServiceIcon(service, productIconsMap), ...EMOJI_DROPDOWN_OPTIONS])]
-                                  .filter((emoji) => emoji.length > 0)
-                                  .map((emoji) => (
-                                    <option key={`product-emoji-${service.id}-${emoji}`} value={emoji}>
-                                      {emoji}
-                                    </option>
-                                  ))}
-                              </select>
+                              />
                             </div>
                             <input
                               defaultValue={service.description || ""}
@@ -1994,7 +1474,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                         style={{ borderColor: isSelected ? accentColor : "#e2e3e7", boxShadow: isSelected ? `0 0 0 2px ${accentColor}33 inset` : "none" }}
                       >
                         <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-[#f5f6f8] text-xl">
-                          {renderConfiguratorIcon(getServiceIcon(service, productIconsMap), service.name)}
+                          <ConfiguratorIcon value={getServiceIcon(service, productIconsMap)} label={service.name} />
                         </div>
                         <p className="mt-4 text-base font-semibold sm:text-lg">{service.name}</p>
                         <p className="mt-1 line-clamp-2 text-sm text-[#7b818c]">{service.description || "Selecteer om verder te configureren."}</p>
@@ -2078,13 +1558,20 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                   </button>
                                 ) : null}
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => updatePackage(option)}
-                                className="w-full rounded-lg p-2 text-left"
-                              >
-                                {isPreviewRoute ? (
-                                  <div className="space-y-2" onClick={(event) => event.stopPropagation()}>
+                              {isPreviewRoute ? (
+                                <div className="w-full rounded-lg p-2 text-left">
+                                  <button
+                                    type="button"
+                                    onClick={() => updatePackage(option)}
+                                    className="mb-2 rounded border px-2 py-0.5 text-[10px] font-semibold"
+                                    style={{
+                                      borderColor: isActive ? accentColor : "#e1e3e8",
+                                      backgroundColor: isActive ? `${accentColor}22` : "transparent",
+                                    }}
+                                  >
+                                    {isActive ? "Actief pakket" : "Maak actief"}
+                                  </button>
+                                  <div className="space-y-2">
                                     <input
                                       defaultValue={option.label}
                                       onBlur={(event) =>
@@ -2126,17 +1613,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                       className="h-8 w-full rounded border px-2 text-xs"
                                     />
                                   </div>
-                                ) : (
-                                  <>
-                                    <p className="text-sm font-semibold">{option.label}</p>
-                                    <p className="mt-1 text-xs text-[#757b86]">{option.subtitle}</p>
-                                    <p className="mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-bold" style={{ backgroundColor: `${accentColor}22`, color: "#8b5d12" }}>
-                                      {formatCurrency(option.price)}
-                                    </p>
-                                  </>
-                                )}
-                                {isPreviewRoute ? (
-                                  <div className="mt-2 space-y-1" onClick={(event) => event.stopPropagation()}>
+                                  <div className="mt-2 space-y-1">
                                     {(option.features || []).map((feature, featureIndex) => (
                                       <div key={`${option.key}-feature-${featureIndex}`} className="flex items-center gap-1">
                                         <input
@@ -2184,14 +1661,27 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                       + Bullet
                                     </button>
                                   </div>
-                                ) : option.features.length > 0 ? (
-                                  <ul className="mt-2 space-y-1 text-xs text-[#6e7480]">
-                                    {option.features.map((feature) => (
-                                      <li key={feature}>✓ {feature}</li>
-                                    ))}
-                                  </ul>
-                                ) : null}
-                              </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => updatePackage(option)}
+                                  className="w-full rounded-lg p-2 text-left"
+                                >
+                                  <p className="text-sm font-semibold">{option.label}</p>
+                                  <p className="mt-1 text-xs text-[#757b86]">{option.subtitle}</p>
+                                  <p className="mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-bold" style={{ backgroundColor: `${accentColor}22`, color: "#8b5d12" }}>
+                                    {formatCurrency(option.price)}
+                                  </p>
+                                  {option.features.length > 0 ? (
+                                    <ul className="mt-2 space-y-1 text-xs text-[#6e7480]">
+                                      {option.features.map((feature) => (
+                                        <li key={feature}>✓ {feature}</li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
+                                </button>
+                              )}
                             </div>
                           );
                         })}
@@ -2221,20 +1711,27 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                               const enabled = Boolean(cart[key]);
                               return (
                                 <div key={key} className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleSpecOption(section, option)}
-                                    className="flex w-full items-center justify-between rounded-lg border bg-white px-3 py-2 text-left"
-                                    style={{ borderColor: enabled ? accentColor : "#e1e3e8" }}
-                                  >
-                                    <div className="flex items-center gap-2">
-                                      <span className="inline-flex h-4 w-4 items-center justify-center rounded border text-[10px]" style={{ borderColor: enabled ? accentColor : "#ced2da", color: enabled ? darkColor : "#7b8190", backgroundColor: enabled ? accentColor : "#fff" }}>
-                                        {enabled ? "✓" : ""}
-                                      </span>
-                                      {isPreviewRoute ? (
+                                  {isPreviewRoute ? (
+                                    <div
+                                      className="flex w-full items-center justify-between gap-2 rounded-lg border bg-white px-3 py-2"
+                                      style={{ borderColor: enabled ? accentColor : "#e1e3e8" }}
+                                    >
+                                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleSpecOption(section, option)}
+                                          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px]"
+                                          style={{
+                                            borderColor: enabled ? accentColor : "#ced2da",
+                                            color: enabled ? darkColor : "#7b8190",
+                                            backgroundColor: enabled ? accentColor : "#fff",
+                                          }}
+                                          aria-label={enabled ? "Optie uit" : "Optie aan"}
+                                        >
+                                          {enabled ? "✓" : ""}
+                                        </button>
                                         <input
                                           defaultValue={option.label}
-                                          onClick={(event) => event.stopPropagation()}
                                           onBlur={(event) =>
                                             sendPreviewAction({
                                               action: "update-option",
@@ -2243,14 +1740,10 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                               patch: { label: event.target.value },
                                             })
                                           }
-                                          className="h-7 rounded border px-2 text-xs"
+                                          className="h-7 min-w-0 flex-1 rounded border px-2 text-xs"
                                         />
-                                      ) : (
-                                        <span className="text-sm">{option.label}</span>
-                                      )}
-                                    </div>
-                                    {isPreviewRoute ? (
-                                      <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
+                                      </div>
+                                      <div className="flex shrink-0 items-center gap-1">
                                         <input
                                           type="number"
                                           min="0"
@@ -2268,12 +1761,33 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                         />
                                         <span className="text-xs">{option.unit || ""}</span>
                                       </div>
-                                    ) : (
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleSpecOption(section, option)}
+                                      className="flex w-full items-center justify-between rounded-lg border bg-white px-3 py-2 text-left"
+                                      style={{ borderColor: enabled ? accentColor : "#e1e3e8" }}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span
+                                          className="inline-flex h-4 w-4 items-center justify-center rounded border text-[10px]"
+                                          style={{
+                                            borderColor: enabled ? accentColor : "#ced2da",
+                                            color: enabled ? darkColor : "#7b8190",
+                                            backgroundColor: enabled ? accentColor : "#fff",
+                                          }}
+                                        >
+                                          {enabled ? "✓" : ""}
+                                        </span>
+                                        <span className="text-sm">{option.label}</span>
+                                      </div>
                                       <span className="text-sm font-semibold" style={{ color: "#c9811b" }}>
-                                        +{formatCurrency(option.price)}{option.unit || ""}
+                                        +{formatCurrency(option.price)}
+                                        {option.unit || ""}
                                       </span>
-                                    )}
-                                  </button>
+                                    </button>
+                                  )}
                                   {isPreviewRoute ? (
                                     <button
                                       type="button"
@@ -2862,171 +2376,60 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
             ) : null}
 
             {currentStep === 4 ? (
-              <form className="space-y-4 sm:space-y-5" onSubmit={handleSubmit}>
-                <div>
-                  <h2 className="text-[22px] font-black leading-tight tracking-tight sm:text-[27px] lg:text-[32px]" style={{ color: darkColor }}>
-                    {settings.detailsTitle}
-                  </h2>
-                  <p className="mt-2 text-sm text-[#6e747e]">{settings.stepDetailsHint || "Voor uw persoonlijke offerte op maat"}</p>
-                </div>
-
-                <div className="rounded-[12px] border border-[#ece1c6] bg-[#f8f4e8] px-3 py-2 text-sm text-[#7c6a42]">
-                  Bijna klaar! Vul uw gegevens in om de gepersonaliseerde offerte te ontvangen.
-                </div>
-
-                <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">Voornaam *</label>
-                    <input value={firstName} onChange={(event) => setFirstName(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" required={!isInternalMode} />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">
-                      Achternaam {isInternalMode ? "" : "*"}
-                    </label>
-                    <input value={lastName} onChange={(event) => setLastName(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" required={!isInternalMode} />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">E-mailadres *</label>
-                    <input value={email} onChange={(event) => setEmail(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" type="email" required />
-                    {email && !isValidEmail(email) ? <p className="mt-1 text-xs text-red-600">Ongeldig e-mailadres.</p> : null}
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">Telefoonnummer</label>
-                    <input value={phone} onChange={(event) => setPhone(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" />
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">Bedrijfsnaam</label>
-                    <input value={company} onChange={(event) => setCompany(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">Adres</label>
-                    <input value={address} onChange={(event) => setAddress(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">BTW-nummer</label>
-                    <input value={vatNumber} onChange={(event) => setVatNumber(event.target.value)} className="h-9 w-full rounded-lg border border-[#d8dbe2] px-3 text-sm sm:h-10" />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#646b76]">Bijkomende opmerkingen</label>
-                    <textarea value={remarks} onChange={(event) => setRemarks(event.target.value)} rows={3} className="w-full rounded-lg border border-[#d8dbe2] px-3 py-2 text-sm" />
-                  </div>
-                </div>
-
-                {status ? (
-                  <div className={`rounded-lg px-3 py-2 text-sm ${status.type === "success" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
-                    {status.message}
-                  </div>
-                ) : null}
-
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={prevStep} className="rounded-xl border px-3 py-2 text-xs text-[#616671] sm:px-4 sm:text-sm">
-                    Terug
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting || !stepReady[4]}
-                    className="rounded-xl px-3 py-2 text-xs font-semibold text-[#15171c] disabled:opacity-50 sm:px-4 sm:text-sm"
-                    style={{ backgroundColor: accentColor }}
-                  >
-                    {isLivePreview ? "Preview (niet versturen)" : submitting ? "Bezig..." : settings.ctaLabel}
-                  </button>
-                </div>
-              </form>
+              <QuoteDetailsStep
+                title={settings.detailsTitle}
+                hint={settings.stepDetailsHint || "Voor uw persoonlijke offerte op maat"}
+                ctaLabel={settings.ctaLabel}
+                firstName={firstName}
+                lastName={lastName}
+                email={email}
+                phone={phone}
+                company={company}
+                address={address}
+                vatNumber={vatNumber}
+                remarks={remarks}
+                status={status}
+                submitting={submitting}
+                isInternalMode={isInternalMode}
+                isLivePreview={isLivePreview}
+                canSubmit={stepReady[4]}
+                accentColor={accentColor}
+                darkColor={darkColor}
+                onFirstNameChange={setFirstName}
+                onLastNameChange={setLastName}
+                onEmailChange={setEmail}
+                onPhoneChange={setPhone}
+                onCompanyChange={setCompany}
+                onAddressChange={setAddress}
+                onVatNumberChange={setVatNumber}
+                onRemarksChange={setRemarks}
+                onBack={prevStep}
+                onSubmit={handleSubmit}
+              />
             ) : null}
           </section>
 
-          <aside className="min-h-0 overflow-y-auto bg-[#f4f1e8] px-3 py-3 sm:px-4">
-            <div className="rounded-[14px] border border-black/10 bg-white shadow-sm">
-              <div className="rounded-t-[14px] px-3 py-2 text-xs font-semibold text-white" style={{ background: `linear-gradient(135deg, ${darkColor} 0%, #1f2228 100%)` }}>
-                Offerte-items ({cartItems.length}) {isPreviewRoute ? "" : `· ${Object.keys(confirmedProducts).length} bevestigd`}
-              </div>
-              <div className="max-h-[34vh] space-y-1 overflow-auto p-1.5">
-                {cartItems.length === 0 ? (
-                  <div className="rounded-lg border border-dashed p-3 text-xs text-[#767c87]">Nog geen items geselecteerd.</div>
-                ) : (
-                  cartItems.map((item) => (
-                    <div key={item.cartKey} className="rounded-lg border bg-white px-2 py-1.5">
-                      <div className="grid grid-cols-[1fr_auto] gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-semibold">{item.name}</p>
-                          <p className="truncate text-[11px] text-[#7b818c]">
-                            {item.packageLabel} · {item.quantity}x
-                            {item.source === "product" && !isPreviewRoute && !confirmedProducts[item.cartKey]
-                              ? " · niet bevestigd"
-                              : ""}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <button type="button" onClick={() => removeFromCart(item.cartKey)} className="text-[11px] text-[#8a909b] hover:text-[#272a30]">✕</button>
-                          <p className="mt-0.5 text-xs font-semibold" style={{ color: "#c9811b" }}>{formatCurrency(item.total)}</p>
-                        </div>
-                      </div>
-                      <div className="mt-1 flex items-center justify-between gap-2">
-                        <span className="truncate text-[11px] text-[#7b818c]">
-                          {item.quantity > 1 ? `${formatCurrency(item.unitPrice)} / stuk` : formatCurrency(item.unitPrice)}
-                        </span>
-                        {(item.source === "product" || payload.editingQuote) ? (
-                          <div className="flex items-center overflow-hidden rounded-md border">
-                            <button type="button" onClick={() => adjustQuantity(item.cartKey, -1)} className="h-5 w-6 text-xs">-</button>
-                            <span className="min-w-6 border-x px-1 text-center text-[11px]">{item.quantity}</span>
-                            <button type="button" onClick={() => adjustQuantity(item.cartKey, 1)} className="h-5 w-6 text-xs">+</button>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-              <div className="flex items-center justify-between border-t px-3 py-2 text-xs font-semibold">
-                <span>Totaal incl. BTW</span>
-                <span>{formatCurrency(total)}</span>
-              </div>
-            </div>
-
-            <div className="mt-3 rounded-[14px] border border-black/10 bg-white p-3 text-sm">
-              <div className="flex items-center justify-between text-xs uppercase tracking-wide text-[#7d838d]">
-                <span>Categorie</span>
-                <span className="font-semibold text-[#3c4149] normal-case">{selectedCategory || "-"}</span>
-              </div>
-              <div className="mt-2 flex items-center justify-between text-xs uppercase tracking-wide text-[#7d838d]">
-                <span>Product</span>
-                <span className="font-semibold text-[#3c4149] normal-case">{selectedProduct?.name || "-"}</span>
-              </div>
-              <div className="mt-2 flex items-center justify-between text-xs uppercase tracking-wide text-[#7d838d]">
-                <span>Aantal in cart</span>
-                <span className="font-semibold text-[#3c4149]">{cartItems.length}</span>
-              </div>
-              {!isPreviewRoute ? (
-                <div className="mt-2 flex items-center justify-between text-xs uppercase tracking-wide text-[#7d838d]">
-                  <span>Bevestigd</span>
-                  <span className="font-semibold text-[#3c4149]">
-                    {Object.keys(confirmedProducts).length}
-                  </span>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="mt-3 overflow-hidden rounded-[14px] border border-black/10 bg-white text-sm">
-              <div className="space-y-2 px-3 py-3">
-                <div className="flex items-center justify-between"><span>Subtotaal excl. BTW</span><span className="font-semibold">{formatCurrency(subtotal)}</span></div>
-                {discount > 0 ? (
-                  <div className="flex items-center justify-between text-[#b15f1b]"><span>Korting</span><span className="font-semibold">-{formatCurrency(discount)}</span></div>
-                ) : null}
-                <div className="flex items-center justify-between"><span>BTW {vatRate}%</span><span className="font-semibold">{formatCurrency(vatAmount)}</span></div>
-              </div>
-              <div className="px-3 py-3 text-sm font-semibold text-white" style={{ background: `linear-gradient(135deg, ${darkColor} 0%, #1f2228 100%)` }}>
-                Totaal incl. BTW <span className="float-right" style={{ color: accentColor }}>{formatCurrency(total)}</span>
-              </div>
-            </div>
-
-            <div className="mt-3 rounded-[14px] border border-[#e8dcc4] bg-[#f7f0df] px-3 py-3 text-xs text-[#6f6655]">
-              <p className="font-semibold text-[#3f3b33]">Indicatieve prijs - Definitieve offerte op aanvraag</p>
-              <p className="mt-1">{settings.disclaimer}</p>
-            </div>
-          </aside>
+          <QuoteSummaryAside
+            cartItems={cartItems}
+            isPreviewRoute={isPreviewRoute}
+            confirmedCount={Object.keys(confirmedProducts).length}
+            isEditingQuote={Boolean(payload.editingQuote)}
+            selectedCategory={selectedCategory}
+            selectedProductName={selectedProduct?.name || ""}
+            selectedProductId={selectedProductId}
+            subtotal={subtotal}
+            discount={discount}
+            vatRate={vatRate}
+            vatAmount={vatAmount}
+            total={total}
+            disclaimer={settings.disclaimer}
+            accentColor={accentColor}
+            darkColor={darkColor}
+            onRemoveFromCart={removeFromCart}
+            onAdjustQuantity={adjustQuantity}
+            onEditCartItem={editCartItem}
+            onUpdateCartItem={updateCartItem}
+          />
         </div>
 
         <footer className="px-4 py-3 text-xs text-white" style={{ background: `linear-gradient(135deg, ${darkColor} 0%, #1f2228 100%)` }}>

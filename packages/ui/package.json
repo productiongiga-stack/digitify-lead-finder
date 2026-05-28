@@ -34,6 +34,7 @@
     "react-dom": "^18 || ^19"
   },
   "devDependencies": {
+    "eslint": "^9.17.0",
     "@types/react": "^19.0.0",
     "typescript": "^5.7.0"
   }

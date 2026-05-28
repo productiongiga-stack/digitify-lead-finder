@@ -22,7 +22,7 @@ export function EmptyState({
     <div
       className={cn(
         "flex flex-col items-center justify-center text-center",
-        size === "sm" ? "px-3 py-5 sm:px-4 sm:py-8" : "px-3 py-7 sm:px-4 sm:py-12",
+        size === "sm" ? "px-4 py-6 sm:py-8" : "px-4 py-10 sm:py-14",
         className,
       )}
       {...props}
@@ -30,7 +30,7 @@ export function EmptyState({
       {icon ? (
         <div
           className={cn(
-            "flex items-center justify-center rounded-full bg-muted text-muted-foreground",
+            "flex items-center justify-center rounded-2xl border border-border/60 bg-muted/60 text-muted-foreground shadow-sm",
             size === "sm"
               ? "h-9 w-9 sm:h-10 sm:w-10 [&_svg]:h-4 [&_svg]:w-4 sm:[&_svg]:h-5 sm:[&_svg]:w-5"
               : "h-11 w-11 sm:h-14 sm:w-14 [&_svg]:h-5 [&_svg]:w-5 sm:[&_svg]:h-7 sm:[&_svg]:w-7",
@@ -39,7 +39,7 @@ export function EmptyState({
           {icon}
         </div>
       ) : null}
-      <p className={cn("font-medium", size === "sm" ? "mt-2 text-sm" : "mt-2 text-sm sm:mt-3 sm:text-base", icon ? "" : "mt-0")}>
+      <p className={cn("font-semibold tracking-tight", size === "sm" ? "mt-3 text-sm" : "mt-3 text-sm sm:text-base", icon ? "" : "mt-0")}>
         {title}
       </p>
       {description ? (

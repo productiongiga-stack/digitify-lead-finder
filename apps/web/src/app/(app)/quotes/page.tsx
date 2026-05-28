@@ -29,6 +29,8 @@ import {
   Clock,
   XCircle,
   Pencil,
+  LayoutGrid,
+  Info,
 } from "lucide-react";
 
 type QuoteStatus = "DRAFT" | "SENT" | "VIEWED" | "ACCEPTED" | "REJECTED" | "EXPIRED";
@@ -276,7 +278,9 @@ export default function QuotesPage() {
       <div className="app-page-header">
         <div className="app-page-heading">
           <h1 className="app-page-title">Offertes</h1>
-          <p className="app-page-subtitle">Beheer en verstuur offertes naar je klanten</p>
+          <p className="app-page-subtitle">
+            Beheer offertes en dien ze in via Outbound — verzending gebeurt pas na goedkeuring.
+          </p>
         </div>
         <div className="app-page-actions">
           <Link href="/quotes/new">
@@ -289,9 +293,15 @@ export default function QuotesPage() {
       </div>
 
       <Tabs defaultValue="overview" className="space-y-3">
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="info">Info</TabsTrigger>
+        <TabsList className="page-view-tabs">
+          <TabsTrigger value="overview" className="page-view-tabs-trigger">
+            <LayoutGrid className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+            Overzicht
+          </TabsTrigger>
+          <TabsTrigger value="info" className="page-view-tabs-trigger">
+            <Info className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+            Info
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-3">
@@ -397,6 +407,19 @@ export default function QuotesPage() {
               </CardContent>
             </Card>
             <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
+              <CardContent className="p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Verzenden via Outbound
+                </p>
+                <p className="mt-1.5 text-sm font-medium">
+                  Offertes worden niet automatisch verstuurd. Dien in ter goedkeuring en verzend daarna via Outbound Center.
+                </p>
+                <Button asChild size="sm" variant="outline" className="mt-2.5">
+                  <Link href="/contacts/approval">Open goedkeuringswachtrij</Link>
+                </Button>
+              </CardContent>
+            </Card>
+            <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20 xl:col-span-2">
               <CardContent className="p-3">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Gerelateerd

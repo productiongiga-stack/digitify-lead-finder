@@ -18,6 +18,11 @@ import {
   TableHeader,
   TableRow,
   Textarea,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@digitify/ui";
 import Link from "next/link";
 import {
@@ -33,6 +38,11 @@ import {
   Activity,
   Link2,
   Pencil,
+  ShieldCheck,
+  MoreHorizontal,
+  Inbox,
+  StickyNote,
+  MessageCircleQuestion,
 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
 import { formatRelativeTime } from "@/lib/utils";
@@ -67,6 +77,89 @@ function formatDate(d: Date | string) {
   });
 }
 
+type QuoteNoteBlock =
+  | { kind: "heading"; text: string }
+  | { kind: "qa"; question: string; answer: string }
+  | { kind: "text"; text: string };
+
+function parseQuoteNotes(raw: string): QuoteNoteBlock[] {
+  const blocks: QuoteNoteBlock[] = [];
+
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const bulletQa = trimmed.match(/^-\s*(.+?):\s*(.+)$/);
+    if (bulletQa) {
+      blocks.push({ kind: "qa", question: bulletQa[1].trim(), answer: bulletQa[2].trim() });
+      continue;
+    }
+
+    const inlineQa = trimmed.match(/^(.+\?):\s*(.+)$/);
+    if (inlineQa) {
+      blocks.push({ kind: "qa", question: inlineQa[1].trim(), answer: inlineQa[2].trim() });
+      continue;
+    }
+
+    if (/offertevragen/i.test(trimmed) || (trimmed.endsWith(":") && trimmed.length < 80)) {
+      blocks.push({ kind: "heading", text: trimmed.replace(/:$/, "") });
+      continue;
+    }
+
+    blocks.push({ kind: "text", text: trimmed });
+  }
+
+  return blocks;
+}
+
+function QuoteNotesDisplay({ notes }: { notes: string }) {
+  const blocks = parseQuoteNotes(notes);
+  const hasStructuredQa = blocks.some((block) => block.kind === "qa");
+
+  if (!hasStructuredQa) {
+    return (
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{notes}</p>
+    );
+  }
+
+  const qaItems = blocks.filter((block): block is Extract<QuoteNoteBlock, { kind: "qa" }> => block.kind === "qa");
+  const heading = blocks.find((block) => block.kind === "heading");
+  const freeText = blocks.filter((block) => block.kind === "text");
+
+  return (
+    <div className="space-y-4">
+      {heading ? (
+        <div className="flex items-center gap-2">
+          <MessageCircleQuestion className="h-4 w-4 text-primary" />
+          <p className="text-sm font-medium">{heading.text}</p>
+          <Badge variant="secondary" className="ml-auto tabular-nums">
+            {qaItems.length} antwoord{qaItems.length === 1 ? "" : "en"}
+          </Badge>
+        </div>
+      ) : null}
+
+      <div className="quote-notes-qa-grid">
+        {qaItems.map((item, index) => (
+          <div key={`${item.question}-${index}`} className="quote-note-qa-item">
+            <p className="quote-note-qa-question">{item.question}</p>
+            <p className="quote-note-qa-answer">{item.answer}</p>
+          </div>
+        ))}
+      </div>
+
+      {freeText.length > 0 ? (
+        <div className="space-y-1 rounded-xl border border-border/60 bg-muted/15 p-3">
+          {freeText.map((block, index) => (
+            <p key={index} className="text-sm leading-relaxed text-muted-foreground">
+              {block.text}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function QuoteDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -97,13 +190,13 @@ export default function QuoteDetailPage() {
       utils.quote.emailPreflight.invalidate({ id });
       utils.quote.list.invalidate();
       showToast({
-        title: "Offerte verzonden",
-        description: "De HTML-offerte is naar de klant verstuurd.",
+        title: "Ingediend ter goedkeuring",
+        description: "De offerte staat in Outbound. Na goedkeuring kun je de mail verzenden.",
       });
     },
     onError: (error) => {
       showToast({
-        title: "Verzenden mislukt",
+        title: "Indienen mislukt",
         description: error.message,
         variant: "error",
       });
@@ -195,100 +288,147 @@ export default function QuoteDetailPage() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href="/quotes">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-xl font-bold tracking-tight">{quote.quoteNumber}</h1>
-              <Badge variant={statusVariant}>
-                {statusLabel}
-              </Badge>
+      <Card className="quote-detail-header overflow-hidden border-border/60 bg-card/90 shadow-sm">
+        <CardContent className="p-0">
+          <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <Link href="/quotes" className="shrink-0">
+                <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl" aria-label="Terug naar offertes">
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+              </Link>
+              <div className="invoice-row-icon shrink-0">
+                <FileText className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="max-w-full truncate text-xl font-semibold tracking-tight sm:text-2xl">
+                    {quote.quoteNumber}
+                  </h1>
+                  <Badge variant={statusVariant} className="shrink-0">
+                    {statusLabel}
+                  </Badge>
+                </div>
+                <p className="mt-1 truncate text-sm text-muted-foreground">
+                  {quote.clientCompany || quote.clientName}
+                  <span className="mx-1.5 text-border">·</span>
+                  Aangemaakt {formatDate(quote.createdAt)}
+                </p>
+              </div>
             </div>
-            <p className="text-sm text-muted-foreground">
-              Aangemaakt op {formatDate(quote.createdAt)}
-            </p>
+
+            <div className="shrink-0 rounded-2xl border border-border/65 bg-background/80 px-4 py-3 text-left shadow-sm ring-1 ring-primary/10 lg:min-w-[180px] lg:text-right">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Totaal</p>
+              <p className="mt-0.5 text-[2rem] font-bold tabular-nums leading-none tracking-tight">{formatCurrency(quote.total)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">incl. {quote.vatRate}% BTW</p>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link href={`/quotes/new?quoteId=${encodeURIComponent(id)}`}>
-            <Button variant="default" size="sm">
-              <Pencil className="mr-2 h-4 w-4" />
-              Bewerken
-            </Button>
-          </Link>
-          <Button variant="outline" size="sm" onClick={handleCopyPortalLink} disabled={portalLoading}>
-            <Link2 className="mr-2 h-4 w-4" />
-            {portalLoading ? "Genereren..." : "Client Portal"}
-          </Button>
-          <Link href={`/api/quotes/${id}/pdf`} target="_blank">
-            <Button variant="outline" size="sm">
-              <Printer className="mr-2 h-4 w-4" />
-              Download PDF
-            </Button>
-          </Link>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => sendEmailMutation.mutate({ id })}
-            disabled={sendEmailMutation.isPending || !emailPreflight?.canSend}
-            title={
-              emailPreflight?.canSend
-                ? quote.clientEmail || "Geen klant e-mailadres beschikbaar"
-                : (emailPreflight?.blockingIssues || []).join(", ") || "Offerte is nog niet verzendklaar"
-            }
-          >
-            <Send className="mr-2 h-4 w-4" />
-            {sendEmailMutation.isPending ? "Verzenden..." : "Verstuur HTML-mail"}
-          </Button>
-          {quote.status === "DRAFT" && (
-            <Button
-              size="sm"
-              onClick={() => handleStatusChange("SENT")}
-              disabled={updateStatusMutation.isPending}
-            >
-              <Send className="mr-2 h-4 w-4" />
-              Markeer als Verstuurd
-            </Button>
-          )}
-          {(quote.status === "SENT" || quote.status === "VIEWED") && (
-            <>
+
+          <div className="quote-detail-actions">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button asChild size="sm" className="h-9 rounded-xl">
+                <Link href={`/quotes/new?quoteId=${encodeURIComponent(id)}`}>
+                  <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                  Bewerken
+                </Link>
+              </Button>
+
+              {(quote.status === "SENT" || quote.status === "VIEWED") && (
+                <>
+                  <Button
+                    size="sm"
+                    className="h-9 rounded-xl"
+                    onClick={() => handleStatusChange("ACCEPTED")}
+                    disabled={updateStatusMutation.isPending}
+                  >
+                    <CheckCircle className="mr-1.5 h-3.5 w-3.5" />
+                    Accepteer
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="h-9 rounded-xl"
+                    onClick={() => handleStatusChange("REJECTED")}
+                    disabled={updateStatusMutation.isPending}
+                  >
+                    <XCircle className="mr-1.5 h-3.5 w-3.5" />
+                    Afwijzen
+                  </Button>
+                </>
+              )}
+
               <Button
                 size="sm"
-                variant="default"
-                onClick={() => handleStatusChange("ACCEPTED")}
-                disabled={updateStatusMutation.isPending}
+                variant="outline"
+                className="h-9 rounded-xl"
+                onClick={() => sendEmailMutation.mutate({ id })}
+                disabled={sendEmailMutation.isPending || !emailPreflight?.canSend}
+                title={
+                  emailPreflight?.canSend
+                    ? "Dien in bij Outbound ter goedkeuring"
+                    : (emailPreflight?.blockingIssues || []).join(", ") || "Offerte is nog niet klaar om in te dienen"
+                }
               >
-                <CheckCircle className="mr-2 h-4 w-4" />
-                Accepteer
+                <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+                {sendEmailMutation.isPending ? "Indienen..." : "Ter goedkeuring"}
               </Button>
+
+              <Button asChild size="sm" variant="outline" className="h-9 rounded-xl">
+                <Link href={`/api/quotes/${id}/pdf`} target="_blank">
+                  <Printer className="mr-1.5 h-3.5 w-3.5" />
+                  PDF
+                </Link>
+              </Button>
+
               <Button
                 size="sm"
-                variant="destructive"
-                onClick={() => handleStatusChange("REJECTED")}
-                disabled={updateStatusMutation.isPending}
+                variant="outline"
+                className="h-9 rounded-xl"
+                onClick={handleCopyPortalLink}
+                disabled={portalLoading}
               >
-                <XCircle className="mr-2 h-4 w-4" />
-                Afwijzen
+                <Link2 className="mr-1.5 h-3.5 w-3.5" />
+                {portalLoading ? "..." : "Portal"}
               </Button>
-            </>
-          )}
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-destructive"
-            onClick={handleDelete}
-            disabled={deleteMutation.isPending}
-          >
-            <Trash2 className="mr-2 h-4 w-4" />
-            Verwijder
-          </Button>
-        </div>
-      </div>
+            </div>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-9 rounded-xl px-2.5">
+                  <MoreHorizontal className="h-4 w-4" />
+                  <span className="sr-only">Meer acties</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem asChild>
+                  <Link href="/contacts/approval">
+                    <Inbox className="mr-2 h-4 w-4" />
+                    Outbound-wachtrij
+                  </Link>
+                </DropdownMenuItem>
+                {quote.status === "DRAFT" ? (
+                  <DropdownMenuItem
+                    onClick={() => handleStatusChange("SENT")}
+                    disabled={updateStatusMutation.isPending}
+                  >
+                    <Send className="mr-2 h-4 w-4" />
+                    Markeer als verstuurd
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={handleDelete}
+                  disabled={deleteMutation.isPending}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Verwijder offerte
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* 2-Column Layout */}
       <div className="grid gap-4 lg:grid-cols-3">
@@ -386,23 +526,27 @@ export default function QuoteDetailPage() {
           {/* Notes & Terms */}
           {(quote.notes || quote.terms) && (
             <Card className="border-border/50 shadow-sm">
-              <CardContent className="pt-6 space-y-4">
-                {quote.notes && (
-                  <div>
-                    <p className="text-sm font-medium mb-1">Notities</p>
-                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                      {quote.notes}
+              {quote.notes ? (
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <StickyNote className="h-4 w-4 text-primary" />
+                    Notities
+                  </CardTitle>
+                </CardHeader>
+              ) : null}
+              <CardContent className={quote.notes ? "space-y-6 pt-0" : "space-y-4 pt-6"}>
+                {quote.notes ? <QuoteNotesDisplay notes={quote.notes} /> : null}
+                {quote.terms ? (
+                  <div className={quote.notes ? "border-t border-border/60 pt-5" : undefined}>
+                    <p className="mb-2 flex items-center gap-2 text-sm font-medium">
+                      <FileText className="h-4 w-4 text-muted-foreground" />
+                      Voorwaarden
                     </p>
-                  </div>
-                )}
-                {quote.terms && (
-                  <div>
-                    <p className="text-sm font-medium mb-1">Voorwaarden</p>
-                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                    <p className="whitespace-pre-wrap rounded-xl border border-border/60 bg-muted/15 p-3 text-sm leading-relaxed text-muted-foreground">
                       {quote.terms}
                     </p>
                   </div>
-                )}
+                ) : null}
               </CardContent>
             </Card>
           )}

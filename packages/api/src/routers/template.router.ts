@@ -2,135 +2,231 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
-import { readUserJsonSetting, writeUserJsonSetting } from "../lib/user-json-setting";
-
-const TEMPLATE_LIBRARY_KEY = "templates.library_json";
-
-const templateSchema = z.object({
-  id: z.string(),
-  type: z.enum(["EMAIL", "QUOTE", "REPORT", "CHATBOT", "FOLLOW_UP", "ADS"]),
-  name: z.string().min(1).max(160),
-  subject: z.string().nullable().default(null),
-  content: z.string().min(1).max(20000),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-
-type TemplateItem = z.infer<typeof templateSchema>;
-
-async function loadTemplates(db: any, userId: string): Promise<TemplateItem[]> {
-  const raw = await readUserJsonSetting<unknown[]>(db, userId, TEMPLATE_LIBRARY_KEY, []);
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item) => templateSchema.safeParse(item))
-    .filter((item) => item.success)
-    .map((item) => item.data);
-}
+import {
+  emailTemplateDataFromInput,
+  listParsedEmailTemplates,
+  parseTemplateRow,
+} from "../lib/email-templates";
+import { sanitizeCtaUrl } from "@digitify/email";
+import {
+  EMAIL_TEMPLATE_STARTER_PACK,
+  syncEmailTemplateStarterPack,
+} from "../lib/email-template-starter-pack";
+import {
+  countLegacyLibraryEntries,
+  migrateLegacyTemplateLibrary,
+  readLegacyTemplateLibrary,
+} from "../lib/migrate-legacy-template-library";
+import { workspaceScopeFromUser } from "../lib/workspace-settings";
+const templateTypeSchema = z.enum([
+  "OUTREACH",
+  "FOLLOW_UP",
+  "PROPOSAL",
+  "REPORT",
+  "BOOKING",
+  "REVIEW",
+  "REENGAGEMENT",
+  "CUSTOM",
+]);
+const layoutSchema = z.enum(["modern", "minimal", "business", "proposal", "followup"]);
 
 export const templateRouter = router({
-  list: protectedProcedure.query(async ({ ctx }) => {
-    const [customTemplates, emailTemplates, reportTemplates] = await Promise.all([
-      loadTemplates(ctx.db, ctx.user.id),
-      ctx.db.emailTemplate.findMany({
-        where: { createdById: ctx.user.id },
-        orderBy: { updatedAt: "desc" },
-        select: { id: true, name: true, subject: true, body: true, updatedAt: true },
-      }),
-      ctx.db.reportTemplate.findMany({
-        orderBy: { createdAt: "desc" },
-        select: { id: true, name: true, description: true, createdAt: true },
-      }),
-    ]);
+  /** Canonical starter templates — single source for Studio UI and seedStarterPack */
+  starterPack: protectedProcedure.query(() => ({
+    items: EMAIL_TEMPLATE_STARTER_PACK,
+  })),
 
-    return {
-      custom: customTemplates.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-      builtIn: {
-        email: emailTemplates.map((item) => ({
-          id: item.id,
-          type: "EMAIL",
-          name: item.name,
-          subject: item.subject,
-          content: item.body,
-          updatedAt: item.updatedAt,
-          source: "email_template",
-        })),
-        report: reportTemplates.map((item) => ({
-          id: item.id,
-          type: "REPORT",
-          name: item.name,
-          subject: item.description || null,
-          content: "Gebruik dit rapporttemplate in rapporten.",
-          updatedAt: item.createdAt,
-          source: "report_template",
-        })),
-      },
-    };
-  }),
-
-  create: protectedProcedure
+  list: protectedProcedure
     .input(
-      z.object({
-        type: z.enum(["EMAIL", "QUOTE", "REPORT", "CHATBOT", "FOLLOW_UP", "ADS"]),
-        name: z.string().min(1).max(160),
-        subject: z.string().max(300).optional(),
-        content: z.string().min(1).max(20000),
-      }),
+      z
+        .object({
+          type: templateTypeSchema.optional(),
+          search: z.string().max(120).optional(),
+          forOutbound: z.boolean().optional(),
+          campaignId: z.string().optional(),
+        })
+        .optional(),
     )
-    .mutation(async ({ ctx, input }) => {
-      const templates = await loadTemplates(ctx.db, ctx.user.id);
-      const now = new Date().toISOString();
-      const created: TemplateItem = {
-        id: randomUUID(),
-        type: input.type,
-        name: input.name.trim(),
-        subject: input.subject?.trim() || null,
-        content: input.content.trim(),
-        createdAt: now,
-        updatedAt: now,
+    .query(async ({ ctx, input }) => {
+      const typeFilter = input?.type;
+      const parsed = await listParsedEmailTemplates(ctx.db, ctx.user.workspaceId!, {
+        forOutbound: input?.forOutbound,
+        campaignId: input?.campaignId,
+        type: typeFilter,
+      });
+      const search = input?.search?.trim().toLowerCase();
+
+      const filtered = search
+        ? parsed.filter((item) =>
+            item.name.toLowerCase().includes(search) ||
+            item.subject.toLowerCase().includes(search) ||
+            item.description.toLowerCase().includes(search) ||
+            item.cleanBody.toLowerCase().includes(search),
+          )
+        : parsed;
+
+      return {
+        templates: filtered,
+        total: parsed.length,
+        layouts: layoutSchema.options,
+        types: templateTypeSchema.options,
       };
-      templates.unshift(created);
-      await writeUserJsonSetting(ctx.db, ctx.user.id, TEMPLATE_LIBRARY_KEY, templates.slice(0, 500));
-      return created;
     }),
 
-  update: protectedProcedure
+  get: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+    const row = await ctx.db.emailTemplate.findFirst({
+      where: { id: input.id, createdById: ctx.user.workspaceId! },
+      include: { campaign: { select: { id: true, name: true } } },
+    });
+    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
+    return parseTemplateRow(row);
+  }),
+
+  save: protectedProcedure
     .input(
       z.object({
-        id: z.string(),
-        type: z.enum(["EMAIL", "QUOTE", "REPORT", "CHATBOT", "FOLLOW_UP", "ADS"]).optional(),
-        name: z.string().min(1).max(160).optional(),
-        subject: z.string().max(300).nullable().optional(),
-        content: z.string().min(1).max(20000).optional(),
+        id: z.string().optional(),
+        name: z.string().min(1).max(160),
+        subject: z.string().min(1).max(300),
+        body: z.string().min(1).max(100000),
+        bodyFormat: z.enum(["TEXT", "HTML"]).default("TEXT"),
+        layout: layoutSchema.default("modern"),
+        type: templateTypeSchema.default("CUSTOM"),
+        description: z.string().max(300).optional(),
+        ctaText: z.string().max(120).optional(),
+        ctaUrl: z
+          .string()
+          .max(500)
+          .optional()
+          .refine((value) => !value?.trim() || Boolean(sanitizeCtaUrl(value)), {
+            message: "CTA URL moet http(s), mailto, een relatief pad of {{placeholder}} zijn.",
+          }),
+        campaignId: z.string().nullable().optional(),
+        isGlobal: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const templates = await loadTemplates(ctx.db, ctx.user.id);
-      const index = templates.findIndex((item) => item.id === input.id);
-      if (index < 0) throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
-      const current = templates[index];
-      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
-      const next: TemplateItem = {
-        ...current,
-        type: input.type || current.type,
-        name: input.name?.trim() || current.name,
-        subject: input.subject !== undefined ? (input.subject?.trim() || null) : current.subject,
-        content: input.content?.trim() || current.content,
-        updatedAt: new Date().toISOString(),
-      };
-      templates[index] = next;
-      await writeUserJsonSetting(ctx.db, ctx.user.id, TEMPLATE_LIBRARY_KEY, templates);
-      return next;
+      try {
+        if (input.campaignId) {
+          const campaign = await ctx.db.campaign.findFirst({
+            where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
+            select: { id: true },
+          });
+          if (!campaign) throw new TRPCError({ code: "NOT_FOUND", message: "Campagne niet gevonden." });
+        }
+
+        const templateData = emailTemplateDataFromInput({
+          body: input.body,
+          bodyFormat: input.bodyFormat,
+          layout: input.layout,
+          type: input.type,
+          description: input.description,
+          ctaText: input.ctaText,
+          ctaUrl: input.ctaUrl,
+        });
+
+        if (input.id) {
+          const existing = await ctx.db.emailTemplate.findFirst({
+            where: { id: input.id, createdById: ctx.user.workspaceId! },
+            select: { id: true },
+          });
+          if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
+
+          const row = await ctx.db.emailTemplate.update({
+            where: { id: input.id },
+            data: {
+              name: input.name.trim(),
+              subject: input.subject.trim(),
+              ...templateData,
+              campaignId: input.campaignId ?? null,
+              isGlobal: input.isGlobal ?? false,
+            },
+            include: { campaign: { select: { id: true, name: true } } },
+          });
+          return parseTemplateRow(row);
+        }
+
+        const row = await ctx.db.emailTemplate.create({
+          data: {
+            createdById: ctx.user.workspaceId!,
+            name: input.name.trim(),
+            subject: input.subject.trim(),
+            ...templateData,
+            campaignId: input.campaignId ?? null,
+            isGlobal: input.isGlobal ?? false,
+          },
+          include: { campaign: { select: { id: true, name: true } } },
+        });
+        return parseTemplateRow(row);
+      } catch (error) {
+        if (
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          (error as { code?: string }).code === "P2002"
+        ) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Er bestaat al een template met deze naam. Kies een andere naam.",
+          });
+        }
+        throw error;
+      }
+    }),
+
+  duplicate: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const source = await ctx.db.emailTemplate.findFirst({
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
+      });
+      if (!source) throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
+
+      const row = await ctx.db.emailTemplate.create({
+        data: {
+          createdById: ctx.user.workspaceId!,
+          name: `${source.name} (kopie)`,
+          subject: source.subject,
+          body: source.body,
+          bodyFormat: source.bodyFormat,
+          type: source.type,
+          layout: source.layout,
+          description: source.description,
+          ctaText: source.ctaText,
+          ctaUrl: source.ctaUrl,
+          campaignId: source.campaignId,
+          isGlobal: false,
+        },
+        include: { campaign: { select: { id: true, name: true } } },
+      });
+      return parseTemplateRow(row);
     }),
 
   remove: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const templates = await loadTemplates(ctx.db, ctx.user.id);
-      const filtered = templates.filter((item) => item.id !== input.id);
-      if (filtered.length === templates.length) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
-      }
-      await writeUserJsonSetting(ctx.db, ctx.user.id, TEMPLATE_LIBRARY_KEY, filtered);
+      const existing = await ctx.db.emailTemplate.findFirst({
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        select: { id: true },
+      });
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
+      await ctx.db.emailTemplate.delete({ where: { id: input.id } });
       return { success: true };
     }),
+
+  seedStarterPack: protectedProcedure.mutation(async ({ ctx }) =>
+    syncEmailTemplateStarterPack(ctx.db, ctx.user.workspaceId!),
+  ),
+
+  legacyLibraryStatus: protectedProcedure.query(async ({ ctx }) => {
+    const scope = workspaceScopeFromUser(ctx.user);
+    const raw = await readLegacyTemplateLibrary(ctx.db, scope);
+    const pending = countLegacyLibraryEntries(raw);
+    return { pending, hasLegacy: pending > 0 };
+  }),
+
+  migrateLegacyLibrary: protectedProcedure.mutation(async ({ ctx }) => {
+    const scope = workspaceScopeFromUser(ctx.user);
+    return migrateLegacyTemplateLibrary(ctx.db, scope);
+  }),
 });

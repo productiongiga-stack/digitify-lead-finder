@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
-import { loadUserSettingRows } from "../lib/user-settings";
+import type { Context } from "../trpc";
+import { leadStatusLabelNl } from "../lib/lead-status-labels";
+import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 import { ownedChatSessionWhere } from "../lib/tenant";
 import { readDashboardCache, writeDashboardCache } from "../lib/dashboard-cache";
 
@@ -51,9 +53,409 @@ type UnifiedRemindersResult = {
   items: UnifiedReminderItem[];
 };
 
+type AttentionItem = UnifiedReminderItem;
+
+type AttentionQueueResult = {
+  totalCount: number;
+  items: AttentionItem[];
+};
+
+type WorkspaceCtx = Pick<Context, "db"> & { user: { workspaceId: string; id: string } };
+
+function asWorkspaceCtx(ctx: Context): WorkspaceCtx {
+  return {
+    db: ctx.db,
+    user: {
+      workspaceId: ctx.user!.workspaceId!,
+      id: ctx.user!.id,
+    },
+  };
+}
+
+async function loadUnifiedReminders(ctx: WorkspaceCtx): Promise<UnifiedRemindersResult> {
+  const cacheKey = `getUnifiedReminders:${ctx.user.workspaceId!}`;
+  const cached = readDashboardCache<UnifiedRemindersResult>(cacheKey);
+  if (cached) return cached;
+
+  const scope = workspaceScopeFromUser(ctx.user);
+  const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["email.followup_days"]);
+  const followupDays = Math.max(
+    1,
+    Number.parseInt(getSettingString(settings, "email.followup_days", "3"), 10) || 3,
+  );
+  const emailThreshold = new Date(Date.now() - followupDays * 24 * 60 * 60 * 1000);
+  const quoteThreshold = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+  const quoteValidThreshold = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+  const now = new Date();
+  const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+  const [drafts, pendingBookings, staleQuotes, leadFollowUps] = await Promise.all([
+    ctx.db.emailDraft.findMany({
+      where: {
+        status: "SENT",
+        sentAt: { lte: emailThreshold },
+        lead: {
+          createdById: ctx.user.workspaceId!,
+          status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
+        },
+      },
+      orderBy: { sentAt: "asc" },
+      distinct: ["leadId"],
+      take: 6,
+      include: {
+        lead: {
+          select: {
+            id: true,
+            companyName: true,
+            status: true,
+          },
+        },
+      },
+    }),
+    ctx.db.booking.findMany({
+      where: {
+        createdById: ctx.user.workspaceId!,
+        OR: [
+          { status: "PENDING" },
+          {
+            status: { in: ["SCHEDULED", "CONFIRMED"] },
+            date: { gte: now, lte: next24Hours },
+          },
+        ],
+      },
+      orderBy: [{ status: "asc" }, { date: "asc" }],
+      take: 6,
+      select: {
+        id: true,
+        clientName: true,
+        date: true,
+        status: true,
+      },
+    }),
+    ctx.db.quote.findMany({
+      where: {
+        createdById: ctx.user.workspaceId!,
+        status: { in: ["SENT", "VIEWED"] },
+        OR: [
+          { sentAt: { lte: quoteThreshold } },
+          { validUntil: { lte: quoteValidThreshold, gte: new Date() } },
+        ],
+      },
+      orderBy: [{ validUntil: "asc" }, { sentAt: "asc" }],
+      take: 6,
+      select: {
+        id: true,
+        quoteNumber: true,
+        clientName: true,
+        status: true,
+        sentAt: true,
+        validUntil: true,
+      },
+    }),
+    ctx.db.lead.findMany({
+      where: {
+        createdById: ctx.user.workspaceId!,
+        status: { in: ["CONTACTED", "RESPONDED", "QUALIFIED"] },
+        activities: {
+          none: {
+            createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+          },
+        },
+      },
+      take: 6,
+      orderBy: { updatedAt: "asc" },
+      select: {
+        id: true,
+        companyName: true,
+        status: true,
+        updatedAt: true,
+      },
+    }),
+  ]);
+
+  const items = [
+    ...drafts.flatMap((draft) => {
+      if (!draft.lead) return [];
+      return [{
+        id: `email-${draft.id}`,
+        type: "email_followup",
+        title: `Follow-up klaar voor ${draft.lead.companyName}`,
+        subtitle: draft.subject,
+        href: `/contacts/compose?leadId=${draft.lead.id}`,
+        dueAt: draft.sentAt ?? draft.createdAt,
+        tone: "violet",
+      }];
+    }),
+    ...pendingBookings.map((booking) => ({
+      id: `booking-${booking.id}`,
+      type: "booking_action",
+      title:
+        booking.status === "PENDING"
+          ? `Bevestig booking van ${booking.clientName}`
+          : `Aankomende booking: ${booking.clientName}`,
+      subtitle:
+        booking.status === "PENDING"
+          ? "Nieuwe aanvraag wacht op reactie"
+          : `Gepland op ${booking.date.toLocaleString("nl-BE")}`,
+      href: "/bookings",
+      dueAt: booking.status === "PENDING" ? booking.date : booking.date,
+      tone: booking.status === "PENDING" ? "amber" : "blue",
+    })),
+    ...staleQuotes.map((quote) => ({
+      id: `quote-${quote.id}`,
+      type: "quote_followup",
+      title: `Volg offerte ${quote.quoteNumber} op`,
+      subtitle: quote.validUntil
+        ? `Geldig tot ${quote.validUntil.toLocaleDateString("nl-BE")} voor ${quote.clientName}`
+        : `Wacht op reactie van ${quote.clientName}`,
+      href: `/quotes/${quote.id}`,
+      dueAt: quote.validUntil ?? quote.sentAt ?? new Date(),
+      tone: "emerald",
+    })),
+    ...leadFollowUps.map((lead) => ({
+      id: `lead-${lead.id}`,
+      type: "lead_followup",
+      title: `Lead opvolgen: ${lead.companyName}`,
+      subtitle: `Status ${leadStatusLabelNl(lead.status)} — opvolging nodig`,
+      href: `/leads/${lead.id}`,
+      dueAt: lead.updatedAt,
+      tone: "rose",
+    })),
+  ];
+
+  const dedupedItems: typeof items = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    dedupedItems.push(item);
+  }
+
+  const sortedItems = dedupedItems
+    .sort((left, right) => new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime())
+    .slice(0, 12);
+
+  const result: UnifiedRemindersResult = { followupDays, items: sortedItems };
+  writeDashboardCache(cacheKey, result);
+  return result;
+}
+
+async function buildAttentionQueue(ctx: WorkspaceCtx): Promise<AttentionQueueResult> {
+  const wsId = ctx.user.workspaceId!;
+  const now = new Date();
+  const thirtyDaysFromNow = new Date();
+  thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+
+  const draftInclude = {
+    lead: { select: { companyName: true } },
+  } as const;
+
+  const [
+    unified,
+    pendingDrafts,
+    approvedDrafts,
+    failedDrafts,
+    rejectedDrafts,
+    expiringDomains,
+    pendingReviews,
+    unreadChats,
+    approvedCount,
+    failedCount,
+    rejectedCount,
+  ] = await Promise.all([
+    loadUnifiedReminders(ctx),
+    ctx.db.emailDraft.findMany({
+      where: { status: "PENDING_APPROVAL", lead: { createdById: wsId } },
+      take: 20,
+      orderBy: { createdAt: "desc" },
+      include: draftInclude,
+    }),
+    ctx.db.emailDraft.findMany({
+      where: { status: "APPROVED", lead: { createdById: wsId } },
+      take: 10,
+      orderBy: { updatedAt: "desc" },
+      include: draftInclude,
+    }),
+    ctx.db.emailDraft.findMany({
+      where: { status: "FAILED", lead: { createdById: wsId } },
+      take: 10,
+      orderBy: { updatedAt: "desc" },
+      include: draftInclude,
+    }),
+    ctx.db.emailDraft.findMany({
+      where: { status: "REJECTED", lead: { createdById: wsId } },
+      take: 10,
+      orderBy: { updatedAt: "desc" },
+      include: draftInclude,
+    }),
+    ctx.db.domain.findMany({
+      where: {
+        createdById: wsId,
+        expiresAt: { gte: now, lte: thirtyDaysFromNow },
+        status: { in: ["ACTIVE", "EXPIRING"] },
+      },
+      orderBy: { expiresAt: "asc" },
+      take: 10,
+      select: { id: true, domainName: true, expiresAt: true },
+    }),
+    ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: wsId } }),
+    ctx.db.chatSession.count({
+      where: { ...ownedChatSessionWhere(wsId, ctx.user.id), isRead: false },
+    }),
+    ctx.db.emailDraft.count({ where: { status: "APPROVED", lead: { createdById: wsId } } }),
+    ctx.db.emailDraft.count({ where: { status: "FAILED", lead: { createdById: wsId } } }),
+    ctx.db.emailDraft.count({ where: { status: "REJECTED", lead: { createdById: wsId } } }),
+  ]);
+
+  const items: AttentionItem[] = [];
+
+  for (const draft of pendingDrafts) {
+    items.push({
+      id: `approval-${draft.id}`,
+      type: "outbound_approval",
+      title: draft.subject || "E-mail zonder onderwerp",
+      subtitle: `Wacht op goedkeuring · ${draft.lead?.companyName ?? draft.toEmail}`,
+      href: "/contacts/approval",
+      dueAt: draft.createdAt,
+      tone: "amber",
+    });
+  }
+
+  for (const draft of approvedDrafts) {
+    items.push({
+      id: `ready-${draft.id}`,
+      type: "outbound_ready",
+      title: draft.subject || "E-mail zonder onderwerp",
+      subtitle: `Klaar om te verzenden · ${draft.lead?.companyName ?? draft.toEmail}`,
+      href: `/contacts/drafts/${draft.id}`,
+      dueAt: draft.updatedAt,
+      tone: "blue",
+    });
+  }
+  if (approvedCount > approvedDrafts.length) {
+    items.push({
+      id: "synthetic-approved-more",
+      type: "outbound_ready",
+      title: `${approvedCount - approvedDrafts.length} extra goedgekeurde e-mail${approvedCount - approvedDrafts.length !== 1 ? "s" : ""}`,
+      subtitle: "Bekijk alles in Outbound Center",
+      href: "/contacts",
+      dueAt: now,
+      tone: "blue",
+    });
+  }
+
+  if (failedCount > 0) {
+    if (failedDrafts.length === 0) {
+      items.push({
+        id: "synthetic-failed",
+        type: "email_failed",
+        title: `${failedCount} mislukte e-mail${failedCount !== 1 ? "s" : ""}`,
+        subtitle: "Onderneem actie of verstuur opnieuw",
+        href: "/contacts",
+        dueAt: now,
+        tone: "rose",
+      });
+    } else {
+      for (const draft of failedDrafts) {
+        items.push({
+          id: `failed-${draft.id}`,
+          type: "email_failed",
+          title: draft.subject || "Mislukte e-mail",
+          subtitle: draft.lead?.companyName ?? draft.toEmail,
+          href: `/contacts/drafts/${draft.id}`,
+          dueAt: draft.updatedAt,
+          tone: "rose",
+        });
+      }
+      if (failedCount > failedDrafts.length) {
+        items.push({
+          id: "synthetic-failed-more",
+          type: "email_failed",
+          title: `${failedCount - failedDrafts.length} extra mislukte e-mail${failedCount - failedDrafts.length !== 1 ? "s" : ""}`,
+          subtitle: "Bekijk alles in Outbound Center",
+          href: "/contacts",
+          dueAt: now,
+          tone: "rose",
+        });
+      }
+    }
+  }
+
+  for (const draft of rejectedDrafts) {
+    items.push({
+      id: `rejected-${draft.id}`,
+      type: "outbound_rejected",
+      title: draft.subject || "Afgekeurde e-mail",
+      subtitle: `Aanpassen en opnieuw indienen · ${draft.lead?.companyName ?? draft.toEmail}`,
+      href: `/contacts/drafts/${draft.id}`,
+      dueAt: draft.updatedAt,
+      tone: "rose",
+    });
+  }
+  if (rejectedCount > rejectedDrafts.length) {
+    items.push({
+      id: "synthetic-rejected-more",
+      type: "outbound_rejected",
+      title: `${rejectedCount - rejectedDrafts.length} extra afgekeurde e-mail${rejectedCount - rejectedDrafts.length !== 1 ? "s" : ""}`,
+      subtitle: "Bekijk alles in Outbound Center",
+      href: "/contacts",
+      dueAt: now,
+      tone: "rose",
+    });
+  }
+
+  if (pendingReviews > 0) {
+    items.push({
+      id: "synthetic-reviews",
+      type: "review_pending",
+      title: `${pendingReviews} open reviewverzoek${pendingReviews !== 1 ? "en" : ""}`,
+      subtitle: "Wachten op reactie van klant",
+      href: "/reviews",
+      dueAt: now,
+      tone: "yellow",
+    });
+  }
+
+  if (unreadChats > 0) {
+    items.push({
+      id: "synthetic-chats",
+      type: "chat_unread",
+      title: `${unreadChats} ongelezen chat${unreadChats !== 1 ? "s" : ""}`,
+      subtitle: "Bezoeker wacht op antwoord",
+      href: "/chatbot",
+      dueAt: now,
+      tone: "indigo",
+    });
+  }
+
+  items.push(...unified.items);
+
+  for (const domain of expiringDomains) {
+    if (!domain.expiresAt) continue;
+    items.push({
+      id: `domain-${domain.id}`,
+      type: "domain_expiring",
+      title: `Domein verloopt: ${domain.domainName}`,
+      subtitle: `Verloopt op ${domain.expiresAt.toLocaleDateString("nl-BE")}`,
+      href: `/domains/${domain.id}`,
+      dueAt: domain.expiresAt,
+      tone: "orange",
+    });
+  }
+
+  const seen = new Set<string>();
+  const dedupedItems = items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+
+  return { totalCount: dedupedItems.length, items: dedupedItems };
+}
+
 export const dashboardRouter = router({
   getKpis: protectedProcedure.query(async ({ ctx }) => {
-    const cacheKey = `getKpis:${ctx.user.id}`;
+    const cacheKey = `getKpis:${ctx.user.workspaceId!}`;
     const cached = readDashboardCache<KpiResult>(cacheKey);
     if (cached) return cached;
 
@@ -75,42 +477,42 @@ export const dashboardRouter = router({
       pendingReviews,
       quoteStatusBuckets,
     ] = await Promise.all([
-      ctx.db.lead.count({ where: { createdById: ctx.user.id } }),
-      ctx.db.lead.count({ where: { createdById: ctx.user.id, createdAt: { gte: weekAgo } } }),
-      ctx.db.lead.count({ where: { createdById: ctx.user.id, scorePriority: "Hot" } }),
+      ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId! } }),
+      ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId!, createdAt: { gte: weekAgo } } }),
+      ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId!, scorePriority: "Hot" } }),
       ctx.db.lead.groupBy({
         by: ["status"],
-        where: { createdById: ctx.user.id },
+        where: { createdById: ctx.user.workspaceId! },
         _count: { _all: true },
       }),
-      ctx.db.campaign.count({ where: { createdById: ctx.user.id } }),
+      ctx.db.campaign.count({ where: { createdById: ctx.user.workspaceId! } }),
       ctx.db.emailDraft.groupBy({
         by: ["status"],
-        where: { lead: { createdById: ctx.user.id } },
+        where: { lead: { createdById: ctx.user.workspaceId! } },
         _count: { _all: true },
       }),
       ctx.db.lead.aggregate({
         _avg: { overallScore: true },
-        where: { createdById: ctx.user.id, overallScore: { not: null } },
+        where: { createdById: ctx.user.workspaceId!, overallScore: { not: null } },
       }),
-      ctx.db.quote.count({ where: { createdById: ctx.user.id, status: { in: ["DRAFT", "SENT", "VIEWED"] } } }),
+      ctx.db.quote.count({ where: { createdById: ctx.user.workspaceId!, status: { in: ["DRAFT", "SENT", "VIEWED"] } } }),
       ctx.db.quote.aggregate({
         _sum: { total: true },
-        where: { createdById: ctx.user.id, status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] } },
+        where: { createdById: ctx.user.workspaceId!, status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] } },
       }),
-      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), isRead: false } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), isRead: false } }),
       ctx.db.campaignLead.count({
         where: {
           campaign: {
             status: "ACTIVE",
-            createdById: ctx.user.id,
+            createdById: ctx.user.workspaceId!,
           },
         },
       }),
-      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.id } }),
+      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.workspaceId! } }),
       ctx.db.quote.groupBy({
         by: ["status"],
-        where: { createdById: ctx.user.id },
+        where: { createdById: ctx.user.workspaceId! },
         _count: { _all: true },
       }),
     ]);
@@ -178,7 +580,7 @@ export const dashboardRouter = router({
       where: {
         OR: [
           { userId: ctx.user.id },
-          { lead: { createdById: ctx.user.id } },
+          { lead: { createdById: ctx.user.workspaceId! } },
         ],
       },
       take: 20,
@@ -191,158 +593,29 @@ export const dashboardRouter = router({
   }),
 
   getUnifiedReminders: protectedProcedure.query(async ({ ctx }) => {
-    const cacheKey = `getUnifiedReminders:${ctx.user.id}`;
-    const cached = readDashboardCache<UnifiedRemindersResult>(cacheKey);
+    return loadUnifiedReminders(asWorkspaceCtx(ctx));
+  }),
+
+  getAttentionQueue: protectedProcedure.query(async ({ ctx }) => {
+    const cacheKey = `getAttentionQueue:${ctx.user.workspaceId!}`;
+    const cached = readDashboardCache<AttentionQueueResult>(cacheKey);
+    if (cached) return cached;
+    const result = await buildAttentionQueue(asWorkspaceCtx(ctx));
+    writeDashboardCache(cacheKey, result);
+    return result;
+  }),
+
+  getAttentionSummary: protectedProcedure.query(async ({ ctx }) => {
+    const cacheKey = `getAttentionSummary:${ctx.user.workspaceId!}`;
+    const cached = readDashboardCache<{ totalCount: number }>(cacheKey);
     if (cached) return cached;
 
-    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["email.followup_days"]);
-    const followupDays = Math.max(
-      1,
-      Number.parseInt(getSettingString(settings, "email.followup_days", "3"), 10) || 3,
-    );
-    const emailThreshold = new Date(Date.now() - followupDays * 24 * 60 * 60 * 1000);
-    const quoteThreshold = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
-    const quoteValidThreshold = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
-    const now = new Date();
-    const next24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const queueCache = readDashboardCache<AttentionQueueResult>(`getAttentionQueue:${ctx.user.workspaceId!}`);
+    const totalCount = queueCache
+      ? queueCache.totalCount
+      : (await buildAttentionQueue(asWorkspaceCtx(ctx))).totalCount;
 
-    const [drafts, pendingBookings, staleQuotes, leadFollowUps] = await Promise.all([
-      ctx.db.emailDraft.findMany({
-        where: {
-          status: "SENT",
-          sentAt: { lte: emailThreshold },
-          lead: {
-            createdById: ctx.user.id,
-            status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
-          },
-        },
-        orderBy: { sentAt: "asc" },
-        distinct: ["leadId"],
-        take: 6,
-        include: {
-          lead: {
-            select: {
-              id: true,
-              companyName: true,
-              status: true,
-            },
-          },
-        },
-      }),
-      ctx.db.booking.findMany({
-        where: {
-          createdById: ctx.user.id,
-          OR: [
-            { status: "PENDING" },
-            {
-              status: { in: ["SCHEDULED", "CONFIRMED"] },
-              date: { gte: now, lte: next24Hours },
-            },
-          ],
-        },
-        orderBy: [{ status: "asc" }, { date: "asc" }],
-        take: 6,
-        select: {
-          id: true,
-          clientName: true,
-          date: true,
-          status: true,
-        },
-      }),
-      ctx.db.quote.findMany({
-        where: {
-          createdById: ctx.user.id,
-          status: { in: ["SENT", "VIEWED"] },
-          OR: [
-            { sentAt: { lte: quoteThreshold } },
-            { validUntil: { lte: quoteValidThreshold, gte: new Date() } },
-          ],
-        },
-        orderBy: [{ validUntil: "asc" }, { sentAt: "asc" }],
-        take: 6,
-        select: {
-          id: true,
-          quoteNumber: true,
-          clientName: true,
-          status: true,
-          sentAt: true,
-          validUntil: true,
-        },
-      }),
-      ctx.db.lead.findMany({
-        where: {
-          createdById: ctx.user.id,
-          status: { in: ["CONTACTED", "RESPONDED", "QUALIFIED"] },
-          activities: {
-            none: {
-              createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
-            },
-          },
-        },
-        take: 6,
-        orderBy: { updatedAt: "asc" },
-        select: {
-          id: true,
-          companyName: true,
-          status: true,
-          updatedAt: true,
-        },
-      }),
-    ]);
-
-    const items = [
-      ...drafts.flatMap((draft) => {
-        if (!draft.lead) return [];
-        return [{
-          id: `email-${draft.id}`,
-          type: "email_followup",
-          title: `Follow-up klaar voor ${draft.lead.companyName}`,
-          subtitle: draft.subject,
-          href: `/contacts/compose?leadId=${draft.lead.id}`,
-          dueAt: draft.sentAt ?? draft.createdAt,
-          tone: "violet",
-        }];
-      }),
-      ...pendingBookings.map((booking) => ({
-        id: `booking-${booking.id}`,
-        type: "booking_action",
-        title:
-          booking.status === "PENDING"
-            ? `Bevestig booking van ${booking.clientName}`
-            : `Aankomende booking: ${booking.clientName}`,
-        subtitle:
-          booking.status === "PENDING"
-            ? "Nieuwe aanvraag wacht op reactie"
-            : `Gepland op ${booking.date.toLocaleString("nl-BE")}`,
-        href: "/bookings",
-        dueAt: booking.status === "PENDING" ? booking.date : booking.date,
-        tone: booking.status === "PENDING" ? "amber" : "blue",
-      })),
-      ...staleQuotes.map((quote) => ({
-        id: `quote-${quote.id}`,
-        type: "quote_followup",
-        title: `Volg offerte ${quote.quoteNumber} op`,
-        subtitle: quote.validUntil
-          ? `Geldig tot ${quote.validUntil.toLocaleDateString("nl-BE")} voor ${quote.clientName}`
-          : `Wacht op reactie van ${quote.clientName}`,
-        href: `/quotes/${quote.id}`,
-        dueAt: quote.validUntil ?? quote.sentAt ?? new Date(),
-        tone: "emerald",
-      })),
-      ...leadFollowUps.map((lead) => ({
-        id: `lead-${lead.id}`,
-        type: "lead_followup",
-        title: `Lead opvolgen: ${lead.companyName}`,
-        subtitle: `Status ${lead.status.toLowerCase()} vraagt nieuwe actie`,
-        href: `/leads/${lead.id}`,
-        dueAt: lead.updatedAt,
-        tone: "rose",
-      })),
-    ]
-      .sort((left, right) => new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime())
-      .slice(0, 12);
-
-    const result: UnifiedRemindersResult = { followupDays, items };
+    const result = { totalCount };
     writeDashboardCache(cacheKey, result);
     return result;
   }),
@@ -350,14 +623,14 @@ export const dashboardRouter = router({
   getPipelineOverview: protectedProcedure.query(async ({ ctx }) => {
     const [stages, leadCounts] = await Promise.all([
       ctx.db.pipelineStage.findMany({
-        where: { createdById: ctx.user.id },
+        where: { createdById: ctx.user.workspaceId! },
         orderBy: { sortOrder: "asc" },
         select: { id: true, name: true, color: true },
       }),
       ctx.db.lead.groupBy({
         by: ["pipelineStageId"],
         _count: { id: true },
-        where: { createdById: ctx.user.id, pipelineStageId: { not: null } },
+        where: { createdById: ctx.user.workspaceId!, pipelineStageId: { not: null } },
       }),
     ]);
     const countMap = new Map(
@@ -384,7 +657,7 @@ export const dashboardRouter = router({
 
     const counts = await Promise.all(
       ranges.map((b) =>
-        ctx.db.lead.count({ where: { createdById: ctx.user.id, overallScore: { gte: b.min, lte: b.max } } })
+        ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId!, overallScore: { gte: b.min, lte: b.max } } })
       )
     );
 
@@ -395,7 +668,7 @@ export const dashboardRouter = router({
     const leads = await ctx.db.lead.groupBy({
       by: ["industry"],
       _count: { id: true },
-      where: { industry: { not: null }, createdById: ctx.user.id },
+      where: { industry: { not: null }, createdById: ctx.user.workspaceId! },
       orderBy: { _count: { id: "desc" } },
       take: 10,
     });
@@ -410,7 +683,7 @@ export const dashboardRouter = router({
     const leads = await ctx.db.lead.groupBy({
       by: ["city"],
       _count: { id: true },
-      where: { city: { not: null }, createdById: ctx.user.id },
+      where: { city: { not: null }, createdById: ctx.user.workspaceId! },
       orderBy: { _count: { id: "desc" } },
       take: 10,
     });
@@ -427,7 +700,7 @@ export const dashboardRouter = router({
 
     const leads = await ctx.db.lead.findMany({
       where: {
-        createdById: ctx.user.id,
+        createdById: ctx.user.workspaceId!,
         status: { in: ["CONTACTED", "RESPONDED", "QUALIFIED"] },
         activities: {
           none: {
@@ -472,16 +745,16 @@ export const dashboardRouter = router({
 
   getSavedSearchCount: protectedProcedure.query(async ({ ctx }) => {
     const count = await ctx.db.lead.count({
-      where: { source: { not: null }, createdById: ctx.user.id },
+      where: { source: { not: null }, createdById: ctx.user.workspaceId! },
     });
     return count;
   }),
 
   getTopLeads: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.db.lead.findMany({
-      where: { overallScore: { not: null }, createdById: ctx.user.id },
+    const rows = await ctx.db.lead.findMany({
+      where: { overallScore: { not: null }, createdById: ctx.user.workspaceId! },
       orderBy: { overallScore: "desc" },
-      take: 5,
+      take: 24,
       select: {
         id: true,
         companyName: true,
@@ -491,16 +764,26 @@ export const dashboardRouter = router({
         status: true,
       },
     });
+    const seen = new Set<string>();
+    const unique: typeof rows = [];
+    for (const row of rows) {
+      const key = row.companyName.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(row);
+      if (unique.length >= 5) break;
+    }
+    return unique;
   }),
 
   getQuoteStats: protectedProcedure.query(async ({ ctx }) => {
     const [draftCount, sentCount, acceptedCount, totalValue] = await Promise.all([
-      ctx.db.quote.count({ where: { status: "DRAFT", createdById: ctx.user.id } }),
-      ctx.db.quote.count({ where: { status: "SENT", createdById: ctx.user.id } }),
-      ctx.db.quote.count({ where: { status: "ACCEPTED", createdById: ctx.user.id } }),
+      ctx.db.quote.count({ where: { status: "DRAFT", createdById: ctx.user.workspaceId! } }),
+      ctx.db.quote.count({ where: { status: "SENT", createdById: ctx.user.workspaceId! } }),
+      ctx.db.quote.count({ where: { status: "ACCEPTED", createdById: ctx.user.workspaceId! } }),
       ctx.db.quote.aggregate({
         _sum: { total: true },
-        where: { status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] }, createdById: ctx.user.id },
+        where: { status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] }, createdById: ctx.user.workspaceId! },
       }),
     ]);
 
@@ -514,9 +797,9 @@ export const dashboardRouter = router({
 
   getChatStats: protectedProcedure.query(async ({ ctx }) => {
     const [openCount, waitingCount, unreadCount] = await Promise.all([
-      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), status: "OPEN" } }),
-      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), status: "WAITING" } }),
-      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), isRead: false } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), status: "OPEN" } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), status: "WAITING" } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), isRead: false } }),
     ]);
 
     return { openCount, waitingCount, unreadCount };
@@ -526,7 +809,7 @@ export const dashboardRouter = router({
     const now = new Date();
     return ctx.db.booking.findMany({
       where: {
-        createdById: ctx.user.id,
+        createdById: ctx.user.workspaceId!,
         date: { gte: now },
         status: { in: ["PENDING", "SCHEDULED", "CONFIRMED"] },
       },
@@ -551,7 +834,7 @@ export const dashboardRouter = router({
 
     return ctx.db.domain.findMany({
       where: {
-        createdById: ctx.user.id,
+        createdById: ctx.user.workspaceId!,
         expiresAt: {
           gte: now,
           lte: thirtyDaysFromNow,
@@ -572,7 +855,7 @@ export const dashboardRouter = router({
 
   getDomainMonitor: protectedProcedure.query(async ({ ctx }) => {
     const domains = await ctx.db.domain.findMany({
-      where: { createdById: ctx.user.id },
+      where: { createdById: ctx.user.workspaceId! },
       orderBy: { updatedAt: "desc" },
       take: 6,
       include: {
@@ -629,9 +912,9 @@ export const dashboardRouter = router({
 
   getReviewStats: protectedProcedure.query(async ({ ctx }) => {
     const [pendingCount, sentCount, reviewedCount] = await Promise.all([
-      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.id } }),
-      ctx.db.reviewRequest.count({ where: { status: "SENT", createdById: ctx.user.id } }),
-      ctx.db.reviewRequest.count({ where: { status: "REVIEWED", createdById: ctx.user.id } }),
+      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.workspaceId! } }),
+      ctx.db.reviewRequest.count({ where: { status: "SENT", createdById: ctx.user.workspaceId! } }),
+      ctx.db.reviewRequest.count({ where: { status: "REVIEWED", createdById: ctx.user.workspaceId! } }),
     ]);
 
     return { pendingCount, sentCount, reviewedCount };
@@ -640,7 +923,7 @@ export const dashboardRouter = router({
   getOpenChats: protectedProcedure.query(async ({ ctx }) => {
     const sessions = await ctx.db.chatSession.findMany({
       where: {
-        ...ownedChatSessionWhere(ctx.user.id),
+        ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id),
         status: { in: ["OPEN", "WAITING"] },
       },
       orderBy: { updatedAt: "desc" },

@@ -50,7 +50,7 @@ function resolveReviewText(
 export async function GET(_: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const ip = getClientIp(_);
-  const limiter = enforceRateLimit(_, {
+  const limiter = await enforceRateLimit(_, {
     key: `public-review-get:${id}:${ip}`,
     limit: 240,
     windowMs: 60 * 60 * 1000,
@@ -136,7 +136,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   const ip = getClientIp(request);
-  const limiter = checkRateLimit({
+  const limiter = await checkRateLimit({
     key: `public-review:${id}:${ip}`,
     limit: 10,
     windowMs: 60 * 60 * 1000,

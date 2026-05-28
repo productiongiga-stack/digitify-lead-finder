@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { getCurrentUser } from "@/lib/auth/session";
+import { getCurrentUser, workspaceIdFor } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 
@@ -38,7 +38,8 @@ export async function GET(request: Request) {
   const dateFrom = url.searchParams.get("from") || "";
   const dateTo = url.searchParams.get("to") || "";
 
-  const where: Record<string, unknown> = { createdById: userId };
+  const workspaceId = workspaceIdFor(currentUser as { id: string; workspaceId?: string });
+  const where: Record<string, unknown> = { createdById: workspaceId };
   if (statusFilter) where.status = statusFilter.toUpperCase();
   if (days) {
     where.createdAt = { gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000) };

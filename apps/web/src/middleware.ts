@@ -2,16 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 
 /**
- * Edge middleware: rate-limit credential login + registration to slow down
- * brute-force / credential-stuffing attempts.
- *
- * Limits are intentionally tight — legitimate users only attempt to log in a
- * handful of times per minute. The bucket is keyed by client IP, falling back
- * to the request URL host when no IP header is available (e.g. local dev).
- *
- * NOTE: this uses an in-memory store from `@/lib/rate-limit`, which is
- * per-process. For multi-instance deployments swap the store for a shared
- * backend (Redis/Upstash) — but the limits and keying stay the same.
+ * Edge middleware: rate-limit credential login + registration.
+ * Uses Upstash REST when UPSTASH_REDIS_REST_* is set; otherwise in-memory per edge node.
  */
 
 function clientIp(req: NextRequest): string {
@@ -26,43 +18,39 @@ function clientIp(req: NextRequest): string {
 }
 
 const LIMITS: { match: (path: string) => boolean; key: string; limit: number; windowMs: number }[] = [
-  // Credential login attempts
   {
     match: (p) => p.startsWith("/api/auth/callback/credentials"),
     key: "auth-login",
     limit: 8,
-    windowMs: 60_000, // 8 attempts / minute / IP
+    windowMs: 60_000,
   },
-  // Slower long-window guard for sustained brute force
   {
     match: (p) => p.startsWith("/api/auth/callback/credentials"),
     key: "auth-login-hour",
     limit: 60,
-    windowMs: 60 * 60_000, // 60 attempts / hour / IP
+    windowMs: 60 * 60_000,
   },
-  // Public registration request endpoint (tRPC)
   {
     match: (p) => p.startsWith("/api/trpc/registration.requestAccess"),
     key: "auth-register",
     limit: 8,
-    windowMs: 60 * 60_000, // 8 attempts / hour / IP
+    windowMs: 60 * 60_000,
   },
-  // Email verification retries
   {
     match: (p) => p.startsWith("/api/trpc/registration.verifyEmail"),
     key: "auth-register-verify",
     limit: 30,
-    windowMs: 60 * 60_000, // 30 attempts / hour / IP
+    windowMs: 60 * 60_000,
   },
 ];
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
   const ip = clientIp(req);
 
   for (const rule of LIMITS) {
     if (!rule.match(path)) continue;
-    const result = checkRateLimit({
+    const result = await checkRateLimit({
       key: `${rule.key}:${ip}`,
       limit: rule.limit,
       windowMs: rule.windowMs,
@@ -93,6 +81,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Keep middleware scoped to auth and registration surfaces.
   matcher: ["/api/auth/callback/:path*", "/api/trpc/:path*"],
 };

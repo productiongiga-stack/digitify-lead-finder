@@ -13,7 +13,13 @@ import { router, publicProcedure, protectedProcedure, adminProcedure, ownerProce
 import { loadEmailSettings } from "../lib/email-sender";
 import { formatSmtpErrorMessage, normalizeTlsOptions } from "../lib/email-utils";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
-import { invalidateUserSettingsCache, loadUserSettingRows, userSettingKey } from "../lib/user-settings";
+import {
+  invalidateWorkspaceSettingsCache,
+  loadWorkspaceSettingRows,
+  resolveSettingDbKey,
+  workspaceScopeFromUser,
+} from "../lib/workspace-settings";
+import { loadUserSettingRows } from "../lib/user-settings";
 import { assertCanManageSettingKey, canReadSettingKey, filterReadableSettingsForRole } from "../lib/permissions";
 import { ensureUserWorkspace } from "../lib/user-workspace";
 import { normalizeSettingKey, validateSettingValue } from "../lib/setting-validation";
@@ -156,11 +162,11 @@ export const settingsRouter = router({
   }),
 
   getPublicMarketingFooter: publicProcedure.query(async ({ ctx }) => {
-    const owner = await ctx.db.user.findFirst({
-      where: { role: "OWNER" },
-      orderBy: { createdAt: "asc" },
-      select: { id: true },
-    });
+    const { resolveMarketingWorkspaceOwnerId } = await import("../lib/public-tenant");
+    const ownerId = await resolveMarketingWorkspaceOwnerId(ctx.db);
+    const owner = ownerId
+      ? await ctx.db.user.findUnique({ where: { id: ownerId }, select: { id: true } })
+      : null;
 
     if (!owner) {
       return {
@@ -219,8 +225,11 @@ export const settingsRouter = router({
     .input(z.object({ key: z.string() }))
     .query(async ({ ctx, input }) => {
       const key = normalizeSettingKey(input.key);
-      await ensureUserWorkspace(ctx.db, ctx.user.id, ctx.user.name);
-      const setting = await ctx.db.setting.findUnique({ where: { key: userSettingKey(ctx.user.id, key) } });
+      const scope = workspaceScopeFromUser(ctx.user);
+      await ensureUserWorkspace(ctx.db, scope.workspaceId, ctx.user.name);
+      const setting = await ctx.db.setting.findUnique({
+        where: { key: resolveSettingDbKey(scope, key) },
+      });
       if (!canReadSettingKey(ctx.user.role, key)) return null;
       if (!setting) return null;
       const settingsMap = settingsRowsToMap([{ key, value: setting.value }]);
@@ -229,7 +238,8 @@ export const settingsRouter = router({
     }),
 
   getBranding: protectedProcedure.query(async ({ ctx }) => {
-    await ensureUserWorkspace(ctx.db, ctx.user.id, ctx.user.name);
+    const scope = workspaceScopeFromUser(ctx.user);
+    await ensureUserWorkspace(ctx.db, scope.workspaceId, ctx.user.name);
     const keys = [
       "branding.company_name",
       "branding.company_slogan",
@@ -253,14 +263,15 @@ export const settingsRouter = router({
       "email.from_name",
       "email.from_email",
     ];
-    const rows = await loadUserSettingRows(ctx.db, ctx.user.id, keys);
+    const rows = await loadWorkspaceSettingRows(ctx.db, scope, keys);
     const map = settingsRowsToMap(rows);
     return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
   }),
 
   getAll: protectedProcedure.query(async ({ ctx }) => {
-    await ensureUserWorkspace(ctx.db, ctx.user.id, ctx.user.name);
-    const rows = await loadUserSettingRows(ctx.db, ctx.user.id);
+    const scope = workspaceScopeFromUser(ctx.user);
+    await ensureUserWorkspace(ctx.db, scope.workspaceId, ctx.user.name);
+    const rows = await loadWorkspaceSettingRows(ctx.db, scope);
     const map = settingsRowsToMap(rows);
     return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
   }),
@@ -269,8 +280,9 @@ export const settingsRouter = router({
     .input(z.object({ key: z.string(), value: z.any() }))
     .mutation(async ({ ctx, input }) => {
       const key = normalizeSettingKey(input.key);
+      const scope = workspaceScopeFromUser(ctx.user);
       assertCanManageSettingKey(ctx.user.role, key);
-      const scopedKey = userSettingKey(ctx.user.id, key);
+      const scopedKey = resolveSettingDbKey(scope, key);
       if (isSecretNoopUpdate(key, input.value)) {
         const current = await ctx.db.setting.findUnique({ where: { key: scopedKey } });
         if (current) return current;
@@ -293,13 +305,14 @@ export const settingsRouter = router({
           metadata: { key, isSecret: isSecretSettingKey(key) },
         },
       });
-      invalidateUserSettingsCache(ctx.user.id);
+      invalidateWorkspaceSettingsCache(scope);
       return result;
     }),
 
   batchUpdate: protectedProcedure
     .input(z.array(z.object({ key: z.string(), value: z.any() })))
     .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromUser(ctx.user);
       const normalizedEntries = input.map((item) => ({
         key: normalizeSettingKey(item.key),
         value: item.value,
@@ -318,13 +331,14 @@ export const settingsRouter = router({
         .map(([key, value]) => ({ key, value }));
       if (uniqueEntries.length === 0) return { success: true };
       await ctx.db.$transaction([
-        ...uniqueEntries.map((item) =>
-          ctx.db.setting.upsert({
-            where: { key: userSettingKey(ctx.user.id, item.key) },
-            create: { key: userSettingKey(ctx.user.id, item.key), value: item.value },
+        ...uniqueEntries.map((item) => {
+          const storageKey = resolveSettingDbKey(scope, item.key);
+          return ctx.db.setting.upsert({
+            where: { key: storageKey },
+            create: { key: storageKey, value: item.value },
             update: { value: item.value },
-          }),
-        ),
+          });
+        }),
         ctx.db.activity.create({
           data: {
             userId: ctx.user.id,
@@ -337,12 +351,13 @@ export const settingsRouter = router({
           },
         }),
       ]);
-      invalidateUserSettingsCache(ctx.user.id);
+      invalidateWorkspaceSettingsCache(scope);
       return { success: true };
     }),
 
   getScoringWeights: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.db.scoringWeight.findMany({ orderBy: { sortOrder: "asc" } });
+    const { loadMergedScoringWeights } = await import("../lib/scoring-weights");
+    return loadMergedScoringWeights(ctx.db, ctx.user.workspaceId!);
   }),
 
   updateScoringWeight: adminProcedure
@@ -356,14 +371,24 @@ export const settingsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { id, ...data } = input;
-      return ctx.db.scoringWeight.update({ where: { id }, data });
+      const { resolveWorkspaceScoringWeightForUpdate } = await import("../lib/scoring-weights");
+      const target = await resolveWorkspaceScoringWeightForUpdate(
+        ctx.db,
+        ctx.user.workspaceId!,
+        input.id,
+      );
+      if (!target) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Scoringfactor niet gevonden." });
+      }
+      const { id: _ignored, ...data } = input;
+      return ctx.db.scoringWeight.update({ where: { id: target.id }, data });
     }),
 
   /* ---------- test connection endpoints ---------- */
 
   testGooglePlaces: ownerProcedure.mutation(async ({ ctx }) => {
-    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.google_places_key"]);
+    const scope = workspaceScopeFromUser(ctx.user);
+    const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["api.google_places_key"]);
     const key = getSettingString(settingsRowsToMap(settings), "api.google_places_key");
     if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Google Places API key is niet geconfigureerd." });
 
@@ -391,7 +416,8 @@ export const settingsRouter = router({
   }),
 
   testAnthropicKey: ownerProcedure.mutation(async ({ ctx }) => {
-    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.anthropic_key"]);
+    const scope = workspaceScopeFromUser(ctx.user);
+    const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["api.anthropic_key"]);
     const key = getSettingString(settingsRowsToMap(settings), "api.anthropic_key");
     if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Anthropic API key is niet geconfigureerd." });
 
@@ -420,7 +446,8 @@ export const settingsRouter = router({
   }),
 
   testOpenaiKey: ownerProcedure.mutation(async ({ ctx }) => {
-    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["api.openai_key"]);
+    const scope = workspaceScopeFromUser(ctx.user);
+    const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["api.openai_key"]);
     const key = getSettingString(settingsRowsToMap(settings), "api.openai_key");
     if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "OpenAI API key is niet geconfigureerd." });
 
@@ -446,8 +473,9 @@ export const settingsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const nodemailer = await import("nodemailer");
-      const settings = await loadUserSettingRows(ctx.db, ctx.user.id);
-      const cfg = await loadEmailSettings(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      const settings = await loadWorkspaceSettingRows(ctx.db, scope);
+      const cfg = await loadEmailSettings(ctx.db, scope);
       const host = cfg.smtpHost;
       const port = cfg.smtpPort;
       const user = cfg.smtpUser;
@@ -523,7 +551,8 @@ export const settingsRouter = router({
         .optional(),
     )
     .mutation(async ({ ctx, input }) => {
-      const settingRows = await loadUserSettingRows(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+      const settingRows = await loadWorkspaceSettingRows(ctx.db, scope);
       const settingsMap = settingsRowsToMap(settingRows);
       const fromEmail = getSettingString(settingsMap, "email.from_email");
       const smtpUser = getSettingString(settingsMap, "email.smtp_user");
@@ -637,7 +666,8 @@ export const settingsRouter = router({
 
   testImap: ownerProcedure.mutation(async ({ ctx }) => {
     const { ImapFlow } = await import("imapflow");
-    const settings = await loadUserSettingRows(ctx.db, ctx.user.id);
+    const scope = workspaceScopeFromUser(ctx.user);
+    const settings = await loadWorkspaceSettingRows(ctx.db, scope);
     const settingsMap = settingsRowsToMap(settings);
     const host = getSettingString(settingsMap, "email.imap_host");
     const port = getSettingString(settingsMap, "email.imap_port", "993");

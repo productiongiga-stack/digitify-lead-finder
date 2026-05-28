@@ -2,17 +2,30 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, Copy, Save, Settings2, Star } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  Copy,
+  FileText,
+  Link2,
+  Loader2,
+  QrCode,
+  Save,
+  Sparkles,
+} from "lucide-react";
 import {
   Button,
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
   Input,
   Label,
   Skeleton,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   Textarea,
 } from "@digitify/ui";
 import { trpc } from "@/lib/trpc/client";
@@ -24,7 +37,30 @@ import {
   REVIEW_PUBLIC_TEXT_FIELDS,
   REVIEW_TEXT_PLACEHOLDERS,
   getReviewTextDefault,
+  type ReviewTextField,
 } from "@/lib/review-text";
+
+function ReviewTextFieldEditor({
+  field,
+  value,
+  onChange,
+}: {
+  field: ReviewTextField;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-2 rounded-xl border border-border/55 bg-muted/15 p-4">
+      <Label>{field.label}</Label>
+      <Textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        rows={field.defaultValue.length > 120 ? 4 : 2}
+      />
+      <p className="text-xs text-muted-foreground">{field.description}</p>
+    </div>
+  );
+}
 
 export default function ReviewSettingsPage() {
   const { data: settings, isLoading } = trpc.settings.getAll.useQuery();
@@ -137,6 +173,8 @@ export default function ReviewSettingsPage() {
     [googleUrl, trustpilotUrl, facebookUrl]
   );
 
+  const configuredPlatformCount = [googleUrl, trustpilotUrl, facebookUrl].filter((url) => url.trim()).length;
+
   function handleSave() {
     batchUpdate.mutate([
       { key: "reviews.embed_company", value: company },
@@ -171,234 +209,278 @@ export default function ReviewSettingsPage() {
     return (
       <div className="space-y-5">
         <Skeleton className="h-8 w-64" />
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Skeleton className="h-[520px]" />
-          <Skeleton className="h-[520px]" />
-        </div>
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-96" />
       </div>
     );
   }
 
   return (
     <div className="space-y-5">
-      <div>
-        <Link
-          href="/settings"
-          className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Terug naar instellingen
+      <div className="flex items-center gap-3">
+        <Link href="/settings">
+          <Button variant="ghost" size="icon" aria-label="Terug naar instellingen">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
         </Link>
-        <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
-          <Settings2 className="h-6 w-6" />
-          Review Instellingen
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Beheer hier je reviewflow, teksten, QR-codes en platformlinks. Alles hieronder wordt gebruikt door de reviewpagina, embed en slimme QR.
-        </p>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Star className="h-4 w-4" />
-              Basis Configuratie
-            </CardTitle>
-            <CardDescription>
-              Deze instellingen sturen de reviewwidget, slimme QR en platformdoorsturing aan.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Bedrijfsnaam</Label>
-              <Input value={company} onChange={(event) => setCompany(event.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Titel</Label>
-              <Input value={title} onChange={(event) => setTitle(event.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Beschrijving</Label>
-              <Textarea
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                rows={3}
-              />
-              <p className="text-xs text-muted-foreground">
-                Deze titel en beschrijving worden vooral gebruikt in de embed en slimme QR flow.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label>Kleur</Label>
-              <Input value={color} onChange={(event) => setColor(event.target.value)} />
-            </div>
-            <div className="space-y-2">
-              <Label>Google review URL</Label>
-              <Input
-                value={googleUrl}
-                onChange={(event) => setGoogleUrl(event.target.value)}
-                placeholder="https://g.page/r/..."
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Trustpilot URL</Label>
-              <Input
-                value={trustpilotUrl}
-                onChange={(event) => setTrustpilotUrl(event.target.value)}
-                placeholder="https://www.trustpilot.com/evaluate/..."
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Facebook review URL</Label>
-              <Input
-                value={facebookUrl}
-                onChange={(event) => setFacebookUrl(event.target.value)}
-                placeholder="https://www.facebook.com/..."
-              />
-            </div>
-
-            <Button onClick={handleSave} disabled={batchUpdate.isPending} className="w-full">
-              <Save className="mr-2 h-4 w-4" />
-              {batchUpdate.isPending ? "Opslaan..." : "Instellingen opslaan"}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Embed Code</CardTitle>
-            <CardDescription>
-              Gebruik deze iframe-code op de website van de klant of op een aparte landingspagina.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="relative">
-              <pre className="overflow-x-auto rounded-xl bg-muted p-4 text-xs leading-6">
-                {embedCode}
-              </pre>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="absolute right-3 top-3"
-                onClick={handleCopy}
-              >
-                {copied ? <Check className="mr-1 h-3.5 w-3.5" /> : <Copy className="mr-1 h-3.5 w-3.5" />}
-                {copied ? "Gekopieerd" : "Kopieer"}
-              </Button>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Laat alleen de reviewplatformen ingevuld die je effectief wilt tonen nadat iemand 4 of 5 sterren gaf. De slimme QR gebruikt dezelfde logica.
-            </p>
-          </CardContent>
-        </Card>
+        <div>
+          <h1 className="text-xl font-bold tracking-tight">Review Instellingen</h1>
+          <p className="text-sm text-muted-foreground">
+            Widget, platformlinks, teksten en QR — per onderdeel apart ingesteld.
+          </p>
+        </div>
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Placeholders</CardTitle>
-          <CardDescription>
-            Deze placeholders kun je gebruiken in alle teksten hieronder. Ze worden automatisch ingevuld op basis van de reviewaanvraag en gekozen score.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          {REVIEW_TEXT_PLACEHOLDERS.map((placeholder) => (
-            <code key={placeholder} className="rounded-full bg-muted px-3 py-1 text-xs">
-              {placeholder}
-            </code>
-          ))}
+        <CardContent className="p-5">
+          <Tabs defaultValue="widget" className="space-y-5">
+            <TabsList className="settings-domain-tabs settings-domain-tabs-cols-4 w-full">
+              <TabsTrigger value="widget" className="settings-domain-tab">
+                <Sparkles className="settings-domain-tab-icon" />
+                Widget
+              </TabsTrigger>
+              <TabsTrigger value="platforms" className="settings-domain-tab">
+                <Link2 className="settings-domain-tab-icon" />
+                Platformen
+              </TabsTrigger>
+              <TabsTrigger value="texts" className="settings-domain-tab">
+                <FileText className="settings-domain-tab-icon" />
+                Teksten
+              </TabsTrigger>
+              <TabsTrigger value="embed" className="settings-domain-tab">
+                <QrCode className="settings-domain-tab-icon" />
+                Embed &amp; QR
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="widget" className="mt-4 space-y-4">
+              <div className="rounded-xl border border-border/55 bg-muted/20 p-4">
+                <p className="text-sm font-medium">Uiterlijk van de reviewwidget</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Bedrijfsnaam, titel, beschrijving en kleur worden gebruikt in de embed, slimme QR en landingspagina.
+                </p>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Bedrijfsnaam</Label>
+                  <Input value={company} onChange={(event) => setCompany(event.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Accentkleur</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="color"
+                      value={color}
+                      onChange={(event) => setColor(event.target.value)}
+                      className="h-10 w-14 shrink-0 cursor-pointer p-1"
+                    />
+                    <Input value={color} onChange={(event) => setColor(event.target.value)} placeholder="#f9ae5a" />
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Titel</Label>
+                <Input value={title} onChange={(event) => setTitle(event.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Beschrijving</Label>
+                <Textarea
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  rows={3}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Korte uitleg boven de sterren in de widget en op QR-landingspagina&apos;s.
+                </p>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="platforms" className="mt-4 space-y-4">
+              <div className="rounded-xl border border-border/55 bg-muted/20 p-4">
+                <p className="text-sm font-medium">Publieke reviewplatformen</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Alleen ingevulde links worden getoond na een score van 4 of 5 sterren. Lagere scores gaan naar interne feedback.
+                </p>
+                <p className="mt-2 text-xs font-medium text-foreground">
+                  {configuredPlatformCount === 0
+                    ? "Nog geen platform ingesteld"
+                    : `${configuredPlatformCount} platform${configuredPlatformCount === 1 ? "" : "en"} actief`}
+                </p>
+              </div>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Google review URL</Label>
+                  <Input
+                    value={googleUrl}
+                    onChange={(event) => setGoogleUrl(event.target.value)}
+                    placeholder="https://g.page/r/..."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Trustpilot URL</Label>
+                  <Input
+                    value={trustpilotUrl}
+                    onChange={(event) => setTrustpilotUrl(event.target.value)}
+                    placeholder="https://www.trustpilot.com/evaluate/..."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Facebook review URL</Label>
+                  <Input
+                    value={facebookUrl}
+                    onChange={(event) => setFacebookUrl(event.target.value)}
+                    placeholder="https://www.facebook.com/..."
+                  />
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="texts" className="mt-4 space-y-4">
+              <div className="rounded-xl border border-dashed border-border/70 bg-muted/15 p-4">
+                <p className="text-sm font-medium">Placeholders</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Gebruik deze tags in teksten — ze worden automatisch ingevuld per reviewaanvraag.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {REVIEW_TEXT_PLACEHOLDERS.map((placeholder) => (
+                    <code key={placeholder} className="rounded-full bg-background px-3 py-1 text-xs ring-1 ring-border/60">
+                      {placeholder}
+                    </code>
+                  ))}
+                </div>
+              </div>
+
+              <Tabs defaultValue="public" className="space-y-4">
+                <TabsList className="grid h-10 w-full max-w-md grid-cols-2 rounded-full bg-muted/60 p-1">
+                  <TabsTrigger
+                    value="public"
+                    className="rounded-full text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                  >
+                    Reviewlink
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="embed"
+                    className="rounded-full text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                  >
+                    Widget &amp; QR
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="public" className="mt-0 space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    Teksten voor de persoonlijke reviewlink die je naar klanten stuurt.
+                  </p>
+                  {REVIEW_PUBLIC_TEXT_FIELDS.map((field) => (
+                    <ReviewTextFieldEditor
+                      key={field.key}
+                      field={field}
+                      value={textValues[field.key] ?? getReviewTextDefault(field.key)}
+                      onChange={(value) => updateTextValue(field.key, value)}
+                    />
+                  ))}
+                </TabsContent>
+
+                <TabsContent value="embed" className="mt-0 space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    Teksten voor de embed op websites en de slimme QR-flow.
+                  </p>
+                  {REVIEW_EMBED_TEXT_FIELDS.map((field) => (
+                    <ReviewTextFieldEditor
+                      key={field.key}
+                      field={field}
+                      value={textValues[field.key] ?? getReviewTextDefault(field.key)}
+                      onChange={(value) => updateTextValue(field.key, value)}
+                    />
+                  ))}
+                </TabsContent>
+              </Tabs>
+            </TabsContent>
+
+            <TabsContent value="embed" className="mt-4 space-y-5">
+              <div className="space-y-3">
+                <div>
+                  <p className="text-sm font-medium">Embed-code</p>
+                  <p className="text-xs text-muted-foreground">
+                    Plak deze iframe op de website van de klant of op een landingspagina.
+                  </p>
+                </div>
+                <div className="relative">
+                  <pre className="overflow-x-auto rounded-xl bg-muted p-4 text-xs leading-6">
+                    {embedCode}
+                  </pre>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="absolute right-3 top-3"
+                    onClick={handleCopy}
+                  >
+                    {copied ? <Check className="mr-1 h-3.5 w-3.5" /> : <Copy className="mr-1 h-3.5 w-3.5" />}
+                    {copied ? "Gekopieerd" : "Kopieer"}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <ReviewQrCodeCard
+                  title="Slimme review QR"
+                  description="Opent dezelfde flow als de embed: eerst score, daarna feedback of publieke review."
+                  url={standaloneReviewUrl}
+                  filename="review-flow-qr"
+                />
+                <Card className="border-border/55">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">Tips voor QR-gebruik</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm text-muted-foreground">
+                    <p>
+                      De slimme QR vangt lagere scores intern op en stuurt alleen tevreden klanten door naar publieke reviews.
+                    </p>
+                    <p>
+                      Sla je instellingen op voordat je QR&apos;s deelt, zodat titel, kleur en platformlinks up-to-date zijn.
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {platformQrCards.length > 0 ? (
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm font-medium">Directe platform-QR&apos;s</p>
+                    <p className="text-xs text-muted-foreground">
+                      Rechtstreeks naar één platform, zonder interne scorefilter.
+                    </p>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {platformQrCards.map((item) => (
+                      <ReviewQrCodeCard
+                        key={item.key}
+                        title={item.label}
+                        description="Directe link naar het reviewplatform."
+                        url={item.url}
+                        filename={`${item.key}-review-qr`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="rounded-xl border border-dashed border-border/60 bg-muted/10 px-4 py-3 text-sm text-muted-foreground">
+                  Vul platform-URL&apos;s in onder het tabblad <strong>Platformen</strong> om aparte QR-codes te genereren.
+                </p>
+              )}
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Publieke Reviewflow Teksten</CardTitle>
-            <CardDescription>
-              Teksten voor de reviewlink die je rechtstreeks naar klanten stuurt. Dit is de hoofdflow voor reviewverzoeken per klant.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {REVIEW_PUBLIC_TEXT_FIELDS.map((field) => (
-              <div key={field.key} className="space-y-2">
-                <Label>{field.label}</Label>
-                <Textarea
-                  value={textValues[field.key] ?? getReviewTextDefault(field.key)}
-                  onChange={(event) => updateTextValue(field.key, event.target.value)}
-                  rows={field.defaultValue.length > 120 ? 4 : 2}
-                />
-                <p className="text-xs text-muted-foreground">{field.description}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Embed Teksten</CardTitle>
-            <CardDescription>
-              Teksten voor de reviewwidget/embed op websites of QR-landingspagina&apos;s. De slimme QR gebruikt dezelfde embedflow.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {REVIEW_EMBED_TEXT_FIELDS.map((field) => (
-              <div key={field.key} className="space-y-2">
-                <Label>{field.label}</Label>
-                <Textarea
-                  value={textValues[field.key] ?? getReviewTextDefault(field.key)}
-                  onChange={(event) => updateTextValue(field.key, event.target.value)}
-                  rows={field.defaultValue.length > 120 ? 4 : 2}
-                />
-                <p className="text-xs text-muted-foreground">{field.description}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ReviewQrCodeCard
-          title="Slimme review QR"
-          description="Deze QR opent dezelfde flow als je embed: eerst score, daarna pas doorgaan naar feedback of publieke review."
-          url={standaloneReviewUrl}
-          filename="review-flow-qr"
-        />
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">QR Gebruik</CardTitle>
-            <CardDescription>
-              Gebruik de slimme QR op flyers, tafeltentjes, offertes of after-service mails.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm text-muted-foreground">
-            <p>
-              De slimme QR is meestal de beste keuze: je vangt lagere scores eerst intern op en stuurt alleen tevreden klanten door naar publieke reviews.
-            </p>
-            <p>
-              Voor campagnes die rechtstreeks naar een platform moeten gaan, kun je hieronder ook aparte platform QR-codes gebruiken.
-            </p>
-            <p>
-              Tip: sla eerst je instellingen op als je nieuwe titels, kleuren of platformlinks wilt meenemen in de QR-codes.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {platformQrCards.length > 0 ? (
-        <div className="grid gap-4 lg:grid-cols-3">
-          {platformQrCards.map((item) => (
-            <ReviewQrCodeCard
-              key={item.key}
-              title={item.label}
-              description="Rechtstreekse QR naar het reviewplatform, zonder interne scorefilter."
-              url={item.url}
-              filename={`${item.key}-review-qr`}
-            />
-          ))}
-        </div>
-      ) : null}
+      <Button onClick={handleSave} disabled={batchUpdate.isPending} className="shadow-sm">
+        {batchUpdate.isPending ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <Save className="mr-2 h-4 w-4" />
+        )}
+        {batchUpdate.isPending ? "Opslaan..." : "Alle reviewinstellingen opslaan"}
+      </Button>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
+import { storeUploadedImage } from "@/lib/upload-storage";
 import { log } from "@digitify/api/src/lib/logger";
 
 const ALLOWED_TYPES = [
@@ -14,12 +15,13 @@ const ALLOWED_TYPES = [
 
 export async function POST(req: NextRequest) {
   const currentUser = await getCurrentUser();
-  const userId = typeof (currentUser as any)?.id === "string" ? (currentUser as any).id : "";
+  const userId =
+    currentUser && typeof currentUser.id === "string" ? currentUser.id : "";
   if (!userId) {
     return NextResponse.json({ error: "Niet geauthenticeerd." }, { status: 401 });
   }
   const ip = getClientIp(req);
-  const limiter = enforceRateLimit(req, {
+  const limiter = await enforceRateLimit(req, {
     key: `upload:${userId}:${ip}`,
     limit: 80,
     windowMs: 60 * 60 * 1000,
@@ -44,18 +46,15 @@ export async function POST(req: NextRequest) {
   }
 
   const bytes = Buffer.from(await file.arrayBuffer());
-  const dataUrl = `data:${file.type};base64,${bytes.toString("base64")}`;
-  log.api.info("Image uploaded via data-url API", {
+  const stored = await storeUploadedImage({ userId, file, bytes });
+
+  log.api.info("Image uploaded", {
     userId,
     name: file.name,
     type: file.type,
     size: file.size,
+    storage: stored.storage,
   });
 
-  return NextResponse.json({
-    url: dataUrl,
-    name: file.name,
-    size: file.size,
-    type: file.type,
-  });
+  return NextResponse.json(stored);
 }

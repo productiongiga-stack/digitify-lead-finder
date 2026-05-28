@@ -7,14 +7,27 @@ import { searchRouter } from "../routers/search.router";
 import { invoiceRouter } from "../routers/invoice.router";
 import { taskRouter } from "../routers/task.router";
 
+const TEST_USER_ID = "user_abcd1234";
+
 function makeCtx(db: Record<string, unknown>) {
+  const userFindUnique = vi.fn().mockResolvedValue({
+    id: TEST_USER_ID,
+    role: "OWNER",
+    workspaceOwnerId: null,
+  });
+  const userFindFirst = vi.fn().mockResolvedValue(null);
+
   return {
-    db: db as any,
+    db: {
+      user: { findUnique: userFindUnique, findFirst: userFindFirst },
+      ...db,
+    } as any,
     user: {
-      id: "user_abcd1234",
+      id: TEST_USER_ID,
       email: "owner@example.com",
       name: "Owner",
       role: "OWNER",
+      workspaceId: TEST_USER_ID,
     },
     requestId: "req_test",
   };
@@ -25,7 +38,7 @@ describe("lead flow", () => {
     const leadCreate = vi.fn().mockResolvedValue({
       id: "lead_1",
       companyName: "Acme BV",
-      createdById: "user_abcd1234",
+      createdById: TEST_USER_ID,
     });
     const activityCreate = vi.fn().mockResolvedValue({ id: "act_1" });
     const caller = leadRouter.createCaller(
@@ -46,7 +59,7 @@ describe("lead flow", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           companyName: "Acme BV",
-          createdById: "user_abcd1234",
+          createdById: TEST_USER_ID,
         }),
       }),
     );
@@ -145,8 +158,6 @@ describe("lead import flow", () => {
 
 describe("invoice flow", () => {
   it("creates invoice from quote", async () => {
-    const settingFindMany = vi.fn().mockResolvedValue([]);
-    const settingUpsert = vi.fn().mockResolvedValue({ id: "setting_1" });
     const quoteFindFirst = vi.fn().mockResolvedValue({
       id: "quote_123",
       quoteNumber: "OFF-2026-TEST-0001",
@@ -164,14 +175,48 @@ describe("invoice flow", () => {
       vatAmount: 210,
       total: 1210,
       items: [
-        { id: "item1", name: "Website", description: null, quantity: 1, unitPrice: 1000, total: 1000 },
+        { id: "item1", name: "Website", description: null, quantity: 1, unitPrice: 1000, total: 1000, sortOrder: 0 },
       ],
     });
+    const workspaceInvoiceCreate = vi.fn().mockImplementation(async ({ data }: { data: { quoteId: string; total: number } }) => ({
+      id: "inv_1",
+      createdById: TEST_USER_ID,
+      invoiceNumber: "INV-2026-1234-0001",
+      quoteId: data.quoteId,
+      leadId: "lead_1",
+      clientName: "Client NV",
+      clientEmail: "client@example.com",
+      clientCompany: "Client NV",
+      clientAddress: "Straat 1",
+      clientVat: "BE0123456789",
+      status: "SENT",
+      issueDate: new Date(),
+      dueDate: new Date(),
+      subtotal: 1000,
+      vatRate: 21,
+      vatAmount: 210,
+      total: data.total,
+      currency: "EUR",
+      paymentReference: "+++123456789+++",
+      notes: "Bedankt",
+      reminderCount: 0,
+      lastReminderAt: null,
+      paidAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      items: [],
+    }));
     const activityCreate = vi.fn().mockResolvedValue({ id: "act_9" });
     const caller = invoiceRouter.createCaller(
       makeCtx({
-        setting: { findMany: settingFindMany, upsert: settingUpsert },
+        setting: { findMany: vi.fn().mockResolvedValue([]) },
         quote: { findFirst: quoteFindFirst },
+        workspaceInvoice: {
+          count: vi.fn().mockResolvedValue(0),
+          findFirst: vi.fn().mockResolvedValue(null),
+          findMany: vi.fn().mockResolvedValue([]),
+          create: workspaceInvoiceCreate,
+        },
         activity: { create: activityCreate },
       }),
     );
@@ -179,19 +224,30 @@ describe("invoice flow", () => {
     const created = await caller.createFromQuote({ quoteId: "quote_123" });
     expect(created.quoteId).toBe("quote_123");
     expect(created.total).toBe(1210);
-    expect(settingUpsert).toHaveBeenCalled();
+    expect(workspaceInvoiceCreate).toHaveBeenCalled();
   });
 });
 
 describe("task flow", () => {
   it("creates task linked to lead", async () => {
-    const settingFindMany = vi.fn().mockResolvedValue([]);
-    const settingUpsert = vi.fn().mockResolvedValue({ id: "setting_2" });
     const leadFindFirst = vi.fn().mockResolvedValue({ id: "lead_1" });
+    const workspaceTaskCreate = vi.fn().mockImplementation(async ({ data }: { data: { title: string } }) => ({
+      id: "task_1",
+      createdById: TEST_USER_ID,
+      title: data.title,
+      description: "",
+      status: "TODO",
+      priority: "MEDIUM",
+      dueAt: null,
+      relatedType: "LEAD",
+      relatedId: "lead_1",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }));
     const caller = taskRouter.createCaller(
       makeCtx({
-        setting: { findMany: settingFindMany, upsert: settingUpsert },
         lead: { findFirst: leadFindFirst },
+        workspaceTask: { create: workspaceTaskCreate },
       }),
     );
 
@@ -201,6 +257,6 @@ describe("task flow", () => {
       relatedId: "lead_1",
     });
     expect(task.title).toBe("Follow-up doen");
-    expect(settingUpsert).toHaveBeenCalled();
+    expect(workspaceTaskCreate).toHaveBeenCalled();
   });
 });

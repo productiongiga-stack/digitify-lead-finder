@@ -23,7 +23,7 @@ export async function GET(
 ) {
   const ip = getClientIp(request);
   const { id } = await context.params;
-  const limiter = enforceRateLimit(request, {
+  const limiter = await enforceRateLimit(request, {
     key: `public-email-open:${id}:${ip}`,
     limit: 2400,
     windowMs: 60 * 60 * 1000,

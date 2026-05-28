@@ -17,7 +17,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
     }
     const ip = getClientIp(request);
-    const limiter = enforceRateLimit(request, {
+    const limiter = await enforceRateLimit(request, {
       key: `public-chatbot-settings:${tenantUserId}:${ip}`,
       limit: 240,
       windowMs: 60 * 60 * 1000,

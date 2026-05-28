@@ -1,81 +1,36 @@
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
-import { readUserJsonSetting, writeUserJsonSetting } from "../lib/user-json-setting";
+import { migrateLegacyWorkspaceInvoices } from "../lib/migrate-workspace-invoices";
+import { nextInvoiceNumber, serializeInvoice } from "../lib/invoice-serializer";
+import { buildInvoiceOutboundBody } from "../lib/invoice-outbound";
 import { sendBrandedEmail } from "../lib/email-sender";
+import { workspaceScopeFromUser } from "../lib/workspace-settings";
 
-const INVOICES_KEY = "invoices.items_json";
+const invoiceInclude = { items: { orderBy: { sortOrder: "asc" as const } } };
 
-const invoiceItemSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string().nullable().default(null),
-  quantity: z.number(),
-  unitPrice: z.number(),
-  total: z.number(),
+const invoiceItemInput = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  quantity: z.number().positive(),
+  unitPrice: z.number().min(0),
 });
 
-const invoiceSchema = z.object({
-  id: z.string(),
-  invoiceNumber: z.string(),
-  quoteId: z.string().nullable().default(null),
-  leadId: z.string().nullable().default(null),
-  clientName: z.string(),
-  clientEmail: z.string().nullable().default(null),
-  clientCompany: z.string().nullable().default(null),
-  clientAddress: z.string().nullable().default(null),
-  clientVat: z.string().nullable().default(null),
-  status: z.enum(["DRAFT", "SENT", "PARTIALLY_PAID", "PAID", "OVERDUE", "CANCELLED"]).default("DRAFT"),
-  issueDate: z.string(),
-  dueDate: z.string(),
-  subtotal: z.number(),
-  vatRate: z.number(),
-  vatAmount: z.number(),
-  total: z.number(),
-  currency: z.string().default("EUR"),
-  paymentReference: z.string(),
-  notes: z.string().nullable().default(null),
-  reminderCount: z.number().default(0),
-  lastReminderAt: z.string().nullable().default(null),
-  paidAt: z.string().nullable().default(null),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  items: z.array(invoiceItemSchema),
-});
+const MANUAL_INVOICE_STATUSES = ["DRAFT", "PARTIALLY_PAID", "PAID", "CANCELLED"] as const;
 
-type InvoiceItem = z.infer<typeof invoiceSchema>;
-
-async function loadInvoices(db: any, userId: string): Promise<InvoiceItem[]> {
-  const raw = await readUserJsonSetting<unknown[]>(db, userId, INVOICES_KEY, []);
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item) => invoiceSchema.safeParse(item))
-    .filter((item) => item.success)
-    .map((item) => item.data);
+function recalcInvoiceTotals(items: Array<{ quantity: number; unitPrice: number }>, vatRate: number) {
+  const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  const vatAmount = Math.round(subtotal * (vatRate / 100) * 100) / 100;
+  return { subtotal, vatAmount, total: subtotal + vatAmount };
 }
 
-function nextInvoiceNumber(userId: string, existing: InvoiceItem[]) {
-  const year = new Date().getFullYear();
-  const prefix = `INV-${year}-${userId.slice(-4).toUpperCase()}-`;
-  const highest = existing.reduce((max, item) => {
-    if (!item.invoiceNumber.startsWith(prefix)) return max;
-    const raw = item.invoiceNumber.slice(prefix.length);
-    const parsed = Number.parseInt(raw, 10);
-    if (!Number.isFinite(parsed)) return max;
-    return Math.max(max, parsed);
-  }, 0);
-  return `${prefix}${String(highest + 1).padStart(4, "0")}`;
-}
-
-function computeInvoiceStatus(item: InvoiceItem) {
-  if (item.status === "PAID" || item.status === "CANCELLED") return item.status;
-  const now = Date.now();
-  const dueAt = new Date(item.dueDate).getTime();
-  if (Number.isFinite(dueAt) && dueAt < now && item.status !== "OVERDUE") {
-    return "OVERDUE" as const;
+function assertInvoiceEditable(status: string) {
+  if (status === "PAID" || status === "CANCELLED") {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Betaalde of geannuleerde facturen kunnen niet meer worden aangepast.",
+    });
   }
-  return item.status;
 }
 
 export const invoiceRouter = router({
@@ -83,35 +38,86 @@ export const invoiceRouter = router({
     .input(
       z
         .object({
-          status: z.enum(["DRAFT", "SENT", "PARTIALLY_PAID", "PAID", "OVERDUE", "CANCELLED"]).optional(),
+          status: z
+            .enum(["DRAFT", "SENT", "PARTIALLY_PAID", "PAID", "OVERDUE", "CANCELLED"])
+            .optional(),
         })
         .default({}),
     )
     .query(async ({ ctx, input }) => {
-      let invoices = await loadInvoices(ctx.db, ctx.user.id);
-      invoices = invoices.map((item) => ({ ...item, status: computeInvoiceStatus(item) }));
-      if (input.status) invoices = invoices.filter((item) => item.status === input.status);
-      invoices.sort((a, b) => new Date(b.issueDate).getTime() - new Date(a.issueDate).getTime());
+      const scope = workspaceScopeFromUser(ctx.user);
+      await migrateLegacyWorkspaceInvoices(ctx.db, scope);
+
+      const rows = await ctx.db.workspaceInvoice.findMany({
+        where: { createdById: scope.workspaceId },
+        include: invoiceInclude,
+        orderBy: { issueDate: "desc" },
+      });
+
+      const allItems = rows.map(serializeInvoice);
+      const items = input.status
+        ? allItems.filter((item) => item.status === input.status)
+        : allItems;
+      const openItems = allItems.filter((item) => !["PAID", "CANCELLED"].includes(item.status));
       const summary = {
-        total: invoices.length,
-        draft: invoices.filter((item) => item.status === "DRAFT").length,
-        sent: invoices.filter((item) => item.status === "SENT").length,
-        overdue: invoices.filter((item) => item.status === "OVERDUE").length,
-        paid: invoices.filter((item) => item.status === "PAID").length,
-        totalOpenAmount: invoices
-          .filter((item) => !["PAID", "CANCELLED"].includes(item.status))
-          .reduce((sum, item) => sum + item.total, 0),
+        total: allItems.length,
+        open: openItems.length,
+        draft: allItems.filter((item) => item.status === "DRAFT").length,
+        sent: allItems.filter((item) => item.status === "SENT").length,
+        overdue: allItems.filter((item) => item.status === "OVERDUE").length,
+        paid: allItems.filter((item) => item.status === "PAID").length,
+        totalOpenAmount: openItems.reduce((sum, item) => sum + item.total, 0),
       };
-      return { items: invoices, summary };
+      const invoicedQuoteIds = allItems
+        .map((item) => item.quoteId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0);
+      return { items, summary, invoicedQuoteIds };
     }),
+
+  listBillableQuotes: protectedProcedure.query(async ({ ctx }) => {
+    const scope = workspaceScopeFromUser(ctx.user);
+    await migrateLegacyWorkspaceInvoices(ctx.db, scope);
+
+    const invoicedRows = await ctx.db.workspaceInvoice.findMany({
+      where: { createdById: scope.workspaceId, quoteId: { not: null } },
+      select: { quoteId: true },
+    });
+    const invoicedQuoteIds = invoicedRows
+      .map((row) => row.quoteId)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+
+    return ctx.db.quote.findMany({
+      where: {
+        createdById: scope.workspaceId,
+        status: "ACCEPTED",
+        items: { some: {} },
+        ...(invoicedQuoteIds.length > 0 ? { id: { notIn: invoicedQuoteIds } } : {}),
+      },
+      orderBy: [{ acceptedAt: "desc" }, { updatedAt: "desc" }],
+      select: {
+        id: true,
+        quoteNumber: true,
+        clientName: true,
+        clientCompany: true,
+        total: true,
+        acceptedAt: true,
+        _count: { select: { items: true } },
+      },
+    });
+  }),
 
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const invoices = await loadInvoices(ctx.db, ctx.user.id);
-      const item = invoices.find((invoice) => invoice.id === input.id);
-      if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
-      return { ...item, status: computeInvoiceStatus(item) };
+      const scope = workspaceScopeFromUser(ctx.user);
+      await migrateLegacyWorkspaceInvoices(ctx.db, scope);
+
+      const row = await ctx.db.workspaceInvoice.findFirst({
+        where: { id: input.id, createdById: scope.workspaceId },
+        include: invoiceInclude,
+      });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
+      return serializeInvoice(row);
     }),
 
   createFromQuote: protectedProcedure
@@ -122,8 +128,11 @@ export const invoiceRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromUser(ctx.user);
+      await migrateLegacyWorkspaceInvoices(ctx.db, scope);
+
       const quote = await ctx.db.quote.findFirst({
-        where: { id: input.quoteId, createdById: ctx.user.id },
+        where: { id: input.quoteId, createdById: scope.workspaceId },
         include: { items: { orderBy: { sortOrder: "asc" } } },
       });
       if (!quote) throw new TRPCError({ code: "NOT_FOUND", message: "Offerte niet gevonden." });
@@ -134,100 +143,259 @@ export const invoiceRouter = router({
         });
       }
 
-      const invoices = await loadInvoices(ctx.db, ctx.user.id);
-      const existing = invoices.find((invoice) => invoice.quoteId === quote.id);
-      if (existing) return existing;
+      const existing = await ctx.db.workspaceInvoice.findFirst({
+        where: { createdById: scope.workspaceId, quoteId: quote.id },
+        include: invoiceInclude,
+      });
+      if (existing) return serializeInvoice(existing);
 
       const issueDate = new Date();
-      const dueDate = input.dueDate ? new Date(input.dueDate) : new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
-      const invoice: InvoiceItem = {
-        id: randomUUID(),
-        invoiceNumber: nextInvoiceNumber(ctx.user.id, invoices),
-        quoteId: quote.id,
-        leadId: quote.leadId,
-        clientName: quote.clientName,
-        clientEmail: quote.clientEmail || null,
-        clientCompany: quote.clientCompany || null,
-        clientAddress: quote.clientAddress || null,
-        clientVat: quote.clientVat || null,
-        status: quote.status === "ACCEPTED" ? "SENT" : "DRAFT",
-        issueDate: issueDate.toISOString(),
-        dueDate: dueDate.toISOString(),
-        subtotal: quote.subtotal,
-        vatRate: quote.vatRate,
-        vatAmount: quote.vatAmount,
-        total: quote.total,
-        currency: "EUR",
-        paymentReference: `+++${Math.floor(Math.random() * 900000000) + 100000000}+++`,
-        notes: quote.notes || null,
-        reminderCount: 0,
-        lastReminderAt: null,
-        paidAt: null,
-        createdAt: issueDate.toISOString(),
-        updatedAt: issueDate.toISOString(),
-        items: quote.items.map((item) => ({
-          id: item.id,
-          name: item.name,
-          description: item.description || null,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          total: item.total,
-        })),
-      };
-      invoices.unshift(invoice);
-      await writeUserJsonSetting(ctx.db, ctx.user.id, INVOICES_KEY, invoices.slice(0, 3000));
+      const dueDate = input.dueDate
+        ? new Date(input.dueDate)
+        : new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+
+      const row = await ctx.db.workspaceInvoice.create({
+        data: {
+          createdById: scope.workspaceId,
+          invoiceNumber: await nextInvoiceNumber(ctx.db, scope.workspaceId),
+          quoteId: quote.id,
+          leadId: quote.leadId,
+          clientName: quote.clientName,
+          clientEmail: quote.clientEmail,
+          clientCompany: quote.clientCompany,
+          clientAddress: quote.clientAddress,
+          clientVat: quote.clientVat,
+          status: "DRAFT",
+          issueDate,
+          dueDate,
+          subtotal: quote.subtotal,
+          vatRate: quote.vatRate,
+          vatAmount: quote.vatAmount,
+          total: quote.total,
+          currency: "EUR",
+          paymentReference: `+++${Math.floor(Math.random() * 900000000) + 100000000}+++`,
+          notes: quote.notes,
+          items: {
+            create: quote.items.map((item, index) => ({
+              name: item.name,
+              description: item.description,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              total: item.total,
+              sortOrder: index,
+            })),
+          },
+        },
+        include: invoiceInclude,
+      });
 
       await ctx.db.activity.create({
         data: {
           userId: ctx.user.id,
           leadId: quote.leadId,
           type: "QUOTE_CREATED",
-          title: `Factuur ${invoice.invoiceNumber} aangemaakt vanuit offerte ${quote.quoteNumber}`,
-          metadata: { invoiceId: invoice.id, quoteId: quote.id, total: invoice.total },
+          title: `Factuur ${row.invoiceNumber} aangemaakt vanuit offerte ${quote.quoteNumber}`,
+          metadata: { invoiceId: row.id, quoteId: quote.id, total: row.total },
         },
       });
 
-      return invoice;
+      return serializeInvoice(row);
+    }),
+
+  update: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        clientName: z.string().min(1).optional(),
+        clientEmail: z.string().email().optional().or(z.literal("")),
+        clientCompany: z.string().optional(),
+        clientAddress: z.string().optional(),
+        clientVat: z.string().optional(),
+        dueDate: z.string().datetime().optional(),
+        vatRate: z.number().min(0).max(100).optional(),
+        notes: z.string().optional(),
+        items: z.array(invoiceItemInput).min(1).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromUser(ctx.user);
+      const row = await ctx.db.workspaceInvoice.findFirst({
+        where: { id: input.id, createdById: scope.workspaceId },
+        include: invoiceInclude,
+      });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
+      assertInvoiceEditable(row.status);
+
+      const vatRate = input.vatRate ?? row.vatRate;
+      const items =
+        input.items ??
+        row.items.map((item) => ({
+          name: item.name,
+          description: item.description ?? undefined,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        }));
+
+      const totals = recalcInvoiceTotals(items, vatRate);
+
+      const updated = await ctx.db.$transaction(async (tx) => {
+        if (input.items) {
+          await tx.workspaceInvoiceItem.deleteMany({ where: { invoiceId: row.id } });
+          await tx.workspaceInvoiceItem.createMany({
+            data: items.map((item, index) => ({
+              invoiceId: row.id,
+              name: item.name,
+              description: item.description,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              total: item.quantity * item.unitPrice,
+              sortOrder: index,
+            })),
+          });
+        }
+
+        return tx.workspaceInvoice.update({
+          where: { id: row.id },
+          data: {
+            clientName: input.clientName ?? row.clientName,
+            clientEmail:
+              input.clientEmail !== undefined
+                ? input.clientEmail || null
+                : row.clientEmail,
+            clientCompany: input.clientCompany ?? row.clientCompany,
+            clientAddress: input.clientAddress ?? row.clientAddress,
+            clientVat: input.clientVat ?? row.clientVat,
+            dueDate: input.dueDate ? new Date(input.dueDate) : row.dueDate,
+            vatRate,
+            notes: input.notes ?? row.notes,
+            subtotal: totals.subtotal,
+            vatAmount: totals.vatAmount,
+            total: totals.total,
+          },
+          include: invoiceInclude,
+        });
+      });
+
+      return serializeInvoice(updated);
     }),
 
   updateStatus: protectedProcedure
     .input(
       z.object({
         id: z.string(),
-        status: z.enum(["DRAFT", "SENT", "PARTIALLY_PAID", "PAID", "OVERDUE", "CANCELLED"]),
+        status: z.enum(MANUAL_INVOICE_STATUSES),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const invoices = await loadInvoices(ctx.db, ctx.user.id);
-      const index = invoices.findIndex((invoice) => invoice.id === input.id);
-      if (index < 0) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
-      const current = invoices[index];
-      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
-      const next: InvoiceItem = {
-        ...current,
-        status: input.status,
-        paidAt: input.status === "PAID" ? new Date().toISOString() : current.paidAt,
-        updatedAt: new Date().toISOString(),
-      };
-      invoices[index] = next;
-      await writeUserJsonSetting(ctx.db, ctx.user.id, INVOICES_KEY, invoices);
-      return next;
+      const scope = workspaceScopeFromUser(ctx.user);
+      const row = await ctx.db.workspaceInvoice.findFirst({
+        where: { id: input.id, createdById: scope.workspaceId },
+      });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
+
+      const updated = await ctx.db.workspaceInvoice.update({
+        where: { id: input.id },
+        data: {
+          status: input.status,
+          paidAt: input.status === "PAID" ? new Date() : row.paidAt,
+        },
+        include: invoiceInclude,
+      });
+      return serializeInvoice(updated);
+    }),
+
+  createOutboundDraft: protectedProcedure
+    .input(z.object({ invoiceId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromUser(ctx.user);
+      const invoice = await ctx.db.workspaceInvoice.findFirst({
+        where: { id: input.invoiceId, createdById: scope.workspaceId },
+      });
+      if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
+      if (!invoice.leadId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Deze factuur heeft geen gekoppelde lead voor Outbound.",
+        });
+      }
+      if (!invoice.clientEmail) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Voeg eerst een klant-e-mailadres toe aan de factuur.",
+        });
+      }
+      if (invoice.status === "PAID" || invoice.status === "CANCELLED") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Deze factuur kan niet meer worden verstuurd.",
+        });
+      }
+
+      if (invoice.status !== "DRAFT") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Alleen concept-facturen kunnen via Outbound worden verstuurd.",
+        });
+      }
+
+      const body = buildInvoiceOutboundBody({
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        clientName: invoice.clientName,
+        total: invoice.total,
+        currency: invoice.currency,
+        dueDate: invoice.dueDate,
+        paymentReference: invoice.paymentReference,
+      });
+
+      const draft = await ctx.db.emailDraft.create({
+        data: {
+          leadId: invoice.leadId,
+          subject: `Factuur ${invoice.invoiceNumber}`,
+          body,
+          toEmail: invoice.clientEmail,
+          status: "PENDING_APPROVAL",
+          type: "TRANSACTIONAL",
+          authorId: ctx.user.id,
+        },
+      });
+
+      await ctx.db.activity.create({
+        data: {
+          leadId: invoice.leadId,
+          userId: ctx.user.id,
+          type: "EMAIL_DRAFTED",
+          title: `Factuur ${invoice.invoiceNumber} ingediend ter goedkeuring`,
+          metadata: { invoiceId: invoice.id },
+        },
+      });
+
+      return { draftId: draft.id };
     }),
 
   sendReminder: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const invoices = await loadInvoices(ctx.db, ctx.user.id);
-      const index = invoices.findIndex((invoice) => invoice.id === input.id);
-      if (index < 0) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
-      const current = invoices[index];
-      if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
+      const row = await ctx.db.workspaceInvoice.findFirst({
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        include: invoiceInclude,
+      });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
+
+      const current = serializeInvoice(row);
+      if (current.status === "DRAFT") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Verstuur de factuur eerst via Outbound voordat je een herinnering stuurt.",
+        });
+      }
       if (!current.clientEmail) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Deze factuur heeft geen klant e-mailadres.",
         });
       }
+
       const result = await sendBrandedEmail(ctx.db, {
         toEmail: current.clientEmail,
         subject: `Betalingsherinnering ${current.invoiceNumber}`,
@@ -251,27 +419,26 @@ export const invoiceRouter = router({
         });
       }
 
-      const updated: InvoiceItem = {
-        ...current,
-        status: current.status === "DRAFT" ? "SENT" : current.status,
-        reminderCount: (current.reminderCount || 0) + 1,
-        lastReminderAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      invoices[index] = updated;
-      await writeUserJsonSetting(ctx.db, ctx.user.id, INVOICES_KEY, invoices);
-      return updated;
+      const updated = await ctx.db.workspaceInvoice.update({
+        where: { id: input.id },
+        data: {
+          reminderCount: row.reminderCount + 1,
+          lastReminderAt: new Date(),
+        },
+        include: invoiceInclude,
+      });
+      return serializeInvoice(updated);
     }),
 
   remove: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const invoices = await loadInvoices(ctx.db, ctx.user.id);
-      const filtered = invoices.filter((invoice) => invoice.id !== input.id);
-      if (filtered.length === invoices.length) {
+      const result = await ctx.db.workspaceInvoice.deleteMany({
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
+      });
+      if (result.count === 0) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
       }
-      await writeUserJsonSetting(ctx.db, ctx.user.id, INVOICES_KEY, filtered);
       return { success: true };
     }),
 });

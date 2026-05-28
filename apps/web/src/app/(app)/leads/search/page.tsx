@@ -31,7 +31,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@digitify/ui";
+import { OutboundDraftStatusBanner } from "@/components/outbound/outbound-draft-status-banner";
+import { PageInfoCards } from "@/components/shared/page-info-cards";
 import {
+  LayoutGrid,
+  Info,
   Search,
   MapPin,
   Building,
@@ -41,17 +45,20 @@ import {
   Phone,
   ExternalLink,
   Check,
-  AlertCircle,
-  Settings,
   RefreshCw,
+  Search as SearchIcon,
+  Users,
   Save,
   ChevronLeft,
   ChevronRight,
   FolderPlus,
   BookmarkPlus,
   Trash2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
+import { QueryErrorState } from "@/components/feedback/query-error-state";
 
 type SearchResult = {
   placeId: string;
@@ -181,7 +188,10 @@ export default function LeadSearchPage() {
   const [campaignLeadId, setCampaignLeadId] = useState<string | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [savedSearchName, setSavedSearchName] = useState("");
+  const [showAllPopular, setShowAllPopular] = useState(false);
   const { showToast } = useToast();
+
+  const searchCriteriaEmpty = !query.trim() && !niche.trim() && !city.trim();
 
   // Campaigns list
   const campaignsQuery = trpc.campaign.list.useQuery();
@@ -189,6 +199,15 @@ export default function LeadSearchPage() {
     staleTime: 300_000,
   });
   const savedSearchesQuery = trpc.search.listSavedSearches.useQuery();
+
+  const popularTerms = useMemo(
+    () =>
+      popularSearchesQuery.data && popularSearchesQuery.data.length > 0
+        ? popularSearchesQuery.data
+        : FALLBACK_POPULAR_TERMS,
+    [popularSearchesQuery.data],
+  );
+  const visiblePopularTerms = showAllPopular ? popularTerms : popularTerms.slice(0, 8);
 
   // Duplicate detection
   const placeIds = useMemo(() => results.map((r: SearchResult) => r.placeId), [results]);
@@ -442,67 +461,72 @@ export default function LeadSearchPage() {
   );
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-bold tracking-tight">Leads Zoeken</h1>
-        <p className="text-sm text-muted-foreground">
+    <div className="app-page">
+      <div className="app-page-header">
+        <div className="app-page-heading">
+        <h1 className="app-page-title">Leads zoeken</h1>
+        <p className="app-page-subtitle">
           Zoek nieuwe leads op basis van niche, locatie en zoekwoorden via Google Places
         </p>
+        </div>
       </div>
 
       <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="info">Info</TabsTrigger>
+        <TabsList className="page-view-tabs">
+          <TabsTrigger value="overview" className="page-view-tabs-trigger">
+            <LayoutGrid />
+            Overzicht
+          </TabsTrigger>
+          <TabsTrigger value="info" className="page-view-tabs-trigger">
+            <Info />
+            Info
+          </TabsTrigger>
         </TabsList>
 
-      <TabsContent value="overview" className="space-y-5">
-      {/* API key missing warning */}
-      {apiKeyMissing && (
-        <Card className="border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30">
-          <CardContent className="flex items-center gap-3 p-4">
-            <AlertCircle className="h-5 w-5 shrink-0 text-amber-600" />
-            <div className="flex-1">
-              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                Google Places API key niet geconfigureerd
-              </p>
-              <p className="text-xs text-amber-700 dark:text-amber-300">
-                Configureer de Google Places API key in de instellingen om te zoeken.
-              </p>
-            </div>
-            <Link href="/settings/integrations">
-              <Button size="sm" variant="outline" className="shrink-0">
-                <Settings className="mr-2 h-3 w-3" />
-                Instellingen
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
+      <TabsContent value="overview" className="space-y-4">
+      {(campaignsQuery.isError || popularSearchesQuery.isError || savedSearchesQuery.isError) && (
+        <QueryErrorState
+          onRetry={() => {
+            void campaignsQuery.refetch();
+            void popularSearchesQuery.refetch();
+            void savedSearchesQuery.refetch();
+          }}
+        />
       )}
+      {apiKeyMissing ? (
+        <OutboundDraftStatusBanner
+          variant="warning"
+          eyebrow="Google Places"
+          icon={MapPin}
+          title="API key niet geconfigureerd"
+          detail="Voeg je Google Places API key toe onder Integraties om te zoeken op niche, stad en zoekterm."
+          action={{ label: "Integraties openen", href: "/settings/integrations" }}
+        />
+      ) : null}
 
       {/* Search error (non-API-key) */}
-      {searchMutation.error && !apiKeyMissing && (
-        <Card className="border-destructive/50 bg-destructive/5">
-          <CardContent className="flex items-center gap-3 p-4">
-            <AlertCircle className="h-5 w-5 shrink-0 text-destructive" />
-            <div className="flex-1">
-              <p className="text-sm font-medium text-destructive">Zoekopdracht mislukt</p>
-              <p className="text-xs text-muted-foreground">
-                {formatSearchErrorMessage(searchMutation.error.message)}
-              </p>
-            </div>
-            {lastSearchParams && (
-              <Button size="sm" variant="outline" onClick={handleRefresh}>
-                <RefreshCw className="mr-2 h-3 w-3" />
-                Opnieuw proberen
+      {searchMutation.error && !apiKeyMissing ? (
+        <QueryErrorState
+          variant="inline"
+          title="Zoekopdracht mislukt"
+          message={formatSearchErrorMessage(searchMutation.error.message)}
+          onRetry={
+            lastSearchParams && !/niet ingelogd/i.test(searchMutation.error.message)
+              ? handleRefresh
+              : undefined
+          }
+          action={
+            /niet ingelogd/i.test(searchMutation.error.message) ? (
+              <Button asChild size="sm">
+                <Link href="/login">Inloggen</Link>
               </Button>
-            )}
-          </CardContent>
-        </Card>
-      )}
+            ) : undefined
+          }
+        />
+      ) : null}
 
       {/* Compact search bar */}
-      <Card>
+      <Card className="app-surface">
         <CardContent className="p-4">
           <form onSubmit={handleSearch} className="flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[180px] space-y-1.5">
@@ -577,7 +601,7 @@ export default function LeadSearchPage() {
             <div className="flex gap-2">
               <Button
                 type="submit"
-                disabled={searchMutation.isPending || (!query.trim() && !niche.trim() && !city.trim())}
+                disabled={searchMutation.isPending || searchCriteriaEmpty}
               >
                 {searchMutation.isPending ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -600,26 +624,46 @@ export default function LeadSearchPage() {
               )}
             </div>
           </form>
+          {searchCriteriaEmpty && !searchMutation.isPending ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Vul minstens een zoekterm, niche of stad in om te zoeken.
+            </p>
+          ) : null}
 
           {/* Popular search chips */}
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
-            <span className="text-xs font-medium text-muted-foreground">
-              Populair:
-            </span>
-            {[
-              ...(popularSearchesQuery.data && popularSearchesQuery.data.length > 0
-                ? popularSearchesQuery.data
-                : FALLBACK_POPULAR_TERMS),
-            ].map((q) => (
-              <Badge
-                key={q}
-                variant="outline"
-                className="cursor-pointer hover:bg-accent"
-                onClick={() => handleQuickSearch(q)}
-              >
-                {q}
-              </Badge>
-            ))}
+          <div className="mt-3 border-t pt-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Populair:</span>
+              {visiblePopularTerms.map((q) => (
+                <Badge
+                  key={q}
+                  variant="outline"
+                  className="cursor-pointer hover:bg-accent"
+                  onClick={() => handleQuickSearch(q)}
+                >
+                  {q}
+                </Badge>
+              ))}
+              {popularTerms.length > 8 ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => setShowAllPopular((open) => !open)}
+                >
+                  {showAllPopular ? (
+                    <>
+                      Minder <ChevronUp className="ml-1 h-3 w-3" />
+                    </>
+                  ) : (
+                    <>
+                      +{popularTerms.length - 8} meer <ChevronDown className="ml-1 h-3 w-3" />
+                    </>
+                  )}
+                </Button>
+              ) : null}
+            </div>
           </div>
 
           {recentSearches.length > 0 ? (
@@ -1104,37 +1148,29 @@ export default function LeadSearchPage() {
       </TabsContent>
 
       <TabsContent value="info" className="space-y-4">
-        <div className="grid gap-3 lg:grid-cols-3">
-          <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-            <CardContent className="p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Voor wie</p>
-              <p className="mt-2 text-sm font-medium">
-                Voor teams die snel lokale bedrijven willen vinden en direct in leadflow willen zetten.
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-            <CardContent className="p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Hoe gebruiken</p>
-              <p className="mt-2 text-sm font-medium">
-                Zoek op niche + stad, selecteer kansrijke resultaten en stuur ze meteen naar leads of campagnes.
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-            <CardContent className="p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gerelateerd</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button asChild size="sm" variant="outline">
-                  <Link href="/campaigns">Campagnes</Link>
-                </Button>
-                <Button asChild size="sm" variant="ghost">
-                  <Link href="/leads">Leads</Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        <PageInfoCards
+          cards={[
+            {
+              eyebrow: "Voor wie",
+              body: "Voor teams die snel lokale bedrijven willen vinden en direct in de leadflow willen zetten.",
+              tone: "emerald",
+              icon: Users,
+            },
+            {
+              eyebrow: "Hoe gebruiken",
+              body: "Zoek op niche en stad, selecteer kansrijke resultaten en stuur ze meteen naar leads of campagnes.",
+              tone: "amber",
+              icon: SearchIcon,
+            },
+          ]}
+          related={{
+            links: [
+              { label: "Campagnes", href: "/campaigns" },
+              { label: "Leads", href: "/leads" },
+              { label: "Integraties", href: "/settings/integrations" },
+            ],
+          }}
+        />
       </TabsContent>
       </Tabs>
 

@@ -2,26 +2,21 @@ import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { assertLeadAccess, ownedChatSessionWhere } from "../lib/tenant";
-import { checkRateLimit } from "../lib/rate-limit-bucket";
+import { enforceRateLimit } from "../lib/rate-limit";
 
-function enforceChatbotRateLimit(params: {
+async function enforceChatbotRateLimit(params: {
   userId: string;
   bucket: string;
   limit: number;
   windowMs: number;
   message: string;
 }) {
-  const result = checkRateLimit({
+  await enforceRateLimit({
     key: `chatbot:${params.bucket}:${params.userId}`,
     limit: params.limit,
     windowMs: params.windowMs,
+    message: params.message,
   });
-  if (!result.allowed) {
-    throw new TRPCError({
-      code: "TOO_MANY_REQUESTS",
-      message: params.message,
-    });
-  }
 }
 
 export const chatbotRouter = router({
@@ -35,7 +30,7 @@ export const chatbotRouter = router({
       search: z.string().optional(),
     }).default({}))
     .query(async ({ ctx, input }) => {
-      enforceChatbotRateLimit({
+      await enforceChatbotRateLimit({
         userId: ctx.user.id,
         bucket: "list",
         limit: 120,
@@ -56,7 +51,7 @@ export const chatbotRouter = router({
       }
       const where = {
         AND: [
-          ownedChatSessionWhere(ctx.user.id),
+          ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id),
           filters,
         ],
       };
@@ -74,7 +69,7 @@ export const chatbotRouter = router({
           },
         }),
         ctx.db.chatSession.count({ where }),
-        ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), isRead: false } }),
+        ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), isRead: false } }),
       ]);
       return { sessions, total, unreadCount, page, perPage, totalPages: Math.ceil(total / perPage) };
     }),
@@ -84,7 +79,7 @@ export const chatbotRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const session = await ctx.db.chatSession.findFirst({
-        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.id }] },
+        where: { AND: [ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), { id: input.id }] },
         include: {
           assignedTo: { select: { id: true, name: true } },
           lead: { select: { id: true, companyName: true, website: true, city: true } },
@@ -106,7 +101,7 @@ export const chatbotRouter = router({
       content: z.string().min(1),
     }))
     .mutation(async ({ ctx, input }) => {
-      enforceChatbotRateLimit({
+      await enforceChatbotRateLimit({
         userId: ctx.user.id,
         bucket: "send",
         limit: 80,
@@ -114,7 +109,7 @@ export const chatbotRouter = router({
         message: "Te veel chatberichten op korte tijd.",
       });
       const session = await ctx.db.chatSession.findFirst({
-        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
+        where: { AND: [ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), { id: input.sessionId }] },
       });
       if (!session) throw new TRPCError({ code: "NOT_FOUND" });
 
@@ -152,7 +147,7 @@ export const chatbotRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
       const session = await ctx.db.chatSession.findFirst({
-        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id }] },
+        where: { AND: [ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), { id }] },
         select: { id: true },
       });
       if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Sessie niet gevonden" });
@@ -163,7 +158,7 @@ export const chatbotRouter = router({
   convertToLead: protectedProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      enforceChatbotRateLimit({
+      await enforceChatbotRateLimit({
         userId: ctx.user.id,
         bucket: "summary",
         limit: 20,
@@ -171,7 +166,7 @@ export const chatbotRouter = router({
         message: "Te veel samenvattingen op korte tijd.",
       });
       const session = await ctx.db.chatSession.findFirst({
-        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
+        where: { AND: [ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), { id: input.sessionId }] },
         include: { messages: { orderBy: { createdAt: "asc" } } },
       });
       if (!session) throw new TRPCError({ code: "NOT_FOUND" });
@@ -184,7 +179,7 @@ export const chatbotRouter = router({
           phone: session.visitorPhone,
           source: "chatbot",
           industry: session.intent || undefined,
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
         },
       });
 
@@ -211,7 +206,7 @@ export const chatbotRouter = router({
     .input(z.object({ sessionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const session = await ctx.db.chatSession.findFirst({
-        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
+        where: { AND: [ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), { id: input.sessionId }] },
       });
       if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Sessie niet gevonden" });
 
@@ -224,7 +219,7 @@ export const chatbotRouter = router({
             phone: session.visitorPhone,
             source: "chatbot",
             industry: session.intent || undefined,
-            createdById: ctx.user.id,
+            createdById: ctx.user.workspaceId!,
           },
           select: { id: true },
         });
@@ -235,7 +230,7 @@ export const chatbotRouter = router({
         });
       }
 
-      const caller = await ctx.db.quote.count({ where: { createdById: ctx.user.id } });
+      const caller = await ctx.db.quote.count({ where: { createdById: ctx.user.workspaceId! } });
       const year = new Date().getFullYear();
       const quoteNumber = `OFF-${year}-${ctx.user.id.slice(-4).toUpperCase()}-${String(caller + 1).padStart(4, "0")}`;
       const quote = await ctx.db.quote.create({
@@ -251,7 +246,7 @@ export const chatbotRouter = router({
           subtotal: 0,
           vatAmount: 0,
           total: 0,
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
         },
         select: { id: true, quoteNumber: true },
       });
@@ -278,7 +273,7 @@ export const chatbotRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const session = await ctx.db.chatSession.findFirst({
-        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
+        where: { AND: [ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), { id: input.sessionId }] },
       });
       if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Sessie niet gevonden" });
       const booking = await ctx.db.booking.create({
@@ -290,7 +285,7 @@ export const chatbotRouter = router({
           notes: `Aangemaakt vanuit chatsessie ${session.id}`,
           status: "PENDING",
           leadId: session.leadId || null,
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
         },
         select: { id: true, date: true, status: true },
       });
@@ -310,7 +305,7 @@ export const chatbotRouter = router({
     .input(z.object({ sessionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const session = await ctx.db.chatSession.findFirst({
-        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
+        where: { AND: [ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), { id: input.sessionId }] },
         select: { id: true, tags: true },
       });
       if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Sessie niet gevonden" });
@@ -342,9 +337,9 @@ export const chatbotRouter = router({
   linkToLead: protectedProcedure
     .input(z.object({ sessionId: z.string(), leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       const session = await ctx.db.chatSession.findFirst({
-        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
+        where: { AND: [ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), { id: input.sessionId }] },
         select: { id: true },
       });
       if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Sessie niet gevonden" });
@@ -360,7 +355,7 @@ export const chatbotRouter = router({
     .input(z.object({ sessionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const session = await ctx.db.chatSession.findFirst({
-        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.sessionId }] },
+        where: { AND: [ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), { id: input.sessionId }] },
         include: { messages: { orderBy: { createdAt: "asc" } } },
       });
       if (!session) throw new TRPCError({ code: "NOT_FOUND" });
@@ -451,9 +446,9 @@ export const chatbotRouter = router({
       perPage: z.number().min(1).max(50).default(20),
     }))
     .query(async ({ ctx, input }) => {
-      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       const { leadId, page, perPage } = input;
-      const where = { AND: [ownedChatSessionWhere(ctx.user.id), { leadId }] };
+      const where = { AND: [ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), { leadId }] };
 
       const [sessions, total] = await Promise.all([
         ctx.db.chatSession.findMany({
@@ -476,11 +471,11 @@ export const chatbotRouter = router({
   // Stats for dashboard
   getStats: protectedProcedure.query(async ({ ctx }) => {
     const [total, open, waiting, unread, resolved] = await Promise.all([
-      ctx.db.chatSession.count({ where: ownedChatSessionWhere(ctx.user.id) }),
-      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), status: "OPEN" } }),
-      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), status: "WAITING" } }),
-      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), isRead: false } }),
-      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.id), status: "RESOLVED" } }),
+      ctx.db.chatSession.count({ where: ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id) }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), status: "OPEN" } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), status: "WAITING" } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), isRead: false } }),
+      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), status: "RESOLVED" } }),
     ]);
     return { total, open, waiting, unread, resolved };
   }),
@@ -490,7 +485,7 @@ export const chatbotRouter = router({
     .input(z.object({ ids: z.array(z.string()) }))
     .mutation(async ({ ctx, input }) => {
       await ctx.db.chatSession.updateMany({
-        where: { id: { in: input.ids }, ...ownedChatSessionWhere(ctx.user.id) },
+        where: { id: { in: input.ids }, ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id) },
         data: { isRead: true },
       });
       return { success: true };
@@ -501,7 +496,7 @@ export const chatbotRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const session = await ctx.db.chatSession.findFirst({
-        where: { AND: [ownedChatSessionWhere(ctx.user.id), { id: input.id }] },
+        where: { AND: [ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), { id: input.id }] },
         select: { id: true },
       });
       if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Sessie niet gevonden" });
@@ -520,7 +515,7 @@ export const chatbotRouter = router({
       initialMessage: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      enforceChatbotRateLimit({
+      await enforceChatbotRateLimit({
         userId: ctx.user.id,
         bucket: "create",
         limit: 30,
@@ -535,7 +530,7 @@ export const chatbotRouter = router({
           visitorPhone: input.visitorPhone,
           visitorCompany: input.visitorCompany,
           pageUrl: input.pageUrl,
-          tags: [`tenant:${ctx.user.id}`],
+          tags: [`tenant:${ctx.user.workspaceId!}`],
         },
       });
 

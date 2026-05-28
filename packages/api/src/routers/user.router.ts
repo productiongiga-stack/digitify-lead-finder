@@ -3,14 +3,30 @@ import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
 import { ensureUserWorkspace } from "../lib/user-workspace";
+import { sendBrandedEmail } from "../lib/email-sender";
+import {
+  assertWorkspaceMember,
+  countWorkspaceOwners,
+  getWorkspaceOwnerProfile,
+  isWorkspaceOwner,
+  workspaceMemberWhere,
+} from "../lib/workspace";
 import { passwordPolicySchema } from "../lib/password-policy";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
-import { loadUserSettingRows } from "../lib/user-settings";
+import { invalidateUserSettingsCache, loadUserSettingRows } from "../lib/user-settings";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(password, salt, 64).toString("hex");
   return `${salt}:${hash}`;
+}
+
+function appUrl() {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.NEXTAUTH_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
+  ).replace(/\/$/, "");
 }
 
 export function verifyPassword(password: string, storedHash: string): boolean {
@@ -27,8 +43,11 @@ export function verifyPassword(password: string, storedHash: string): boolean {
 
 export const userRouter = router({
   getProfile: protectedProcedure.query(async ({ ctx }) => {
-    await ensureUserWorkspace(ctx.db, ctx.user.id, ctx.user.name);
-    return ctx.db.user.findUnique({
+    const workspaceId = ctx.user.workspaceId!;
+    if (isWorkspaceOwner(ctx.user, workspaceId)) {
+      await ensureUserWorkspace(ctx.db, workspaceId, ctx.user.name);
+    }
+    const profile = await ctx.db.user.findUnique({
       where: { id: ctx.user.id },
       select: {
         id: true,
@@ -37,8 +56,45 @@ export const userRouter = router({
         image: true,
         role: true,
         createdAt: true,
+        workspaceOwnerId: true,
       },
     });
+    const owner = await getWorkspaceOwnerProfile(ctx.db, workspaceId);
+    return {
+      ...profile,
+      workspaceId,
+      workspaceOwnerName: owner?.name || owner?.email || "Workspace",
+      isWorkspaceOwner: ctx.user.id === workspaceId,
+    };
+  }),
+
+  getWorkspaceInfo: protectedProcedure.query(async ({ ctx }) => {
+    const workspaceId = ctx.user.workspaceId!;
+    const owner = await getWorkspaceOwnerProfile(ctx.db, workspaceId);
+    const memberCount = await ctx.db.user.count({
+      where: {
+        OR: [{ id: workspaceId }, { workspaceOwnerId: workspaceId }],
+      },
+    });
+    return {
+      workspaceId,
+      ownerName: owner?.name || owner?.email || "Eigenaar",
+      ownerEmail: owner?.email ?? "",
+      isOwner: ctx.user.id === workspaceId,
+      memberCount,
+      sharedResources: [
+        "Leads & pipeline",
+        "Campagnes & templates",
+        "Offertes & dienstencatalogus",
+        "Bookings & agenda",
+        "Dashboard & KPI's",
+        "Reviews & domeinen",
+        "CRM & chatbot",
+        "Instellingen (branding, e-mail, integraties)",
+        "Inbox (gedeelde mailbox-config)",
+        "Taken & facturen (gedeelde tabellen)",
+      ],
+    };
   }),
 
   updateProfile: protectedProcedure
@@ -94,7 +150,9 @@ export const userRouter = router({
     }),
 
   list: adminProcedure.query(async ({ ctx }) => {
+    const workspaceId = ctx.user.workspaceId!;
     const users = await ctx.db.user.findMany({
+      where: workspaceMemberWhere(workspaceId),
       select: {
         id: true,
         email: true,
@@ -146,13 +204,16 @@ export const userRouter = router({
   updateRole: ownerProcedure
     .input(z.object({ userId: z.string(), role: z.enum(["OWNER", "ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER", "VIEWER"]) }))
     .mutation(async ({ ctx, input }) => {
-      const target = await ctx.db.user.findUnique({
-        where: { id: input.userId },
-        select: { role: true },
-      });
-      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Gebruiker niet gevonden." });
+      const workspaceId = ctx.user.workspaceId!;
+      const target = await assertWorkspaceMember(ctx.db, workspaceId, input.userId);
+      if (input.userId === workspaceId && input.role !== "OWNER") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "De workspace-eigenaar moet de rol Eigenaar behouden.",
+        });
+      }
       if (target.role === "OWNER" && input.role !== "OWNER") {
-        const owners = await ctx.db.user.count({ where: { role: "OWNER" } });
+        const owners = await countWorkspaceOwners(ctx.db, workspaceId);
         if (owners <= 1) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Er moet minstens één owner blijven." });
         }
@@ -163,46 +224,108 @@ export const userRouter = router({
       });
     }),
 
+  updateUserDetails: ownerProcedure
+    .input(
+      z.object({
+        userId: z.string(),
+        name: z.string().trim().min(1).max(120),
+        email: z.string().email(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      const normalizedEmail = input.email.trim().toLowerCase();
+      await assertWorkspaceMember(ctx.db, workspaceId, input.userId);
+
+      const existing = await ctx.db.user.findUnique({
+        where: { email: normalizedEmail },
+        select: { id: true },
+      });
+      if (existing && existing.id !== input.userId) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Er bestaat al een gebruiker met dit e-mailadres.",
+        });
+      }
+
+      return ctx.db.user.update({
+        where: { id: input.userId },
+        data: {
+          name: input.name.trim(),
+          email: normalizedEmail,
+        },
+      });
+    }),
+
   createUser: ownerProcedure
     .input(
       z.object({
         name: z.string().min(1),
         email: z.string().email(),
         password: passwordPolicySchema,
-        role: z.enum(["ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER", "VIEWER"]),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const existing = await ctx.db.user.findUnique({ where: { email: input.email } });
+      const email = input.email.trim().toLowerCase();
+      const existing = await ctx.db.user.findUnique({ where: { email } });
       if (existing) {
         throw new TRPCError({ code: "CONFLICT", message: "Er bestaat al een gebruiker met dit e-mailadres." });
       }
+      const existingRequest = await ctx.db.registrationRequest.findFirst({
+        where: {
+          email,
+          status: {
+            in: ["PENDING_EMAIL_VERIFICATION", "PENDING_APPROVAL"],
+          },
+        },
+        select: { id: true },
+      });
+      if (existingRequest) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Voor dit e-mailadres bestaat al een open uitnodiging.",
+        });
+      }
 
-      const user = await ctx.db.user.create({
+      const token = randomBytes(32).toString("hex");
+      await ctx.db.registrationRequest.create({
         data: {
           name: input.name,
-          email: input.email,
+          email,
           passwordHash: hashPassword(input.password),
-          role: input.role,
+          requestedRole: "MEMBER",
+          status: "PENDING_EMAIL_VERIFICATION",
+          emailVerificationToken: token,
         },
       });
-      await ensureUserWorkspace(ctx.db, user.id, user.name);
-      return user;
+
+      const verifyUrl = `${appUrl()}/register/verify?token=${token}`;
+      await sendBrandedEmail(ctx.db, {
+        toEmail: email,
+        subject: "Bevestig je team-uitnodiging voor Digitify Lead Finder",
+        body:
+          `Hallo ${input.name},\n\n` +
+          `Je bent uitgenodigd voor een team workspace in Digitify Lead Finder.\n` +
+          `Bevestig je e-mailadres via deze link:\n${verifyUrl}\n\n` +
+          `Na bevestiging kan je workspace-owner je account afronden als teamlid.\n\nDigitify`,
+      });
+
+      return { success: true };
     }),
 
   deleteUser: ownerProcedure
     .input(z.object({ userId: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
       if (input.userId === ctx.user.id) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Je kunt jezelf niet verwijderen." });
       }
-      const target = await ctx.db.user.findUnique({
-        where: { id: input.userId },
-        select: { role: true },
-      });
-      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Gebruiker niet gevonden." });
+      if (input.userId === workspaceId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "De workspace-eigenaar kan niet verwijderd worden." });
+      }
+      const target = await assertWorkspaceMember(ctx.db, workspaceId, input.userId);
       if (target.role === "OWNER") {
-        const owners = await ctx.db.user.count({ where: { role: "OWNER" } });
+        const owners = await countWorkspaceOwners(ctx.db, workspaceId);
         if (owners <= 1) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "De laatste owner kan niet verwijderd worden." });
         }
@@ -217,6 +340,7 @@ export const userRouter = router({
   getUserModules: ownerProcedure
     .input(z.object({ userId: z.string() }))
     .query(async ({ ctx, input }) => {
+      await assertWorkspaceMember(ctx.db, ctx.user.workspaceId!, input.userId);
       const rows = await loadUserSettingRows(ctx.db as any, input.userId, ["modules.disabled"]);
       const map = settingsRowsToMap(rows);
       const raw = getSettingString(map, "modules.disabled", "");
@@ -231,6 +355,7 @@ export const userRouter = router({
       enabled: z.boolean(),
     }))
     .mutation(async ({ ctx, input }) => {
+      await assertWorkspaceMember(ctx.db, ctx.user.workspaceId!, input.userId);
       const rows = await loadUserSettingRows(ctx.db as any, input.userId, ["modules.disabled"]);
       const map = settingsRowsToMap(rows);
       const raw = getSettingString(map, "modules.disabled", "");
@@ -247,6 +372,7 @@ export const userRouter = router({
         update: { value },
         create: { key, value },
       });
+      invalidateUserSettingsCache(input.userId);
       return { success: true, disabled: next };
     }),
 

@@ -3,6 +3,8 @@
  * All layouts are table-based HTML for maximum email client compatibility.
  */
 
+import { sanitizeCtaUrl } from "./safe-url";
+
 export type EmailLayout = "modern" | "minimal" | "business" | "proposal" | "followup";
 type TypographyMode = "compact" | "normal";
 
@@ -53,14 +55,15 @@ function bodyToHtml(body: string, style?: string, typographyMode?: TypographyMod
 }
 
 function ctaToHtml(options: LayoutOptions): string {
-  if (!options.ctaText || !options.ctaUrl) return "";
+  const safeUrl = sanitizeCtaUrl(options.ctaUrl);
+  if (!options.ctaText || !safeUrl) return "";
 
   return `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 28px 0;">
       <tr>
         <td align="center">
           <a
-            href="${escapeHtml(options.ctaUrl)}"
+            href="${escapeHtml(safeUrl)}"
             target="_blank"
             rel="noopener noreferrer"
             style="display:inline-block;background-color:${options.primaryColor};color:#ffffff;text-decoration:none;padding:14px 26px;border-radius:999px;font-size:${fontSize(options.typographyMode, 15, 16)}px;font-weight:700;"
@@ -201,36 +204,141 @@ function generateModern(o: LayoutOptions): string {
   });
 }
 
+function signatureBlock(o: LayoutOptions, borderColor = "#e5e7eb"): string {
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:20px;">
+      <tr>
+        <td style="border-top:1px solid ${borderColor};padding-top:14px;">
+          <p style="margin:0;font-size:${fontSize(o.typographyMode, 13, 14)}px;color:#111827;font-weight:600;">${escapeHtml(o.fromName)}</p>
+          <p style="margin:4px 0 0 0;font-size:${fontSize(o.typographyMode, 12, 13)}px;color:#6b7280;">${escapeHtml(o.fromEmail)}</p>
+        </td>
+      </tr>
+    </table>`;
+}
+
+function poweredByFooter(o: LayoutOptions, textColor = "#9ca3af"): string {
+  const unsub = unsubBlock(o.unsubscribeUrl);
+  if (o.hidePoweredBy && !unsub) return "";
+  return `<p style="margin:8px 0 0 0;font-size:${fontSize(o.typographyMode, 10, 11)}px;line-height:1.5;color:${textColor};text-align:center;">
+    ${unsub || ""}${unsub ? " &middot; " : ""}${o.hidePoweredBy ? "" : "Powered by Digitify"}
+  </p>`;
+}
+
 /* =============== MINIMAL =============== */
 function generateMinimal(o: LayoutOptions): string {
-  return renderPremiumShell(o, {
-    badge: "COMPACT",
-    eyebrow: "Minimalistische mail met premium uitstraling voor korte, persoonlijke berichten.",
-    summaryTitle: "Compact",
-    summaryBody: "Minder ruis, meer focus. Ideaal voor korte outreach, reminders en zachte check-ins.",
-    accentTone: "#f7f4ec",
-    bodyHtml: bodyToHtml(
-      o.body,
-      `margin:0 0 12px 0;line-height:1.65;color:#4b5563;font-size:${fontSize(o.typographyMode, 13, 14)}px;`,
-      o.typographyMode,
-    ),
-  });
+  const bodyHtml = bodyToHtml(
+    o.body,
+    `margin:0 0 14px 0;line-height:1.75;color:#374151;font-size:${fontSize(o.typographyMode, 15, 16)}px;`,
+    o.typographyMode,
+  );
+  const ctaHtml = ctaToHtml(o);
+
+  return `${doctype()}
+<html xmlns="http://www.w3.org/1999/xhtml" lang="nl">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(o.subject)}</title>
+  ${msoFontStyle()}
+</head>
+<body style="margin:0;padding:0;background-color:#fafaf9;font-family:Georgia,'Times New Roman',serif;-webkit-font-smoothing:antialiased;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#fafaf9;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #e7e5e4;border-radius:4px;">
+          <tr>
+            <td style="padding:32px 36px 28px 36px;">
+              <p style="margin:0 0 4px 0;font-size:${fontSize(o.typographyMode, 11, 12)}px;letter-spacing:0.12em;text-transform:uppercase;color:#a8a29e;font-family:Arial,Helvetica,sans-serif;">${escapeHtml(o.companyName)}</p>
+              <p style="margin:0 0 24px 0;font-size:${fontSize(o.typographyMode, 13, 14)}px;color:#78716c;font-family:Arial,Helvetica,sans-serif;">${escapeHtml(o.subject)}</p>
+              ${bodyHtml}
+              ${ctaHtml}
+              ${signatureBlock(o)}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 36px 24px 36px;">
+              ${poweredByFooter(o)}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }
 
 /* =============== BUSINESS =============== */
 function generateBusiness(o: LayoutOptions): string {
-  return renderPremiumShell(o, {
-    badge: "BUSINESS",
-    eyebrow: "Zakelijke premium mail voor duidelijke beslissingen, afspraken en professionele opvolging.",
-    summaryTitle: "Beslissingskader",
-    summaryBody: "Helder opgebouwd voor professionele communicatie met snelle scanbaarheid en duidelijke call-to-action.",
-    accentTone: "#f3efe6",
-    bodyHtml: bodyToHtml(
-      o.body,
-      `margin:0 0 14px 0;line-height:1.65;color:#47505a;font-size:${fontSize(o.typographyMode, 14, 15)}px;`,
-      o.typographyMode,
-    ),
-  });
+  const bodyHtml = bodyToHtml(
+    o.body,
+    `margin:0 0 14px 0;line-height:1.65;color:#334155;font-size:${fontSize(o.typographyMode, 14, 15)}px;`,
+    o.typographyMode,
+  );
+  const ctaHtml = ctaToHtml(o);
+  const businessBlue = "#1e3a8a";
+
+  return `${doctype()}
+<html xmlns="http://www.w3.org/1999/xhtml" lang="nl">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(o.subject)}</title>
+  ${msoFontStyle()}
+</head>
+<body style="margin:0;padding:0;background-color:#e8edf4;font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#e8edf4;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" width="680" cellpadding="0" cellspacing="0" border="0" style="max-width:680px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 4px 24px rgba(30,58,138,0.12);">
+          <tr>
+            <td style="background:linear-gradient(135deg,#1e40af 0%,#1e3a8a 100%);padding:20px 28px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="width:4px;background:rgba(255,255,255,0.35);border-radius:2px;">&nbsp;</td>
+                  <td style="padding-left:16px;">
+                    <p style="margin:0;font-size:${fontSize(o.typographyMode, 22, 24)}px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">${escapeHtml(o.companyName)}</p>
+                    ${sloganBlock(o.headerSlogan || "Professionele communicatie", "left", "rgba(255,255,255,0.82)")}
+                  </td>
+                  <td align="right" style="vertical-align:top;">
+                    <p style="margin:0;font-size:${fontSize(o.typographyMode, 11, 12)}px;font-weight:700;color:rgba(255,255,255,0.7);letter-spacing:0.08em;text-transform:uppercase;">Zakelijk</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px 28px 8px 28px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f1f5f9;border-radius:8px;border:1px solid #e2e8f0;">
+                <tr>
+                  <td style="padding:12px 16px;">
+                    <p style="margin:0 0 2px 0;font-size:${fontSize(o.typographyMode, 10, 11)}px;font-weight:700;color:#64748b;letter-spacing:0.1em;text-transform:uppercase;">Aan</p>
+                    <p style="margin:0;font-size:${fontSize(o.typographyMode, 16, 17)}px;font-weight:700;color:#0f172a;">${escapeHtml(o.recipientCompany)}</p>
+                    <p style="margin:4px 0 0 0;font-size:${fontSize(o.typographyMode, 12, 13)}px;color:#64748b;">Betreft: ${escapeHtml(o.subject)}</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 28px 24px 28px;">
+              ${bodyHtml}
+              ${ctaHtml}
+              ${signatureBlock(o, "#cbd5e1")}
+            </td>
+          </tr>
+          <tr>
+            <td style="background:${businessBlue};padding:14px 28px;text-align:center;">
+              <p style="margin:0;font-size:${fontSize(o.typographyMode, 12, 13)}px;font-weight:600;color:#ffffff;">${escapeHtml(o.companyName)}</p>
+              ${poweredByFooter(o, "rgba(255,255,255,0.55)")}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }
 
 /* =============== PROPOSAL =============== */
@@ -319,12 +427,13 @@ function generateProposal(o: LayoutOptions): string {
     `margin:0 0 12px 0;line-height:1.6;color:#4b5563;font-size:${fontSize(o.typographyMode, 15, 16)}px;`,
     o.typographyMode,
   );
-  const ctaHtml = o.ctaText && o.ctaUrl
+  const safeCtaUrl = sanitizeCtaUrl(o.ctaUrl);
+  const ctaHtml = o.ctaText && safeCtaUrl
     ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 8px 0;">
       <tr>
         <td align="center">
           <a
-            href="${escapeHtml(o.ctaUrl)}"
+            href="${escapeHtml(safeCtaUrl)}"
             target="_blank"
             rel="noopener noreferrer"
             style="display:inline-block;background:${accent};color:#12151a;text-decoration:none;padding:12px 24px;border-radius:999px;font-size:${fontSize(o.typographyMode, 15, 16)}px;font-weight:800;"
@@ -335,7 +444,7 @@ function generateProposal(o: LayoutOptions): string {
       </tr>
     </table>`
     : "";
-  const websiteHost = safeUrlHost(o.ctaUrl);
+  const websiteHost = safeUrlHost(safeCtaUrl);
   const refLabel = parsed.reference || o.subject;
   const totalLabel = parsed.total || "";
   const validUntilLabel = parsed.validUntil || "";
@@ -522,18 +631,53 @@ function generateProposal(o: LayoutOptions): string {
 
 /* =============== FOLLOWUP =============== */
 function generateFollowup(o: LayoutOptions): string {
-  return renderPremiumShell(o, {
-    badge: "FOLLOW-UP",
-    eyebrow: "Compacte premium opvolgmail die snel leest en duidelijk aanzet tot reactie.",
-    summaryTitle: "Opvolging",
-    summaryBody: "Een zachte reminder met duidelijke context, korte inhoud en een snelle volgende stap.",
-    accentTone: "#f6f1e7",
-    bodyHtml: bodyToHtml(
-      o.body,
-      `margin:0 0 12px 0;line-height:1.65;color:#4b5563;font-size:${fontSize(o.typographyMode, 13, 14)}px;`,
-      o.typographyMode,
-    ),
-  });
+  const accentViolet = "#7c3aed";
+  const bodyHtml = bodyToHtml(
+    o.body,
+    `margin:0 0 12px 0;line-height:1.6;color:#4b5563;font-size:${fontSize(o.typographyMode, 14, 15)}px;`,
+    o.typographyMode,
+  );
+  const ctaHtml = ctaToHtml(o);
+
+  return `${doctype()}
+<html xmlns="http://www.w3.org/1999/xhtml" lang="nl">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(o.subject)}</title>
+  ${msoFontStyle()}
+</head>
+<body style="margin:0;padding:0;background-color:#f5f3ff;font-family:Arial,Helvetica,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f3ff;">
+    <tr>
+      <td align="center" style="padding:28px 14px;">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:12px;border-left:5px solid ${accentViolet};box-shadow:0 2px 16px rgba(124,58,237,0.1);">
+          <tr>
+            <td style="padding:20px 22px 12px 22px;">
+              <span style="display:inline-block;background:#ede9fe;color:${accentViolet};padding:5px 12px;border-radius:999px;font-size:${fontSize(o.typographyMode, 10, 11)}px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;">Follow-up</span>
+              <p style="margin:12px 0 4px 0;font-size:${fontSize(o.typographyMode, 11, 12)}px;color:#9ca3af;">Re: ${escapeHtml(o.subject)}</p>
+              <p style="margin:0;font-size:${fontSize(o.typographyMode, 18, 20)}px;font-weight:700;color:#1f2937;">${escapeHtml(o.recipientCompany)}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 22px 20px 22px;">
+              ${bodyHtml}
+              ${ctaHtml}
+              ${signatureBlock(o, "#ede9fe")}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 22px 18px 22px;">
+              <p style="margin:0;font-size:${fontSize(o.typographyMode, 11, 12)}px;color:#a78bfa;text-align:center;">${escapeHtml(o.companyName)}</p>
+              ${poweredByFooter(o, "#c4b5fd")}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }
 
 /* =============== DISPATCHER =============== */

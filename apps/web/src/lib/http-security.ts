@@ -14,7 +14,7 @@ export function getClientIp(request: Request) {
   return "unknown";
 }
 
-export function enforceRateLimit(
+export async function enforceRateLimit(
   request: Request,
   options: {
     key: string;
@@ -23,8 +23,8 @@ export function enforceRateLimit(
     message: string;
   },
 ) {
-  const result = checkRateLimit({
-    key: options.key,
+  const result = await checkRateLimit({
+    key: `${options.key}:${getClientIp(request)}`,
     limit: options.limit,
     windowMs: options.windowMs,
   });

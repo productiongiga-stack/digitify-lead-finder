@@ -1,5 +1,7 @@
 const path = require("path");
 
+const workspaceRoot = path.join(__dirname, "../../");
+
 function resolveAppUrl() {
   if (process.env.NEXTAUTH_URL) return process.env.NEXTAUTH_URL;
   if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
@@ -10,15 +12,21 @@ function resolveAppUrl() {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  outputFileTracingRoot: path.join(__dirname, "../../"),
+  experimental: {
+    instrumentationHook: true,
+  },
+  outputFileTracingRoot: workspaceRoot,
+  turbopack: {
+    root: workspaceRoot,
+  },
   env: {
     NEXTAUTH_URL: resolveAppUrl(),
   },
   eslint: {
-    ignoreDuringBuilds: true,
+    ignoreDuringBuilds: false,
   },
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   transpilePackages: [
     "@digitify/api",
@@ -29,7 +37,13 @@ const nextConfig = {
     "@digitify/scoring",
     "@digitify/connectors",
   ],
-  serverExternalPackages: ["@prisma/client", "prisma", "bcryptjs"],
+  serverExternalPackages: [
+    "@prisma/client",
+    "prisma",
+    "bcryptjs",
+    "@sentry/node",
+    "@sentry/nextjs",
+  ],
 };
 
 module.exports = nextConfig;

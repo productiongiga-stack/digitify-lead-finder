@@ -2,125 +2,15 @@ import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { sendBrandedEmail } from "../lib/email-sender";
+import { sendApprovedQuoteDraft } from "../lib/quote-outbound-email";
+import { extractInvoiceIdFromDraftBody } from "../lib/invoice-outbound";
 import { getSettingString } from "../lib/settings";
-import { loadUserSettingRows } from "../lib/user-settings";
+import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 import { assertLeadAccess } from "../lib/tenant";
-
-const DEFAULT_TEMPLATE_PACK: Array<{
-  name: string;
-  subject: string;
-  body: string;
-  isGlobal: boolean;
-}> = [
-  {
-    name: "Lead Contact - Eerste bericht",
-    subject: "Korte intro voor {{companyName}}",
-    body: [
-      "Beste {{contactName}},",
-      "",
-      "Ik zag dat {{companyName}} actief is in {{industry}} en ik wou kort contact opnemen.",
-      "We helpen bedrijven zoals het uwe met gerichte verbeteringen in zichtbaarheid en conversie.",
-      "",
-      "Is een korte kennismaking deze week haalbaar?",
-      "",
-      "Vriendelijke groeten,",
-      "{{senderName}}",
-      "",
-      "[[LAYOUT=modern]]",
-    ].join("\n"),
-    isGlobal: true,
-  },
-  {
-    name: "Follow-up - Opvolging",
-    subject: "Even opvolgen op mijn bericht",
-    body: [
-      "Beste {{contactName}},",
-      "",
-      "Ik volg kort op mijn vorige bericht.",
-      "Past dit momenteel binnen jullie prioriteiten bij {{companyName}}?",
-      "",
-      "Ik licht het graag in 10 minuten toe.",
-      "",
-      "Vriendelijke groeten,",
-      "{{senderName}}",
-      "",
-      "[[LAYOUT=followup]]",
-    ].join("\n"),
-    isGlobal: true,
-  },
-  {
-    name: "Offerte - Samenvatting",
-    subject: "Offerte {{quoteNumber}} voor {{companyName}}",
-    body: [
-      "Beste {{contactName}},",
-      "",
-      "Hierbij bezorgen we uw offerte met een duidelijke samenvatting.",
-      "Totaalprijs: {{offerPrice}}",
-      "",
-      "Laat gerust weten welke onderdelen je eerst wil opstarten.",
-      "",
-      "Vriendelijke groeten,",
-      "{{senderName}}",
-      "",
-      "[[LAYOUT=proposal]]",
-    ].join("\n"),
-    isGlobal: true,
-  },
-  {
-    name: "Rapport - Persoonlijke analyse",
-    subject: "Uw gepersonaliseerd opportuniteitenrapport",
-    body: [
-      "Beste {{contactName}},",
-      "",
-      "In bijlage/onderstaande link vindt u uw gepersonaliseerde rapport.",
-      "Daarin tonen we de belangrijkste opportuniteiten voor {{companyName}} op basis van score, website en marktpositie.",
-      "",
-      "Ik bespreek de aanbevelingen graag samen in een kort gesprek.",
-      "",
-      "Vriendelijke groeten,",
-      "{{senderName}}",
-      "",
-      "[[LAYOUT=business]]",
-    ].join("\n"),
-    isGlobal: true,
-  },
-  {
-    name: "Booking - Bevestiging",
-    subject: "Bevestiging van uw afspraak",
-    body: [
-      "Beste {{contactName}},",
-      "",
-      "Uw afspraak is ingepland en bevestigd.",
-      "U ontvangt kort voor de afspraak nog een herinnering met praktische info.",
-      "",
-      "Tot binnenkort,",
-      "{{senderName}}",
-      "",
-      "[[LAYOUT=business]]",
-    ].join("\n"),
-    isGlobal: true,
-  },
-  {
-    name: "Review - Vriendelijke vraag",
-    subject: "Korte feedbackvraag",
-    body: [
-      "Beste {{contactName}},",
-      "",
-      "Dankjewel voor de samenwerking.",
-      "Heb je 1 minuut om je ervaring te delen? Dat helpt ons sterk om verder te verbeteren.",
-      "",
-      "Alvast bedankt!",
-      "{{senderName}}",
-      "",
-      "[[LAYOUT=minimal]]",
-    ].join("\n"),
-    isGlobal: true,
-  },
-];
-
 export const contactRouter = router({
   getTopbarStats: protectedProcedure.query(async ({ ctx }) => {
-    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["email.followup_days"]);
+    const scope = workspaceScopeFromUser(ctx.user);
+    const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["email.followup_days"]);
     const followupDays = Math.max(
       1,
       Number.parseInt(getSettingString(settings, "email.followup_days", "3"), 10) || 3,
@@ -129,14 +19,14 @@ export const contactRouter = router({
 
     const [pendingDrafts, followupLeads] = await Promise.all([
       ctx.db.emailDraft.count({
-        where: { status: "PENDING_APPROVAL", lead: { createdById: ctx.user.id } },
+        where: { status: "PENDING_APPROVAL", lead: { createdById: ctx.user.workspaceId! } },
       }),
       ctx.db.emailDraft.findMany({
         where: {
           status: "SENT",
           sentAt: { lte: reminderThreshold },
           lead: {
-            createdById: ctx.user.id,
+            createdById: ctx.user.workspaceId!,
             status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
           },
         },
@@ -164,11 +54,11 @@ export const contactRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const where: Record<string, unknown> = {
-        lead: { createdById: ctx.user.id },
+        lead: { createdById: ctx.user.workspaceId! },
       };
       if (input.status) where.status = input.status;
       if (input.leadId) {
-        await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+        await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
         where.leadId = input.leadId;
       }
       const search = input.search?.trim();
@@ -176,7 +66,7 @@ export const contactRouter = router({
         where.OR = [
           { subject: { contains: search, mode: "insensitive" } },
           { toEmail: { contains: search, mode: "insensitive" } },
-          { lead: { companyName: { contains: search, mode: "insensitive" }, createdById: ctx.user.id } },
+          { lead: { companyName: { contains: search, mode: "insensitive" }, createdById: ctx.user.workspaceId! } },
         ];
       }
 
@@ -202,7 +92,7 @@ export const contactRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const draft = await ctx.db.emailDraft.findFirst({
-        where: { id: input.id, lead: { createdById: ctx.user.id } },
+        where: { id: input.id, lead: { createdById: ctx.user.workspaceId! } },
         select: { id: true, leadId: true, subject: true },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "E-mail niet gevonden." });
@@ -225,7 +115,7 @@ export const contactRouter = router({
     .input(z.object({ ids: z.array(z.string()).min(1).max(100) }))
     .mutation(async ({ ctx, input }) => {
       const drafts = await ctx.db.emailDraft.findMany({
-        where: { id: { in: input.ids }, lead: { createdById: ctx.user.id } },
+        where: { id: { in: input.ids }, lead: { createdById: ctx.user.workspaceId! } },
         select: { id: true },
       });
       const ids = drafts.map((draft) => draft.id);
@@ -240,7 +130,7 @@ export const contactRouter = router({
       const drafts = await ctx.db.emailDraft.findMany({
         where: {
           id: { in: input.ids },
-          lead: { createdById: ctx.user.id },
+          lead: { createdById: ctx.user.workspaceId! },
           status: { in: ["APPROVED", "FAILED"] },
         },
         select: { id: true },
@@ -277,7 +167,8 @@ export const contactRouter = router({
     }),
 
   getFollowUpQueue: protectedProcedure.query(async ({ ctx }) => {
-    const settings = await loadUserSettingRows(ctx.db, ctx.user.id, ["email.followup_days"]);
+    const scope = workspaceScopeFromUser(ctx.user);
+    const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["email.followup_days"]);
     const followupDays = Math.max(
       1,
       Number.parseInt(getSettingString(settings, "email.followup_days", "3"), 10) || 3,
@@ -289,7 +180,7 @@ export const contactRouter = router({
         status: "SENT",
         sentAt: { lte: reminderThreshold },
         lead: {
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
           status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
         },
       },
@@ -342,7 +233,7 @@ export const contactRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       const draft = await ctx.db.emailDraft.create({
         data: {
           ...input,
@@ -370,13 +261,14 @@ export const contactRouter = router({
         subject: z.string().optional(),
         body: z.string().optional(),
         toEmail: z.string().email().optional(),
+        templateId: z.string().nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const draft = await ctx.db.emailDraft.findFirst({
         where: {
           id: input.id,
-          lead: { createdById: ctx.user.id },
+          lead: { createdById: ctx.user.workspaceId! },
         },
         select: { id: true, status: true, authorId: true },
       });
@@ -384,12 +276,22 @@ export const contactRouter = router({
       if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang om dit concept te bewerken." });
       }
-      if (draft.status !== "DRAFT" && draft.status !== "REJECTED") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Can only edit drafts or rejected emails" });
+      const editableStatuses = ["DRAFT", "REJECTED", "PENDING_APPROVAL", "APPROVED", "FAILED"];
+      if (!editableStatuses.includes(draft.status)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Deze e-mail kan niet meer worden bewerkt." });
       }
 
       const { id, ...data } = input;
-      return ctx.db.emailDraft.update({ where: { id }, data: { ...data, status: "DRAFT" } });
+      const nextStatus = draft.status === "PENDING_APPROVAL" ? "PENDING_APPROVAL" : "DRAFT";
+      const approvalReset =
+        draft.status === "APPROVED"
+          ? { approverId: null, approvedAt: null, rejectedAt: null, rejectionNote: null }
+          : {};
+
+      return ctx.db.emailDraft.update({
+        where: { id },
+        data: { ...data, status: nextStatus, ...approvalReset },
+      });
     }),
 
   submitForApproval: protectedProcedure
@@ -398,7 +300,7 @@ export const contactRouter = router({
       const draft = await ctx.db.emailDraft.findFirst({
         where: {
           id: input.id,
-          lead: { createdById: ctx.user.id },
+          lead: { createdById: ctx.user.workspaceId! },
         },
         select: { id: true, status: true, authorId: true },
       });
@@ -420,7 +322,7 @@ export const contactRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const draft = await ctx.db.emailDraft.findFirst({
-        where: { id: input.id, lead: { createdById: ctx.user.id } },
+        where: { id: input.id, lead: { createdById: ctx.user.workspaceId! } },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
       if (draft.status !== "PENDING_APPROVAL") {
@@ -452,7 +354,7 @@ export const contactRouter = router({
     .input(z.object({ id: z.string(), note: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const draft = await ctx.db.emailDraft.findFirst({
-        where: { id: input.id, lead: { createdById: ctx.user.id } },
+        where: { id: input.id, lead: { createdById: ctx.user.workspaceId! } },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
       if (draft.status !== "PENDING_APPROVAL") {
@@ -476,7 +378,7 @@ export const contactRouter = router({
       const draft = await ctx.db.emailDraft.findFirst({
         where: {
           id: input.id,
-          lead: { createdById: ctx.user.id },
+          lead: { createdById: ctx.user.workspaceId! },
         },
         include: { lead: { select: { id: true, companyName: true } } },
       });
@@ -503,22 +405,34 @@ export const contactRouter = router({
         const followUpDays =
           Number.parseInt(
             getSettingString(
-              await loadUserSettingRows(ctx.db, ctx.user.id, ["email.followup_days"]),
+              await loadWorkspaceSettingRows(
+                ctx.db,
+                workspaceScopeFromUser(ctx.user),
+                ["email.followup_days"],
+              ),
               "email.followup_days",
               "3",
             ),
             10,
           ) || 3;
 
-        const result = await sendBrandedEmail(ctx.db, {
-          toEmail: draft.toEmail,
-          subject: draft.subject,
-          body: draft.body,
-          recipientCompany: draft.lead?.companyName ?? draft.toEmail,
-          leadId: draft.leadId,
-          userId: ctx.user.id,
-          trackingDraftId: draft.id,
-        });
+        const result =
+          draft.type === "QUOTE"
+            ? await sendApprovedQuoteDraft(
+                ctx.db,
+                draft,
+                ctx.user.id,
+                ctx.user.workspaceId!,
+              )
+            : await sendBrandedEmail(ctx.db, {
+                toEmail: draft.toEmail,
+                subject: draft.subject,
+                body: draft.body,
+                recipientCompany: draft.lead?.companyName ?? draft.toEmail,
+                leadId: draft.leadId,
+                userId: ctx.user.id,
+                trackingDraftId: draft.id,
+              });
 
         if (!result.success) {
           await ctx.db.emailDraft.update({
@@ -545,13 +459,28 @@ export const contactRouter = router({
           },
         });
 
+        const invoiceId = extractInvoiceIdFromDraftBody(draft.body);
+        if (invoiceId) {
+          await ctx.db.workspaceInvoice.updateMany({
+            where: {
+              id: invoiceId,
+              createdById: ctx.user.workspaceId!,
+              status: "DRAFT",
+            },
+            data: { status: "SENT" },
+          });
+        }
+
         // Create activity record
         await ctx.db.activity.create({
           data: {
             leadId: draft.leadId,
             userId: ctx.user.id,
-            type: "EMAIL_SENT",
-            title: `E-mail verzonden naar ${draft.toEmail}`,
+            type: draft.type === "QUOTE" ? "QUOTE_SENT" : "EMAIL_SENT",
+            title:
+              draft.type === "QUOTE"
+                ? `Offerte per e-mail verstuurd naar ${draft.toEmail}`
+                : `E-mail verzonden naar ${draft.toEmail}`,
             metadata: { followUpDays },
           },
         });
@@ -573,130 +502,13 @@ export const contactRouter = router({
       }
     }),
 
-  listTemplates: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.db.emailTemplate.findMany({
-      where: { createdById: ctx.user.id },
-      orderBy: { createdAt: "desc" },
-      include: { campaign: { select: { id: true, name: true } } },
-    });
-  }),
-
-  createTemplate: protectedProcedure
-    .input(
-      z.object({
-        name: z.string().min(1),
-        subject: z.string().min(1),
-        body: z.string().min(1),
-        campaignId: z.string().optional(),
-        isGlobal: z.boolean().default(false),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      if (input.campaignId) {
-        const campaign = await ctx.db.campaign.findFirst({
-          where: { id: input.campaignId, createdById: ctx.user.id },
-          select: { id: true },
-        });
-        if (!campaign) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Campagne niet gevonden." });
-        }
-      }
-      return ctx.db.emailTemplate.create({
-        data: {
-          ...input,
-          createdById: ctx.user.id,
-          isGlobal: false,
-        },
-      });
-    }),
-
-  seedDefaultTemplates: protectedProcedure.mutation(async ({ ctx }) => {
-    const existing = await ctx.db.emailTemplate.findMany({
-      where: {
-        createdById: ctx.user.id,
-        OR: DEFAULT_TEMPLATE_PACK.map((template) => ({ name: template.name })),
-      },
-      select: { name: true },
-    });
-    const existingNames = new Set(existing.map((item) => item.name));
-    const templatesToCreate = DEFAULT_TEMPLATE_PACK.filter(
-      (template) => !existingNames.has(template.name)
-    );
-    if (templatesToCreate.length === 0) {
-      return { created: 0, total: DEFAULT_TEMPLATE_PACK.length };
-    }
-    await ctx.db.emailTemplate.createMany({
-      data: templatesToCreate.map((template) => ({
-        createdById: ctx.user.id,
-        name: template.name,
-        subject: template.subject,
-        body: template.body,
-        isGlobal: false,
-      })),
-      skipDuplicates: true,
-    });
-    return { created: templatesToCreate.length, total: DEFAULT_TEMPLATE_PACK.length };
-  }),
-
-  updateTemplate: protectedProcedure
-    .input(
-      z.object({
-        id: z.string(),
-        name: z.string().min(1).optional(),
-        subject: z.string().min(1).optional(),
-        body: z.string().min(1).optional(),
-        campaignId: z.string().nullable().optional(),
-        isGlobal: z.boolean().optional(),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const { id, ...data } = input;
-      const template = await ctx.db.emailTemplate.findFirst({
-        where: { id, createdById: ctx.user.id },
-        select: { id: true },
-      });
-      if (!template) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
-      }
-      if (data.campaignId) {
-        const campaign = await ctx.db.campaign.findFirst({
-          where: { id: data.campaignId, createdById: ctx.user.id },
-          select: { id: true },
-        });
-        if (!campaign) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Campagne niet gevonden." });
-        }
-      }
-      return ctx.db.emailTemplate.update({
-        where: { id },
-        data: {
-          ...data,
-          isGlobal: data.isGlobal ?? false,
-        },
-      });
-    }),
-
-  deleteTemplate: protectedProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      const template = await ctx.db.emailTemplate.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
-        select: { id: true },
-      });
-      if (!template) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
-      }
-      await ctx.db.emailTemplate.delete({ where: { id: input.id } });
-      return { success: true };
-    }),
-
   getDraftById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const draft = await ctx.db.emailDraft.findFirst({
         where: {
           id: input.id,
-          lead: { createdById: ctx.user.id },
+          lead: { createdById: ctx.user.workspaceId! },
         },
         include: {
           lead: { select: { id: true, companyName: true, email: true, city: true, industry: true } },

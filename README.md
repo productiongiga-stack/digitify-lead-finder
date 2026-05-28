@@ -2,108 +2,104 @@
 
 **V1.0.1 ALPHA**
 
-Slimme lead generation en outreach tool voor Digitify. Zoek bedrijven, analyseer hun online zichtbaarheid, score op opportuniteit, en contacteer via e-mail - met AI-assistent OpenClaw.
-
-## Release Notes - V1.0.1 ALPHA
-
-Dit is de eerste Alpha versie van de Digitify Lead Finder app.
-
-- Gefixt: leads openen vanuit de Leads-pagina gaat nu naar de juiste lead detailinformatie.
-- Verbeterd: klikken op `Leads` in de linker navigatie opent nu de dropdown in plaats van direct te navigeren.
-- Toegevoegd: de dropdown onder `Leads` bevat nu een expliciete `Leads` link naar de volledige leadlijst.
-- Meegeleverd: eerste Alpha-bundel met dashboard, lead search, lead detail, campagnes, outbound, offertes, facturen, rapporten, CRM, taken, templates, audit en instellingen.
+Slimme lead generation en outreach tool voor Digitify. Zoek bedrijven, analyseer hun online zichtbaarheid, score op opportuniteit, en contacteer via e-mail — met AI-assistent OpenClaw.
 
 ## Quick Start
 
 ### Vereisten
+
 - Node.js >= 20
 - pnpm >= 9
-- Docker (voor PostgreSQL + Redis)
+- Docker (PostgreSQL + optioneel Redis)
 
 ### Setup
 
 ```bash
-# Start databases
 docker compose up -d
-
-# Installeer dependencies
 pnpm install
-
-# Genereer Prisma client
 pnpm db:generate
-
-# Push schema naar database
-pnpm db:push
-
-# Seed baseline data
-pnpm db:seed
-
-# Start development server
+pnpm db:migrate          # init + RLS + workspace_tasks
+pnpm db:seed             # vereist SEED_* env — zie hieronder
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open [http://localhost:3000](http://localhost:3000) (of poort uit terminal).
 
-### Initial owner account
-
-The seed script creates one `OWNER` user. Credentials are required via env before running `pnpm db:seed`:
+**Bestaande database** (vóór init-migratie):
 
 ```bash
-SEED_ADMIN_EMAIL=you@example.com SEED_ADMIN_PASSWORD='a-strong-password-123' pnpm db:seed
+pnpm db:resolve-init
+pnpm db:migrate
 ```
 
-`SEED_ADMIN_EMAIL` + `SEED_ADMIN_PASSWORD` are mandatory in every environment.
+### Owner-accounts (seed)
 
-> Never commit credentials, `.env`, or hardcoded passwords. Sensitive settings (API keys, SMTP/IMAP passwords, OAuth tokens) are encrypted at rest with `SETTINGS_ENCRYPTION_KEY` (AES-256-GCM).
+```bash
+export SEED_ADMIN_EMAIL=admin@digitify.local
+export SEED_ADMIN_PASSWORD='minimaal-12-tekens'
+# Optioneel tweede OWNER voor RLS-staging:
+export SEED_RLS_OWNER_B_EMAIL=owner-b@digitify.local
+pnpm db:seed
+```
+
+RLS-staging smoke: `ENABLE_WORKSPACE_RLS=true pnpm rls:smoke`
+
+### Productie / staging database
+
+```bash
+pnpm setup:db
+```
+
+Zie [DEPLOYMENT.md](DEPLOYMENT.md) en [docs/VERCEL.md](docs/VERCEL.md).
+
+### Uploads (logo’s, afbeeldingen)
+
+- **Productie (Vercel):** `BLOB_READ_WRITE_TOKEN` — Vercel Blob Storage
+- **Lokaal zonder token:** data-URL fallback (alleen dev)
 
 ## Stack
 
 | Laag | Technologie |
 |------|-------------|
 | Frontend | Next.js 15, React 19, TypeScript |
-| UI | Tailwind CSS, shadcn/ui, TanStack Table |
-| API | tRPC (type-safe) |
-| Database | PostgreSQL + Prisma ORM |
+| UI | Tailwind CSS, shadcn/ui |
+| API | tRPC |
+| Database | PostgreSQL + Prisma |
 | Auth | NextAuth.js (JWT + RBAC) |
-| Queue | BullMQ + Redis (Fase 2) |
-| Email | Provider abstractie (Fase 2) |
-| AI | Anthropic Claude SDK - OpenClaw (Fase 2) |
+| Cache / limits | Redis of Upstash |
+| Deploy | Vercel (+ Neon via Marketplace) |
 
-## Project Structuur
+## Scripts
 
-```
-├── apps/web/          # Next.js app
-├── packages/
-│   ├── api/           # tRPC routers + services
-│   ├── db/            # Prisma schema + client
-│   ├── ui/            # shadcn/ui components
-│   ├── scoring/       # Score engine (Fase 2)
-│   ├── connectors/    # Search connectors (Fase 2)
-│   ├── email/         # Email provider (Fase 2)
-│   ├── queue/         # BullMQ workers (Fase 2)
-│   └── openclaw/      # AI agent (Fase 2)
-```
+| Script | Doel |
+|--------|------|
+| `pnpm test` | Unit tests (api, email, scoring, web) |
+| `pnpm test:integration` | Postgres RLS |
+| `pnpm test:e2e` | Playwright smoke |
+| `pnpm typecheck` | TypeScript |
+| `pnpm rls:smoke` | Cross-tenant RLS check |
+| `pnpm setup:db` | Productie DB migraties |
 
-## Modules
+## Documentatie
 
-- **Dashboard** - KPI's, pipeline, activiteiten, niches, locaties
-- **Lead Search** - Zoek op niche, stad, zoekwoord
-- **Lead Table** - Filter, sorteer, pagineer, bulk acties
-- **Lead Detail** - Score breakdown, tijdlijn, notities, e-mails
-- **Campagnes** - Groepeer leads per niche/regio
-- **Contact** - E-mail drafts, templates, approval flow
-- **Settings** - Scoring gewichten, team, branding
+- [docs/PHASES.md](docs/PHASES.md) — verbeterplan per fase
+- [packages/api/src/lib/WORKSPACE.md](packages/api/src/lib/WORKSPACE.md) — workspace / RLS
+- [packages/db/prisma/migrations/README.md](packages/db/prisma/migrations/README.md) — migraties
 
-## E-mail Veiligheid
+## E-mail veiligheid
 
-E-mails worden NOOIT automatisch verzonden. De flow:
-1. Draft aanmaken (handmatig of via OpenClaw)
-2. Submit voor goedkeuring
-3. Handmatige review + goedkeuring
-4. Pas dan verzending
+E-mails worden **niet** automatisch verzonden:
 
-## Roadmap
+1. Draft aanmaken  
+2. Indienen ter goedkeuring  
+3. Handmatige goedkeuring  
+4. Verzending  
 
-- [x] Fase 1: App shell, auth, dashboard, leads, campagnes, settings
-- [ ] Fase 2: Scoring engine, connectors, OpenClaw, email module
-- [ ] Fase 3: Reports + PDF, bulk workflows, desktop packaging
+## Roadmap (samenvatting)
+
+- [x] App shell, leads, campagnes, outbound, Template Studio  
+- [x] Workspace settings, optionele Postgres RLS  
+- [x] CI, E2E smoke, strikte build  
+- [x] Taken in database (`workspace_tasks`)  
+- [ ] Productie live (Vercel + Neon + merge PR)  
+- [ ] RLS op staging/productie  

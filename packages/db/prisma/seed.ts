@@ -1,4 +1,12 @@
-import { PrismaClient, UserRole, LeadStatus, CampaignStatus, ActivityType } from "@prisma/client";
+import {
+  PrismaClient,
+  UserRole,
+  LeadStatus,
+  CampaignStatus,
+  ActivityType,
+  EmailTemplateType,
+  EmailTemplateLayout,
+} from "@prisma/client";
 import { scryptSync, randomBytes } from "crypto";
 
 const prisma = new PrismaClient();
@@ -32,6 +40,25 @@ async function main() {
       email: adminEmail,
       name: "Admin",
       passwordHash: hashPassword(adminPassword),
+      emailVerified: new Date(),
+      role: UserRole.OWNER,
+    },
+  });
+
+  // Second OWNER for RLS staging smoke (cross-tenant isolation)
+  const rlsOwnerBEmail =
+    process.env.SEED_RLS_OWNER_B_EMAIL?.trim().toLowerCase() || "owner-b@digitify.local";
+  const rlsOwnerBPassword = process.env.SEED_RLS_OWNER_B_PASSWORD?.trim() || adminPassword;
+  if (rlsOwnerBPassword.length < 12) {
+    throw new Error("SEED_RLS_OWNER_B_PASSWORD must be at least 12 characters when set.");
+  }
+  const ownerB = await prisma.user.upsert({
+    where: { email: rlsOwnerBEmail },
+    update: {},
+    create: {
+      email: rlsOwnerBEmail,
+      name: "Owner B (RLS staging)",
+      passwordHash: hashPassword(rlsOwnerBPassword),
       emailVerified: new Date(),
       role: UserRole.OWNER,
     },
@@ -75,9 +102,11 @@ async function main() {
 
   for (const w of weights) {
     await prisma.scoringWeight.upsert({
-      where: { factorKey: w.factorKey },
+      where: {
+        createdById_factorKey: { createdById: "_global", factorKey: w.factorKey },
+      },
       update: w,
-      create: w,
+      create: { ...w, createdById: "_global" },
     });
   }
 
@@ -614,12 +643,19 @@ async function main() {
   }
 
   // Create email templates
+  const seedTemplateFields = {
+    type: EmailTemplateType.OUTREACH,
+    layout: EmailTemplateLayout.modern,
+  };
+
   await prisma.emailTemplate.upsert({
     where: { createdById_name: { createdById: admin.id, name: "Intro - Webdesign" } },
     update: {
       name: "Intro - Webdesign",
       subject: "Betere online zichtbaarheid voor {{companyName}}?",
       body: `Beste {{contactName}},\n\nIk kwam {{companyName}} tegen en merkte op dat er enkele kansen zijn om uw online aanwezigheid te versterken.\n\n{{painPoints}}\n\nBij {{senderCompany}} helpen we bedrijven zoals het uwe om meer klanten aan te trekken via een professionele website en sterke online zichtbaarheid.\n\nZou u openstaan voor een kort gesprek van 15 minuten om te bekijken hoe we u kunnen helpen?\n\nMet vriendelijke groeten,\n{{senderName}}\n{{senderCompany}}`,
+      ...seedTemplateFields,
+      campaignId: campaign1.id,
       isGlobal: false,
     },
     create: {
@@ -627,6 +663,8 @@ async function main() {
       name: "Intro - Webdesign",
       subject: "Betere online zichtbaarheid voor {{companyName}}?",
       body: `Beste {{contactName}},\n\nIk kwam {{companyName}} tegen en merkte op dat er enkele kansen zijn om uw online aanwezigheid te versterken.\n\n{{painPoints}}\n\nBij {{senderCompany}} helpen we bedrijven zoals het uwe om meer klanten aan te trekken via een professionele website en sterke online zichtbaarheid.\n\nZou u openstaan voor een kort gesprek van 15 minuten om te bekijken hoe we u kunnen helpen?\n\nMet vriendelijke groeten,\n{{senderName}}\n{{senderCompany}}`,
+      ...seedTemplateFields,
+      campaignId: campaign1.id,
       isGlobal: false,
     }
   });
@@ -637,6 +675,8 @@ async function main() {
       name: "Intro - SEO",
       subject: "{{companyName}} beter vindbaar in Google?",
       body: `Beste {{contactName}},\n\nIk deed wat onderzoek naar {{companyName}} en zag dat er mogelijkheden zijn om beter gevonden te worden in Google.\n\n{{painPoints}}\n\nBij {{senderCompany}} helpen we bedrijven in {{city}} om hoger te scoren in Google en meer relevante bezoekers aan te trekken.\n\nInteresse in een gratis SEO-analyse? Ik stuur ze graag door.\n\nGroeten,\n{{senderName}}\n{{senderCompany}}`,
+      ...seedTemplateFields,
+      campaignId: campaign2.id,
       isGlobal: false,
     },
     create: {
@@ -644,6 +684,8 @@ async function main() {
       name: "Intro - SEO",
       subject: "{{companyName}} beter vindbaar in Google?",
       body: `Beste {{contactName}},\n\nIk deed wat onderzoek naar {{companyName}} en zag dat er mogelijkheden zijn om beter gevonden te worden in Google.\n\n{{painPoints}}\n\nBij {{senderCompany}} helpen we bedrijven in {{city}} om hoger te scoren in Google en meer relevante bezoekers aan te trekken.\n\nInteresse in een gratis SEO-analyse? Ik stuur ze graag door.\n\nGroeten,\n{{senderName}}\n{{senderCompany}}`,
+      ...seedTemplateFields,
+      campaignId: campaign2.id,
       isGlobal: false,
     },
   });
@@ -654,14 +696,20 @@ async function main() {
       name: "Follow-up 1",
       subject: "Re: {{previousSubject}}",
       body: `Beste {{contactName}},\n\nIk wilde even opvolgen op mijn vorige mail. Ik begrijp dat het druk kan zijn.\n\nKort samengevat: ik zag enkele concrete verbeterpunten voor {{companyName}} online en zou die graag even toelichten.\n\nPast het om deze week even kort te bellen?\n\nMet vriendelijke groeten,\n{{senderName}}\n{{senderCompany}}`,
-      isGlobal: false,
+      type: EmailTemplateType.FOLLOW_UP,
+      layout: EmailTemplateLayout.followup,
+      campaignId: null,
+      isGlobal: true,
     },
     create: {
       createdById: admin.id,
       name: "Follow-up 1",
       subject: "Re: {{previousSubject}}",
       body: `Beste {{contactName}},\n\nIk wilde even opvolgen op mijn vorige mail. Ik begrijp dat het druk kan zijn.\n\nKort samengevat: ik zag enkele concrete verbeterpunten voor {{companyName}} online en zou die graag even toelichten.\n\nPast het om deze week even kort te bellen?\n\nMet vriendelijke groeten,\n{{senderName}}\n{{senderCompany}}`,
-      isGlobal: false,
+      type: EmailTemplateType.FOLLOW_UP,
+      layout: EmailTemplateLayout.followup,
+      campaignId: null,
+      isGlobal: true,
     },
   });
 
@@ -709,8 +757,62 @@ async function main() {
     });
   }
 
+  // RLS staging workspace B — minimal isolated data (see prisma/rls-staging-smoke.ts)
+  const rlsMarker = "RLS Workspace B —";
+  await prisma.pipelineStage.upsert({
+    where: { createdById_name: { createdById: ownerB.id, name: "New" } },
+    update: { createdById: ownerB.id, color: "#6366f1", sortOrder: 0, isDefault: true },
+    create: {
+      createdById: ownerB.id,
+      name: "New",
+      color: "#6366f1",
+      sortOrder: 0,
+      isDefault: true,
+    },
+  });
+  const existingRlsCampaign = await prisma.campaign.findFirst({
+    where: { createdById: ownerB.id, name: "RLS Staging Campagne" },
+  });
+  if (!existingRlsCampaign) {
+    await prisma.campaign.create({
+      data: {
+        createdById: ownerB.id,
+        name: "RLS Staging Campagne",
+        description: "Testcampagne voor workspace B (RLS smoke)",
+        niche: "Test",
+        region: "Staging",
+        status: CampaignStatus.DRAFT,
+      },
+    });
+  }
+  for (const suffix of ["Demo Lead 1", "Demo Lead 2"]) {
+    const companyName = `${rlsMarker} ${suffix}`;
+    const existingLead = await prisma.lead.findFirst({
+      where: { createdById: ownerB.id, companyName },
+    });
+    if (!existingLead) {
+      await prisma.lead.create({
+        data: {
+          createdById: ownerB.id,
+          companyName,
+          status: LeadStatus.NEW,
+          source: "rls_staging_seed",
+        },
+      });
+    }
+  }
+  await prisma.setting.upsert({
+    where: { key: userSettingKey(ownerB.id, "branding.company_name") },
+    update: { value: "Workspace B Staging" },
+    create: {
+      key: userSettingKey(ownerB.id, "branding.company_name"),
+      value: "Workspace B Staging",
+    },
+  });
+
   console.log("Seed completed!");
-  console.log(`  - 1 owner user (${adminEmail})`);
+  console.log(`  - 2 owner users (${adminEmail}, ${rlsOwnerBEmail})`);
+  console.log(`  - RLS smoke: ENABLE_WORKSPACE_RLS=true pnpm rls:smoke`);
   console.log(`  - ${stages.length} pipeline stages`);
   console.log(`  - ${weights.length} scoring weights`);
   console.log(`  - ${tags.length} tags`);

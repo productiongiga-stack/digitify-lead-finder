@@ -6,12 +6,12 @@ import nodemailer from "nodemailer";
 import { createHash } from "node:crypto";
 import { type PrismaClient, Prisma } from "@digitify/db";
 import { normalizeTlsOptions } from "../lib/email-utils";
-import { buildLeadContext, generateBrandedHtml, replacePlaceholders, type EmailLayout } from "@digitify/email";
+import { buildLeadContext, generateBrandedHtml, normalizeHtmlEmailDocument, replacePlaceholders, type EmailLayout } from "@digitify/email";
 import { loadEmailSettings } from "../lib/email-sender";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
 import { ensureLeadLink } from "../lib/lead-link";
 import { extractEmailTemplateMetadata } from "../lib/email-content";
-import { loadUserSettingRows } from "../lib/user-settings";
+import { loadWorkspaceSettingRows, workspaceScopeFromUser, type WorkspaceScope } from "../lib/workspace-settings";
 import { log } from "../lib/logger";
 
 /* ---------- helpers ---------- */
@@ -155,8 +155,8 @@ function resolveAppUrl() {
   return "http://localhost:3000";
 }
 
-async function getImapConfig(db: PrismaClient, userId: string) {
-  const rows = await loadUserSettingRows(db, userId);
+async function getImapConfig(db: PrismaClient, scope: WorkspaceScope) {
+  const rows = await loadWorkspaceSettingRows(db, scope);
   const settings = settingsRowsToMap(rows);
   const host = getSettingString(settings, "email.imap_host");
   const port = getSettingString(settings, "email.imap_port", "993");
@@ -186,8 +186,8 @@ async function getImapConfig(db: PrismaClient, userId: string) {
   };
 }
 
-async function getSmtpConfig(db: PrismaClient, userId: string) {
-  const rows = await loadUserSettingRows(db, userId);
+async function getSmtpConfig(db: PrismaClient, scope: WorkspaceScope) {
+  const rows = await loadWorkspaceSettingRows(db, scope);
   const settings = settingsRowsToMap(rows);
   const host = getSettingString(settings, "email.smtp_host");
   const port = getSettingString(settings, "email.smtp_port", "587");
@@ -260,6 +260,7 @@ async function appendToSentMailbox(
 async function sendInboxMessage(params: {
   db: PrismaClient;
   userId: string;
+  workspaceScope: WorkspaceScope;
   input: {
     to: string;
     subject: string;
@@ -270,9 +271,13 @@ async function sendInboxMessage(params: {
     references?: string;
   };
 }) {
-  const smtpConfig = await getSmtpConfig(params.db, params.userId);
-  const imapConfig = await getImapConfig(params.db, params.userId);
-  const emailSettings = await loadEmailSettings(params.db, params.userId);
+  const scope = params.workspaceScope ?? {
+    workspaceId: params.userId,
+    memberId: params.userId,
+  };
+  const smtpConfig = await getSmtpConfig(params.db, scope);
+  const imapConfig = await getImapConfig(params.db, scope);
+  const emailSettings = await loadEmailSettings(params.db, scope);
 
   const guardKey = createSendGuardKey(
     params.userId,
@@ -327,13 +332,16 @@ async function sendInboxMessage(params: {
   const subject = replacePlaceholders(params.input.subject.trim(), placeholderContext, { removeMissing: true }).trim() || "Bericht";
   const resolvedBody = replacePlaceholders(params.input.body.trim(), placeholderContext, { removeMissing: true }).trim();
   const templateMetadata = extractEmailTemplateMetadata(resolvedBody);
-  const plainBody = [
-    templateMetadata.cleanBody,
-    emailSettings.signature.trim() ? emailSettings.signature.trim() : "",
-    emailSettings.footer.trim() ? emailSettings.footer.trim() : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const isHtmlBody = templateMetadata.bodyFormat === "HTML";
+  const plainBody = isHtmlBody
+    ? templateMetadata.cleanBody
+    : [
+        templateMetadata.cleanBody,
+        emailSettings.signature.trim() ? emailSettings.signature.trim() : "",
+        emailSettings.footer.trim() ? emailSettings.footer.trim() : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
   const draft = await params.db.emailDraft.create({
     data: {
       leadId: linkedLead.id,
@@ -346,22 +354,24 @@ async function sendInboxMessage(params: {
     },
   });
   const trackingPixel = `<img src="${resolveAppUrl()}/api/public/email/open/${encodeURIComponent(draft.id)}" alt="" width="1" height="1" style="display:none;border:0;outline:none;"/>`;
-  const htmlBody = generateBrandedHtml({
-    subject,
-    body: plainBody,
-    companyName: emailSettings.companyName || fromName || "Digitify",
-    primaryColor: emailSettings.primaryColor,
-    fromName,
-    fromEmail,
-    headerSlogan: emailSettings.headerSlogan,
-    recipientCompany: linkedLead?.companyName || params.input.to,
-    logoUrl: emailSettings.logoUrl,
-    hidePoweredBy: true,
-    layout: templateMetadata.layout || resolveLayoutForType(params.input.type, emailSettings.defaultLayout),
-    ctaText: templateMetadata.ctaText,
-    ctaUrl: templateMetadata.ctaUrl,
-    typographyMode: emailSettings.typographyMode,
-  });
+  const htmlBody = isHtmlBody
+    ? normalizeHtmlEmailDocument(plainBody)
+    : generateBrandedHtml({
+        subject,
+        body: plainBody,
+        companyName: emailSettings.companyName || fromName || "Digitify",
+        primaryColor: emailSettings.primaryColor,
+        fromName,
+        fromEmail,
+        headerSlogan: emailSettings.headerSlogan,
+        recipientCompany: linkedLead?.companyName || params.input.to,
+        logoUrl: emailSettings.logoUrl,
+        hidePoweredBy: true,
+        layout: templateMetadata.layout || resolveLayoutForType(params.input.type, emailSettings.defaultLayout),
+        ctaText: templateMetadata.ctaText,
+        ctaUrl: templateMetadata.ctaUrl,
+        typographyMode: emailSettings.typographyMode,
+      });
   const htmlBodyWithTracking = `${htmlBody}${trackingPixel}`;
 
   const transporter = nodemailer.createTransport({
@@ -455,7 +465,8 @@ async function sendInboxMessage(params: {
 
 export const inboxRouter = router({
   mailboxes: protectedProcedure.query(async ({ ctx }) => {
-    const config = await getImapConfig(ctx.db, ctx.user.id);
+    const scope = workspaceScopeFromUser(ctx.user);
+    const config = await getImapConfig(ctx.db, scope);
 
     return withImap(config, async (client) => {
       const mailboxes = await client.list();
@@ -497,7 +508,8 @@ export const inboxRouter = router({
   list: protectedProcedure
     .input(z.object({ mailbox: z.string().default("INBOX") }).optional())
     .query(async ({ ctx, input }) => {
-      const config = await getImapConfig(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+    const config = await getImapConfig(ctx.db, scope);
       const mailbox = input?.mailbox || "INBOX";
 
       return withImap(config, async (client) => {
@@ -563,7 +575,8 @@ export const inboxRouter = router({
   getMessage: protectedProcedure
     .input(z.object({ uid: z.number(), mailbox: z.string().default("INBOX") }))
     .query(async ({ ctx, input }) => {
-      const config = await getImapConfig(ctx.db, ctx.user.id);
+      const scope = workspaceScopeFromUser(ctx.user);
+    const config = await getImapConfig(ctx.db, scope);
 
       return withImap(config, async (client) => {
         const lock = await client.getMailboxLock(input.mailbox);
@@ -627,7 +640,14 @@ export const inboxRouter = router({
         references: z.string().optional(),
       }),
     )
-    .mutation(async ({ ctx, input }) => sendInboxMessage({ db: ctx.db, userId: ctx.user.id, input })),
+    .mutation(async ({ ctx, input }) =>
+      sendInboxMessage({
+        db: ctx.db,
+        userId: ctx.user.id,
+        workspaceScope: workspaceScopeFromUser(ctx.user),
+        input,
+      }),
+    ),
 
   /**
    * Reply to an email - sends via SMTP, appends to IMAP Sent folder
@@ -662,6 +682,7 @@ export const inboxRouter = router({
       return sendInboxMessage({
         db: ctx.db,
         userId: ctx.user.id,
+        workspaceScope: workspaceScopeFromUser(ctx.user),
         input: {
           to: input.to,
           subject: replySubject,

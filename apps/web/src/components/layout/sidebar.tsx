@@ -18,8 +18,103 @@ import {
   Zap,
   Bot,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc/client";
+
+type SidebarNavEntry = {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+};
+
+function sidebarItemClass(active?: boolean) {
+  return cn(
+    "flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-sm font-medium transition-all",
+    active
+      ? "bg-primary/12 text-primary shadow-sm ring-1 ring-primary/15"
+      : "text-muted-foreground hover:bg-accent/75 hover:text-accent-foreground",
+  );
+}
+
+function NavSectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="px-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+      {children}
+    </p>
+  );
+}
+
+function BrandBlock({
+  logoUrl,
+  brandName,
+  brandSlogan,
+  collapsed,
+  mobile,
+}: {
+  logoUrl?: string | null;
+  brandName: string;
+  brandSlogan?: string | null;
+  collapsed: boolean;
+  mobile: boolean;
+}) {
+  return (
+    <div className="flex h-16 items-center justify-between border-b border-border/60 bg-gradient-to-b from-background/70 to-transparent px-3">
+      <Link href="/dashboard" className="flex items-center gap-2">
+        {logoUrl ? (
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/60 bg-background shadow-sm">
+            <img src={logoUrl} alt={brandName} className="h-8 w-8 object-contain" />
+          </div>
+        ) : (
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+            <Zap className="h-4 w-4" />
+          </div>
+        )}
+        {!collapsed && (
+          <div className="min-w-0">
+            <p className="truncate text-base font-bold tracking-tight">{brandName}</p>
+            {brandSlogan ? (
+              <p className="truncate text-[11px] text-muted-foreground">{brandSlogan}</p>
+            ) : null}
+          </div>
+        )}
+      </Link>
+      {mobile ? (
+        <SheetClose asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-muted-foreground">
+            <X className="h-4 w-4" />
+          </Button>
+        </SheetClose>
+      ) : null}
+    </div>
+  );
+}
+
+function SidebarNavLink({
+  item,
+  active,
+  collapsed,
+  onNavigate,
+  onPrefetch,
+}: {
+  item: SidebarNavEntry;
+  active: boolean;
+  collapsed: boolean;
+  onNavigate: () => void;
+  onPrefetch: (href: string) => void;
+}) {
+  return (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      onMouseEnter={() => onPrefetch(item.href)}
+      className={sidebarItemClass(active)}
+    >
+      <item.icon className="h-4 w-4 shrink-0" />
+      {!collapsed && <span>{item.label}</span>}
+    </Link>
+  );
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -85,49 +180,23 @@ export function Sidebar() {
     return (
     <aside
       className={cn(
-        "inset-y-0 left-0 z-30 flex h-full flex-col bg-card/95 backdrop-blur transition-all duration-300",
-        mobile ? "w-full border-r-0" : "border-r",
+        "inset-y-0 left-0 z-30 flex h-full flex-col bg-card/90 shadow-xl shadow-slate-950/5 backdrop-blur-xl transition-all duration-300",
+        mobile ? "w-full border-r-0" : "border-r border-border/60",
         !mobile && (collapsed ? "w-16" : "w-60")
       )}
     >
-      {/* Logo */}
-      <div className="flex h-14 items-center justify-between border-b bg-[linear-gradient(180deg,rgba(255,255,255,0.7),rgba(255,255,255,0))] px-3 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.45),rgba(15,23,42,0))]">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          {logoUrl ? (
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg overflow-hidden">
-              <img src={logoUrl} alt={brandName} className="h-8 w-8 object-contain" />
-            </div>
-          ) : (
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <Zap className="h-4 w-4" />
-            </div>
-          )}
-          {!collapsed && (
-            <div className="min-w-0">
-              <p className="truncate text-base font-bold tracking-tight">{brandName}</p>
-              {brandSlogan ? (
-                <p className="truncate text-[11px] text-muted-foreground">{brandSlogan}</p>
-              ) : null}
-            </div>
-          )}
-        </Link>
-        {mobile ? (
-          <SheetClose asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-muted-foreground">
-              <X className="h-4 w-4" />
-            </Button>
-          </SheetClose>
-        ) : null}
-      </div>
+      <BrandBlock
+        logoUrl={logoUrl}
+        brandName={brandName}
+        brandSlogan={brandSlogan}
+        collapsed={collapsed}
+        mobile={mobile}
+      />
 
       {/* Nav */}
-      <ScrollArea className="flex-1 py-2">
-        {!collapsed && (
-          <p className="px-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-            Navigatie
-          </p>
-        )}
-        <nav className="space-y-1 px-2">
+      <ScrollArea className="flex-1 py-3">
+        {!collapsed && <NavSectionLabel>Navigatie</NavSectionLabel>}
+        <nav className="space-y-1.5 px-2">
           {MAIN_NAV_ITEMS.map((item) => {
             const isLeadNavItem = item.href === "/leads";
             const activeLeadMenuHref = isLeadNavItem
@@ -144,10 +213,10 @@ export function Sidebar() {
                 <div key={item.href} className="space-y-1">
                   <div
                     className={cn(
-                      "flex items-center gap-1 rounded-xl pr-1 transition-all",
+                      "flex items-center gap-1 rounded-2xl pr-1 transition-all",
                       isActive
-                        ? "bg-primary/10 text-primary shadow-sm"
-                        : "text-muted-foreground hover:bg-accent/80 hover:text-accent-foreground"
+                        ? "bg-primary/12 text-primary shadow-sm ring-1 ring-primary/15"
+                        : "text-muted-foreground hover:bg-accent/75 hover:text-accent-foreground"
                     )}
                   >
                     <button
@@ -160,7 +229,7 @@ export function Sidebar() {
                         }
                         setLeadWorkflowOpen((prev) => !prev);
                       }}
-                      className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2.5 text-left text-sm font-medium"
+                      className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium"
                     >
                       <item.icon className="h-4 w-4 shrink-0" />
                       {!collapsed && <span>{item.label}</span>}
@@ -188,7 +257,7 @@ export function Sidebar() {
                             onClick={() => setMobileSidebarOpen(false)}
                             onMouseEnter={() => router.prefetch(entry.href)}
                             className={cn(
-                              "flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors",
+                              "flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-medium transition-colors",
                               workflowActive
                                 ? "bg-primary/10 text-primary"
                                 : "text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground"
@@ -206,21 +275,14 @@ export function Sidebar() {
             }
 
             return (
-              <Link
+              <SidebarNavLink
                 key={item.href}
-                href={item.href}
-                onClick={() => setMobileSidebarOpen(false)}
-                onMouseEnter={() => router.prefetch(item.href)}
-                className={cn(
-                  "flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-sm font-medium transition-all",
-                  isActive
-                    ? "bg-primary/10 text-primary shadow-sm"
-                    : "text-muted-foreground hover:bg-accent/80 hover:text-accent-foreground"
-                )}
-              >
-                <item.icon className="h-4 w-4 shrink-0" />
-                {!collapsed && <span>{item.label}</span>}
-              </Link>
+                item={item}
+                active={isActive}
+                collapsed={collapsed}
+                onNavigate={() => setMobileSidebarOpen(false)}
+                onPrefetch={(href) => router.prefetch(href)}
+              />
             );
           })}
         </nav>
@@ -229,31 +291,20 @@ export function Sidebar() {
           <>
             <Separator className="my-2 mx-2" />
 
-            {!collapsed && (
-              <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
-                Tools
-              </p>
-            )}
+            {!collapsed && <NavSectionLabel>Tools</NavSectionLabel>}
 
-            <nav className="space-y-1 px-2">
+            <nav className="space-y-1.5 px-2">
               {visibleToolNav.map((item) => {
                 const isActive = isNavItemActive(item, pathname);
                 return (
-                  <Link
+                  <SidebarNavLink
                     key={item.href}
-                    href={item.href}
-                    onClick={() => setMobileSidebarOpen(false)}
-                    onMouseEnter={() => router.prefetch(item.href)}
-                    className={cn(
-                      "flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-sm font-medium transition-all",
-                      isActive
-                        ? "bg-primary/10 text-primary shadow-sm"
-                        : "text-muted-foreground hover:bg-accent/80 hover:text-accent-foreground"
-                    )}
-                  >
-                    <item.icon className="h-4 w-4 shrink-0" />
-                    {!collapsed && <span>{item.label}</span>}
-                  </Link>
+                    item={item}
+                    active={isActive}
+                    collapsed={collapsed}
+                    onNavigate={() => setMobileSidebarOpen(false)}
+                    onPrefetch={(href) => router.prefetch(href)}
+                  />
                 );
               })}
             </nav>
@@ -265,7 +316,7 @@ export function Sidebar() {
         <nav className="space-y-1 px-2">
           <button
             onClick={() => useUIStore.getState().toggleOpenClaw()}
-          className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm font-medium text-muted-foreground transition-all hover:bg-accent/80 hover:text-accent-foreground"
+          className="flex w-full items-center gap-2.5 rounded-2xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:bg-accent/75 hover:text-accent-foreground"
         >
           <Bot className="h-4 w-4 shrink-0" />
             {!collapsed && <span>OpenClaw</span>}
@@ -274,25 +325,18 @@ export function Sidebar() {
       </ScrollArea>
 
       {/* Bottom */}
-      <div className="border-t bg-muted/20 px-1.5 py-2">
+      <div className="border-t border-border/60 bg-muted/20 px-2 py-3">
         {BOTTOM_NAV_ITEMS.map((item) => {
           const isActive = isNavItemActive(item, pathname);
           return (
-            <Link
+            <SidebarNavLink
               key={item.href}
-              href={item.href}
-              onClick={() => setMobileSidebarOpen(false)}
-              onMouseEnter={() => router.prefetch(item.href)}
-              className={cn(
-                "flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-sm font-medium transition-all",
-                isActive
-                  ? "bg-primary/10 text-primary shadow-sm"
-                  : "text-muted-foreground hover:bg-accent/80 hover:text-accent-foreground"
-              )}
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
-            </Link>
+              item={item}
+              active={isActive}
+              collapsed={collapsed}
+              onNavigate={() => setMobileSidebarOpen(false)}
+              onPrefetch={(href) => router.prefetch(href)}
+            />
           );
         })}
 
@@ -300,7 +344,7 @@ export function Sidebar() {
           <Button
             variant="ghost"
             size="sm"
-            className="mt-2 w-full justify-center rounded-xl text-muted-foreground"
+            className="mt-2 w-full justify-center rounded-2xl text-muted-foreground"
             onClick={toggleSidebar}
           >
             {collapsed ? (

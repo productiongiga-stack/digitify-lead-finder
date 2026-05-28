@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { getCurrentUser } from "@/lib/auth/session";
+import { getCurrentUser, workspaceIdFor } from "@/lib/auth/session";
 import { log } from "@digitify/api/src/lib/logger";
+import { syncQuoteOutboundDrafts } from "@digitify/api/src/lib/quote-outbound-email";
 
 async function resolveLeadId(params: {
-  userId: string;
+  workspaceId: string;
+  memberId: string;
   leadId?: string;
   chatSessionId?: string;
   clientEmail: string;
@@ -14,7 +16,7 @@ async function resolveLeadId(params: {
 }) {
   if (params.leadId) {
     const lead = await prisma.lead.findFirst({
-      where: { id: params.leadId, createdById: params.userId },
+      where: { id: params.leadId, createdById: params.workspaceId },
       select: { id: true },
     });
     if (lead) return lead.id;
@@ -24,7 +26,11 @@ async function resolveLeadId(params: {
     const session = await prisma.chatSession.findFirst({
       where: {
         id: params.chatSessionId,
-        OR: [{ assignedToId: params.userId }, { tags: { has: `tenant:${params.userId}` } }],
+        OR: [
+          { lead: { createdById: params.workspaceId } },
+          { assignedToId: params.memberId },
+          { tags: { has: `tenant:${params.workspaceId}` } },
+        ],
       },
       select: {
         id: true,
@@ -50,7 +56,7 @@ async function resolveLeadId(params: {
           phone: params.clientPhone || session.visitorPhone,
           source: "chatbot",
           industry: session.intent || undefined,
-          createdById: params.userId,
+          createdById: params.workspaceId,
         },
         select: { id: true },
       });
@@ -67,7 +73,7 @@ async function resolveLeadId(params: {
 
   const existingLead = await prisma.lead.findFirst({
     where: {
-      createdById: params.userId,
+      createdById: params.workspaceId,
       OR: [
         ...(params.clientEmail ? [{ email: params.clientEmail.toLowerCase() }] : []),
         ...(companyCandidate ? [{ companyName: companyCandidate }] : []),
@@ -145,8 +151,10 @@ export async function POST(request: Request) {
     const vatAmount = Math.round(discountedSubtotal * (vatRate / 100) * 100) / 100;
     const total = discountedSubtotal + vatAmount;
 
+    const workspaceId = workspaceIdFor(user);
     const resolvedLeadId = await resolveLeadId({
-      userId: user.id,
+      workspaceId,
+      memberId: user.id,
       leadId,
       chatSessionId,
       clientEmail,
@@ -157,7 +165,7 @@ export async function POST(request: Request) {
 
     if (quoteId) {
       const existingQuote = await prisma.quote.findFirst({
-        where: { id: quoteId, createdById: user.id },
+        where: { id: quoteId, createdById: workspaceId },
         select: { id: true, quoteNumber: true, leadId: true },
       });
 
@@ -222,6 +230,8 @@ export async function POST(request: Request) {
         }).catch(() => null);
       }
 
+      await syncQuoteOutboundDrafts(prisma, quote.id, workspaceId);
+
       return NextResponse.json({
         success: true,
         quoteId: quote.id,
@@ -231,9 +241,9 @@ export async function POST(request: Request) {
     }
 
     const year = new Date().getFullYear();
-    const numberPrefix = `OFF-${year}-${user.id.slice(-4).toUpperCase()}-`;
+    const numberPrefix = `OFF-${year}-${workspaceId.slice(-4).toUpperCase()}-`;
     const count = await prisma.quote.count({
-      where: { createdById: user.id, quoteNumber: { startsWith: numberPrefix } },
+      where: { createdById: workspaceId, quoteNumber: { startsWith: numberPrefix } },
     });
     const quoteNumber = `${numberPrefix}${String(count + 1).padStart(4, "0")}`;
 
@@ -255,7 +265,7 @@ export async function POST(request: Request) {
         discount,
         vatAmount,
         total,
-        createdById: user.id,
+        createdById: workspaceId,
         items: { create: normalizedItems },
       },
       select: { id: true, quoteNumber: true },

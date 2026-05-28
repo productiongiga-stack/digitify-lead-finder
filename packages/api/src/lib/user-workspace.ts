@@ -29,6 +29,8 @@ const DEFAULT_EMAIL_TEMPLATES = [
   {
     name: "Lead Contact - Eerste bericht",
     subject: "Korte intro voor {{companyName}}",
+    type: "OUTREACH" as const,
+    layout: "modern" as const,
     body: [
       "Beste {{contactName}},",
       "",
@@ -39,13 +41,13 @@ const DEFAULT_EMAIL_TEMPLATES = [
       "",
       "Vriendelijke groeten,",
       "{{senderName}}",
-      "",
-      "[[LAYOUT=modern]]",
     ].join("\n"),
   },
   {
     name: "Follow-up - Opvolging",
     subject: "Even opvolgen op mijn bericht",
+    type: "FOLLOW_UP" as const,
+    layout: "followup" as const,
     body: [
       "Beste {{contactName}},",
       "",
@@ -56,13 +58,13 @@ const DEFAULT_EMAIL_TEMPLATES = [
       "",
       "Vriendelijke groeten,",
       "{{senderName}}",
-      "",
-      "[[LAYOUT=followup]]",
     ].join("\n"),
   },
   {
     name: "Offerte - Samenvatting",
     subject: "Offerte {{quoteNumber}} voor {{companyName}}",
+    type: "PROPOSAL" as const,
+    layout: "proposal" as const,
     body: [
       "Beste {{contactName}},",
       "",
@@ -73,8 +75,6 @@ const DEFAULT_EMAIL_TEMPLATES = [
       "",
       "Vriendelijke groeten,",
       "{{senderName}}",
-      "",
-      "[[LAYOUT=proposal]]",
     ].join("\n"),
   },
 ] as const;
@@ -183,6 +183,8 @@ export async function ensureUserWorkspace(db: PrismaClient, userId: string, fall
           name: template.name,
           subject: template.subject,
           body: template.body,
+          type: template.type,
+          layout: template.layout,
           isGlobal: false,
         })),
         skipDuplicates: true,

@@ -5,267 +5,299 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import {
+  Badge,
   Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-  Badge,
-  Skeleton,
+  CreateModal,
+  EmptyState,
+  Input,
+  Label,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Skeleton,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-  CreateModal,
-  EmptyState,
-  Label,
 } from "@digitify/ui";
-import { FileText, Plus, Trash2, Calendar, User } from "lucide-react";
+import {
+  Calendar,
+  Globe,
+  Loader2,
+  ScanSearch,
+  Sparkles,
+  Trash2,
+  Zap,
+} from "lucide-react";
+
+function hostnameFromUrl(raw: string) {
+  try {
+    const normalized = raw.startsWith("http") ? raw : `https://${raw}`;
+    return new URL(normalized).hostname.replace(/^www\./, "");
+  } catch {
+    return raw;
+  }
+}
 
 export default function ReportsPage() {
   const router = useRouter();
-  const [page, setPage] = useState(1);
-  const [generateOpen, setGenerateOpen] = useState(false);
+  const [url, setUrl] = useState("");
+  const [leadId, setLeadId] = useState("__none");
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string>("all");
 
-  const reportsQuery = trpc.report.list.useQuery({ page, perPage: 12 });
-  const campaignsQuery = trpc.campaign.list.useQuery();
-  const generateMutation = trpc.report.generate.useMutation({
-    onSuccess: (report) => {
-      setGenerateOpen(false);
-      reportsQuery.refetch();
-      router.push(`/reports/${report.id}`);
+  const audits = trpc.audit.listRecent.useQuery({ limit: 24 });
+  const leads = trpc.lead.list.useQuery({
+    page: 1,
+    pageSize: 200,
+    sortBy: "companyName",
+    sortDir: "asc",
+  });
+  const runAudit = trpc.audit.run.useMutation({
+    onSuccess: (data) => {
+      audits.refetch();
+      router.push(`/reports/${data.reportId}`);
     },
   });
   const deleteMutation = trpc.report.delete.useMutation({
     onSuccess: () => {
-      reportsQuery.refetch();
+      audits.refetch();
       setDeleteId(null);
     },
   });
 
+  const pending = runAudit.isPending;
+
   return (
-    <div className="app-page">
+    <div className="app-page reports-auditor-page">
       <div className="app-page-header">
         <div className="app-page-heading">
-          <h1 className="app-page-title">Rapporten</h1>
-          <p className="app-page-subtitle">Genereer en bekijk rapporten over je leads</p>
+          <h1 className="app-page-title">Website auditor</h1>
+          <p className="app-page-subtitle">
+            Laat een bot je website scannen — pagina&apos;s, knoppen, snelheid en SEO — en ontvang een
+            verbeterrapport voor elk bedrijf.
+          </p>
         </div>
-        <Button size="sm" onClick={() => setGenerateOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Rapport Genereren
-        </Button>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-3">
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="info">Info</TabsTrigger>
+      <Card className="reports-auditor-hero app-surface">
+        <CardContent className="p-5 md:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="audit-url" className="text-sm font-medium">
+                Website URL
+              </Label>
+              <div className="relative">
+                <Globe className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="audit-url"
+                  className="pl-9"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://jouwbedrijf.be"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && url.trim() && !pending) {
+                      runAudit.mutate({
+                        url: url.trim(),
+                        leadId: leadId === "__none" ? undefined : leadId,
+                      });
+                    }
+                  }}
+                />
+              </div>
+              {runAudit.error ? (
+                <p className="text-sm text-destructive">{runAudit.error.message}</p>
+              ) : null}
+            </div>
+            <div className="w-full space-y-2 lg:max-w-xs">
+              <Label className="text-sm font-medium">Koppel aan lead (optioneel)</Label>
+              <Select value={leadId} onValueChange={setLeadId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Geen lead" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">Geen lead</SelectItem>
+                  {(leads.data?.items ?? []).map((lead) => (
+                    <SelectItem key={lead.id} value={lead.id}>
+                      {lead.companyName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              size="lg"
+              className="shrink-0"
+              disabled={!url.trim() || pending}
+              onClick={() =>
+                runAudit.mutate({
+                  url: url.trim(),
+                  leadId: leadId === "__none" ? undefined : leadId,
+                })
+              }
+            >
+              {pending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <ScanSearch className="mr-2 h-4 w-4" />
+              )}
+              {pending ? "Website scannen…" : "Audit starten"}
+            </Button>
+          </div>
+          {pending ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              We controleren de homepage, interne pagina&apos;s, knoppen, formulieren, SEO en
+              contactsignalen. Dit kan tot een minuut duren.
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Tabs defaultValue="reports" className="space-y-3">
+        <TabsList className="page-view-tabs">
+          <TabsTrigger value="reports" className="page-view-tabs-trigger">
+            Rapporten
+          </TabsTrigger>
+          <TabsTrigger value="info" className="page-view-tabs-trigger">
+            Hoe het werkt
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="space-y-3">
-          {reportsQuery.isLoading ? (
+        <TabsContent value="reports" className="space-y-3">
+          {audits.isLoading ? (
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-36 w-full rounded-lg" />
+                <Skeleton key={i} className="h-40 w-full rounded-xl" />
               ))}
             </div>
-          ) : reportsQuery.data?.reports.length === 0 ? (
-            <Card>
+          ) : (audits.data ?? []).length === 0 ? (
+            <Card className="app-surface">
               <CardContent className="p-0">
                 <EmptyState
-                  icon={<FileText />}
-                  title="Nog geen rapporten gegenereerd"
-                  description='Klik op "Rapport Genereren" om te beginnen.'
-                  action={
-                    <Button size="sm" onClick={() => setGenerateOpen(true)}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Rapport Genereren
-                    </Button>
-                  }
+                  icon={<Sparkles />}
+                  title="Nog geen website-audits"
+                  description="Voer een URL in om je eerste verbeterrapport te genereren."
                 />
               </CardContent>
             </Card>
           ) : (
-            <>
-              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                {reportsQuery.data?.reports.map(
-                  (report: NonNullable<typeof reportsQuery.data>["reports"][number]) => {
-                    const data = report.data as Record<string, unknown>;
-                    return (
-                      <Card
-                        key={report.id}
-                        className="cursor-pointer transition-all hover:shadow-md hover:border-primary/20"
-                        onClick={() => router.push(`/reports/${report.id}`)}
-                      >
-                        <CardHeader className="pb-2">
-                          <div className="flex items-start justify-between">
-                            <CardTitle className="text-sm leading-tight">
-                              {report.title}
-                            </CardTitle>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeleteId(report.id);
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
-                          <div className="flex flex-wrap gap-1.5">
-                            <Badge variant={report.type === "campaign" ? "default" : "secondary"}>
-                              {report.type === "campaign" ? "Campagne" : "Alle Leads"}
-                            </Badge>
-                            {report.campaign ? (
-                              <Badge variant="outline">{report.campaign.name}</Badge>
-                            ) : null}
-                          </div>
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <Calendar className="h-3 w-3" />
-                              {new Date(report.createdAt).toLocaleDateString("nl-BE")}
-                            </span>
-                            {report.generatedBy?.name ? (
-                              <span className="flex items-center gap-1">
-                                <User className="h-3 w-3" />
-                                {report.generatedBy.name}
-                              </span>
-                            ) : null}
-                          </div>
-                          {data?.totalLeads != null ? (
-                            <p className="text-xs text-muted-foreground">
-                              {String(data.totalLeads)} leads · score gem.{" "}
-                              {String(data.avgScore ?? "—")}
-                            </p>
-                          ) : null}
-                        </CardContent>
-                      </Card>
-                    );
-                  },
-                )}
-              </div>
-
-              {reportsQuery.data && reportsQuery.data.totalPages > 1 ? (
-                <div className="flex items-center justify-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page === 1}
-                    onClick={() => setPage((p) => p - 1)}
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {(audits.data ?? []).map((item) => {
+                const data = (item.data ?? {}) as {
+                  url?: string;
+                  metrics?: { overall?: number; speedScore?: number; uxScore?: number };
+                  checks?: { ux?: { pagesBroken?: number; pagesChecked?: number } };
+                };
+                const overall = data.metrics?.overall;
+                const displayUrl = data.url ?? hostnameFromUrl(item.title);
+                return (
+                  <Card
+                    key={item.id}
+                    className="reports-audit-card cursor-pointer transition-all hover:border-primary/25 hover:shadow-md"
+                    onClick={() => router.push(`/reports/${item.id}`)}
                   >
-                    Vorige
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    Pagina {page} van {reportsQuery.data.totalPages}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page === reportsQuery.data.totalPages}
-                    onClick={() => setPage((p) => p + 1)}
-                  >
-                    Volgende
-                  </Button>
-                </div>
-              ) : null}
-            </>
+                    <CardHeader className="pb-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <CardTitle className="text-sm leading-snug">
+                          {hostnameFromUrl(displayUrl)}
+                        </CardTitle>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteId(item.id);
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        <Badge>Website audit</Badge>
+                        {overall != null ? (
+                          <Badge variant={overall >= 70 ? "default" : overall >= 45 ? "secondary" : "destructive"}>
+                            Score {overall}
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="h-3 w-3" />
+                          {new Date(item.createdAt).toLocaleDateString("nl-BE")}
+                        </span>
+                        {data.metrics?.speedScore != null ? (
+                          <span className="flex items-center gap-1">
+                            <Zap className="h-3 w-3" />
+                            Snelheid {data.metrics.speedScore}
+                          </span>
+                        ) : null}
+                      </div>
+                      {data.checks?.ux?.pagesChecked != null ? (
+                        <p className="text-xs text-muted-foreground">
+                          {data.checks.ux.pagesChecked} pagina&apos;s ·{" "}
+                          {data.checks.ux.pagesBroken ?? 0} probleem
+                          {(data.checks.ux.pagesBroken ?? 0) === 1 ? "" : "en"}
+                        </p>
+                      ) : null}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
           )}
         </TabsContent>
 
         <TabsContent value="info" className="space-y-3">
           <div className="grid gap-3 lg:grid-cols-3">
-            <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-              <CardContent className="p-3">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Gebruik
-                </p>
-                <p className="mt-1.5 text-sm font-medium">
-                  Genereer rapporten per campagne om snel trends in leadkwaliteit, score en
-                  output te zien.
+            <Card className="reports-auditor-info-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stap 1</p>
+                <p className="mt-2 text-sm font-medium">Voer de website-URL in van elk bedrijf — horeca, retail, B2B, …</p>
+              </CardContent>
+            </Card>
+            <Card className="reports-auditor-info-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stap 2</p>
+                <p className="mt-2 text-sm font-medium">
+                  De bot scant pagina&apos;s, knoppen, formulieren, laadtijd, SEO, reviews en contact.
                 </p>
               </CardContent>
             </Card>
-            <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-              <CardContent className="p-3">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Voor wie
+            <Card className="reports-auditor-info-card">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stap 3</p>
+                <p className="mt-2 text-sm font-medium">
+                  Gebruik het rapport in salesgesprekken of interne optimalisatie — met concrete acties.
                 </p>
-                <p className="mt-1.5 text-sm font-medium">
-                  Handig voor sales en operations om wekelijkse opvolging en
-                  campagnebeslissingen te onderbouwen.
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-              <CardContent className="p-3">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Gerelateerd
-                </p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <Button asChild size="sm" variant="outline">
-                    <Link href="/campaigns">Campagnes</Link>
-                  </Button>
-                  <Button asChild size="sm" variant="ghost">
-                    <Link href="/leads">Leads</Link>
-                  </Button>
-                </div>
               </CardContent>
             </Card>
           </div>
+          <Card className="app-surface">
+            <CardContent className="flex flex-wrap gap-2 p-4">
+              <Button asChild size="sm" variant="outline">
+                <Link href="/leads">Leads</Link>
+              </Button>
+              <Button asChild size="sm" variant="ghost">
+                <Link href="/settings">API-instellingen (Google Places)</Link>
+              </Button>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 
-      {/* Generate dialog */}
-      <CreateModal
-        open={generateOpen}
-        onOpenChange={setGenerateOpen}
-        title="Nieuw Rapport Genereren"
-        description="Selecteer een campagne om over te rapporteren, of kies alle leads."
-        submitLabel="Genereren"
-        pending={generateMutation.isPending}
-        onSubmit={() =>
-          generateMutation.mutate({
-            campaignId: selectedCampaignId === "all" ? undefined : selectedCampaignId,
-          })
-        }
-      >
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">Selecteer campagne</Label>
-          <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
-            <SelectTrigger>
-              <SelectValue placeholder="Kies een campagne..." />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Alle Leads</SelectItem>
-              {campaignsQuery.data?.map(
-                (campaign: NonNullable<typeof campaignsQuery.data>[number]) => (
-                  <SelectItem key={campaign.id} value={campaign.id}>
-                    {campaign.name}
-                  </SelectItem>
-                ),
-              )}
-            </SelectContent>
-          </Select>
-        </div>
-      </CreateModal>
-
-      {/* Delete confirmation */}
       <CreateModal
         open={deleteId !== null}
         onOpenChange={(open) => !open && setDeleteId(null)}
-        title="Rapport verwijderen"
-        description="Weet je zeker dat je dit rapport wilt verwijderen? Dit kan niet ongedaan worden gemaakt."
+        title="Audit verwijderen"
+        description="Weet je zeker dat je dit auditrapport wilt verwijderen?"
         submitLabel="Verwijderen"
         submitVariant="destructive"
         pending={deleteMutation.isPending}
@@ -273,9 +305,7 @@ export default function ReportsPage() {
           if (deleteId) deleteMutation.mutate({ id: deleteId });
         }}
       >
-        <p className="text-sm text-muted-foreground">
-          Verwijderde rapporten zijn niet meer terug te halen.
-        </p>
+        <p className="text-sm text-muted-foreground">Verwijderde rapporten zijn niet meer terug te halen.</p>
       </CreateModal>
     </div>
   );

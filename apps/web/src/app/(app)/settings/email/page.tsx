@@ -3,29 +3,86 @@
 import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc/client";
 import {
-  Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Textarea, Skeleton,
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-  Tabs, TabsContent, TabsList, TabsTrigger, Badge,
+  Button, Card, CardContent, Input, Label, Textarea, Skeleton,
+  Tabs, TabsContent, TabsList, TabsTrigger,
 } from "@digitify/ui";
-import { ArrowLeft, Save, Loader2 } from "lucide-react";
+import { ArrowLeft, Save, Loader2, User, Send, Palette, Braces } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
 import { readSettingString } from "@/lib/settings";
 import { MailVariablesHelp } from "@/components/email/mail-variables-help";
-import { EmailPreview } from "@/components/email/preview";
-import { parseEmailLayout, type EmailLayout } from "@/lib/email-content";
+import { EmailDesignPanel, type EmailDesignMode } from "@/components/email/email-design-panel";
+import { DEFAULT_CUSTOM_EMAIL_HTML } from "@/lib/email-design-examples";
+import { parseEmailLayout, type EmailLayout, type TemplateType } from "@/lib/email-content";
 
-const EMAIL_LAYOUT_OPTIONS: Array<{
-  value: EmailLayout;
-  label: string;
-  description: string;
-}> = [
-  { value: "modern", label: "Modern", description: "Heldere allround layout voor algemene outreach." },
-  { value: "minimal", label: "Minimalistisch", description: "Rustig en persoonlijk, ideaal voor korte mails." },
-  { value: "business", label: "Zakelijk", description: "Strakker voor rapporten, afspraken en professionele updates." },
-  { value: "proposal", label: "Voorstel", description: "Visueel sterker voor offertes en commerciële voorstellen." },
-  { value: "followup", label: "Follow-up", description: "Compacte opvolg-layout voor reminders en check-ins." },
+type CustomHtmlPreset = {
+  id: string;
+  name: string;
+  html: string;
+};
+
+const TYPE_LAYOUT_KEYS: TemplateType[] = [
+  "OUTREACH",
+  "FOLLOW_UP",
+  "PROPOSAL",
+  "REPORT",
+  "BOOKING",
+  "REVIEW",
+  "REENGAGEMENT",
+  "CUSTOM",
 ];
+
+function parseDesignMode(value: string): EmailDesignMode {
+  return value === "custom" ? "custom" : "preset";
+}
+
+function parseCustomHtmlPresets(value: string): CustomHtmlPreset[] {
+  if (!value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") return null;
+        const record = entry as Record<string, unknown>;
+        const id = typeof record.id === "string" ? record.id.trim() : "";
+        const name = typeof record.name === "string" ? record.name.trim() : "";
+        const html = typeof record.html === "string" ? record.html : "";
+        if (!id || !name || !html.trim()) return null;
+        return { id, name, html };
+      })
+      .filter((item): item is CustomHtmlPreset => item !== null);
+  } catch {
+    return [];
+  }
+}
+
+function stringifyCustomHtmlPresets(value: CustomHtmlPreset[]) {
+  return JSON.stringify(value, null, 2);
+}
+
+function parseLayoutByType(value: string): Partial<Record<TemplateType, EmailLayout>> {
+  if (!value.trim()) return {};
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const record = parsed as Record<string, unknown>;
+    const result: Partial<Record<TemplateType, EmailLayout>> = {};
+    TYPE_LAYOUT_KEYS.forEach((typeKey) => {
+      const raw = record[typeKey];
+      if (typeof raw !== "string") return;
+      const normalized = parseEmailLayout(raw, "business");
+      result[typeKey] = normalized;
+    });
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+function stringifyLayoutByType(value: Partial<Record<TemplateType, EmailLayout>>) {
+  return JSON.stringify(value, null, 2);
+}
 
 export default function EmailSettingsPage() {
   const { data: settings, isLoading, error, refetch } = trpc.settings.getAll.useQuery(undefined, {
@@ -58,6 +115,10 @@ export default function EmailSettingsPage() {
   const [replyTo, setReplyTo] = useState("");
   const [footer, setFooter] = useState("");
   const [defaultLayout, setDefaultLayout] = useState<EmailLayout>("business");
+  const [designMode, setDesignMode] = useState<EmailDesignMode>("preset");
+  const [customHtml, setCustomHtml] = useState(DEFAULT_CUSTOM_EMAIL_HTML);
+  const [customHtmlPresets, setCustomHtmlPresets] = useState<CustomHtmlPreset[]>([]);
+  const [layoutByType, setLayoutByType] = useState<Partial<Record<TemplateType, EmailLayout>>>({});
   const [initialValues, setInitialValues] = useState({
     fromName: "",
     fromEmail: "",
@@ -70,6 +131,10 @@ export default function EmailSettingsPage() {
     replyTo: "",
     footer: "",
     defaultLayout: "business" as EmailLayout,
+    designMode: "preset" as EmailDesignMode,
+    customHtml: DEFAULT_CUSTOM_EMAIL_HTML,
+    customHtmlPresets: [] as CustomHtmlPreset[],
+    layoutByType: {} as Partial<Record<TemplateType, EmailLayout>>,
   });
   useEffect(() => {
     if (settings) {
@@ -85,6 +150,14 @@ export default function EmailSettingsPage() {
         replyTo: readSettingString(settings, "email.reply_to"),
         footer: readSettingString(settings, "email.footer"),
         defaultLayout: parseEmailLayout(readSettingString(settings, "email.default_layout", "business"), "business"),
+        designMode: parseDesignMode(readSettingString(settings, "email.design_mode", "preset")),
+        customHtml: readSettingString(settings, "email.custom_html", DEFAULT_CUSTOM_EMAIL_HTML) || DEFAULT_CUSTOM_EMAIL_HTML,
+        customHtmlPresets: parseCustomHtmlPresets(
+          readSettingString(settings, "email.custom_html_presets_json", "[]"),
+        ),
+        layoutByType: parseLayoutByType(
+          readSettingString(settings, "email.default_layout_by_type_json", "{}"),
+        ),
       };
       setFromName(nextValues.fromName);
       setFromEmail(nextValues.fromEmail);
@@ -97,6 +170,10 @@ export default function EmailSettingsPage() {
       setReplyTo(nextValues.replyTo);
       setFooter(nextValues.footer);
       setDefaultLayout(nextValues.defaultLayout);
+      setDesignMode(nextValues.designMode);
+      setCustomHtml(nextValues.customHtml);
+      setCustomHtmlPresets(nextValues.customHtmlPresets);
+      setLayoutByType(nextValues.layoutByType);
       setInitialValues(nextValues);
     }
   }, [settings]);
@@ -114,6 +191,10 @@ export default function EmailSettingsPage() {
       { key: "email.reply_to", value: replyTo.trim() },
       { key: "email.footer", value: footer },
       { key: "email.default_layout", value: defaultLayout },
+      { key: "email.design_mode", value: designMode },
+      { key: "email.custom_html", value: customHtml },
+      { key: "email.custom_html_presets_json", value: stringifyCustomHtmlPresets(customHtmlPresets) },
+      { key: "email.default_layout_by_type_json", value: stringifyLayoutByType(layoutByType) },
     ]);
   }
 
@@ -128,7 +209,46 @@ export default function EmailSettingsPage() {
     || bcc !== initialValues.bcc
     || replyTo !== initialValues.replyTo
     || footer !== initialValues.footer
-    || defaultLayout !== initialValues.defaultLayout;
+    || defaultLayout !== initialValues.defaultLayout
+    || designMode !== initialValues.designMode
+    || customHtml !== initialValues.customHtml
+    || JSON.stringify(customHtmlPresets) !== JSON.stringify(initialValues.customHtmlPresets)
+    || JSON.stringify(layoutByType) !== JSON.stringify(initialValues.layoutByType);
+
+  function saveCustomHtmlPreset(name: string) {
+    const html = customHtml.trim();
+    if (!html) return;
+    const id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `preset-${Date.now()}`;
+    setCustomHtmlPresets((current) => [{ id, name, html }, ...current].slice(0, 20));
+    showToast({
+      title: "Preset opgeslagen",
+      description: `"${name}" is toegevoegd aan je HTML-presets.`,
+    });
+  }
+
+  function loadCustomHtmlPreset(id: string) {
+    const preset = customHtmlPresets.find((entry) => entry.id === id);
+    if (!preset) return;
+    setCustomHtml(preset.html);
+    setDesignMode("custom");
+  }
+
+  function deleteCustomHtmlPreset(id: string) {
+    setCustomHtmlPresets((current) => current.filter((entry) => entry.id !== id));
+  }
+
+  function setTypeLayout(type: TemplateType, layout: EmailLayout) {
+    setLayoutByType((current) => ({
+      ...current,
+      [type]: layout,
+    }));
+  }
+
+  const previewCompanyName = readSettingString(settings || {}, "branding.company_name", "Digitify");
+  const previewPrimaryColor = readSettingString(settings || {}, "branding.primary_color", "#f9ae5a");
 
   if (isLoading) {
     return (
@@ -165,44 +285,29 @@ export default function EmailSettingsPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-4">
-        <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Afzender</p>
-            <p className="mt-2 text-sm font-medium">{fromName || "Geen afzendernaam"} · {fromEmail || "geen e-mail"}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Layout</p>
-            <p className="mt-2 text-sm font-medium">{EMAIL_LAYOUT_OPTIONS.find((layout) => layout.value === defaultLayout)?.label}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Follow-up</p>
-            <p className="mt-2 text-sm font-medium">Standaard na {followupDays || "3"} dagen</p>
-          </CardContent>
-        </Card>
-        <Card className="border-violet-200 bg-violet-50/80 shadow-sm dark:border-violet-900/40 dark:bg-violet-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Wijzigingen</p>
-            <p className="mt-2 text-sm font-medium">{hasChanges ? "Niet-opgeslagen wijzigingen aanwezig." : "Alles is opgeslagen."}</p>
-          </CardContent>
-        </Card>
-      </div>
-
       <Card>
         <CardContent className="p-5">
           <Tabs defaultValue="identity" className="space-y-5">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="identity">Afzender</TabsTrigger>
-              <TabsTrigger value="delivery">Verzending</TabsTrigger>
-              <TabsTrigger value="design">Design</TabsTrigger>
-              <TabsTrigger value="variables">Variabelen</TabsTrigger>
+            <TabsList className="settings-domain-tabs settings-domain-tabs-cols-4 w-full">
+              <TabsTrigger value="identity" className="settings-domain-tab">
+                <User className="settings-domain-tab-icon" />
+                Afzender
+              </TabsTrigger>
+              <TabsTrigger value="delivery" className="settings-domain-tab">
+                <Send className="settings-domain-tab-icon" />
+                Verzending
+              </TabsTrigger>
+              <TabsTrigger value="design" className="settings-domain-tab">
+                <Palette className="settings-domain-tab-icon" />
+                Design
+              </TabsTrigger>
+              <TabsTrigger value="variables" className="settings-domain-tab">
+                <Braces className="settings-domain-tab-icon" />
+                Variabelen
+              </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="identity" className="space-y-4">
+            <TabsContent value="identity" className="mt-4 space-y-4">
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Standaard &quot;Van&quot; naam</Label>
@@ -245,7 +350,7 @@ export default function EmailSettingsPage() {
               </div>
             </TabsContent>
 
-            <TabsContent value="delivery" className="space-y-4">
+            <TabsContent value="delivery" className="mt-4 space-y-4">
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Reply-to adres (optioneel)</Label>
@@ -280,70 +385,29 @@ export default function EmailSettingsPage() {
               </div>
             </TabsContent>
 
-            <TabsContent value="design" className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline">Premium compact maildesign</Badge>
-                <p className="text-xs text-muted-foreground">
-                  Elke layout gebruikt dezelfde premium basisstijl, maar met eigen inhoudsstructuur.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label>Standaard e-mail layout</Label>
-                <Select value={defaultLayout} onValueChange={(value) => setDefaultLayout(parseEmailLayout(value, "business"))}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {EMAIL_LAYOUT_OPTIONS.map((layout) => (
-                      <SelectItem key={layout.value} value={layout.value}>
-                        {layout.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  {EMAIL_LAYOUT_OPTIONS.find((layout) => layout.value === defaultLayout)?.description}
-                </p>
-              </div>
-              <div className="grid gap-3 md:grid-cols-5">
-                {EMAIL_LAYOUT_OPTIONS.map((layout) => (
-                  <button
-                    key={layout.value}
-                    type="button"
-                    onClick={() => setDefaultLayout(layout.value)}
-                    className={`rounded-xl border px-3 py-3 text-left transition ${
-                      defaultLayout === layout.value
-                        ? "border-primary bg-primary/5 shadow-sm"
-                        : "border-border bg-card hover:border-primary/40"
-                    }`}
-                  >
-                    <p className="text-sm font-medium">{layout.label}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{layout.description}</p>
-                  </button>
-                ))}
-              </div>
-              <EmailPreview
-                subject="Voorbeeld: samenwerking met {{companyName}}"
-                body={[
-                  "Beste {{contactName}},",
-                  "",
-                  "Bedankt voor je tijd. Hieronder vind je een helder overzicht met de volgende stap voor onze samenwerking.",
-                  "",
-                  "Alles is bewust compact gehouden zodat je snel kan scannen en reageren.",
-                  "",
-                  "Vriendelijke groeten,",
-                  fromName || "Jouw naam",
-                ].join("\n")}
-                companyName={fromName || "Digitify"}
-                primaryColor="#f5b04c"
-                fromName={fromName || "Jouw naam"}
-                headerSlogan={headerSlogan || "Premium outreach, helder en compact"}
-                recipientCompany="Voorbeeldbedrijf BV"
-                layout={defaultLayout}
+            <TabsContent value="design" className="mt-4 space-y-4">
+              <EmailDesignPanel
+                designMode={designMode}
+                onDesignModeChange={setDesignMode}
+                defaultLayout={defaultLayout}
+                onDefaultLayoutChange={setDefaultLayout}
+                layoutByType={layoutByType}
+                onLayoutByTypeChange={setTypeLayout}
+                customHtml={customHtml}
+                onCustomHtmlChange={setCustomHtml}
+                customPresets={customHtmlPresets.map((preset) => ({ id: preset.id, name: preset.name }))}
+                onSavePreset={saveCustomHtmlPreset}
+                onLoadPreset={loadCustomHtmlPreset}
+                onDeletePreset={deleteCustomHtmlPreset}
+                previewSubject="Voorbeeld: samenwerking met {{companyName}}"
+                fromName={fromName}
+                headerSlogan={headerSlogan}
+                companyName={previewCompanyName}
+                primaryColor={previewPrimaryColor}
               />
             </TabsContent>
 
-            <TabsContent value="variables" className="space-y-4">
+            <TabsContent value="variables" className="mt-4 space-y-4">
               <MailVariablesHelp
                 title="Centrale Variable Bibliotheek"
                 defaultOpen={false}

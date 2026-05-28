@@ -15,6 +15,7 @@ import {
   Copy,
   ExternalLink,
   Globe2,
+  Layers,
   ListChecks,
   Pencil,
   Plus,
@@ -23,6 +24,7 @@ import {
   Trash2,
   Webhook,
   Zap,
+  Code2,
 } from "lucide-react";
 import {
   Badge,
@@ -50,6 +52,7 @@ import {
 import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/components/feedback/toast-provider";
 import { getAppUrl } from "@/lib/config";
+import { cn } from "@/lib/utils";
 
 type DayKey = "0" | "1" | "2" | "3" | "4" | "5" | "6";
 type DaySchedule = { enabled: boolean; start: string; end: string };
@@ -174,6 +177,8 @@ function BookingEventTypeManager({ publicTenantToken }: { publicTenantToken: str
   const utils = trpc.useUtils();
   const { showToast } = useToast();
   const { data: eventTypes, isLoading } = trpc.booking.listEventTypes.useQuery();
+  type EventType = NonNullable<NonNullable<typeof eventTypes>[number]>;
+  const eventTypeItems = (eventTypes ?? []).filter((item): item is EventType => Boolean(item));
   const [editTarget, setEditTarget] = useState<null | {
     id?: string;
     name: string;
@@ -220,7 +225,7 @@ function BookingEventTypeManager({ publicTenantToken }: { publicTenantToken: str
     });
   }
 
-  function openEdit(et: NonNullable<typeof eventTypes>[number]) {
+  function openEdit(et: EventType) {
     setEditTarget({
       id: et.id,
       name: et.name,
@@ -269,7 +274,7 @@ function BookingEventTypeManager({ publicTenantToken }: { publicTenantToken: str
       </div>
 
       <div className="space-y-2">
-        {(eventTypes || []).map((et) => {
+        {eventTypeItems.map((et) => {
           const embedUrl = `${getAppUrl()}/embed/bookings${publicTenantToken ? `?tenant=${encodeURIComponent(publicTenantToken)}&eventType=${encodeURIComponent(et.slug)}` : ""}`;
           return (
             <div key={et.id} className="flex items-center gap-3 rounded-xl border px-4 py-3">
@@ -419,6 +424,129 @@ function BookingEventTypeManager({ publicTenantToken }: { publicTenantToken: str
   );
 }
 
+// ─── Setup checklist ───────────────────────────────────────────────────────────
+
+function BookingSetupChecklist({
+  googleDone,
+  googleDescription,
+  availabilityDone,
+  availabilityDescription,
+  embedDone,
+  embedDescription,
+  automationsDone,
+  automationsDescription,
+}: {
+  googleDone: boolean;
+  googleDescription: string;
+  availabilityDone: boolean;
+  availabilityDescription: string;
+  embedDone: boolean;
+  embedDescription: string;
+  automationsDone: boolean;
+  automationsDescription: string;
+}) {
+  const items = [
+    {
+      id: "google",
+      title: "Google Agenda",
+      description: googleDescription,
+      done: googleDone,
+      icon: Calendar,
+    },
+    {
+      id: "availability",
+      title: "Beschikbaarheid",
+      description: availabilityDescription,
+      done: availabilityDone,
+      icon: Clock,
+    },
+    {
+      id: "embed",
+      title: "Embed actief",
+      description: embedDescription,
+      done: embedDone,
+      icon: ExternalLink,
+    },
+    {
+      id: "automations",
+      title: "Automaties",
+      description: automationsDescription,
+      done: automationsDone,
+      icon: Webhook,
+    },
+  ];
+
+  const completedCount = items.filter((item) => item.done).length;
+  const progressPercent = Math.round((completedCount / items.length) * 100);
+
+  return (
+    <div className="settings-setup-checklist">
+      <div className="settings-setup-checklist-accent" />
+      <div className="settings-setup-checklist-header">
+        <div className="flex items-center gap-2">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <ListChecks className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold tracking-tight">Setup checklist</p>
+            <p className="text-xs text-muted-foreground">
+              {completedCount === items.length
+                ? "Je bookingflow is klaar om live te gaan."
+                : "Voltooi de open stappen om alles werkend te krijgen."}
+            </p>
+          </div>
+        </div>
+        <div className="w-full min-w-[200px] space-y-1.5 sm:max-w-xs">
+          <div className="flex items-center justify-between text-[11px] font-medium">
+            <span className="text-muted-foreground">Voortgang</span>
+            <span className="tabular-nums text-foreground">
+              {completedCount}/{items.length} klaar
+            </span>
+          </div>
+          <div className="settings-setup-checklist-progress-track">
+            <div
+              className="settings-setup-checklist-progress-fill"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+        </div>
+      </div>
+      <div className="settings-setup-checklist-grid">
+        {items.map((item) => {
+          const Icon = item.icon;
+          return (
+            <div
+              key={item.id}
+              className={cn(
+                "settings-setup-checklist-item",
+                item.done ? "settings-setup-checklist-item-done" : "settings-setup-checklist-item-pending",
+              )}
+            >
+              <div
+                className={cn(
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1",
+                  item.done
+                    ? "bg-emerald-500/10 text-emerald-600 ring-emerald-500/25 dark:text-emerald-400"
+                    : "bg-amber-500/10 text-amber-600 ring-amber-500/25 dark:text-amber-400",
+                )}
+              >
+                {item.done ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <p className="text-sm font-medium leading-snug">{item.title}</p>
+                  <Icon className="h-3.5 w-3.5 text-muted-foreground/70" aria-hidden />
+                </div>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{item.description}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Settings Page ────────────────────────────────────────────────────────
 
 export default function BookingSettingsPage() {
@@ -446,7 +574,7 @@ export default function BookingSettingsPage() {
       showToast({
         title: result.enabled ? "Google sync getest" : "Google sync staat nog uit",
         description: result.enabled
-          ? `Kalendercheck gelukt. Slotstatus: ${result.available ? "vrij" : "bezet"}.`
+          ? `Lezen en schrijven OK. ${result.upcomingGoogleEvents} afspraak(en) komende 7 dagen. Huidig slot: ${result.available ? "vrij" : "bezet"}.`
           : "Koppel Google Agenda en activeer synchronisatie om slots live te controleren.",
       }),
     onError: (mutationError) =>
@@ -717,6 +845,11 @@ export default function BookingSettingsPage() {
   const publicTenantToken = readSettingString(settings || {}, "chatbot.public_tenant_token", "");
   const bookingPreviewUrl = `${getAppUrl()}/embed/bookings${publicTenantToken ? `?tenant=${encodeURIComponent(publicTenantToken)}` : ""}`;
 
+  const activeDayCount = availableDaysCsv.split(",").filter(Boolean).length;
+  const googleChecklistDone = Boolean(googleOauthEmail || googleServiceAccountEmail.trim());
+  const embedChecklistDone = Boolean(publicTenantToken);
+  const automationsChecklistDone = Boolean(webhookUrl.trim()) || approvalMode === "automatic";
+
   const embedCode = useMemo(() => {
     const url = new URL(`${getAppUrl()}/embed/bookings`);
     url.searchParams.set("title", title);
@@ -894,145 +1027,133 @@ export default function BookingSettingsPage() {
         </div>
       </div>
 
-      <Card>
-        <CardContent className="p-4">
-          <h2 className="flex items-center gap-2 text-sm font-semibold">
-            <ListChecks className="h-4 w-4" />
-            Setup checklist
-          </h2>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            {/* Google Agenda */}
-            {(() => {
-              const done = Boolean(googleOauthEmail || googleServiceAccountEmail.trim());
-              return (
-                <div className="flex items-start gap-3 rounded-xl border p-3">
-                  <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${done ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-500"}`}>
-                    {done ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Google Agenda</p>
-                    <p className="text-xs text-muted-foreground">
-                      {done
-                        ? `Verbonden als ${googleOauthEmail || "Service account actief"}`
-                        : "Koppel je Google Agenda in de Google-tab"}
-                    </p>
-                  </div>
-                </div>
-              );
-            })()}
-            {/* Beschikbaarheid */}
-            {(() => {
-              const activeDays = availableDaysCsv.split(",").filter(Boolean).length;
-              const done = activeDays > 0;
-              return (
-                <div className="flex items-start gap-3 rounded-xl border p-3">
-                  <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${done ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-500"}`}>
-                    {done ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Beschikbaarheid</p>
-                    <p className="text-xs text-muted-foreground">
-                      {done ? `${activeDays} dagen actief` : "Stel je beschikbare dagen in"}
-                    </p>
-                  </div>
-                </div>
-              );
-            })()}
-            {/* Embed actief */}
-            {(() => {
-              const done = Boolean(publicTenantToken);
-              return (
-                <div className="flex items-start gap-3 rounded-xl border p-3">
-                  <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${done ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-500"}`}>
-                    {done ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Embed actief</p>
-                    <p className="text-xs text-muted-foreground">
-                      {done ? "Publieke link beschikbaar" : "Genereer je publieke token via de embed-tab"}
-                    </p>
-                  </div>
-                </div>
-              );
-            })()}
-            {/* Automaties */}
-            {(() => {
-              const done = Boolean(webhookUrl.trim()) || approvalMode === "automatic";
-              return (
-                <div className="flex items-start gap-3 rounded-xl border p-3">
-                  <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${done ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-500"}`}>
-                    {done ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Automaties</p>
-                    <p className="text-xs text-muted-foreground">
-                      {done
-                        ? approvalMode === "automatic" ? "Auto-bevestiging aan" : "Webhook geconfigureerd"
-                        : "Stel auto-bevestiging of webhook in"}
-                    </p>
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        </CardContent>
-      </Card>
+      <BookingSetupChecklist
+        googleDone={googleChecklistDone}
+        googleDescription={
+          googleChecklistDone
+            ? `Verbonden als ${googleOauthEmail || "service account"}`
+            : "Koppel je Google Agenda in de Google-tab"
+        }
+        availabilityDone={activeDayCount > 0}
+        availabilityDescription={
+          activeDayCount > 0 ? `${activeDayCount} dagen actief` : "Stel je beschikbare dagen in"
+        }
+        embedDone={embedChecklistDone}
+        embedDescription={
+          embedChecklistDone ? "Publieke link beschikbaar" : "Genereer je publieke token via de embed-tab"
+        }
+        automationsDone={automationsChecklistDone}
+        automationsDescription={
+          automationsChecklistDone
+            ? approvalMode === "automatic"
+              ? "Auto-bevestiging aan"
+              : "Webhook geconfigureerd"
+            : "Stel auto-bevestiging of webhook in"
+        }
+      />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card>
-          <CardContent className="flex items-center gap-4 p-5">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600">
+      <div className="settings-stat-grid">
+        <div className="settings-stat-card">
+          <div className="h-1 bg-gradient-to-r from-amber-500/85 via-amber-500/35 to-transparent" />
+          <div className="settings-stat-card-body">
+            <div className="settings-stat-card-icon bg-amber-500/10 text-amber-600 ring-amber-500/20 dark:text-amber-400">
               <CalendarDays className="h-5 w-5" />
             </div>
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Bookingflow</p>
-              <p className="mt-1 text-sm font-medium">
-                {meetingName || "Kennismaking"} / {duration} min
+            <div className="min-w-0">
+              <p className="settings-stat-card-label">Bookingflow</p>
+              <p className="settings-stat-card-value">
+                {meetingName || "Kennismaking"} · {duration} min
               </p>
-              <p className="text-xs text-muted-foreground">{theme === "dark" ? "Donkere layout" : "Lichte layout"}</p>
+              <p className="settings-stat-card-meta">
+                {theme === "dark" ? "Donkere layout" : "Lichte layout"} · {brandName || "Digitify"}
+              </p>
             </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-4 p-5">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-600">
+          </div>
+        </div>
+
+        <div className="settings-stat-card">
+          <div className="h-1 bg-gradient-to-r from-blue-500/85 via-blue-500/35 to-transparent" />
+          <div className="settings-stat-card-body">
+            <div className="settings-stat-card-icon bg-blue-500/10 text-blue-600 ring-blue-500/20 dark:text-blue-400">
               <Globe2 className="h-5 w-5" />
             </div>
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Beschikbaarheid</p>
-              <p className="mt-1 text-sm font-medium">
-                {availableDaysCsv ? `${availableDaysCsv.split(",").length} actieve dagen` : "Geen dagen actief"}
+            <div className="min-w-0">
+              <p className="settings-stat-card-label">Beschikbaarheid</p>
+              <p className="settings-stat-card-value">
+                {availableDaysCsv
+                  ? `${availableDaysCsv.split(",").length} actieve dagen`
+                  : "Geen dagen actief"}
               </p>
-              <p className="text-xs text-muted-foreground">
-                {fallbackWindow.start} - {fallbackWindow.end}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-4 p-5">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600">
-              <CheckCircle2 className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Google Agenda</p>
-              <p className="mt-1 text-sm font-medium">{googleReady ? "Klaar voor live sync" : "Nog niet volledig gekoppeld"}</p>
-              <p className="text-xs text-muted-foreground">{googleConnectionLabel}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center justify-between gap-4 p-5">
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Opslagstatus</p>
-              <p className="mt-1 text-sm font-medium">{hasChanges ? "Niet-opgeslagen wijzigingen" : "Alles opgeslagen"}</p>
-              <p className="text-xs text-muted-foreground">
-                Alle booking- en Google-instellingen blijven bewaard in je settings.
+              <p className="settings-stat-card-meta">
+                {fallbackWindow.start} – {fallbackWindow.end} · slots {slotMinutes} min
               </p>
             </div>
-            <Badge variant={hasChanges ? "warning" : "success"}>{hasChanges ? "Open" : "Saved"}</Badge>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+
+        <div className="settings-stat-card">
+          <div
+            className={cn(
+              "h-1 bg-gradient-to-r to-transparent",
+              googleReady
+                ? "from-emerald-500/85 via-emerald-500/35"
+                : "from-amber-500/85 via-amber-500/35",
+            )}
+          />
+          <div className="settings-stat-card-body">
+            <div
+              className={cn(
+                "settings-stat-card-icon",
+                googleReady
+                  ? "bg-emerald-500/10 text-emerald-600 ring-emerald-500/20 dark:text-emerald-400"
+                  : "bg-amber-500/10 text-amber-600 ring-amber-500/20 dark:text-amber-400",
+              )}
+            >
+              {googleReady ? (
+                <CheckCircle2 className="h-5 w-5" />
+              ) : (
+                <AlertCircle className="h-5 w-5" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="settings-stat-card-label">Google Agenda</p>
+              <p className="settings-stat-card-value">
+                {googleReady ? "Live sync actief" : "Nog niet gekoppeld"}
+              </p>
+              <p className="settings-stat-card-meta">{googleConnectionLabel}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="settings-stat-card">
+          <div
+            className={cn(
+              "h-1 bg-gradient-to-r to-transparent",
+              hasChanges
+                ? "from-amber-500/85 via-amber-500/35"
+                : "from-emerald-500/85 via-emerald-500/35",
+            )}
+          />
+          <div className="settings-stat-card-body items-center justify-between">
+            <div className="min-w-0 flex-1">
+              <p className="settings-stat-card-label">Opslagstatus</p>
+              <p className="settings-stat-card-value">
+                {hasChanges ? "Niet-opgeslagen wijzigingen" : "Alles opgeslagen"}
+              </p>
+              <p className="settings-stat-card-meta">
+                {hasChanges
+                  ? "Klik opslaan om wijzigingen te bewaren."
+                  : "Booking- en Google-instellingen zijn gesynchroniseerd."}
+              </p>
+            </div>
+            <Badge
+              variant={hasChanges ? "warning" : "success"}
+              className="shrink-0 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+            >
+              {hasChanges ? "Open" : "Saved"}
+            </Badge>
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.7fr)_minmax(420px,0.9fr)]">
@@ -1068,13 +1189,31 @@ export default function BookingSettingsPage() {
               </Button>
             </div>
             <Tabs defaultValue="flow" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-6">
-                <TabsTrigger value="flow">Flow</TabsTrigger>
-                <TabsTrigger value="availability">Beschikbaarheid</TabsTrigger>
-                <TabsTrigger value="automations">Automaties</TabsTrigger>
-                <TabsTrigger value="google">Google</TabsTrigger>
-                <TabsTrigger value="embed">Embed</TabsTrigger>
-                <TabsTrigger value="types">Boekingstypes</TabsTrigger>
+              <TabsList className="settings-domain-tabs settings-domain-tabs-cols-6">
+                <TabsTrigger value="flow" className="settings-domain-tab">
+                  <Zap className="settings-domain-tab-icon" />
+                  Flow
+                </TabsTrigger>
+                <TabsTrigger value="availability" className="settings-domain-tab">
+                  <Clock className="settings-domain-tab-icon" />
+                  Beschikbaarheid
+                </TabsTrigger>
+                <TabsTrigger value="automations" className="settings-domain-tab">
+                  <Webhook className="settings-domain-tab-icon" />
+                  Automaties
+                </TabsTrigger>
+                <TabsTrigger value="google" className="settings-domain-tab">
+                  <Globe2 className="settings-domain-tab-icon" />
+                  Google
+                </TabsTrigger>
+                <TabsTrigger value="embed" className="settings-domain-tab">
+                  <Code2 className="settings-domain-tab-icon" />
+                  Embed
+                </TabsTrigger>
+                <TabsTrigger value="types" className="settings-domain-tab">
+                  <Layers className="settings-domain-tab-icon" />
+                  Boekingstypes
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="flow" className="space-y-4 rounded-2xl border p-4">
@@ -1385,26 +1524,86 @@ export default function BookingSettingsPage() {
                   <Switch checked={googleSyncEnabled} onCheckedChange={setGoogleSyncEnabled} />
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="rounded-2xl border p-4">
-                    <p className="text-sm font-medium">OAuth koppeling</p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button type="button" variant="outline" asChild>
-                        <a href="/api/integrations/google-calendar/connect">
-                          <Globe2 className="mr-2 h-4 w-4" />
-                          {googleOauthEmail ? "Opnieuw verbinden en auto-sync aanzetten" : "Verbind via Google en zet auto-sync aan"}
-                        </a>
-                      </Button>
-                      <Button type="button" variant="outline" onClick={() => testGoogleSync.mutate()} disabled={testGoogleSync.isPending}>
-                        <CheckCircle2 className="mr-2 h-4 w-4" />
-                        {testGoogleSync.isPending ? "Testen..." : "Test synchronisatie"}
-                      </Button>
-                      <Badge variant={googleOauthEmail ? "success" : "secondary"}>
-                        {googleOauthEmail ? "OAuth actief" : "Niet verbonden"}
-                      </Badge>
+                  <div className="settings-connect-card">
+                    <div className="h-1 bg-gradient-to-r from-blue-500/85 via-blue-500/30 to-transparent" />
+                    <div className="settings-connect-card-body">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 gap-3">
+                          <div className="settings-connect-card-icon bg-blue-500/10 text-blue-600 ring-blue-500/20 dark:text-blue-400">
+                            <Globe2 className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold tracking-tight">OAuth koppeling</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              Snelste manier: inloggen met Google en auto-sync inschakelen.
+                            </p>
+                          </div>
+                        </div>
+                        <Badge
+                          variant={googleOauthEmail ? "success" : "secondary"}
+                          className="shrink-0 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                        >
+                          {googleOauthEmail ? "Verbonden" : "Niet verbonden"}
+                        </Badge>
+                      </div>
+                      {googleOauthEmail ? (
+                        <p className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 text-xs text-muted-foreground">
+                          Actief als <span className="font-medium text-foreground">{googleOauthEmail}</span>
+                        </p>
+                      ) : null}
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <Button type="button" className="shadow-sm sm:flex-1" asChild>
+                          <a href="/api/integrations/google-calendar/connect">
+                            <Globe2 className="mr-2 h-4 w-4" />
+                            {googleOauthEmail ? "Opnieuw verbinden" : "Verbind met Google"}
+                          </a>
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => testGoogleSync.mutate()}
+                          disabled={testGoogleSync.isPending}
+                          className="sm:shrink-0"
+                        >
+                          <CheckCircle2 className="mr-2 h-4 w-4" />
+                          {testGoogleSync.isPending ? "Testen..." : "Test sync"}
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                  <div className="rounded-2xl border p-4">
-                    <p className="text-sm font-medium">Service account</p>
+                  <div className="settings-connect-card">
+                    <div className="h-1 bg-gradient-to-r from-violet-500/85 via-violet-500/30 to-transparent" />
+                    <div className="settings-connect-card-body">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 gap-3">
+                          <div className="settings-connect-card-icon bg-violet-500/10 text-violet-600 ring-violet-500/20 dark:text-violet-400">
+                            <Settings2 className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold tracking-tight">Service account</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              Alternatief voor teams: koppel via service account credentials.
+                            </p>
+                          </div>
+                        </div>
+                        <Badge
+                          variant={
+                            googleServiceAccountEmail.trim() && googleServicePrivateKey.trim()
+                              ? "success"
+                              : "secondary"
+                          }
+                          className="shrink-0 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                        >
+                          {googleServiceAccountEmail.trim() && googleServicePrivateKey.trim()
+                            ? "Ingevuld"
+                            : "Optioneel"}
+                        </Badge>
+                      </div>
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        Vul hieronder e-mail en private key in als je geen OAuth wilt gebruiken, bijvoorbeeld voor
+                        server-side synchronisatie.
+                      </p>
+                    </div>
                   </div>
                 </div>
                 <div className="space-y-2">

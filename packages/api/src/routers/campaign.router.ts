@@ -6,7 +6,7 @@ import { type PrismaClient } from "@digitify/db";
 import { normalizeAiPlaceholderSyntax } from "../lib/email-utils";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
-import { loadUserSettingRows } from "../lib/user-settings";
+import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
 
 type DripMode = "lead" | "review";
 
@@ -62,9 +62,9 @@ async function runScheduledSequence(params: {
   db: PrismaClient;
   sequenceId: string;
   sequenceName: string;
-  activityUserId?: string;
+  workspaceId: string;
 }) : Promise<DripSequenceRunResult> {
-  const { db, sequenceId, sequenceName, activityUserId } = params;
+  const { db, sequenceId, sequenceName, workspaceId } = params;
   const sequenceMeta = parseSequenceMeta(sequenceName);
   const now = new Date();
   const dueDrafts = await db.emailDraft.findMany({
@@ -73,6 +73,7 @@ async function runScheduledSequence(params: {
       status: "SCHEDULED",
       sequenceStep: { in: [2, 3] },
       scheduledFor: { lte: now },
+      lead: { createdById: workspaceId },
     },
     include: {
       lead: {
@@ -82,6 +83,7 @@ async function runScheduledSequence(params: {
           email: true,
           status: true,
           doNotContact: true,
+          createdById: true,
           emailDrafts: {
             where: { sequenceId },
             select: { repliedAt: true, status: true },
@@ -134,7 +136,7 @@ async function runScheduledSequence(params: {
       body: draft.body,
       recipientCompany: draft.lead.companyName,
       leadId: draft.lead.id,
-      userId: activityUserId,
+      userId: workspaceId,
     });
 
     if (sendResult.success) {
@@ -161,10 +163,10 @@ async function runScheduledSequence(params: {
     }
   }
 
-  if (activityUserId && dueDrafts.length > 0) {
+  if (dueDrafts.length > 0) {
     await db.activity.create({
       data: {
-        userId: activityUserId,
+        userId: workspaceId,
         type: "EMAIL_SENT",
         title: `Drip queue verwerkt (${sequenceMeta.campaignName})`,
         metadata: {
@@ -195,7 +197,7 @@ async function runScheduledSequence(params: {
 
 export async function runAllDueDripsWorker(
   db: PrismaClient,
-  activityUserId?: string
+  options?: { workspaceId?: string },
 ): Promise<{
   sequences: number;
   due: number;
@@ -204,32 +206,41 @@ export async function runAllDueDripsWorker(
   stopped: number;
   errors: string[];
   campaigns: DripSequenceRunResult[];
+  workspaces: number;
 }> {
-  const dueSequenceRows = await db.emailDraft.findMany({
+  const now = new Date();
+  const dueDraftRows = await db.emailDraft.findMany({
     where: {
       status: "SCHEDULED",
       sequenceId: { not: null },
       sequenceStep: { in: [2, 3] },
-      scheduledFor: { lte: new Date() },
+      scheduledFor: { lte: now },
     },
     select: {
       sequenceId: true,
-      sequence: {
-        select: {
-          name: true,
-        },
-      },
+      lead: { select: { createdById: true } },
+      sequence: { select: { name: true } },
     },
-    distinct: ["sequenceId"],
   });
 
-  const sequenceRows = dueSequenceRows
-    .filter(
-      (row): row is { sequenceId: string; sequence: { name: string } } =>
-        Boolean(row.sequenceId) &&
-        Boolean(row.sequence?.name) &&
-        parseSequenceMeta(row.sequence!.name).campaignId !== null
-    );
+  type WorkspaceSequence = { workspaceId: string; sequenceId: string; sequenceName: string };
+  const byWorkspaceSequence = new Map<string, WorkspaceSequence>();
+
+  for (const row of dueDraftRows) {
+    if (!row.sequenceId || !row.sequence?.name) continue;
+    const meta = parseSequenceMeta(row.sequence.name);
+    if (!meta.campaignId) continue;
+    const workspaceId = row.lead.createdById;
+    if (options?.workspaceId && workspaceId !== options.workspaceId) continue;
+    const key = `${workspaceId}:${row.sequenceId}`;
+    if (!byWorkspaceSequence.has(key)) {
+      byWorkspaceSequence.set(key, {
+        workspaceId,
+        sequenceId: row.sequenceId,
+        sequenceName: row.sequence.name,
+      });
+    }
+  }
 
   const campaigns: DripSequenceRunResult[] = [];
   let due = 0;
@@ -237,13 +248,15 @@ export async function runAllDueDripsWorker(
   let failed = 0;
   let stopped = 0;
   const errors: string[] = [];
+  const workspaceIds = new Set<string>();
 
-  for (const row of sequenceRows) {
+  for (const entry of byWorkspaceSequence.values()) {
+    workspaceIds.add(entry.workspaceId);
     const result = await runScheduledSequence({
       db,
-      sequenceId: row.sequenceId,
-      sequenceName: row.sequence.name,
-      activityUserId,
+      sequenceId: entry.sequenceId,
+      sequenceName: entry.sequenceName,
+      workspaceId: entry.workspaceId,
     });
     campaigns.push(result);
     due += result.due;
@@ -255,6 +268,7 @@ export async function runAllDueDripsWorker(
 
   return {
     sequences: campaigns.length,
+    workspaces: workspaceIds.size,
     due,
     sent,
     failed,
@@ -342,8 +356,13 @@ function buildLeadFollowUpStep(baseSubject: string, step: number) {
   };
 }
 
-async function getOpenClawClient(db: PrismaClient, userId: string): Promise<{ client: OpenClawClient | null }> {
-  const rows = await loadUserSettingRows(db, userId, ["api.ai_provider", "openclaw.model", "api.anthropic_key", "api.openai_key"]);
+async function getOpenClawClient(db: PrismaClient, workspaceId: string): Promise<{ client: OpenClawClient | null }> {
+  const rows = await loadWorkspaceSettingRows(db, { workspaceId, memberId: workspaceId }, [
+    "api.ai_provider",
+    "openclaw.model",
+    "api.anthropic_key",
+    "api.openai_key",
+  ]);
   const settings = settingsRowsToMap(rows);
   const provider = getSettingString(settings, "api.ai_provider", "anthropic");
   const model = getSettingString(settings, "openclaw.model", "claude-sonnet-4-20250514");
@@ -416,7 +435,7 @@ function buildOpenclawContext(lead: any, campaign: any): OpenClawContext {
 export const campaignRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
     return ctx.db.campaign.findMany({
-      where: { createdById: ctx.user.id },
+      where: { createdById: ctx.user.workspaceId! },
       orderBy: { createdAt: "desc" },
       include: {
         _count: { select: { campaignLeads: true, templates: true } },
@@ -429,7 +448,7 @@ export const campaignRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const campaign = await ctx.db.campaign.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
         include: {
           createdBy: { select: { id: true, name: true } },
           templates: true,
@@ -503,7 +522,7 @@ export const campaignRouter = router({
       const campaign = await ctx.db.campaign.create({
         data: {
           ...input,
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
         },
       });
 
@@ -536,7 +555,7 @@ export const campaignRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
-      const existing = await ctx.db.campaign.findFirst({ where: { id, createdById: ctx.user.id }, select: { id: true } });
+      const existing = await ctx.db.campaign.findFirst({ where: { id, createdById: ctx.user.workspaceId! }, select: { id: true } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
       return ctx.db.campaign.update({ where: { id }, data: data as any });
     }),
@@ -544,7 +563,7 @@ export const campaignRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const existing = await ctx.db.campaign.findFirst({ where: { id: input.id, createdById: ctx.user.id }, select: { id: true } });
+      const existing = await ctx.db.campaign.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! }, select: { id: true } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
       await ctx.db.campaign.delete({ where: { id: input.id } });
       return { success: true };
@@ -553,10 +572,10 @@ export const campaignRouter = router({
   addLeads: protectedProcedure
     .input(z.object({ campaignId: z.string(), leadIds: z.array(z.string()) }))
     .mutation(async ({ ctx, input }) => {
-      const campaign = await ctx.db.campaign.findFirst({ where: { id: input.campaignId, createdById: ctx.user.id }, select: { id: true } });
+      const campaign = await ctx.db.campaign.findFirst({ where: { id: input.campaignId, createdById: ctx.user.workspaceId! }, select: { id: true } });
       if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });
       const ownedLeads = await ctx.db.lead.findMany({
-        where: { id: { in: input.leadIds }, createdById: ctx.user.id },
+        where: { id: { in: input.leadIds }, createdById: ctx.user.workspaceId! },
         select: { id: true },
       });
       const ownedLeadIds = ownedLeads.map((lead) => lead.id);
@@ -577,7 +596,7 @@ export const campaignRouter = router({
         where: {
           campaignId: input.campaignId,
           leadId: { in: input.leadIds },
-          campaign: { createdById: ctx.user.id },
+          campaign: { createdById: ctx.user.workspaceId! },
         },
       });
       return { removed: deleted.count };
@@ -587,7 +606,7 @@ export const campaignRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const campaign = await ctx.db.campaign.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
         include: {
           campaignLeads: {
             include: {
@@ -670,7 +689,7 @@ export const campaignRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const mode = input.mode as DripMode;
-      const { client } = await getOpenClawClient(ctx.db, ctx.user.id);
+      const { client } = await getOpenClawClient(ctx.db, ctx.user.workspaceId!);
       if (mode === "lead" && !client) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
@@ -679,7 +698,7 @@ export const campaignRouter = router({
       }
 
       const campaign = await ctx.db.campaign.findFirst({
-        where: { id: input.campaignId, createdById: ctx.user.id },
+        where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
         include: {
           campaignLeads: {
             include: {
@@ -781,10 +800,10 @@ export const campaignRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const mode = input.mode as DripMode;
-      const { client } = await getOpenClawClient(ctx.db, ctx.user.id);
+      const { client } = await getOpenClawClient(ctx.db, ctx.user.workspaceId!);
 
       const campaign = await ctx.db.campaign.findFirst({
-        where: { id: input.campaignId, createdById: ctx.user.id },
+        where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
         include: {
           campaignLeads: {
             include: {
@@ -1021,7 +1040,7 @@ export const campaignRouter = router({
     .mutation(async ({ ctx, input }) => {
       const mode = input.mode as DripMode;
       const campaign = await ctx.db.campaign.findFirst({
-        where: { id: input.campaignId, createdById: ctx.user.id },
+        where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
         select: { id: true, name: true },
       });
       if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });
@@ -1036,7 +1055,7 @@ export const campaignRouter = router({
         db: ctx.db,
         sequenceId: sequence.id,
         sequenceName: sequence.name,
-        activityUserId: ctx.user.id,
+        workspaceId: ctx.user.workspaceId!,
       });
 
       return {
@@ -1049,7 +1068,7 @@ export const campaignRouter = router({
     }),
 
   runAllDueDrip: protectedProcedure.mutation(async ({ ctx }) => {
-    return runAllDueDripsWorker(ctx.db, ctx.user.id);
+    return runAllDueDripsWorker(ctx.db, { workspaceId: ctx.user.workspaceId! });
   }),
 
   searchLeads: protectedProcedure
@@ -1058,7 +1077,7 @@ export const campaignRouter = router({
       const leads = await ctx.db.lead.findMany({
         where: {
           companyName: { contains: input.query, mode: "insensitive" },
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
           ...(input.excludeCampaignId
             ? {
                 campaignLeads: {

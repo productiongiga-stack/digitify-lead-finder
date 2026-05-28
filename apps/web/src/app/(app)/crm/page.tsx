@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import {
@@ -18,11 +18,6 @@ import {
   DialogTitle,
   Input,
   Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Skeleton,
   Table,
   TableBody,
@@ -47,22 +42,14 @@ import {
   Send,
   ChevronLeft,
   ChevronRight,
-  CircleDot,
   Users,
-  BadgeCheck,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useToast } from "@/components/feedback/toast-provider";
-
-const SEGMENT_OPTIONS = [
-  { value: "ALL", label: "Alle relaties" },
-  { value: "CUSTOMERS", label: "Klanten" },
-  { value: "PROSPECTS", label: "Prospects" },
-] as const;
+import { QueryErrorState } from "@/components/feedback/query-error-state";
 
 export default function CrmPage() {
   const [search, setSearch] = useState("");
-  const [segment, setSegment] = useState<(typeof SEGMENT_OPTIONS)[number]["value"]>("ALL");
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const { showToast } = useToast();
@@ -70,7 +57,7 @@ export default function CrmPage() {
 
   const query = trpc.crm.list.useQuery({
     search: search || undefined,
-    segment,
+    segment: "CUSTOMERS",
     page,
     pageSize: 20,
   });
@@ -96,30 +83,8 @@ export default function CrmPage() {
     },
   });
 
-  const markAsCustomer = trpc.crm.markAsCustomer.useMutation({
-    onSuccess: () => {
-      utils.crm.list.invalidate();
-      utils.lead.list.invalidate();
-      showToast({
-        title: "Relatie bijgewerkt",
-        description: "De relatie is nu gemarkeerd als klant.",
-      });
-    },
-    onError: (error) => {
-      showToast({
-        title: "Bijwerken mislukt",
-        description: error.message,
-        variant: "error",
-      });
-    },
-  });
-
   const rows = query.data?.items ?? [];
   const stats = query.data?.summary;
-  const activeCount = useMemo(
-    () => rows.filter((item) => item.crmSegment === "CUSTOMER").length,
-    [rows]
-  );
 
   function handleCreateSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -142,7 +107,7 @@ export default function CrmPage() {
         <div className="app-page-heading">
           <h1 className="app-page-title">CRM</h1>
           <p className="app-page-subtitle">
-            Centraal overzicht van klanten en prospects met directe koppelingen naar leads, outbound, offertes en rapporten.
+            Overzicht van klanten die je handmatig toevoegt via CRM of als &quot;Gewonnen&quot; markeert op een leadprofiel.
           </p>
         </div>
         <div className="app-page-actions">
@@ -154,95 +119,81 @@ export default function CrmPage() {
       </div>
 
       <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="info">Info</TabsTrigger>
+        <TabsList className="page-view-tabs">
+          <TabsTrigger value="overview" className="page-view-tabs-trigger">
+            Overzicht
+          </TabsTrigger>
+          <TabsTrigger value="info" className="page-view-tabs-trigger">
+            Info
+          </TabsTrigger>
         </TabsList>
 
       <TabsContent value="overview" className="space-y-4">
-      <Card className="p-3 sm:p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-[180px] flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Zoek op bedrijf, e-mail, stad..."
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
-              className="pl-9"
-            />
-          </div>
-          <Select
-            value={segment}
-            onValueChange={(value: (typeof SEGMENT_OPTIONS)[number]["value"]) => {
-              setSegment(value);
+      {query.isError ? (
+        <QueryErrorState onRetry={() => void query.refetch()} />
+      ) : null}
+      <div className="app-page-filters">
+        <div className="relative min-w-[180px] flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Zoek op bedrijf, e-mail, stad..."
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
               setPage(1);
             }}
-          >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {SEGMENT_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Badge variant="secondary" className="h-8 px-3">
-            {query.data?.total ?? 0} relaties
-          </Badge>
+            className="h-10 rounded-xl border-border/60 bg-background/80 pl-9 shadow-sm"
+          />
         </div>
-      </Card>
+        <Badge variant="secondary" className="h-10 shrink-0 px-3 font-normal">
+          {query.isLoading ? "—" : `${query.data?.total ?? 0} klanten`}
+        </Badge>
+      </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="rounded-lg bg-primary/10 p-2">
-              <Users className="h-4 w-4 text-primary" />
+      <div className="crm-stats-grid">
+        {[
+          {
+            label: "Totaal klanten",
+            hint: "Status gewonnen",
+            value: stats?.totalCustomers ?? 0,
+            icon: Users,
+            iconClass: "bg-primary/10 text-primary ring-primary/15",
+          },
+          {
+            label: "Met offertes",
+            hint: "Minstens één offerte",
+            value: stats?.withQuotes ?? 0,
+            icon: Receipt,
+            iconClass: "bg-amber-500/10 text-amber-700 ring-amber-500/20 dark:text-amber-400",
+          },
+          {
+            label: "Met outbound",
+            hint: "E-mail drafts",
+            value: stats?.withOutbound ?? 0,
+            icon: Mail,
+            iconClass: "bg-sky-500/10 text-sky-700 ring-sky-500/20 dark:text-sky-400",
+          },
+          {
+            label: "Cross-module",
+            hint: "Offerte, mail of rapport",
+            value: stats?.crossModuleLinked ?? 0,
+            icon: Link2,
+            iconClass: "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-400",
+          },
+        ].map((stat) => (
+          <div key={stat.label} className="crm-stat-card">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="crm-stat-card-label">{stat.label}</p>
+                <p className="crm-stat-card-value">{query.isLoading ? "—" : stat.value}</p>
+                <p className="crm-stat-card-hint">{stat.hint}</p>
+              </div>
+              <div className={`crm-stat-card-icon ${stat.iconClass}`}>
+                <stat.icon className="h-5 w-5" />
+              </div>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Totaal Klanten</p>
-              <p className="text-xl font-semibold">{stats?.totalCustomers ?? 0}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="rounded-lg bg-amber-500/10 p-2">
-              <CircleDot className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Prospects</p>
-              <p className="text-xl font-semibold">{stats?.totalProspects ?? 0}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="rounded-lg bg-emerald-500/10 p-2">
-              <BadgeCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Klanten op deze pagina</p>
-              <p className="text-xl font-semibold">{activeCount}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 p-4">
-            <div className="rounded-lg bg-blue-500/10 p-2">
-              <Link2 className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Cross-module gekoppeld</p>
-              <p className="text-xl font-semibold">{rows.filter((row) => row._count.quotes + row._count.emailDrafts + row._count.campaignLeads > 0).length}</p>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        ))}
       </div>
 
       <Card className="border-border/50 shadow-sm">
@@ -256,8 +207,8 @@ export default function CrmPage() {
           ) : rows.length === 0 ? (
             <EmptyState
               icon={<Building2 />}
-              title="Geen relaties gevonden"
-              description="Maak een klant aan of pas je zoekfilter aan."
+              title="Geen klanten gevonden"
+              description="Voeg een klant toe via CRM of markeer een lead als Gewonnen op het leadprofiel."
             />
           ) : (
             <>
@@ -271,9 +222,7 @@ export default function CrmPage() {
                           {[row.city, row.country].filter(Boolean).join(", ") || row.email || "Geen locatie"}
                         </p>
                       </div>
-                      <Badge variant={row.crmSegment === "CUSTOMER" ? "success" : "warning"}>
-                        {row.crmSegment === "CUSTOMER" ? "Klant" : "Prospect"}
-                      </Badge>
+                      <Badge variant="success">Klant</Badge>
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] text-muted-foreground">
                       <div className="rounded-lg border bg-muted/20 px-2 py-1.5">Offertes {row._count.quotes}</div>
@@ -296,16 +245,6 @@ export default function CrmPage() {
                           Offerte
                         </Link>
                       </Button>
-                      {row.crmSegment !== "CUSTOMER" ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => markAsCustomer.mutate({ leadId: row.id })}
-                          disabled={markAsCustomer.isPending}
-                        >
-                          Markeer klant
-                        </Button>
-                      ) : null}
                     </div>
                   </div>
                 ))}
@@ -339,9 +278,7 @@ export default function CrmPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={row.crmSegment === "CUSTOMER" ? "success" : "warning"}>
-                            {row.crmSegment === "CUSTOMER" ? "Klant" : "Prospect"}
-                          </Badge>
+                          <Badge variant="success">Klant</Badge>
                         </TableCell>
                         <TableCell className="text-sm">
                           <p>{row._count.quotes} totaal</p>
@@ -380,16 +317,6 @@ export default function CrmPage() {
                                 Rapport
                               </Link>
                             </Button>
-                            {row.crmSegment !== "CUSTOMER" ? (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => markAsCustomer.mutate({ leadId: row.id })}
-                                disabled={markAsCustomer.isPending}
-                              >
-                                Klant maken
-                              </Button>
-                            ) : null}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -435,7 +362,7 @@ export default function CrmPage() {
             <CardContent className="p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Voor wie</p>
               <p className="mt-2 text-sm font-medium">
-                Voor sales en accountteams die klanten, prospects en opvolging centraal willen beheren.
+                Voor sales en accountteams die klanten centraal willen beheren met koppelingen naar outbound, offertes en rapporten.
               </p>
             </CardContent>
           </Card>
@@ -443,7 +370,7 @@ export default function CrmPage() {
             <CardContent className="p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Hoe het werkt</p>
               <p className="mt-2 text-sm font-medium">
-                Elke relatie koppelt automatisch met leads, outbound, offertes en rapporten zodat context overal behouden blijft.
+                Alleen leads met status &quot;Gewonnen&quot; verschijnen in CRM — via Nieuwe Klant, leadprofiel of pipeline.
               </p>
             </CardContent>
           </Card>

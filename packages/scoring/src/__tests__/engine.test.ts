@@ -32,9 +32,9 @@ describe("computeScore", () => {
     expect(result.overallScore).toBeLessThanOrEqual(100);
   });
 
-  it("returns 0 when all factors score 0", () => {
+  it("scores high opportunity when lead has no website", () => {
     const result = computeScore({ lead: baseLead, enrichment: emptyEnrichment, weights: defaultWeights });
-    expect(result.overallScore).toBe(0);
+    expect(result.overallScore).toBeGreaterThan(0);
   });
 
   it("returns 100 for a lead with all positives", () => {
@@ -69,9 +69,9 @@ describe("computeScore", () => {
     expect(result.overallScore).toBeGreaterThan(0);
   });
 
-  it("assigns correct priority based on score", () => {
+  it("assigns Hot priority for high opportunity leads", () => {
     const noWebsite = computeScore({ lead: baseLead, enrichment: emptyEnrichment, weights: defaultWeights });
-    expect(noWebsite.priority).toBe("Low");
+    expect(noWebsite.priority).toBe("Hot");
   });
 
   it("returns Hot priority for score >= 75", () => {

@@ -1,0 +1,79 @@
+# Vercel — digitify-lead-finder
+
+Git integration is active on branch `cursor/dashboard-modern-layout` (see [PR #1](https://github.com/productiongiga-stack/digitify-lead-finder/pull/1)).
+
+**Fase-plan:** [docs/PHASES.md](PHASES.md) · **Productie:** gebruik Vercel-project **`project-ubm6y`** voor `leads.digitify.be` (zelfde repo + `vercel.json`). Preview/CI kan ook op `digitify-lead-finder` draaien — deploy productie via `vercel link --project project-ubm6y && vercel deploy --prod`.
+
+## Preview URL (latest push)
+
+- https://digitify-lead-finder-git-c-54986e-productiongiga-7978s-projects.vercel.app
+
+Productie-dashboard: https://vercel.com/productiongiga-7978s-projects/project-ubm6y  
+Productie-URL: https://leads.digitify.be
+
+## Required environment variables (Production + Preview)
+
+Set these in **Vercel → Project → Settings → Environment Variables**:
+
+| Variable | Notes |
+|----------|--------|
+| `DATABASE_URL` | Neon/Postgres connection string (pooled) |
+| `DIRECT_URL` | Direct Postgres URL (migrations) |
+| `NEXTAUTH_URL` | `https://<your-domain>` |
+| `NEXTAUTH_SECRET` | Min. 32 characters |
+| `NEXT_PUBLIC_APP_URL` | Same as public app URL |
+| `SETTINGS_ENCRYPTION_KEY` | Min. 32 characters (production) |
+| `CRON_SECRET` | Min. 16 characters; Vercel Cron sends `Authorization: Bearer …` |
+| `REDIS_URL` or Upstash | `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` for Edge rate limits |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob — logo/branding uploads (avoid data URLs in prod) |
+| `SENTRY_DSN` | Sentry project DSN (server errors + tRPC 500s) |
+| `NEXT_PUBLIC_SENTRY_DSN` | Same DSN for client `global-error` boundary |
+
+Optional staging:
+
+| Variable | Notes |
+|----------|--------|
+| `ENABLE_WORKSPACE_RLS` | `true` only after `pnpm rls:smoke` on staging DB |
+
+## Local development (first run / after pull)
+
+```bash
+set -a && source .env && set +a
+pnpm install
+pnpm db:generate
+pnpm db:resolve-init    # only if migrate fails on existing DB (P3009 on init)
+pnpm db:migrate
+pnpm --filter @digitify/web dev --port 3001
+```
+
+If the app shows a CSS build error, delete `apps/web/.next` and restart the dev server.
+
+Login (seed): `admin@digitify.local` / `DigitifyDev2026!` (after `pnpm db:seed` if needed).
+
+## Database on deploy
+
+1. Link **Neon** (or Postgres) via Vercel Marketplace.
+2. Run once against the production DB (shell with non-empty `DATABASE_URL` / `POSTGRES_URL_NON_POOLING`):
+
+```bash
+pnpm db:generate
+pnpm db:resolve-init    # if init migration is marked failed but schema exists
+pnpm db:migrate
+pnpm db:migrate-workspace-settings
+pnpm db:seed            # optional dev/staging only
+```
+
+Do **not** run seed on production unless intentional.
+
+## Production domain
+
+1. Merge PR #1 to `main` (or promote preview in Vercel).
+2. Vercel → **Domains** → add `leads.digitify.be` (see `DEPLOYMENT.md` for DNS).
+
+## CLI (optional)
+
+```bash
+npx vercel login
+npx vercel link --project project-ubm6y
+npx vercel deploy --prod
+```

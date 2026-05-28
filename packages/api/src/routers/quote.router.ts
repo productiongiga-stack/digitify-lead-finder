@@ -1,9 +1,12 @@
 import { z } from "zod";
-import { createHmac } from "node:crypto";
 import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
-import { sendBrandedEmail } from "../lib/email-sender";
+import {
+  appendQuoteIdMarker,
+  buildQuoteOutboundEmailBody,
+  syncQuoteOutboundDrafts,
+} from "../lib/quote-outbound-email";
 import { ensureLeadLink } from "../lib/lead-link";
 import { assertLeadAccess } from "../lib/tenant";
 
@@ -12,37 +15,6 @@ function formatCurrency(amount: number) {
     style: "currency",
     currency: "EUR",
   }).format(amount);
-}
-
-function getAppUrl() {
-  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-  if (process.env.NEXTAUTH_URL) return process.env.NEXTAUTH_URL.replace(/\/$/, "");
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL.replace(/\/$/, "")}`;
-  return "http://localhost:3000";
-}
-
-function getQuotePdfTokenSecret() {
-  const secret = process.env.QUOTE_PDF_TOKEN_SECRET || process.env.NEXTAUTH_SECRET;
-  if (!secret) throw new Error("QUOTE_PDF_TOKEN_SECRET or NEXTAUTH_SECRET must be set");
-  return secret;
-}
-
-function stripHtml(text: string): string {
-  return text.replace(/<[^>]*>/g, "").trim();
-}
-
-function createQuotePdfToken(quoteId: string, validUntil?: Date | string | null) {
-  const requestedExpiry = validUntil ? new Date(validUntil).getTime() : NaN;
-  const fallbackExpiry = Date.now() + 1000 * 60 * 60 * 24 * 90;
-  const expiresAt =
-    Number.isFinite(requestedExpiry) && requestedExpiry > Date.now()
-      ? requestedExpiry
-      : fallbackExpiry;
-  const payload = `${quoteId}.${expiresAt}`;
-  const signature = createHmac("sha256", getQuotePdfTokenSecret())
-    .update(payload)
-    .digest("base64url");
-  return `${expiresAt}.${signature}`;
 }
 
 type QuoteForEmail = {
@@ -162,8 +134,9 @@ function buildQuoteEmailPreflight(quote: QuoteForEmail, leadResolution: QuoteLea
   const blockingIssues = checks.filter((check) => check.blocking && !check.ok);
   const warnings: string[] = [];
   if (leadResolution.mode === "will_create") {
-    warnings.push("Bij verzenden wordt automatisch een nieuwe lead aangemaakt.");
+    warnings.push("Bij indienen wordt automatisch een nieuwe lead aangemaakt.");
   }
+  warnings.push("Offertes worden niet automatisch verstuurd. Indienen gaat naar Outbound ter goedkeuring.");
 
   return {
     canSend: blockingIssues.length === 0,
@@ -197,8 +170,8 @@ export const quoteRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const { page, perPage, status, leadId } = input;
-      if (leadId) await assertLeadAccess(ctx.db, ctx.user.id, leadId);
-      const where: Record<string, unknown> = { createdById: ctx.user.id };
+      if (leadId) await assertLeadAccess(ctx.db, ctx.user.workspaceId!, leadId);
+      const where: Record<string, unknown> = { createdById: ctx.user.workspaceId! };
       if (status) where.status = status;
       if (leadId) where.leadId = leadId;
       const [quotes, total] = await Promise.all([
@@ -228,7 +201,7 @@ export const quoteRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const quote = await ctx.db.quote.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
         include: {
           lead: {
             select: {
@@ -255,7 +228,7 @@ export const quoteRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const quote = await ctx.db.quote.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
         include: {
           lead: { select: { id: true, companyName: true } },
           items: { select: { id: true } },
@@ -304,19 +277,19 @@ export const quoteRouter = router({
       // Generate quote number: OFF-YYYY-XXXX
       const year = new Date().getFullYear();
       const count = await ctx.db.quote.count({
-        where: { createdById: ctx.user.id },
+        where: { createdById: ctx.user.workspaceId! },
       });
       const quoteNumber = `OFF-${year}-${ctx.user.id.slice(-4).toUpperCase()}-${String(count + 1).padStart(4, "0")}`;
       let resolvedLeadId = input.leadId || null;
       if (resolvedLeadId) {
-        await assertLeadAccess(ctx.db, ctx.user.id, resolvedLeadId);
+        await assertLeadAccess(ctx.db, ctx.user.workspaceId!, resolvedLeadId);
       } else {
         const clientEmail = input.clientEmail?.trim().toLowerCase();
         const companyCandidate = (input.clientCompany || input.clientName || "").trim();
         if (clientEmail || companyCandidate) {
           const existingLead = await ctx.db.lead.findFirst({
             where: {
-              createdById: ctx.user.id,
+              createdById: ctx.user.workspaceId!,
               OR: [
                 ...(clientEmail ? [{ email: clientEmail }] : []),
                 ...(companyCandidate ? [{ companyName: companyCandidate }] : []),
@@ -359,7 +332,7 @@ export const quoteRouter = router({
           total,
           notes: input.notes,
           terms: input.terms,
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
           items: {
             create: items,
           },
@@ -416,7 +389,7 @@ export const quoteRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.quote.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
       });
       if (!existing)
         throw new TRPCError({
@@ -501,6 +474,8 @@ export const quoteRouter = router({
         },
       });
 
+      await syncQuoteOutboundDrafts(ctx.db, quote.id, ctx.user.workspaceId!);
+
       return quote;
     }),
 
@@ -520,7 +495,7 @@ export const quoteRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const quote = await ctx.db.quote.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
       });
       if (!quote)
         throw new TRPCError({
@@ -567,7 +542,7 @@ export const quoteRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const quote = await ctx.db.quote.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
         include: {
           lead: { select: { id: true, companyName: true } },
           items: { orderBy: { sortOrder: "asc" } },
@@ -624,111 +599,35 @@ export const quoteRouter = router({
         });
       }
 
-      const pdfToken = createQuotePdfToken(quote.id, quote.validUntil);
-      const quoteUrl = `${getAppUrl()}/api/public/quotes/${quote.id}/pdf?token=${encodeURIComponent(pdfToken)}&download=0`;
-      const quoteDownloadUrl = `${getAppUrl()}/api/public/quotes/${quote.id}/pdf?token=${encodeURIComponent(pdfToken)}&download=1`;
-      const summaryLines = quote.items.slice(0, 5).map(
-        (item) => `- ${item.name}: ${item.category || "dienst"} · ${formatCurrency(item.quantity * item.unitPrice)}`
-      );
-      const validUntilLabel = quote.validUntil
-        ? new Date(quote.validUntil).toLocaleDateString("nl-BE")
-        : "30 dagen na verzending";
-      const attachmentName = `Offerte-${quote.quoteNumber}.pdf`;
-      const body = [
-        `Beste ${quote.clientName},`,
-        ``,
-        `Hierbij vindt u uw persoonlijke offerte op maat.`,
-        ``,
-        `Bijlage toegevoegd: ${attachmentName}`,
-        `Offertenummer: ${quote.quoteNumber}`,
-        `Totaalprijs: ${formatCurrency(quote.total)}`,
-        `Geldig tot: ${validUntilLabel}`,
-        ``,
-        `Samenvatting van de voorgestelde diensten:`,
-        ...summaryLines,
-        ``,
-        quote.notes
-          ? `Opmerkingen: ${stripHtml(quote.notes)}`
-          : "Klik op de knop hieronder om de volledige offerte te bekijken of te printen.",
-      ]
-        .filter(Boolean)
-        .join("\n");
-      const composedBody = `${body}\n\n[[CTA_TEXT=Bekijk offerte]]\n[[CTA_URL=${quoteUrl}]]`;
+      const existingDraft = await ctx.db.emailDraft.findFirst({
+        where: {
+          type: "QUOTE",
+          status: { in: ["PENDING_APPROVAL", "APPROVED"] },
+          lead: { createdById: ctx.user.workspaceId! },
+          body: { contains: `[[QUOTE_ID=${quote.id}]]` },
+        },
+        select: { id: true, status: true },
+      });
+      if (existingDraft) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message:
+            existingDraft.status === "APPROVED"
+              ? "Deze offerte is al goedgekeurd in Outbound. Verzend de mail via Outbound Center."
+              : "Deze offerte staat al in de goedkeuringswachtrij van Outbound.",
+        });
+      }
+
+      const { body: composedBody, attachmentName } = buildQuoteOutboundEmailBody(quote);
       const emailDraft = await ctx.db.emailDraft.create({
         data: {
           leadId: linkedLead.id,
           authorId: ctx.user.id,
           toEmail: quote.clientEmail,
           subject: `Offerte ${quote.quoteNumber} voor ${quote.clientCompany || quote.clientName}`,
-          body: composedBody,
-          status: "SENDING",
+          body: appendQuoteIdMarker(composedBody, quote.id),
+          status: "PENDING_APPROVAL",
           type: "QUOTE",
-        },
-      });
-
-      let result: Awaited<ReturnType<typeof sendBrandedEmail>>;
-      try {
-        result = await sendBrandedEmail(ctx.db, {
-          toEmail: quote.clientEmail,
-          subject: emailDraft.subject,
-          body: composedBody,
-          recipientCompany: quote.clientCompany || quote.clientName,
-          leadId: linkedLead.id,
-          layout: "proposal",
-          userId: ctx.user.id,
-          trackingDraftId: emailDraft.id,
-          placeholderContext: {
-            quoteNumber: quote.quoteNumber,
-            offerTitle: `Offerte ${quote.quoteNumber}`,
-            offerPrice: formatCurrency(quote.total),
-          },
-          attachments: [
-            {
-              filename: attachmentName,
-              path: quoteDownloadUrl,
-              contentType: "application/pdf",
-            },
-          ],
-        });
-      } catch (error) {
-        await ctx.db.emailDraft.update({
-          where: { id: emailDraft.id },
-          data: {
-            status: "FAILED",
-            rejectionNote: error instanceof Error ? error.message : "Offerte e-mail verzenden mislukt",
-          },
-        });
-        throw error;
-      }
-
-      if (!result.success) {
-        await ctx.db.emailDraft.update({
-          where: { id: emailDraft.id },
-          data: {
-            status: "FAILED",
-            rejectionNote: result.error || "Offerte e-mail verzenden mislukt",
-          },
-        });
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: result.error || "Offerte e-mail verzenden mislukt",
-        });
-      }
-      await ctx.db.emailDraft.update({
-        where: { id: emailDraft.id },
-        data: {
-          status: "SENT",
-          sentAt: new Date(),
-          messageId: result.messageId || null,
-          rejectionNote: null,
-        },
-      });
-
-      const updated = await ctx.db.quote.update({
-        where: { id: input.id },
-        data: {
-          status: quote.status === "DRAFT" ? "SENT" : quote.status,
-          sentAt: quote.sentAt || new Date(),
         },
       });
 
@@ -736,19 +635,28 @@ export const quoteRouter = router({
         data: {
           leadId: linkedLead.id,
           userId: ctx.user.id,
-          type: "QUOTE_SENT",
-          title: `Offerte ${quote.quoteNumber} per e-mail verstuurd naar ${quote.clientEmail}`,
-          metadata: { quoteId: quote.id, messageId: result.messageId },
+          type: "EMAIL_DRAFTED",
+          title: `Offerte ${quote.quoteNumber} ingediend ter goedkeuring`,
+          metadata: {
+            quoteId: quote.id,
+            draftId: emailDraft.id,
+            attachmentName,
+            source: "quote.submit_outbound",
+          },
         },
       });
 
-      return updated;
+      return {
+        quote,
+        draftId: emailDraft.id,
+        queued: true as const,
+      };
     }),
 
   addNote: protectedProcedure
     .input(z.object({ id: z.string(), note: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const quote = await ctx.db.quote.findFirst({ where: { id: input.id, createdById: ctx.user.id } });
+      const quote = await ctx.db.quote.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! } });
       if (!quote)
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -783,7 +691,7 @@ export const quoteRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const quote = await ctx.db.quote.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
         include: {
           lead: { select: { id: true, companyName: true } },
           createdBy: { select: { id: true, name: true } },
@@ -873,7 +781,7 @@ export const quoteRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.quote.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
         select: { id: true },
       });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Offerte niet gevonden" });
@@ -884,7 +792,7 @@ export const quoteRouter = router({
   // Service catalog
   getServices: protectedProcedure.query(async ({ ctx }) => {
     return ctx.db.serviceCatalog.findMany({
-      where: { isActive: true, createdById: ctx.user.id },
+      where: { isActive: true, createdById: ctx.user.workspaceId! },
       orderBy: [{ category: "asc" }, { sortOrder: "asc" }],
     });
   }),
@@ -905,7 +813,7 @@ export const quoteRouter = router({
     .mutation(async ({ ctx, input }) => {
       if (input.id) {
         const existing = await ctx.db.serviceCatalog.findFirst({
-          where: { id: input.id, createdById: ctx.user.id },
+          where: { id: input.id, createdById: ctx.user.workspaceId! },
           select: { id: true },
         });
         if (!existing) {
@@ -927,7 +835,7 @@ export const quoteRouter = router({
       return ctx.db.serviceCatalog.create({
         data: {
           ...input,
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
         },
       });
     }),
@@ -936,7 +844,7 @@ export const quoteRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const deleted = await ctx.db.serviceCatalog.deleteMany({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
       });
       if (deleted.count === 0) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Service niet gevonden." });
@@ -947,15 +855,15 @@ export const quoteRouter = router({
   // Stats for dashboard
   getStats: protectedProcedure.query(async ({ ctx }) => {
     const [total, draft, sent, accepted, rejected] = await Promise.all([
-      ctx.db.quote.count({ where: { createdById: ctx.user.id } }),
-      ctx.db.quote.count({ where: { status: "DRAFT", createdById: ctx.user.id } }),
-      ctx.db.quote.count({ where: { status: "SENT", createdById: ctx.user.id } }),
-      ctx.db.quote.count({ where: { status: "ACCEPTED", createdById: ctx.user.id } }),
-      ctx.db.quote.count({ where: { status: "REJECTED", createdById: ctx.user.id } }),
+      ctx.db.quote.count({ where: { createdById: ctx.user.workspaceId! } }),
+      ctx.db.quote.count({ where: { status: "DRAFT", createdById: ctx.user.workspaceId! } }),
+      ctx.db.quote.count({ where: { status: "SENT", createdById: ctx.user.workspaceId! } }),
+      ctx.db.quote.count({ where: { status: "ACCEPTED", createdById: ctx.user.workspaceId! } }),
+      ctx.db.quote.count({ where: { status: "REJECTED", createdById: ctx.user.workspaceId! } }),
     ]);
 
     const acceptedQuotes = await ctx.db.quote.findMany({
-      where: { status: "ACCEPTED", createdById: ctx.user.id },
+      where: { status: "ACCEPTED", createdById: ctx.user.workspaceId! },
       select: { total: true },
     });
     const totalValue = acceptedQuotes.reduce((sum, q) => sum + q.total, 0);
@@ -963,7 +871,7 @@ export const quoteRouter = router({
     const allSentOrLater = await ctx.db.quote.findMany({
       where: {
         status: { in: ["SENT", "VIEWED", "ACCEPTED", "REJECTED"] },
-        createdById: ctx.user.id,
+        createdById: ctx.user.workspaceId!,
       },
       select: { total: true },
     });
@@ -985,7 +893,7 @@ export const quoteRouter = router({
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const lead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.id },
+        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
         include: {
           scoringFactors: { include: { scoringWeight: true } },
         },
@@ -1005,7 +913,7 @@ export const quoteRouter = router({
       // Generate quote number
       const year = new Date().getFullYear();
       const count = await ctx.db.quote.count({
-        where: { createdById: ctx.user.id },
+        where: { createdById: ctx.user.workspaceId! },
       });
       const quoteNumber = `OFF-${year}-${ctx.user.id.slice(-4).toUpperCase()}-${String(count + 1).padStart(4, "0")}`;
 
@@ -1018,7 +926,7 @@ export const quoteRouter = router({
           clientPhone: lead.phone,
           clientCompany: lead.companyName,
           clientAddress: lead.address,
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
           items: {
             create: suggestedServices.map((s, i) => ({
               ...s,

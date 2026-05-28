@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { cn } from "@/lib/utils";
 import { readSettingBoolean, readSettingString } from "@/lib/settings";
@@ -15,6 +15,7 @@ import {
 import {
   Calendar, Plus, Clock, CheckCircle2, XCircle, Trash2, Pencil,
   CalendarCheck, CalendarX, BarChart3, Settings2, ArrowRight, Sparkles, CalendarClock, Activity, Download,
+  Search, Tags, X, Globe, ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
@@ -60,11 +61,80 @@ function isSameCalendarDay(left: Date, right: Date) {
   );
 }
 
+function startOfDay(value: Date) {
+  const copy = new Date(value);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+function addDays(value: Date, days: number) {
+  const copy = new Date(value);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function formatAgendaDayLabel(value: Date) {
+  const today = startOfDay(new Date());
+  const target = startOfDay(value);
+  if (target.getTime() === today.getTime()) return "Vandaag";
+  const tomorrow = addDays(today, 1);
+  if (target.getTime() === tomorrow.getTime()) return "Morgen";
+  return formatDateNice(value).split(" om ")[0] || formatDateNice(value);
+}
+
+function formatAgendaTime(value: Date, allDay?: boolean) {
+  if (allDay) return "Hele dag";
+  return value.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" });
+}
+
+type AgendaListItem =
+  | {
+      kind: "booking";
+      id: string;
+      title: string;
+      start: Date;
+      end: Date;
+      booking: {
+        id: string;
+        clientName: string;
+        clientEmail: string | null;
+        status: string;
+        duration: number;
+        googleSyncState: string | null;
+        eventType?: { name: string; color: string | null } | null;
+      };
+    }
+  | {
+      kind: "google";
+      id: string;
+      title: string;
+      start: Date;
+      end: Date;
+      htmlLink: string | null;
+      allDay: boolean;
+    };
+
 function getSyncBadge(state: string | null | undefined) {
   if (state === "SYNCED") return { label: "Synced", variant: "success" as const };
   if (state === "RETRYING") return { label: "Retrying", variant: "warning" as const };
   if (state === "ERROR") return { label: "Sync fout", variant: "destructive" as const };
   return { label: "Sync uit", variant: "secondary" as const };
+}
+
+function readStringProperty(source: unknown, key: string) {
+  if (!source || typeof source !== "object") return "";
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
+}
+
+function readNumberProperty(source: unknown, key: string) {
+  if (!source || typeof source !== "object") return undefined;
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function getGoogleSyncState(source: unknown) {
+  return readStringProperty(source, "googleSyncState") || undefined;
 }
 
 export default function BookingsPage() {
@@ -92,8 +162,68 @@ export default function BookingsPage() {
   const [confirmNotes, setConfirmNotes] = useState("");
   const [confirmSubmitting, setConfirmSubmitting] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
+  const [bookingsTab, setBookingsTab] = useState("list");
   const { showToast } = useToast();
   const utils = trpc.useUtils();
+
+  const agendaRangeStart = useMemo(() => startOfDay(new Date()), []);
+  const agendaRangeEnd = useMemo(() => {
+    const end = addDays(agendaRangeStart, 14);
+    end.setHours(23, 59, 59, 999);
+    return end;
+  }, [agendaRangeStart]);
+
+  const { data: agendaData, isLoading: agendaLoading } = trpc.booking.getAgenda.useQuery(
+    { from: agendaRangeStart.toISOString(), to: agendaRangeEnd.toISOString() },
+    { enabled: bookingsTab === "agenda" }
+  );
+
+  const agendaByDay = useMemo(() => {
+    if (!agendaData) return [] as Array<{ day: Date; items: AgendaListItem[] }>;
+    const items: AgendaListItem[] = [];
+    for (const booking of agendaData.bookings) {
+      const start = new Date(booking.date);
+      items.push({
+        kind: "booking",
+        id: booking.id,
+        title: booking.clientName,
+        start,
+        end: new Date(start.getTime() + booking.duration * 60_000),
+        booking: {
+          id: booking.id,
+          clientName: booking.clientName,
+          clientEmail: booking.clientEmail,
+          status: booking.status,
+          duration: booking.duration,
+          googleSyncState: booking.googleSyncState,
+          eventType: booking.eventType,
+        },
+      });
+    }
+    for (const event of agendaData.externalGoogleEvents) {
+      items.push({
+        kind: "google",
+        id: event.id,
+        title: event.title,
+        start: new Date(event.start),
+        end: new Date(event.end),
+        htmlLink: event.htmlLink,
+        allDay: event.allDay,
+      });
+    }
+    items.sort((left, right) => left.start.getTime() - right.start.getTime());
+    const groups = new Map<string, AgendaListItem[]>();
+    for (const item of items) {
+      const key = startOfDay(item.start).toISOString();
+      const dayItems = groups.get(key) || [];
+      dayItems.push(item);
+      groups.set(key, dayItems);
+    }
+    return Array.from(groups.entries()).map(([key, dayItems]) => ({
+      day: new Date(key),
+      items: dayItems,
+    }));
+  }, [agendaData]);
 
   const { data, isLoading } = trpc.booking.list.useQuery(
     {
@@ -107,6 +237,8 @@ export default function BookingsPage() {
   const { data: stats } = trpc.booking.getStats.useQuery();
   const { data: settingsData } = trpc.settings.getAll.useQuery();
   const { data: eventTypes } = trpc.booking.listEventTypes.useQuery();
+  type EventType = NonNullable<NonNullable<typeof eventTypes>[number]>;
+  const eventTypeItems = (eventTypes ?? []).filter((item): item is EventType => Boolean(item));
   const { data: unifiedReminders } = trpc.dashboard.getUnifiedReminders.useQuery(undefined, {
     staleTime: 60_000,
   });
@@ -119,7 +251,7 @@ export default function BookingsPage() {
       utils.booking.list.invalidate();
       utils.booking.getStats.invalidate();
       setCreateOpen(false);
-      const sync = getSyncBadge((result as any)?.googleSyncState);
+      const sync = getSyncBadge(getGoogleSyncState(result));
       showToast({ title: "Boeking opgeslagen", description: sync.label === "Synced" ? "De boeking is succesvol toegevoegd." : `Boeking opgeslagen. Google sync: ${sync.label}.` });
     },
     onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
@@ -129,7 +261,7 @@ export default function BookingsPage() {
       utils.booking.list.invalidate();
       utils.booking.getStats.invalidate();
       setEditOpen(false);
-      const sync = getSyncBadge((result as any)?.googleSyncState);
+      const sync = getSyncBadge(getGoogleSyncState(result));
       showToast({ title: "Boeking bijgewerkt", description: sync.label === "Synced" ? "De boeking is succesvol aangepast." : `Boeking aangepast. Google sync: ${sync.label}.` });
     },
     onError: (error) => showToast({ title: "Bijwerken mislukt", description: error.message, variant: "error" }),
@@ -138,7 +270,7 @@ export default function BookingsPage() {
     onSuccess: (result) => {
       utils.booking.list.invalidate();
       utils.booking.getStats.invalidate();
-      const sync = getSyncBadge((result as any)?.googleSyncState);
+      const sync = getSyncBadge(getGoogleSyncState(result));
       showToast({ title: "Boeking bevestigd", description: sync.label === "Synced" ? "De klant kreeg een bevestiging met kalenderbestand." : `Bevestigd. Google sync: ${sync.label}.` });
     },
     onError: (error) => showToast({ title: "Bevestigen mislukt", description: error.message, variant: "error" }),
@@ -147,7 +279,7 @@ export default function BookingsPage() {
     onSuccess: (result) => {
       utils.booking.list.invalidate();
       utils.booking.getStats.invalidate();
-      const sync = getSyncBadge((result as any)?.googleSyncState);
+      const sync = getSyncBadge(getGoogleSyncState(result));
       showToast({ title: "Boeking afgewezen", description: `De klant kreeg een update. Google sync: ${sync.label}.` });
     },
     onError: (error) => showToast({ title: "Afwijzen mislukt", description: error.message, variant: "error" }),
@@ -233,7 +365,7 @@ export default function BookingsPage() {
     setConfirmTargetId(booking.id);
     setConfirmClientName(booking.clientName || "");
     setConfirmClientEmail(booking.clientEmail || "");
-    setConfirmLocation((booking as any).location || "");
+    setConfirmLocation(readStringProperty(booking, "location"));
     setConfirmNotes(booking.notes || "");
     setConfirmStep(1);
     setConfirmOpen(true);
@@ -267,15 +399,20 @@ export default function BookingsPage() {
     ? [...data.bookings].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     : [];
 
+  const pendingCount = readNumberProperty(stats, "pending") ?? 0;
+  const confirmedCount = readNumberProperty(stats, "confirmed") ?? 0;
+  const rejectedCount = readNumberProperty(stats, "rejected") ?? 0;
+  const noShowCount = readNumberProperty(stats, "noShow") ?? 0;
+
   const filterTabs: Array<{ key: BookingStatus | undefined; label: string; count: number | undefined }> = [
     { key: undefined, label: "Alle", count: stats?.total },
-    { key: "PENDING", label: "In Afwachting", count: (stats as any)?.pending },
+    { key: "PENDING", label: "In Afwachting", count: pendingCount },
     { key: "SCHEDULED", label: "Gepland", count: stats?.scheduled },
-    { key: "CONFIRMED", label: "Bevestigd", count: (stats as any)?.confirmed },
+    { key: "CONFIRMED", label: "Bevestigd", count: confirmedCount },
     { key: "COMPLETED", label: "Voltooid", count: stats?.completed },
     { key: "CANCELLED", label: "Geannuleerd", count: stats?.cancelled },
-    { key: "REJECTED", label: "Afgewezen", count: (stats as any)?.rejected },
-    { key: "NO_SHOW", label: "Niet Verschenen", count: (stats as any)?.noShow },
+    { key: "REJECTED", label: "Afgewezen", count: rejectedCount },
+    { key: "NO_SHOW", label: "Niet Verschenen", count: noShowCount },
   ];
   const now = new Date();
   const upcomingBookingsCount = sortedBookings.filter((booking) => new Date(booking.date) >= now).length;
@@ -353,7 +490,7 @@ export default function BookingsPage() {
       </div>
 
       {/* Pending bookings alert */}
-      {(stats as any)?.pending > 0 ? (
+      {pendingCount > 0 ? (
         <div className="flex items-center justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-950/20">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500/20">
@@ -361,7 +498,7 @@ export default function BookingsPage() {
             </div>
             <div>
               <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-                {(stats as any).pending} boeking{(stats as any).pending !== 1 ? "en" : ""} wacht op bevestiging
+                {pendingCount} boeking{pendingCount !== 1 ? "en" : ""} wacht op bevestiging
               </p>
               <p className="text-xs text-amber-600 dark:text-amber-500">
                 Controleer en bevestig of wijs af via de lijst hieronder.
@@ -380,24 +517,86 @@ export default function BookingsPage() {
       ) : null}
 
       {/* Shared filters rendered once, used by both List and Overview tabs */}
-      <Card className="border-border/60 shadow-sm">
-        <CardContent className={cn("grid gap-3 md:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,0.8fr))]", effectiveCompactMode ? "p-3" : "p-4")}>
-          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Zoek op klant, e-mail of notitie..." />
-          <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-          <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+      <section className={cn("bookings-filters", effectiveCompactMode && "gap-2 p-3")} aria-label="Boekingen filteren">
+        <div className="flex flex-wrap items-center justify-between gap-2 md:col-span-2 lg:col-span-4">
+          <div>
+            <p className="text-sm font-semibold tracking-tight text-foreground">Filteren</p>
+            <p className="text-xs text-muted-foreground">Zoek en verfijn afspraken op periode, type en klant.</p>
+          </div>
+          {search.trim() || dateFrom || dateTo || eventTypeFilter !== "__all" ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 rounded-lg border border-border/60 bg-background/80 px-3 text-xs text-muted-foreground hover:bg-background"
+              onClick={() => {
+                setSearch("");
+                setDateFrom("");
+                setDateTo("");
+                setEventTypeFilter("__all");
+              }}
+            >
+              <X className="mr-1.5 h-3.5 w-3.5" />
+              Filters wissen
+            </Button>
+          ) : null}
+        </div>
+        <div className="bookings-filter-field">
+          <span className="bookings-filter-label">
+            <Search className="h-3.5 w-3.5" />
+            Zoeken
+          </span>
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Klant, e-mail of notitie..."
+            className="bookings-filter-control"
+          />
+        </div>
+        <div className="bookings-filter-field">
+          <span className="bookings-filter-label">
+            <Calendar className="h-3.5 w-3.5" />
+            Vanaf
+          </span>
+          <Input
+            type="date"
+            value={dateFrom}
+            onChange={(event) => setDateFrom(event.target.value)}
+            className="bookings-filter-control"
+          />
+        </div>
+        <div className="bookings-filter-field">
+          <span className="bookings-filter-label">
+            <Calendar className="h-3.5 w-3.5" />
+            Tot
+          </span>
+          <Input
+            type="date"
+            value={dateTo}
+            onChange={(event) => setDateTo(event.target.value)}
+            className="bookings-filter-control"
+          />
+        </div>
+        <div className="bookings-filter-field">
+          <span className="bookings-filter-label">
+            <Tags className="h-3.5 w-3.5" />
+            Bookingtype
+          </span>
           <Select value={eventTypeFilter} onValueChange={setEventTypeFilter}>
-            <SelectTrigger>
-              <SelectValue placeholder="Bookingtype" />
+            <SelectTrigger className="bookings-filter-control w-full">
+              <SelectValue placeholder="Alle types" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all">Alle bookingtypes</SelectItem>
-              {eventTypes?.map((item: NonNullable<typeof eventTypes>[number]) => (
-                <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
+              {eventTypeItems.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
       <div className="-mx-1 overflow-x-auto px-1 pb-1">
         <div className="flex min-w-max gap-2">
           {filterTabs.map((tab) => (
@@ -409,15 +608,16 @@ export default function BookingsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="list" className="space-y-3">
-        <TabsList className="grid w-full max-w-md grid-cols-3">
-          <TabsTrigger value="list">Lijst</TabsTrigger>
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="automations">Automations</TabsTrigger>
+      <Tabs value={bookingsTab} onValueChange={setBookingsTab} className="space-y-4">
+        <TabsList className="bookings-view-tabs">
+          <TabsTrigger value="list" className="bookings-view-tab-trigger">Lijst</TabsTrigger>
+          <TabsTrigger value="agenda" className="bookings-view-tab-trigger">Agenda</TabsTrigger>
+          <TabsTrigger value="overview" className="bookings-view-tab-trigger">Overzicht</TabsTrigger>
+          <TabsTrigger value="automations" className="bookings-view-tab-trigger">Automations</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="list" className="space-y-3">
-          <Card className="border-border/50 shadow-sm">
+        <TabsContent value="list" className="space-y-4">
+          <Card className="app-surface">
             <CardContent className="p-0">
               {isLoading ? (
                 <div className="space-y-3 p-6">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
@@ -427,10 +627,10 @@ export default function BookingsPage() {
                 <div className={cn("grid gap-3", effectiveCompactMode ? "p-3" : "p-4")}>
                   {sortedBookings.map((booking) => {
                     const statusInfo = STATUS_MAP[booking.status] ?? { label: booking.status, variant: "secondary" as const };
-                    const syncInfo = getSyncBadge((booking as any).googleSyncState);
+                    const syncInfo = getSyncBadge(getGoogleSyncState(booking));
                     const bookingDate = new Date(booking.date);
                     return (
-                      <div key={booking.id} className={cn("rounded-2xl border", effectiveCompactMode ? "p-3" : "p-4")} role="article" aria-label={`Boeking ${booking.clientName}`}>
+                      <div key={booking.id} className={cn("rounded-2xl border border-border/60 bg-background/45 shadow-sm", effectiveCompactMode ? "p-3" : "p-4")} role="article" aria-label={`Boeking ${booking.clientName}`}>
                         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
@@ -452,6 +652,114 @@ export default function BookingsPage() {
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="agenda" className="space-y-4">
+          <Card className="app-surface">
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base">Gecombineerde agenda</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Digitify-boekingen en overige afspraken uit je gekoppelde Google Agenda (14 dagen vooruit).
+                  </p>
+                </div>
+                {agendaData?.googleEnabled ? (
+                  <Badge variant="secondary" className="gap-1.5">
+                    <Globe className="h-3.5 w-3.5" />
+                    {agendaData.googleAccountEmail || "Google gekoppeld"}
+                  </Badge>
+                ) : (
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/settings/bookings#google-agenda">Google Agenda koppelen</Link>
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-0">
+              {agendaLoading ? (
+                <div className="space-y-3">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-16 w-full" />)}</div>
+              ) : !agendaByDay.length ? (
+                <EmptyState
+                  icon={<CalendarClock />}
+                  title="Geen afspraken in deze periode"
+                  description={
+                    agendaData?.googleEnabled
+                      ? "Er staan geen boekingen of externe Google-afspraken in de komende 14 dagen."
+                      : "Koppel Google Agenda om externe afspraken naast je boekingen te tonen."
+                  }
+                />
+              ) : (
+                <div className="space-y-5">
+                  {agendaByDay.map((group) => (
+                    <section key={group.day.toISOString()} className="space-y-2">
+                      <h3 className="text-sm font-semibold text-foreground">{formatAgendaDayLabel(group.day)}</h3>
+                      <div className="space-y-2">
+                        {group.items.map((item) => {
+                          if (item.kind === "booking") {
+                            const statusInfo = STATUS_MAP[item.booking.status] ?? { label: item.booking.status, variant: "secondary" as const };
+                            const syncInfo = getSyncBadge(item.booking.googleSyncState);
+                            return (
+                              <div
+                                key={`booking-${item.id}`}
+                                className="flex flex-col gap-2 rounded-xl border border-border/60 bg-background/50 p-3 sm:flex-row sm:items-center sm:justify-between"
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <p className="font-medium">{item.title}</p>
+                                    <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                                    <Badge variant={syncInfo.variant}>{syncInfo.label}</Badge>
+                                    <Badge variant="outline">Digitify</Badge>
+                                  </div>
+                                  {item.booking.eventType?.name ? (
+                                    <p className="text-xs text-muted-foreground">{item.booking.eventType.name}</p>
+                                  ) : null}
+                                </div>
+                                <p className="shrink-0 text-sm text-muted-foreground">
+                                  {formatAgendaTime(item.start)} – {formatAgendaTime(item.end)}
+                                </p>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={`google-${item.id}`}
+                              className="flex flex-col gap-2 rounded-xl border border-dashed border-sky-300/70 bg-sky-50/50 p-3 dark:border-sky-800/60 dark:bg-sky-950/20 sm:flex-row sm:items-center sm:justify-between"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="font-medium">{item.title}</p>
+                                  <Badge variant="outline" className="gap-1 border-sky-300/80 text-sky-800 dark:text-sky-200">
+                                    <Globe className="h-3 w-3" />
+                                    Google Agenda
+                                  </Badge>
+                                </div>
+                              </div>
+                              <div className="flex shrink-0 items-center gap-3">
+                                <p className="text-sm text-muted-foreground">
+                                  {formatAgendaTime(item.start, item.allDay)}
+                                  {!item.allDay ? ` – ${formatAgendaTime(item.end)}` : ""}
+                                </p>
+                                {item.htmlLink ? (
+                                  <Button variant="ghost" size="sm" className="h-8 px-2" asChild>
+                                    <a href={item.htmlLink} target="_blank" rel="noreferrer">
+                                      <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                                      Open
+                                    </a>
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
                 </div>
               )}
             </CardContent>
@@ -936,40 +1244,44 @@ export default function BookingsPage() {
             {[
               {
                 label: "In afwachting",
-                value: (stats as any)?.pending ?? 0,
-                color: "amber",
+                value: pendingCount,
+                cardClass: "border-amber-200 bg-amber-50/60 dark:border-amber-900/40 dark:bg-amber-950/20",
+                iconClass: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
                 icon: <Clock className="h-4 w-4" />,
                 action: () => setStatusFilter("PENDING"),
               },
               {
                 label: "Bevestigd",
-                value: (stats as any)?.confirmed ?? 0,
-                color: "blue",
+                value: confirmedCount,
+                cardClass: "border-blue-200 bg-blue-50/60 dark:border-blue-900/40 dark:bg-blue-950/20",
+                iconClass: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
                 icon: <CheckCircle2 className="h-4 w-4" />,
                 action: () => setStatusFilter("CONFIRMED"),
               },
               {
                 label: "Voltooid",
                 value: stats?.completed ?? 0,
-                color: "emerald",
+                cardClass: "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/40 dark:bg-emerald-950/20",
+                iconClass: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
                 icon: <CalendarCheck className="h-4 w-4" />,
                 action: () => setStatusFilter("COMPLETED"),
               },
               {
                 label: "Niet verschenen",
-                value: (stats as any)?.noShow ?? 0,
-                color: "red",
+                value: noShowCount,
+                cardClass: "border-red-200 bg-red-50/60 dark:border-red-900/40 dark:bg-red-950/20",
+                iconClass: "bg-red-500/15 text-red-600 dark:text-red-400",
                 icon: <CalendarX className="h-4 w-4" />,
                 action: () => setStatusFilter("NO_SHOW"),
               },
-            ].map(({ label, value, color, icon, action }) => (
+            ].map(({ label, value, cardClass, iconClass, icon, action }) => (
               <button
                 key={label}
                 type="button"
                 onClick={action}
-                className={`rounded-2xl border p-4 text-left transition hover:shadow-sm border-${color}-200 bg-${color}-50/60 dark:border-${color}-900/40 dark:bg-${color}-950/20`}
+                className={cn("rounded-2xl border p-4 text-left transition hover:shadow-sm", cardClass)}
               >
-                <div className={`mb-2 flex h-9 w-9 items-center justify-center rounded-xl bg-${color}-500/15 text-${color}-600 dark:text-${color}-400`}>
+                <div className={cn("mb-2 flex h-9 w-9 items-center justify-center rounded-xl", iconClass)}>
                   {icon}
                 </div>
                 <p className="text-2xl font-bold">{value}</p>

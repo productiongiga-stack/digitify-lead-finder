@@ -8,6 +8,7 @@ import { trpc } from "@/lib/trpc/client";
 import { Avatar, AvatarFallback, AvatarImage, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Tabs, TabsContent, TabsList, TabsTrigger } from "@digitify/ui";
 import { ArrowLeft, Camera, KeyRound, Loader2, LogOut, Save, ShieldCheck, Trash2, UserCircle } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
+import { PasswordRulesPanel } from "@/components/settings/password-rules-panel";
 
 function initials(name?: string | null, email?: string | null) {
   const source = name?.trim() || email?.trim() || "U";
@@ -102,35 +103,56 @@ export default function AccountSettingsPage() {
           <h1 className="text-xl font-bold tracking-tight">Account & Profiel</h1>
           <p className="text-sm text-muted-foreground">Beheer je naam, profielfoto en wachtwoord.</p>
         </div>
-        <Badge variant="outline" className="w-fit">
-          {profile?.role || "Account"}
-        </Badge>
       </div>
 
-      <Card className="overflow-hidden border-border/60 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-xl">
-        <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-4">
-            <Avatar className="h-16 w-16 border border-white/15">
+      <div className="account-profile-banner">
+        <div className="account-profile-banner-accent" />
+        <div className="account-profile-banner-glow" aria-hidden />
+        <div className="account-profile-banner-content">
+          <div className="flex min-w-0 items-center gap-4">
+            <Avatar className="account-profile-avatar">
               {image ? <AvatarImage src={image} alt={name || profile?.email || "Profiel"} /> : null}
-              <AvatarFallback className="bg-white/10 text-lg text-white">{initials(name, profile?.email)}</AvatarFallback>
+              <AvatarFallback className="bg-primary/10 text-lg font-semibold text-primary">
+                {initials(name, profile?.email)}
+              </AvatarFallback>
             </Avatar>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/50">Ingelogd als</p>
-              <p className="mt-1 text-lg font-semibold">{name || profile?.email || "Gebruiker"}</p>
-              <p className="text-sm text-white/60">{profile?.email}</p>
+            <div className="min-w-0">
+              <p className="account-profile-label">Ingelogd als</p>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <p className="truncate text-lg font-semibold tracking-tight">
+                  {name || profile?.email || "Gebruiker"}
+                </p>
+                {profile?.role ? (
+                  <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
+                    {profile.role}
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mt-0.5 truncate text-sm text-muted-foreground">{profile?.email}</p>
             </div>
           </div>
-          <Button variant="outline" className="border-white/20 bg-white/10 text-white hover:bg-white/15" onClick={() => signOut({ callbackUrl: "/login" })}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 border-border/70 bg-background/80 shadow-sm hover:bg-muted/50"
+            onClick={() => signOut({ callbackUrl: "/login" })}
+          >
             <LogOut className="mr-2 h-4 w-4" />
             Uitloggen
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
-          <TabsTrigger value="profile">Profiel</TabsTrigger>
-          <TabsTrigger value="security">Beveiliging</TabsTrigger>
+        <TabsList className="page-view-tabs max-w-md">
+          <TabsTrigger value="profile" className="page-view-tabs-trigger">
+            <UserCircle className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+            Profiel
+          </TabsTrigger>
+          <TabsTrigger value="security" className="page-view-tabs-trigger">
+            <ShieldCheck className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+            Beveiliging
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="profile" className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
@@ -235,13 +257,7 @@ export default function AccountSettingsPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-border/60 bg-muted/30">
-            <CardContent className="space-y-3 p-5">
-              <p className="text-sm font-semibold">Wachtwoordregels</p>
-              <p className="text-sm text-muted-foreground">Minimaal 10 tekens, met kleine letter, hoofdletter en cijfer.</p>
-              <p className="text-sm text-muted-foreground">Veelgebruikte wachtwoorden zoals `admin123` worden geweigerd.</p>
-            </CardContent>
-          </Card>
+          <PasswordRulesPanel password={newPassword} />
         </TabsContent>
       </Tabs>
     </div>

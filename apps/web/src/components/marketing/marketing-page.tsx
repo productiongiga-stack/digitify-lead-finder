@@ -643,7 +643,7 @@ function HomePage() {
             </div>
             <div className="reveal-right grid grid-cols-2 gap-3.5">
               {[
-                { icon: TrendingUp,  label: "Pipeline waarde",  value: "€ 84.200", sub: "Dit kwartaal",         color: "#f9ae5a" },
+                { icon: TrendingUp,  label: "Pipeline waarde",  value: "€ 84.200", sub: "Voorbeeldcijfer",      color: "#f9ae5a" },
                 { icon: CheckCircle2,label: "Leads opgevolgd",  value: "147",       sub: "Actief in pipeline",   color: "#12a66a" },
                 { icon: Clock,       label: "Tijdsbesparing",   value: "~8u",       sub: "Per week vs losse tools",color: "#3b82f6" },
                 { icon: Award,       label: "Gem. lead score",  value: "76/100",    sub: "Commerciële fit",      color: "#8b5cf6" },

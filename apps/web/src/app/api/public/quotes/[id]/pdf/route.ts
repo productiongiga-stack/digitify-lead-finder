@@ -21,7 +21,7 @@ function userSettingPrefix(userId: string) {
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ip = getClientIp(request);
-  const limiter = enforceRateLimit(request, {
+  const limiter = await enforceRateLimit(request, {
     key: `public-quote-pdf:${id}:${ip}`,
     limit: 60,
     windowMs: 60 * 60 * 1000,

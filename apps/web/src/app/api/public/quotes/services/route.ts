@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
   }
   const ip = getClientIp(request);
-  const limiter = enforceRateLimit(request, {
+  const limiter = await enforceRateLimit(request, {
     key: `public-quote-services:${tenantUserId}:${ip}`,
     limit: 180,
     windowMs: 60 * 60 * 1000,
@@ -65,6 +65,7 @@ export async function GET(request: Request) {
             "quotes.embed_product_specs_json",
             "quotes.embed_category_icons_json",
             "quotes.embed_product_icons_json",
+            "quotes.embed_icon_library_json",
           ].map((key) => userSettingKey(tenantUserId, key)),
         },
       },
@@ -122,6 +123,7 @@ export async function GET(request: Request) {
       productSpecsJson: map["quotes.embed_product_specs_json"] || "{}",
       categoryIconsJson: map["quotes.embed_category_icons_json"] || "{}",
       productIconsJson: map["quotes.embed_product_icons_json"] || "{}",
+      iconLibraryJson: map["quotes.embed_icon_library_json"] || "[]",
     },
     services,
   });

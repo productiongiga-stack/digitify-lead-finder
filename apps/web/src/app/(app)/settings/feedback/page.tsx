@@ -1,7 +1,8 @@
 "use client";
 
+import type { ComponentType } from "react";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, Loader2, MessageSquareWarning, RefreshCw } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock3, ExternalLink, Loader2, MessageSquareWarning, RefreshCw } from "lucide-react";
 import {
   Badge,
   Button,
@@ -39,6 +40,12 @@ const statusVariants: Record<FeedbackStatus, "warning" | "info" | "success"> = {
   OPEN: "warning",
   TRIAGED: "info",
   CLOSED: "success",
+};
+
+const statusIcon: Record<FeedbackStatus, ComponentType<{ className?: string }>> = {
+  OPEN: MessageSquareWarning,
+  TRIAGED: Clock3,
+  CLOSED: CheckCircle2,
 };
 
 function statusSummary(items: Array<{ status: FeedbackStatus }> | undefined, status: FeedbackStatus) {
@@ -111,14 +118,21 @@ export default function FeedbackSettingsPage() {
 
       <div className="grid gap-3 sm:grid-cols-3">
         {(["OPEN", "TRIAGED", "CLOSED"] as FeedbackStatus[]).map((status) => (
-          <Card key={status} className="border-border/60">
-            <CardContent className="flex items-center gap-3 p-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <MessageSquareWarning className="h-5 w-5 text-primary" />
+          <Card key={status} className="border-border/60 bg-card/95">
+            <CardContent className="flex min-h-[92px] items-center justify-between gap-3 p-4">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  {statusLabels[status]}
+                </p>
+                <p className="mt-1 text-3xl font-bold tabular-nums leading-none">
+                  {statusSummary(feedback, status)}
+                </p>
               </div>
-              <div>
-                <p className="text-2xl font-semibold">{statusSummary(feedback, status)}</p>
-                <p className="text-xs text-muted-foreground">{statusLabels[status]}</p>
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-muted/25">
+                {(() => {
+                  const Icon = statusIcon[status];
+                  return <Icon className="h-5 w-5 text-muted-foreground" />;
+                })()}
               </div>
             </CardContent>
           </Card>

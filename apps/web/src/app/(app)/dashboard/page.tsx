@@ -2,11 +2,8 @@
 
 import { useMemo } from "react";
 import { trpc } from "@/lib/trpc/client";
-import {
-  getLeadPriorityBadgeVariant,
-  getLeadStatusDotClass,
-  getLeadStatusLabel,
-} from "@/lib/lead-status";
+import { getLeadStatusDotClass, getLeadStatusLabel } from "@/lib/lead-status";
+import { QueryErrorState } from "@/components/feedback/query-error-state";
 import {
   Card,
   CardContent,
@@ -52,6 +49,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { formatRelativeTime, formatDate } from "@/lib/utils";
+import { DashboardHero } from "@/components/dashboard/dashboard-hero";
+import { WidgetCard } from "@/components/dashboard/widget-card";
 
 /* ================================================================
    Quick Actions
@@ -184,7 +183,12 @@ function ActionCenter({
     if (reminders?.items) {
       list.push(...(reminders.items as ReminderItem[]));
     }
-    return list;
+    const seen = new Set<string>();
+    return list.filter((item) => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
   }, [reminders, kpis]);
 
   const grouped = useMemo(() => {
@@ -201,18 +205,18 @@ function ActionCenter({
   const isLoading = loading || remindersLoading;
 
   return (
-    <Card className="border-border/50 shadow-sm">
-      <CardHeader className="pb-2.5">
+    <Card className="dashboard-widget border-border/50 bg-card/90 shadow-sm backdrop-blur-sm">
+      <CardHeader className="dashboard-widget-header pb-2.5">
         <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2 text-sm">
+          <CardTitle className="flex items-center gap-2 text-sm font-semibold">
             <AlertOctagon className="h-4 w-4 text-primary" />
-            Action Center
+            Actiecentrum
           </CardTitle>
           <Badge
             variant={totalCount > 0 ? "warning" : "success"}
             className="h-6 px-2"
           >
-            {isLoading ? "…" : totalCount > 0 ? `${totalCount} open` : "Up to date"}
+            {isLoading ? "…" : totalCount > 0 ? `${totalCount} open` : "Alles bijgewerkt"}
           </Badge>
         </div>
       </CardHeader>
@@ -562,10 +566,13 @@ function PipelineOverview() {
 }
 
 /* ================================================================
-   Follow-Up Widget — leads without follow-up
+   Lead follow-up snippet — same source as actiecentrum (no duplicate query)
    ================================================================ */
-function FollowUpWidget() {
-  const { data: leads, isLoading } = trpc.dashboard.getLeadsNeedingFollowUp.useQuery();
+function LeadFollowUpSnippet() {
+  const { data: reminders, isLoading } = trpc.dashboard.getUnifiedReminders.useQuery(undefined, {
+    staleTime: 60_000,
+  });
+  const items = (reminders?.items ?? []).filter((item) => item.type === "lead_followup").slice(0, 5);
 
   if (isLoading) {
     return (
@@ -577,14 +584,13 @@ function FollowUpWidget() {
               <Skeleton className="h-3 w-40" />
               <Skeleton className="h-2.5 w-24" />
             </div>
-            <Skeleton className="h-6 w-14 rounded-md" />
           </div>
         ))}
       </div>
     );
   }
 
-  if (!leads || leads.length === 0) {
+  if (items.length === 0) {
     return (
       <EmptyState
         icon={<TrendingUp />}
@@ -597,40 +603,21 @@ function FollowUpWidget() {
 
   return (
     <div className="space-y-0.5">
-      {leads.slice(0, 5).map((lead: NonNullable<typeof leads>[number]) => (
-        <div
-          key={lead.id}
+      {items.map((item) => (
+        <Link
+          key={item.id}
+          href={item.href}
           className="flex items-center gap-2.5 rounded-md p-1.5 transition-colors hover:bg-muted/50"
         >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-900/30">
             <Clock className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-semibold">{lead.companyName}</p>
-            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span>{getLeadStatusLabel(lead.status)}</span>
-              {lead.city ? <span>· {lead.city}</span> : null}
-              {lead.scorePriority && (
-                <Badge
-                  variant={getLeadPriorityBadgeVariant(lead.scorePriority)}
-                  className="h-3.5 px-1 text-[9px]"
-                >
-                  {lead.scorePriority}
-                </Badge>
-              )}
-            </div>
+            <p className="truncate text-xs font-semibold">{item.title.replace(/^Lead opvolgen:\s*/i, "")}</p>
+            <p className="truncate text-[11px] text-muted-foreground">{item.subtitle}</p>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
-              {lead.daysSinceLastContact}d
-            </span>
-            <Link href={`/leads/${lead.id}`}>
-              <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]">
-                Open
-              </Button>
-            </Link>
-          </div>
-        </div>
+          <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </Link>
       ))}
     </div>
   );
@@ -884,7 +871,12 @@ function ExpiringDomains() {
    Dashboard Page
    ================================================================ */
 export default function DashboardPage() {
-  const { data: kpis, isLoading } = trpc.dashboard.getKpis.useQuery();
+  const {
+    data: kpis,
+    isLoading,
+    isError,
+    refetch,
+  } = trpc.dashboard.getKpis.useQuery();
   const queueCount =
     (kpis?.pendingDrafts ?? 0) + (kpis?.failedEmails ?? 0) + (kpis?.pendingReviews ?? 0);
 
@@ -914,40 +906,40 @@ export default function DashboardPage() {
       tone: (kpis?.hotLeads ?? 0) > 0 ? "warning" : "neutral",
     },
     {
-      label: "Open Quotes",
+      label: "Open offertes",
       value: kpis?.activeQuotes ?? 0,
       icon: <Receipt />,
       href: "/quotes",
     },
     {
-      label: "Quote Pipeline",
+      label: "Offertepipeline",
       value: formatEUR(pipelineRevenue),
       icon: <Euro />,
       hint: "Open + goedgekeurd",
       tone: pipelineRevenue > 0 ? "positive" : "neutral",
     },
     {
-      label: "Active Chats",
+      label: "Actieve chats",
       value: kpis?.unreadChats ?? 0,
       icon: <MessageSquare />,
       href: "/chatbot",
       tone: (kpis?.unreadChats ?? 0) > 0 ? "warning" : "neutral",
     },
     {
-      label: "E-mails in Draft",
+      label: "E-mailconcepten",
       value: kpis?.pendingDrafts ?? 0,
       icon: <Mail />,
       href: "/contacts/approval",
     },
     {
-      label: "Mislukte E-mails",
+      label: "Mislukte e-mails",
       value: kpis?.failedEmails ?? 0,
       icon: <AlertTriangle />,
       href: "/contacts",
       tone: (kpis?.failedEmails ?? 0) > 0 ? "negative" : "neutral",
     },
     {
-      label: "Pending Reviews",
+      label: "Open reviews",
       value: kpis?.pendingReviews ?? 0,
       icon: <Star />,
       href: "/reviews",
@@ -980,7 +972,7 @@ export default function DashboardPage() {
       tone: (kpis?.conversionRate ?? 0) >= 10 ? "positive" : "neutral",
     },
     {
-      label: "Active Campaign Leads",
+      label: "Actieve campagne-leads",
       value: kpis?.activeCampaignLeadCount ?? 0,
       icon: <Target />,
       href: "/campaigns",
@@ -993,30 +985,36 @@ export default function DashboardPage() {
     },
   ];
 
+  if (isError) {
+    return (
+      <div className="app-page space-y-4">
+        <QueryErrorState onRetry={() => void refetch()} />
+      </div>
+    );
+  }
+
   return (
     <div className="app-page">
-      {/* Header */}
-      <div className="app-page-heading">
-        <h1 className="app-page-title">Dashboard</h1>
-        <p className="app-page-subtitle">Welkom terug. Hier is je overzicht.</p>
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          <Badge variant="secondary" className="h-6 px-2">
-            {kpis?.totalLeads ?? 0} leads
-          </Badge>
-          <Badge variant={queueCount > 0 ? "warning" : "success"} className="h-6 px-2">
-            {queueCount > 0 ? `${queueCount} items vragen actie` : "Geen open actie-items"}
-          </Badge>
-        </div>
-      </div>
+      <DashboardHero
+        totalLeads={kpis?.totalLeads ?? 0}
+        hotLeads={kpis?.hotLeads ?? 0}
+        pipelineValue={formatEUR(pipelineRevenue)}
+        actionCount={queueCount}
+        newLeadsThisWeek={kpis?.newLeads}
+        loading={isLoading && !kpis}
+      />
 
-      <Tabs defaultValue="overview" className="space-y-3">
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="info">Info</TabsTrigger>
+      <Tabs defaultValue="overview" className="space-y-4">
+        <TabsList className="page-view-tabs">
+          <TabsTrigger value="overview" className="page-view-tabs-trigger">
+            Overzicht
+          </TabsTrigger>
+          <TabsTrigger value="info" className="page-view-tabs-trigger">
+            Statistieken
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="space-y-3">
-          {/* Action Center — top priority */}
+        <TabsContent value="overview" className="space-y-4">
           <ActionCenter
             kpis={
               kpis
@@ -1030,172 +1028,82 @@ export default function DashboardPage() {
             loading={isLoading}
           />
 
-          {/* Primary KPIs — compact grid */}
-          <StatsCards items={primaryKpis} columns={4} loading={isLoading && !kpis} />
+          <div className="dashboard-bento">
+            <WidgetCard title="Taken vandaag" icon={Bell} className="min-w-0 lg:col-span-4">
+              <TasksToday />
+            </WidgetCard>
 
-          {/* Today + Pipeline + Top Leads */}
-          <div className="grid gap-3 lg:grid-cols-3">
-            <Card className="border-border/50 shadow-sm">
-              <CardHeader className="pb-2.5">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <Bell className="h-4 w-4 text-primary" />
-                  Tasks Today
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <TasksToday />
-              </CardContent>
-            </Card>
+            <WidgetCard
+              title="Leads zonder opvolging"
+              icon={AlertTriangle}
+              iconClassName="bg-amber-500/10 [&_svg]:text-amber-600"
+              className="min-w-0 lg:col-span-4"
+            >
+              <LeadFollowUpSnippet />
+            </WidgetCard>
 
-            <Card className="border-border/50 shadow-sm">
-              <CardHeader className="pb-2.5">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <AlertTriangle className="h-4 w-4 text-amber-500" />
-                  Leads zonder follow-up
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <FollowUpWidget />
-              </CardContent>
-            </Card>
-
-            <Card className="border-border/50 shadow-sm">
-              <CardHeader className="pb-2.5">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2 text-sm">
-                    <TrendingUp className="h-4 w-4 text-primary" />
-                    Top Leads
-                  </CardTitle>
-                  <Link
-                    href="/leads"
-                    className="text-[11px] font-medium text-primary hover:underline"
-                  >
-                    Alle
-                  </Link>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <TopLeads />
-              </CardContent>
-            </Card>
+            <WidgetCard title="Top leads" icon={TrendingUp} href="/leads" className="min-w-0 lg:col-span-4">
+              <TopLeads />
+            </WidgetCard>
           </div>
 
-          {/* Quick actions + activity */}
-          <div className="grid gap-3 lg:grid-cols-5">
-            <div className="space-y-3 lg:col-span-3">
-              <Card className="border-border/50 shadow-sm">
-                <CardHeader className="pb-2.5">
-                  <CardTitle className="flex items-center gap-2 text-sm">
-                    <Zap className="h-4 w-4 text-primary" />
-                    Snelle Acties
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <QuickActions />
-                </CardContent>
-              </Card>
+          <div className="dashboard-bento">
+            <div className="min-w-0 space-y-3 lg:col-span-7">
+              <WidgetCard title="Snelle acties" icon={Zap}>
+                <QuickActions />
+              </WidgetCard>
 
-              <Card className="border-border/50 shadow-sm">
-                <CardHeader className="pb-2.5">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="flex items-center gap-2 text-sm">
-                      <ActivityIcon className="h-4 w-4 text-primary" />
-                      Recente Activiteit
-                    </CardTitle>
-                    <Link
-                      href="/leads"
-                      className="text-[11px] font-medium text-primary hover:underline"
-                    >
-                      Bekijk alles
-                    </Link>
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <ActivityFeed />
-                </CardContent>
-              </Card>
+              <WidgetCard
+                title="Recente activiteit"
+                icon={ActivityIcon}
+                href="/leads"
+                linkLabel="Bekijk alles"
+                contentClassName="max-h-[min(28rem,50vh)] overflow-y-auto pr-1"
+              >
+                <ActivityFeed />
+              </WidgetCard>
             </div>
 
-            <div className="space-y-3 lg:col-span-2">
-              <Card className="border-border/50 shadow-sm">
-                <CardHeader className="pb-2.5">
-                  <CardTitle className="flex items-center gap-2 text-sm">
-                    <Target className="h-4 w-4 text-primary" />
-                    Pipeline Overzicht
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <PipelineOverview />
-                </CardContent>
-              </Card>
-
-              <Card className="border-border/50 shadow-sm">
-                <CardHeader className="pb-2.5">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="flex items-center gap-2 text-sm">
-                      <Globe2 className="h-4 w-4 text-amber-600" />
-                      Verlopende Domeinen
-                    </CardTitle>
-                    <Link
-                      href="/domains"
-                      className="text-[11px] font-medium text-primary hover:underline"
-                    >
-                      Alles
-                    </Link>
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <ExpiringDomains />
-                </CardContent>
-              </Card>
+            <div className="min-w-0 space-y-3 lg:col-span-5">
+              <WidgetCard title="Pipeline" icon={Target}>
+                <PipelineOverview />
+              </WidgetCard>
+              <WidgetCard
+                title="Verlopende domeinen"
+                icon={Globe2}
+                iconClassName="bg-amber-500/10 [&_svg]:text-amber-600"
+                href="/domains"
+              >
+                <ExpiringDomains />
+              </WidgetCard>
             </div>
           </div>
 
-          {/* Bottom row: bookings + chats */}
-          <div className="grid gap-3 md:grid-cols-2">
-            <Card className="border-border/50 shadow-sm">
-              <CardHeader className="pb-2.5">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2 text-sm">
-                    <Calendar className="h-4 w-4 text-blue-600" />
-                    Aankomende Boekingen
-                  </CardTitle>
-                  <Link
-                    href="/bookings"
-                    className="text-[11px] font-medium text-primary hover:underline"
-                  >
-                    Alles
-                  </Link>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <UpcomingBookings />
-              </CardContent>
-            </Card>
+          <div className="dashboard-bento">
+            <WidgetCard
+              title="Aankomende boekingen"
+              icon={Calendar}
+              iconClassName="bg-blue-500/10 [&_svg]:text-blue-600"
+              href="/bookings"
+              className="min-w-0 lg:col-span-6"
+            >
+              <UpcomingBookings />
+            </WidgetCard>
 
-            <Card className="border-border/50 shadow-sm">
-              <CardHeader className="pb-2.5">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2 text-sm">
-                    <MessageSquare className="h-4 w-4 text-indigo-600" />
-                    Active Chats
-                  </CardTitle>
-                  <Link
-                    href="/chatbot"
-                    className="text-[11px] font-medium text-primary hover:underline"
-                  >
-                    Alles
-                  </Link>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <ActiveChats />
-              </CardContent>
-            </Card>
+            <WidgetCard
+              title="Actieve chats"
+              icon={MessageSquare}
+              iconClassName="bg-indigo-500/10 [&_svg]:text-indigo-600"
+              href="/chatbot"
+              className="min-w-0 lg:col-span-6"
+            >
+              <ActiveChats />
+            </WidgetCard>
           </div>
         </TabsContent>
 
-        <TabsContent value="info" className="space-y-3">
+        <TabsContent value="info" className="space-y-4">
+          <StatsCards items={primaryKpis} columns={4} loading={isLoading && !kpis} />
           <StatsCards items={secondaryKpis} columns={3} loading={isLoading && !kpis} />
         </TabsContent>
       </Tabs>

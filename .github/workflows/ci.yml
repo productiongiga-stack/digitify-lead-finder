@@ -1,0 +1,198 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, "cursor/**"]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/digitify_ci
+      DIRECT_URL: postgresql://ci:ci@localhost:5432/digitify_ci
+      REDIS_URL: redis://localhost:6379
+      NEXTAUTH_SECRET: ci-nextauth-secret-min-32-chars-long
+      NEXTAUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      SEED_ADMIN_EMAIL: admin@digitify.ci
+      SEED_ADMIN_PASSWORD: DigitifyCiSeed2026!
+      SEED_RLS_OWNER_B_EMAIL: owner-b@digitify.ci
+      SEED_RLS_OWNER_B_PASSWORD: DigitifyCiSeed2026!
+      SETTINGS_ENCRYPTION_KEY: ci-settings-encryption-key-min-32-chars
+      CRON_SECRET: ci-cron-secret-min-16
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: digitify_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d digitify_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Apply database migrations (init + RLS)
+        run: pnpm db:migrate
+
+      - name: Migrate workspace settings (dry-run)
+        run: pnpm db:migrate-workspace-settings -- --dry-run
+
+      - name: Migrate workspace settings
+        run: pnpm db:migrate-workspace-settings
+
+      - name: Migrate legacy templates (dry-run)
+        run: pnpm db:migrate-legacy-templates -- --dry-run
+
+      - name: Seed database
+        run: pnpm db:seed
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Redis rate limit integration
+        env:
+          RUN_REDIS_INTEGRATION: "1"
+        run: pnpm test:redis
+
+      - name: Workspace RLS integration tests
+        env:
+          RUN_DB_INTEGRATION: "1"
+          ENABLE_WORKSPACE_RLS: "true"
+        run: pnpm test:integration
+
+      - name: RLS staging smoke (seeded OWNER A + B)
+        env:
+          ENABLE_WORKSPACE_RLS: "true"
+        run: pnpm rls:smoke
+
+      - name: Typecheck web app
+        run: pnpm typecheck
+
+      - name: Lint web app
+        run: pnpm --filter @digitify/web lint
+
+      - name: Production build
+        run: pnpm build
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: quality
+
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/digitify_ci
+      DIRECT_URL: postgresql://ci:ci@localhost:5432/digitify_ci
+      NEXTAUTH_SECRET: ci-nextauth-secret-min-32-chars-long
+      NEXTAUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      SEED_ADMIN_EMAIL: admin@digitify.ci
+      SEED_ADMIN_PASSWORD: DigitifyCiSeed2026!
+      SEED_RLS_OWNER_B_EMAIL: owner-b@digitify.ci
+      SEED_RLS_OWNER_B_PASSWORD: DigitifyCiSeed2026!
+      PLAYWRIGHT_LOGIN_EMAIL: admin@digitify.ci
+      PLAYWRIGHT_LOGIN_PASSWORD: DigitifyCiSeed2026!
+      PLAYWRIGHT_OWNER_B_EMAIL: owner-b@digitify.ci
+      PLAYWRIGHT_OWNER_B_PASSWORD: DigitifyCiSeed2026!
+      REDIS_URL: redis://localhost:6379
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: digitify_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d digitify_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Prepare database
+        run: pnpm db:migrate && pnpm db:seed
+
+      - name: Build web app
+        run: pnpm --filter @digitify/web build
+
+      - name: Install Playwright browser
+        run: pnpm --filter @digitify/web exec playwright install chromium --with-deps
+
+      - name: Playwright smoke tests
+        run: |
+          pnpm --filter @digitify/web start --port 3000 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:3000/login >/dev/null && break
+            sleep 2
+          done
+          PLAYWRIGHT_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm test:e2e

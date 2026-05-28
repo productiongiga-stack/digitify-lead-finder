@@ -1,5 +1,6 @@
 import { getServerSession } from "next-auth";
 import { prisma } from "@digitify/db";
+import { resolveWorkspaceOwnerId } from "@digitify/api/src/lib/workspace";
 import { authOptions } from "./options";
 
 export async function getSession() {
@@ -14,9 +15,11 @@ export async function getCurrentUser() {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, email: true, name: true, role: true },
+    select: { id: true, email: true, name: true, role: true, workspaceOwnerId: true },
   });
   if (!user) return null;
+
+  const workspaceId = await resolveWorkspaceOwnerId(prisma, user.id);
 
   return {
     ...sessionUser,
@@ -24,5 +27,10 @@ export async function getCurrentUser() {
     email: user.email,
     name: user.name,
     role: user.role,
+    workspaceId,
   };
+}
+
+export function workspaceIdFor(user: { id: string; workspaceId?: string }) {
+  return user.workspaceId ?? user.id;
 }

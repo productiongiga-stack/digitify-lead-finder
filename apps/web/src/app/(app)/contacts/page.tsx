@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
@@ -23,20 +23,72 @@ import {
   TabsTrigger,
   Input,
   Checkbox,
+  type StatItem,
 } from "@digitify/ui";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
 import { EmptyState } from "@digitify/ui";
-import { Mail, FileText, CheckCircle, Eye, Send, Inbox, ArrowRight, PenSquare, Trash2, X } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  Eye,
+  FileEdit,
+  FileText,
+  Inbox,
+  Mail,
+  PenSquare,
+  Search,
+  Send,
+  ShieldCheck,
+  Trash2,
+  X,
+  Receipt,
+  LayoutGrid,
+  Info,
+} from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { EmailPreview } from "@/components/email/preview";
 import { extractEmailTemplateMetadata } from "@/lib/email-content";
 import {
+  OUTBOUND_STAT_CARD_STATUSES,
+  OUTBOUND_STAT_CARD_LABELS,
+  type OutboundStatCardStatus,
   OUTBOUND_STATUS_LABELS,
   OUTBOUND_STATUS_OPTIONS,
   OUTBOUND_STATUS_VARIANTS,
+  SEND_OUTBOUND_TOOLTIP,
   canSendOutboundDraft,
+  canEditOutboundDraft,
+  getOutboundStatusLabel,
+  getSendButtonLabel,
 } from "@/lib/contact-status";
+import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
+import { OutboundInfoPanel } from "@/components/outbound/outbound-info-panel";
+import { OutboundStatsCards } from "@/components/outbound/outbound-stats-cards";
+import {
+  extractQuoteIdFromDraftBody,
+  getQuoteConfiguratorUrl,
+} from "@/lib/quote-outbound";
+
+function QuoteConfiguratorButton({
+  draft,
+}: {
+  draft: { id: string; type: string; body: string };
+}) {
+  if (draft.type !== "QUOTE") return null;
+  const quoteId = extractQuoteIdFromDraftBody(draft.body);
+  if (!quoteId) return null;
+
+  return (
+    <Button asChild variant="outline" size="sm">
+      <Link href={getQuoteConfiguratorUrl(quoteId, `/contacts/drafts/${draft.id}`)}>
+        <Receipt className="mr-1.5 h-3.5 w-3.5" />
+        Configurator
+      </Link>
+    </Button>
+  );
+}
 
 export default function ContactsPage() {
   const searchParams = useSearchParams();
@@ -45,6 +97,7 @@ export default function ContactsPage() {
   const [searchFilter, setSearchFilter] = useState("");
   const [selectedDraftIds, setSelectedDraftIds] = useState<string[]>([]);
   const [sendingDraftId, setSendingDraftId] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<null | { mode: "single"; id: string } | { mode: "bulk" }>(null);
   const utils = trpc.useUtils();
 
   const { data, isLoading } = trpc.contact.listDrafts.useQuery({
@@ -59,6 +112,9 @@ export default function ContactsPage() {
     staleTime: 60_000,
   });
   const { data: followUpQueue } = trpc.contact.getFollowUpQueue.useQuery(undefined, {
+    staleTime: 60_000,
+  });
+  const { data: topbarStats } = trpc.contact.getTopbarStats.useQuery(undefined, {
     staleTime: 60_000,
   });
 
@@ -113,11 +169,52 @@ export default function ContactsPage() {
     failed: drafts.filter((item) => item.status === "FAILED").length,
   };
   const activeFilterCount = (statusFilter ? 1 : 0) + (searchFilter.trim() ? 1 : 0);
-  const nextActionHref =
-    stats.pending > 0 ? "/contacts/approval" : stats.failed > 0 ? "/contacts" : "/contacts/compose";
-  const nextActionLabel =
-    stats.pending > 0 ? "Werk eerst de goedkeuringswachtrij af." : stats.failed > 0 ? "Los mislukte mails eerst op." : "Er is ruimte om nieuwe outreach op te starten.";
   const followUpItems = followUpQueue?.items ?? [];
+
+  const outboundStatItems = useMemo<StatItem[]>(() => {
+    const countByStatus: Record<OutboundStatCardStatus, number> = {
+      DRAFT: stats.draft,
+      PENDING_APPROVAL: stats.pending,
+      APPROVED: stats.approved,
+      SENT: stats.sent,
+      FAILED: stats.failed,
+    };
+    const meta: Record<
+      OutboundStatCardStatus,
+      { icon: React.ReactNode; tone: NonNullable<StatItem["tone"]> }
+    > = {
+      DRAFT: { icon: <FileEdit />, tone: "neutral" },
+      PENDING_APPROVAL: { icon: <Clock />, tone: "warning" },
+      APPROVED: { icon: <ShieldCheck />, tone: "positive" },
+      SENT: { icon: <Send />, tone: "positive" },
+      FAILED: { icon: <AlertCircle />, tone: "negative" },
+    };
+
+    const statusCards: StatItem[] = OUTBOUND_STAT_CARD_STATUSES.map((status) => {
+      const count = countByStatus[status];
+      const active = statusFilter === status;
+      return {
+        label: OUTBOUND_STAT_CARD_LABELS[status],
+        value: count,
+        icon: meta[status].icon,
+        tone: meta[status].tone,
+        active,
+        onClick: () => setStatusFilter((current) => (current === status ? "" : status)),
+      };
+    });
+
+    return [
+      ...statusCards,
+      {
+        label: "Inkomend",
+        value: "Inbox",
+        icon: <Inbox />,
+        tone: "info" as const,
+        href: "/contacts/inbox",
+        hint: "Ontvangen e-mail",
+      },
+    ];
+  }, [stats.approved, stats.draft, stats.failed, stats.pending, stats.sent, statusFilter]);
 
   function toggleDraftSelection(id: string, checked: boolean) {
     setSelectedDraftIds((current) =>
@@ -134,14 +231,12 @@ export default function ContactsPage() {
   }
 
   function handleDeleteDraft(id: string) {
-    if (!window.confirm("Wil je deze outbound e-mail verwijderen?")) return;
-    deleteDraft.mutate({ id });
+    setDeleteConfirm({ mode: "single", id });
   }
 
   function handleBulkDelete() {
     if (selectedDraftIds.length === 0) return;
-    if (!window.confirm(`${selectedDraftIds.length} outbound e-mail(s) verwijderen?`)) return;
-    bulkDeleteDrafts.mutate({ ids: selectedDraftIds });
+    setDeleteConfirm({ mode: "bulk" });
   }
 
   function handleBulkSend() {
@@ -152,11 +247,34 @@ export default function ContactsPage() {
 
   return (
     <div className="app-page">
+      <ConfirmDialog
+        open={Boolean(deleteConfirm)}
+        title={deleteConfirm?.mode === "bulk" ? "Outbound e-mails verwijderen?" : "Outbound e-mail verwijderen?"}
+        description={
+          deleteConfirm?.mode === "bulk"
+            ? `${selectedDraftIds.length} geselecteerde e-mail(s) worden permanent verwijderd.`
+            : "Deze e-mail wordt permanent verwijderd uit het outbound center."
+        }
+        confirmLabel="Verwijderen"
+        loading={deleteDraft.isPending || bulkDeleteDrafts.isPending}
+        onOpenChange={(open) => {
+          if (!open) setDeleteConfirm(null);
+        }}
+        onConfirm={() => {
+          if (!deleteConfirm) return;
+          if (deleteConfirm.mode === "single") {
+            deleteDraft.mutate({ id: deleteConfirm.id });
+          } else {
+            bulkDeleteDrafts.mutate({ ids: selectedDraftIds });
+          }
+          setDeleteConfirm(null);
+        }}
+      />
       <div className="app-page-header">
         <div className="app-page-heading">
           <h1 className="app-page-title">Outbound Center</h1>
           <p className="app-page-subtitle">
-            Opstellen, goedkeuren en verzenden van outreach. Inkomende mail loopt via Inbox.
+            Concept → goedkeuren → verzenden. Goedkeuren stuurt nog niet; gebruik Verzenden voor SMTP.
           </p>
         </div>
         <div className="app-page-actions">
@@ -166,7 +284,7 @@ export default function ContactsPage() {
               Nieuwe E-mail
             </Button>
           </Link>
-          <Link href="/contacts/templates">
+          <Link href="/templates">
             <Button variant="outline" size="sm">
               <FileText className="mr-2 h-4 w-4" />
               Templates
@@ -182,23 +300,35 @@ export default function ContactsPage() {
       </div>
 
       <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="info">Info</TabsTrigger>
+        <TabsList className="page-view-tabs">
+          <TabsTrigger value="overview" className="page-view-tabs-trigger">
+            <LayoutGrid />
+            Overzicht
+          </TabsTrigger>
+          <TabsTrigger value="info" className="page-view-tabs-trigger">
+            <Info />
+            Info
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
-      <Card className="p-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <Input
-            value={searchFilter}
-            onChange={(event) => setSearchFilter(event.target.value)}
-            placeholder="Zoek op lead, onderwerp of e-mail..."
-            className="w-full sm:w-[280px]"
-          />
-          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v === "all" ? "" : v)}>
-            <SelectTrigger className="w-full sm:w-[190px]">
-              <SelectValue placeholder="Filter op status" />
+      <div className="app-page-filters">
+        <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="relative min-w-0 flex-1 sm:max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchFilter}
+              onChange={(event) => setSearchFilter(event.target.value)}
+              placeholder="Zoek lead, onderwerp of e-mail…"
+              className="h-9 min-w-0 border-border/70 bg-background/80 pl-9 shadow-none"
+            />
+          </div>
+          <Select
+            value={statusFilter || "all"}
+            onValueChange={(v) => setStatusFilter(v === "all" ? "" : v)}
+          >
+            <SelectTrigger className="h-9 w-full border-border/70 bg-background/80 shadow-none sm:w-[210px]">
+              <SelectValue placeholder="Alle statussen" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Alle statussen</SelectItem>
@@ -209,16 +339,20 @@ export default function ContactsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Link href="/contacts/inbox">
-            <Button variant="ghost" size="sm">
-              <Inbox className="mr-1.5 h-3.5 w-3.5" />
-              Naar Inbox
-            </Button>
-          </Link>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 sm:shrink-0 lg:border-l lg:border-border/50 lg:pl-4">
+          <Button asChild variant="outline" size="sm" className="h-9 border-border/70 bg-background/80 shadow-none">
+            <Link href="/contacts/inbox">
+              <Inbox className="mr-1.5 h-4 w-4" />
+              Inbox
+            </Link>
+          </Button>
           {activeFilterCount > 0 ? (
             <Button
               variant="ghost"
               size="sm"
+              className="h-9 text-muted-foreground"
               onClick={() => {
                 setStatusFilter("");
                 setSearchFilter("");
@@ -230,16 +364,16 @@ export default function ContactsPage() {
           ) : null}
           {leadIdFilter ? (
             <>
-              <Badge variant="outline" className="h-9 px-3">
-                Lead filter actief
+              <Badge variant="secondary" className="h-9 px-2.5 text-xs">
+                Leadfilter actief
               </Badge>
-              <Button asChild variant="ghost" size="sm">
+              <Button asChild variant="ghost" size="sm" className="h-9">
                 <Link href={`/leads/${leadIdFilter}`}>Open lead</Link>
               </Button>
             </>
           ) : null}
         </div>
-      </Card>
+      </div>
 
       {selectedDraftIds.length > 0 ? (
         <Card className="border-primary/30 bg-primary/5 p-3">
@@ -247,12 +381,15 @@ export default function ContactsPage() {
             <div className="text-sm">
               <span className="font-semibold">{selectedDraftIds.length}</span> e-mail(s) geselecteerd
               {sendableSelectedCount > 0 ? (
-                <span className="ml-2 text-muted-foreground">{sendableSelectedCount} klaar om te verzenden</span>
+                <span className="ml-2 text-muted-foreground">
+                  {sendableSelectedCount} {OUTBOUND_STATUS_LABELS.APPROVED!.toLowerCase()}
+                </span>
               ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
+                title={SEND_OUTBOUND_TOOLTIP}
                 onClick={handleBulkSend}
                 disabled={bulkSendDrafts.isPending || sendableSelectedCount === 0}
               >
@@ -276,136 +413,24 @@ export default function ContactsPage() {
         </Card>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-6">
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Concept</p>
-            <p className="mt-1 text-lg font-semibold">{stats.draft}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Wacht op goedkeuring</p>
-            <p className="mt-1 text-lg font-semibold">{stats.pending}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Goedgekeurd</p>
-            <p className="mt-1 text-lg font-semibold">{stats.approved}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Verzonden</p>
-            <p className="mt-1 text-lg font-semibold">{stats.sent}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Mislukt</p>
-            <p className="mt-1 text-lg font-semibold">{stats.failed}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Inkomend</p>
-            <Link href="/contacts/inbox" className="mt-1 inline-flex items-center text-sm font-medium text-primary hover:underline">
-              Open Inbox
-              <ArrowRight className="ml-1 h-3.5 w-3.5" />
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
+      <OutboundStatsCards items={outboundStatItems} loading={isLoading} />
 
       </TabsContent>
 
       <TabsContent value="info" className="space-y-4">
-      <Card className="border-dashed">
-        <CardContent className="p-3 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Flow:</span> Concept -&gt; Goedkeuring -&gt; Verzenden.{" "}
-          <span className="font-medium text-foreground">Tip:</span> status <span className="font-medium">Mislukt</span> kan je opnieuw verzenden na correctie van SMTP/domein.
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-3 xl:grid-cols-3">
-        <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Volgende actie</p>
-            <p className="mt-2 text-sm font-medium">{nextActionLabel}</p>
-            <Button asChild size="sm" variant="outline" className="mt-3">
-              <Link href={nextActionHref}>
-                {stats.pending > 0 ? "Open goedkeuringswachtrij" : stats.failed > 0 ? "Open mislukte mails" : "Nieuwe e-mail maken"}
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
-        <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Werkqueue</p>
-            <p className="mt-2 text-sm font-medium">
-              {stats.pending} wachten op goedkeuring · {stats.approved} klaar om te verzenden · {stats.failed} mislukt
-            </p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Zo zie je sneller waar de outreachflow vandaag blijft hangen.
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gerelateerd</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button asChild size="sm" variant="outline">
-                <Link href="/contacts/templates">Templates</Link>
-              </Button>
-              <Button asChild size="sm" variant="ghost">
-                <Link href="/settings/integrations">SMTP & inbox</Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="border-border/60 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Follow-up herinneringen</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {followUpItems.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Geen follow-ups die vandaag aandacht vragen. Nieuwe reminders worden opgebouwd op basis van verzonden mails en het ingestelde interval van {followUpQueue?.followupDays ?? 3} dagen.
-            </p>
-          ) : (
-            <>
-              <p className="text-xs text-muted-foreground">
-                Deze leads kregen al een mail en zijn na {followUpQueue?.followupDays ?? 3} dagen nog niet verder geraakt in de pipeline.
-              </p>
-              <div className="grid gap-2">
-                {followUpItems.map((item) => (
-                  <div key={item.id} className="flex flex-col gap-2 rounded-lg border bg-muted/20 p-3 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <Link href={`/leads/${item.lead.id}`} className="text-sm font-medium hover:text-primary">
-                        {item.lead.companyName}
-                      </Link>
-                      <p className="text-xs text-muted-foreground">
-                        {item.subject} · {item.daysSinceSent} dagen geleden verzonden
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button asChild size="sm" variant="outline">
-                        <Link href={`/contacts/compose?leadId=${item.lead.id}`}>Nieuwe follow-up</Link>
-                      </Button>
-                      <Button asChild size="sm" variant="ghost">
-                        <Link href={`/leads/${item.lead.id}`}>Open lead</Link>
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+        <OutboundInfoPanel
+          loading={isLoading}
+          stats={stats}
+          drafts={drafts.map((draft) => ({
+            id: draft.id,
+            status: draft.status,
+            subject: draft.subject,
+            lead: { id: draft.lead.id, companyName: draft.lead.companyName },
+          }))}
+          followUpDays={followUpQueue?.followupDays}
+          followUpItems={followUpItems}
+          topbarFollowUpCount={topbarStats?.followUpCount}
+        />
       </TabsContent>
 
       <TabsContent value="overview" className="space-y-4">
@@ -436,7 +461,10 @@ export default function ContactsPage() {
                     </Link>
                     </div>
                   </div>
-                  <Badge variant={OUTBOUND_STATUS_VARIANTS[draft.status] || "secondary"}>
+                  <Badge
+                    variant={OUTBOUND_STATUS_VARIANTS[draft.status] || "secondary"}
+                    className="whitespace-nowrap px-3 py-1 text-xs font-semibold"
+                  >
                     {OUTBOUND_STATUS_LABELS[draft.status] || draft.status}
                   </Badge>
                 </div>
@@ -444,16 +472,27 @@ export default function ContactsPage() {
                   {draft.author.name} · {formatDate(draft.createdAt)}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <Button asChild variant="outline" size="sm">
-                    <Link href={`/contacts/drafts/${draft.id}`}>
-                      <Eye className="mr-1.5 h-3.5 w-3.5" />
-                      Open
-                    </Link>
-                  </Button>
+                  {canEditOutboundDraft(draft.status) ? (
+                    <Button asChild variant="outline" size="sm">
+                      <Link href={`/contacts/drafts/${draft.id}`}>
+                        <PenSquare className="mr-1.5 h-3.5 w-3.5" />
+                        Bewerken
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button asChild variant="outline" size="sm">
+                      <Link href={`/contacts/drafts/${draft.id}`}>
+                        <Eye className="mr-1.5 h-3.5 w-3.5" />
+                        Open
+                      </Link>
+                    </Button>
+                  )}
+                  <QuoteConfiguratorButton draft={draft} />
                   {canSendOutboundDraft(draft.status) ? (
                     <Button
                       variant="default"
                       size="sm"
+                      title={SEND_OUTBOUND_TOOLTIP}
                       disabled={sendEmail.isPending}
                       onClick={() => {
                         setSendingDraftId(draft.id);
@@ -468,11 +507,10 @@ export default function ContactsPage() {
                       }}
                     >
                       <Send className="mr-1.5 h-3.5 w-3.5" />
-                      {sendEmail.isPending && sendingDraftId === draft.id
-                        ? "Verzenden..."
-                        : draft.status === "FAILED"
-                          ? "Opnieuw verzenden"
-                          : "Verzenden"}
+                      {getSendButtonLabel(
+                        draft.status,
+                        sendEmail.isPending && sendingDraftId === draft.id,
+                      )}
                     </Button>
                   ) : null}
                   <Button
@@ -541,7 +579,10 @@ export default function ContactsPage() {
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={OUTBOUND_STATUS_VARIANTS[draft.status] || "secondary"}>
+                    <Badge
+                      variant={OUTBOUND_STATUS_VARIANTS[draft.status] || "secondary"}
+                      className="whitespace-nowrap px-3 py-1 text-xs font-semibold"
+                    >
                       {OUTBOUND_STATUS_LABELS[draft.status] || draft.status}
                     </Badge>
                   </TableCell>
@@ -578,10 +619,22 @@ export default function ContactsPage() {
                         </DialogContent>
                       </Dialog>
 
+                      {canEditOutboundDraft(draft.status) ? (
+                        <Button asChild variant="ghost" size="sm">
+                          <Link href={`/contacts/drafts/${draft.id}`}>
+                            <PenSquare className="mr-1 h-3.5 w-3.5" />
+                            Bewerken
+                          </Link>
+                        </Button>
+                      ) : null}
+
+                      <QuoteConfiguratorButton draft={draft} />
+
                       {canSendOutboundDraft(draft.status) && (
                         <Button
                           variant="default"
                           size="sm"
+                          title={SEND_OUTBOUND_TOOLTIP}
                           disabled={sendEmail.isPending}
                           onClick={() => {
                             setSendingDraftId(draft.id);
@@ -596,11 +649,10 @@ export default function ContactsPage() {
                           }}
                         >
                           <Send className="mr-1 h-3.5 w-3.5" />
-                          {sendEmail.isPending && sendingDraftId === draft.id
-                            ? "Verzenden..."
-                            : draft.status === "FAILED"
-                              ? "Opnieuw verzenden"
-                              : "Verzenden"}
+                          {getSendButtonLabel(
+                            draft.status,
+                            sendEmail.isPending && sendingDraftId === draft.id,
+                          )}
                         </Button>
                       )}
                       <Button

@@ -18,11 +18,14 @@ import {
   Textarea,
   Label,
 } from "@digitify/ui";
-import { CheckCircle, XCircle, Eye, Inbox } from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { CheckCircle, XCircle, Eye, Inbox, Mail, FileText, Clock, User, AtSign, Pencil } from "lucide-react";
+import { formatDate, formatRelativeTime } from "@/lib/utils";
 import Link from "next/link";
 import { EmailPreview } from "@/components/email/preview";
+import { OutboundWorkflowHelp } from "@/components/outbound/outbound-workflow-help";
 import { extractEmailTemplateMetadata } from "@/lib/email-content";
+import { OUTBOUND_STATUS_LABELS, OUTBOUND_STATUS_VARIANTS } from "@/lib/contact-status";
+import { extractQuoteIdFromDraftBody, getQuoteConfiguratorUrl } from "@/lib/quote-outbound";
 
 export default function ApprovalPage() {
   const utils = trpc.useUtils();
@@ -81,46 +84,17 @@ export default function ApprovalPage() {
       <div>
         <h1 className="text-xl font-bold tracking-tight">Goedkeuringswachtrij</h1>
         <p className="text-sm text-muted-foreground">
-          E-mails die wachten op goedkeuring voor verzending
+          Keur inhoud goed — verzending gebeurt apart via Outbound Center
         </p>
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-3">
-        <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Open items</p>
-            <p className="mt-2 text-2xl font-bold">{data?.items.length ?? 0}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Werk deze wachtrij af voor je nieuwe outreach uitstuurd.
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Beslis sneller</p>
-            <p className="mt-2 text-sm font-medium">
-              Preview de mail, keur goed als de toon klopt en geef een korte reden mee bij afkeuren.
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gerelateerde acties</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button asChild size="sm" variant="outline">
-                <Link href="/contacts">Outbound center</Link>
-              </Button>
-              <Button asChild size="sm" variant="ghost">
-                <Link href="/contacts/templates">Templates</Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <OutboundWorkflowHelp />
 
       {isLoading ? (
         <div className="space-y-4">
-          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-32" />)}
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-48 rounded-2xl" />
+          ))}
         </div>
       ) : data?.items.length === 0 ? (
         <Card>
@@ -136,80 +110,151 @@ export default function ApprovalPage() {
         <div className="space-y-4">
           {data?.items.map((draft: NonNullable<typeof data>["items"][number]) => {
             const parsedDraft = extractEmailTemplateMetadata(draft.body);
+            const quoteId = draft.type === "QUOTE" ? extractQuoteIdFromDraftBody(draft.body) : null;
+            const isQuoteDraft = draft.type === "QUOTE";
+
             return (
-            <Card key={draft.id}>
-              <CardContent className="p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Link href={`/leads/${draft.lead.id}`} className="font-medium hover:text-primary">
-                        {draft.lead.companyName}
+              <Card key={draft.id} className="approval-queue-item overflow-hidden">
+                <CardContent className="p-0">
+                  <div className="approval-queue-item-header">
+                    <div
+                      className={`approval-queue-item-icon ${isQuoteDraft ? "approval-queue-item-icon-quote" : ""}`}
+                    >
+                      {isQuoteDraft ? <FileText className="h-5 w-5" /> : <Mail className="h-5 w-5" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                          href={`/leads/${draft.lead.id}`}
+                          className="text-sm font-semibold hover:text-primary"
+                        >
+                          {draft.lead.companyName}
+                        </Link>
+                        <Badge variant={OUTBOUND_STATUS_VARIANTS.PENDING_APPROVAL}>
+                          {OUTBOUND_STATUS_LABELS.PENDING_APPROVAL}
+                        </Badge>
+                        {isQuoteDraft ? (
+                          <Badge
+                            variant="outline"
+                            className="border-amber-300/70 bg-amber-50/80 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+                          >
+                            Offerte-e-mail
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <Link
+                        href={`/contacts/drafts/${draft.id}`}
+                        className="mt-1 block text-base font-semibold leading-snug hover:text-primary"
+                      >
+                        {draft.subject}
                       </Link>
-                      <Badge variant="warning">Wacht op goedkeuring</Badge>
-                    </div>
-                    <p className="text-sm font-semibold">{draft.subject}</p>
-                    <p className="text-xs text-muted-foreground">Naar: {draft.toEmail}</p>
-                    <p className="text-sm text-muted-foreground line-clamp-2">{parsedDraft.cleanBody}</p>
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      <span>Door: {draft.author.name}</span>
-                      <span>{formatDate(draft.createdAt)}</span>
                     </div>
                   </div>
-                  <div className="flex flex-col gap-2">
-                    {/* Preview Dialog */}
-                    <Dialog>
-                      <DialogTrigger asChild>
-                        <Button variant="outline" size="sm">
-                          <Eye className="mr-1 h-3.5 w-3.5" />
-                          Preview
+
+                  <div className="space-y-3 px-4 py-4 sm:px-5">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1.5">
+                        <AtSign className="h-3.5 w-3.5 shrink-0" />
+                        {draft.toEmail}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <User className="h-3.5 w-3.5 shrink-0" />
+                        {draft.author.name}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Clock className="h-3.5 w-3.5 shrink-0" />
+                        {formatRelativeTime(draft.createdAt)} · {formatDate(draft.createdAt)}
+                      </span>
+                    </div>
+
+                    <div className="approval-queue-item-excerpt">
+                      <p className="line-clamp-3 text-sm leading-relaxed text-muted-foreground">
+                        {parsedDraft.cleanBody}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="approval-queue-item-actions">
+                    <div className="flex flex-wrap gap-2">
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <Button variant="outline" size="sm">
+                            <Eye className="mr-1.5 h-3.5 w-3.5" />
+                            Preview
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-2xl">
+                          <DialogHeader>
+                            <DialogTitle>E-mail preview</DialogTitle>
+                          </DialogHeader>
+                          <EmailPreview
+                            subject={draft.subject}
+                            body={parsedDraft.cleanBody}
+                            companyName={brandCompanyName}
+                            primaryColor={brandPrimaryColor}
+                            fromName={draft.author.name || brandCompanyName}
+                            headerSlogan={brandHeaderSlogan}
+                            recipientCompany={draft.lead.companyName}
+                            layout={parsedDraft.layout}
+                          />
+                        </DialogContent>
+                      </Dialog>
+
+                      <Button asChild variant="outline" size="sm">
+                        <Link href={`/contacts/drafts/${draft.id}`}>
+                          <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                          Bewerken
+                        </Link>
+                      </Button>
+
+                      {quoteId ? (
+                        <Button asChild variant="outline" size="sm">
+                          <Link href={getQuoteConfiguratorUrl(quoteId, `/contacts/drafts/${draft.id}`)}>
+                            <FileText className="mr-1.5 h-3.5 w-3.5" />
+                            Offerte aanpassen
+                          </Link>
                         </Button>
-                      </DialogTrigger>
-                      <DialogContent className="max-w-2xl">
-                        <DialogHeader>
-                          <DialogTitle>E-mail preview</DialogTitle>
-                        </DialogHeader>
-                        <EmailPreview
-                          subject={draft.subject}
-                          body={parsedDraft.cleanBody}
-                          companyName={brandCompanyName}
-                          primaryColor={brandPrimaryColor}
-                          fromName={draft.author.name || brandCompanyName}
-                          headerSlogan={brandHeaderSlogan}
-                          recipientCompany={draft.lead.companyName}
-                          layout={parsedDraft.layout}
-                        />
-                      </DialogContent>
-                    </Dialog>
+                      ) : null}
+                    </div>
 
-                    <Button
-                      size="sm"
-                      className="bg-emerald-600 text-white hover:bg-emerald-700"
-                      onClick={() => approve.mutate({ id: draft.id })}
-                      disabled={approve.isPending}
-                    >
-                      <CheckCircle className="mr-1 h-3.5 w-3.5" />
-                      {approve.isPending ? "..." : "Goedkeuren"}
-                    </Button>
+                    <div className="flex flex-wrap gap-2 sm:justify-end">
+                      <Button
+                        size="sm"
+                        className="bg-emerald-600 text-white hover:bg-emerald-700"
+                        onClick={() => approve.mutate({ id: draft.id })}
+                        disabled={approve.isPending}
+                      >
+                        <CheckCircle className="mr-1.5 h-3.5 w-3.5" />
+                        {approve.isPending ? "Bezig..." : "Goedkeuren"}
+                      </Button>
 
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => openRejectDialog(draft.id)}
-                      disabled={reject.isPending}
-                    >
-                      <XCircle className="mr-1 h-3.5 w-3.5" />
-                      Afkeuren
-                    </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => openRejectDialog(draft.id)}
+                        disabled={reject.isPending}
+                      >
+                        <XCircle className="mr-1.5 h-3.5 w-3.5" />
+                        Afkeuren
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          )})}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 
-      {/* Reject Dialog */}
-      <Dialog open={rejectDialogOpen} onOpenChange={(open) => { if (!open) { setRejectDialogOpen(false); setRejectingId(null); } }}>
+      <Dialog
+        open={rejectDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRejectDialogOpen(false);
+            setRejectingId(null);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>E-mail afkeuren</DialogTitle>
@@ -230,7 +275,13 @@ export default function ApprovalPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setRejectDialogOpen(false); setRejectingId(null); }}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRejectDialogOpen(false);
+                setRejectingId(null);
+              }}
+            >
               Annuleren
             </Button>
             <Button variant="destructive" onClick={handleReject} disabled={reject.isPending}>

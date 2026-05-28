@@ -5,13 +5,23 @@ import {
   type EmailAttachment,
   buildLeadContext,
   replacePlaceholders,
+  normalizeHtmlEmailDocument,
+  htmlToPlainText,
 } from "@digitify/email";
 import { type PrismaClient } from "@digitify/db";
 import { formatSmtpErrorMessage, normalizeAiPlaceholderSyntax, normalizeLegacyPlaceholders, normalizeTlsOptions } from "./email-utils";
 import { log } from "./logger";
 import { getSettingBoolean, getSettingNumber, getSettingString, settingsRowsToMap } from "./settings";
 import { extractEmailTemplateMetadata } from "./email-content";
-import { loadUserSettingRows } from "./user-settings";
+import { loadWorkspaceSettingRows, type WorkspaceScope } from "./workspace-settings";
+
+export type EmailSettingsScope = string | WorkspaceScope;
+
+function resolveEmailSettingsScope(scope?: EmailSettingsScope): WorkspaceScope | null {
+  if (!scope) return null;
+  if (typeof scope === "string") return { workspaceId: scope, memberId: scope };
+  return scope;
+}
 
 interface EmailSettings {
   providerName: string;
@@ -26,6 +36,7 @@ interface EmailSettings {
   signature: string;
   footer: string;
   defaultLayout: EmailLayout;
+  defaultLayoutByType: Partial<Record<"OUTREACH" | "FOLLOW_UP" | "PROPOSAL" | "REPORT" | "BOOKING" | "REVIEW" | "REENGAGEMENT" | "CUSTOM", EmailLayout>>;
   typographyMode: "compact" | "normal";
   replyTo: string;
   bcc: string;
@@ -35,6 +46,39 @@ interface EmailSettings {
   smtpPass: string;
   smtpServername: string;
   smtpRejectUnauthorized: boolean;
+}
+
+const TEMPLATE_TYPE_KEYS = [
+  "OUTREACH",
+  "FOLLOW_UP",
+  "PROPOSAL",
+  "REPORT",
+  "BOOKING",
+  "REVIEW",
+  "REENGAGEMENT",
+  "CUSTOM",
+] as const;
+
+type TemplateTypeKey = (typeof TEMPLATE_TYPE_KEYS)[number];
+
+function parseLayoutByTypeSetting(raw: string): Partial<Record<TemplateTypeKey, EmailLayout>> {
+  if (!raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const obj = parsed as Record<string, unknown>;
+    const result: Partial<Record<TemplateTypeKey, EmailLayout>> = {};
+    TEMPLATE_TYPE_KEYS.forEach((typeKey) => {
+      const value = obj[typeKey];
+      if (typeof value !== "string") return;
+      if (["modern", "minimal", "business", "proposal", "followup"].includes(value)) {
+        result[typeKey] = value as EmailLayout;
+      }
+    });
+    return result;
+  } catch {
+    return {};
+  }
 }
 
 interface SendBrandedEmailParams {
@@ -72,7 +116,7 @@ function resolveAppUrl() {
 /**
  * Load email and branding settings from the database.
  */
-export async function loadEmailSettings(db: PrismaClient, userId?: string): Promise<EmailSettings> {
+export async function loadEmailSettings(db: PrismaClient, scope?: EmailSettingsScope): Promise<EmailSettings> {
   const settingKeys = [
     "email.provider",
     "email.smtp_host",
@@ -89,6 +133,7 @@ export async function loadEmailSettings(db: PrismaClient, userId?: string): Prom
     "email.signature",
     "email.footer",
     "email.default_layout",
+    "email.default_layout_by_type_json",
     "display.typography_mode",
     "branding.company_name",
     "branding.primary_color",
@@ -98,8 +143,9 @@ export async function loadEmailSettings(db: PrismaClient, userId?: string): Prom
     "company.website",
   ];
 
-  const settingRows = userId
-    ? await loadUserSettingRows(db, userId, settingKeys)
+  const resolved = resolveEmailSettingsScope(scope);
+  const settingRows = resolved
+    ? await loadWorkspaceSettingRows(db, resolved, settingKeys)
     : await db.setting.findMany({ where: { key: { in: settingKeys } } });
   const settings = settingsRowsToMap(settingRows);
 
@@ -127,6 +173,7 @@ export async function loadEmailSettings(db: PrismaClient, userId?: string): Prom
     signature: getSettingString(settings, "email.signature"),
     footer: getSettingString(settings, "email.footer"),
     defaultLayout: getSettingString(settings, "email.default_layout", "proposal") as EmailLayout,
+    defaultLayoutByType: parseLayoutByTypeSetting(getSettingString(settings, "email.default_layout_by_type_json", "{}")),
     typographyMode: getSettingString(settings, "display.typography_mode", "compact") === "normal" ? "normal" : "compact",
     replyTo: getSettingString(settings, "email.reply_to"),
     bcc: getSettingString(settings, "email.bcc"),
@@ -215,32 +262,40 @@ export async function sendBrandedEmail(
   const safeBody = replacePlaceholders(normalizedBody, mergedContext, { removeMissing: true }).replace(/\n{3,}/g, "\n\n").trim();
 
   const templateMetadata = extractEmailTemplateMetadata(safeBody);
+  const isHtmlBody = templateMetadata.bodyFormat === "HTML";
 
-  const bodyWithSignature = [
-    templateMetadata.cleanBody.trim(),
-    cfg.signature.trim() ? cfg.signature.trim() : "",
-    cfg.footer.trim() ? cfg.footer.trim() : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-  const effectiveLayout = params.layout || templateMetadata.layout || cfg.defaultLayout || "proposal";
+  const bodyWithSignature = isHtmlBody
+    ? templateMetadata.cleanBody.trim()
+    : [
+        templateMetadata.cleanBody.trim(),
+        cfg.signature.trim() ? cfg.signature.trim() : "",
+        cfg.footer.trim() ? cfg.footer.trim() : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+  const typedLayout = templateMetadata.type
+    ? cfg.defaultLayoutByType[templateMetadata.type as TemplateTypeKey]
+    : undefined;
+  const effectiveLayout = params.layout || templateMetadata.layout || typedLayout || cfg.defaultLayout || "proposal";
 
-  const html = generateBrandedHtml({
-    subject: safeSubject,
-    body: bodyWithSignature,
-    companyName: cfg.companyName,
-    primaryColor: cfg.primaryColor,
-    fromName: effectiveFromName,
-    fromEmail: effectiveFromEmail,
-    headerSlogan: cfg.headerSlogan,
-    recipientCompany: params.recipientCompany || "",
-    ctaText: templateMetadata.ctaText,
-    ctaUrl: templateMetadata.ctaUrl,
-    layout: effectiveLayout,
-    typographyMode: cfg.typographyMode,
-    logoUrl: cfg.logoUrl,
-    hidePoweredBy: true,
-  });
+  const html = isHtmlBody
+    ? normalizeHtmlEmailDocument(bodyWithSignature)
+    : generateBrandedHtml({
+        subject: safeSubject,
+        body: bodyWithSignature,
+        companyName: cfg.companyName,
+        primaryColor: cfg.primaryColor,
+        fromName: effectiveFromName,
+        fromEmail: effectiveFromEmail,
+        headerSlogan: cfg.headerSlogan,
+        recipientCompany: params.recipientCompany || "",
+        ctaText: templateMetadata.ctaText,
+        ctaUrl: templateMetadata.ctaUrl,
+        layout: effectiveLayout,
+        typographyMode: cfg.typographyMode,
+        logoUrl: cfg.logoUrl,
+        hidePoweredBy: true,
+      });
   const htmlWithTrackingPixel = params.trackingDraftId
     ? `${html}<img src="${resolveAppUrl()}/api/public/email/open/${encodeURIComponent(params.trackingDraftId)}" alt="" width="1" height="1" style="display:none;border:0;outline:none;"/>`
     : html;
@@ -277,7 +332,7 @@ export async function sendBrandedEmail(
     fromName: effectiveFromName,
     subject: safeSubject,
     html: htmlWithTrackingPixel,
-    text: bodyWithSignature.replace(/<[^>]*>/g, ""),
+    text: isHtmlBody ? htmlToPlainText(bodyWithSignature) : bodyWithSignature.replace(/<[^>]*>/g, ""),
     replyTo: cfg.replyTo || undefined,
     bcc: cfg.bcc || undefined,
     attachments: params.attachments,

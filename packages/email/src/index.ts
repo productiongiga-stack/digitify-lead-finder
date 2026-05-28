@@ -1,13 +1,14 @@
 export { SmtpProvider } from "./providers/smtp";
 export { ConsoleProvider } from "./providers/console";
 export { renderTemplate, renderSubject, htmlFromText } from "./template-renderer";
-export { generateBrandedHtml } from "./html-template";
+export { generateBrandedHtml, normalizeHtmlEmailDocument, htmlToPlainText } from "./html-template";
 export type { BrandedHtmlOptions } from "./html-template";
 export { generateLayout } from "./layouts";
 export type { EmailLayout, LayoutOptions } from "./layouts";
 export type { EmailMessage, EmailAttachment, SendResult, EmailProvider, TemplateContext } from "./types";
 export { replacePlaceholders, buildLeadContext, hasUnresolvedPlaceholders, getPlaceholdersByCategory, PLACEHOLDER_REGISTRY } from "./placeholders";
 export type { PlaceholderContext } from "./placeholders";
+export { isSafeCtaUrl, sanitizeCtaUrl } from "./safe-url";
 
 import type { EmailProvider } from "./types";
 import { SmtpProvider } from "./providers/smtp";

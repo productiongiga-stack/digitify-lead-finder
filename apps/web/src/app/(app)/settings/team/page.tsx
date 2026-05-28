@@ -7,7 +7,7 @@ import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Skeleton, Inpu
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@digitify/ui";
-import { ArrowLeft, UserPlus, Loader2, Trash2, AlertTriangle, CheckCircle2, XCircle, CalendarDays, Layers } from "lucide-react";
+import { ArrowLeft, UserPlus, Loader2, Trash2, AlertTriangle, CheckCircle2, XCircle, CalendarDays, Layers, Users2, Pencil } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { ALL_MODULES } from "@/lib/navigation";
@@ -57,8 +57,11 @@ export default function TeamSettingsPage() {
   const { data: session } = useSession();
   const currentRole = (session?.user as { role?: string } | undefined)?.role;
   const canManageUsers = currentRole === "OWNER";
+  const { data: workspaceInfo } = trpc.user.getWorkspaceInfo.useQuery();
   const { data: users, isLoading } = trpc.user.list.useQuery();
-  const { data: requests, isLoading: requestsLoading } = trpc.registration.listRequests.useQuery();
+  const { data: requests, isLoading: requestsLoading } = trpc.registration.listRequests.useQuery(undefined, {
+    enabled: canManageUsers,
+  });
   const utils = trpc.useUtils();
 
   const updateRole = trpc.user.updateRole.useMutation({
@@ -67,12 +70,20 @@ export default function TeamSettingsPage() {
 
   const createUser = trpc.user.createUser.useMutation({
     onSuccess: () => {
-      utils.user.list.invalidate();
+      utils.registration.listRequests.invalidate();
       setShowInvite(false);
       setInviteName("");
       setInviteEmail("");
       setInvitePassword("");
-      setInviteRole("MEMBER");
+    },
+  });
+
+  const updateUserDetails = trpc.user.updateUserDetails.useMutation({
+    onSuccess: () => {
+      utils.user.list.invalidate();
+      setEditTarget(null);
+      setEditName("");
+      setEditEmail("");
     },
   });
 
@@ -98,10 +109,12 @@ export default function TeamSettingsPage() {
   const [inviteName, setInviteName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [invitePassword, setInvitePassword] = useState("");
-  const [inviteRole, setInviteRole] = useState<"ADMIN" | "MODERATOR" | "MEMBER" | "TRIAL" | "TESTER" | "VIEWER">("MEMBER");
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string | null } | null>(null);
   const [moduleTarget, setModuleTarget] = useState<{ id: string; name: string } | null>(null);
+  const [editTarget, setEditTarget] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
 
   return (
     <div className="space-y-5">
@@ -120,6 +133,58 @@ export default function TeamSettingsPage() {
           </Button>
         ) : null}
       </div>
+
+      {workspaceInfo ? (
+        <div className="team-workspace-banner">
+          <div className="team-workspace-banner-glow" aria-hidden />
+          <div className="team-workspace-banner-accent" />
+          <div className="team-workspace-banner-content">
+            <div className="flex min-w-0 gap-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/15">
+                <Users2 className="h-5 w-5 text-primary" />
+              </div>
+              <div className="min-w-0 space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold tracking-tight">Gedeelde workspace</p>
+                  {workspaceInfo.isOwner ? (
+                    <Badge className="border-primary/25 bg-primary/10 text-primary hover:bg-primary/10">
+                      Eigenaar
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary">Teamlid</Badge>
+                  )}
+                </div>
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  {workspaceInfo.isOwner
+                    ? "Jij bent de eigenaar. Teamleden werken in dezelfde omgeving met gedeelde data."
+                    : `Je werkt in de workspace van ${workspaceInfo.ownerName}. Leads, campagnes en templates zijn gedeeld.`}
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 gap-2 sm:flex-col sm:items-stretch">
+              <div className="team-workspace-stat min-w-[88px]">
+                <p className="text-lg font-bold tabular-nums leading-none">{workspaceInfo.memberCount}</p>
+                <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {workspaceInfo.memberCount === 1 ? "Account" : "Teamleden"}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="border-t border-border/50 px-5 pb-5 pt-4">
+            <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Gedeeld in deze workspace
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {workspaceInfo.sharedResources.map((resource) => (
+                <span key={resource} className="team-workspace-chip">
+                  <Layers className="mr-1 inline h-3 w-3 text-primary/70" aria-hidden />
+                  {resource}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <Card>
         <Table>
@@ -197,6 +262,19 @@ export default function TeamSettingsPage() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          title="Gebruiker bewerken"
+                          onClick={() => {
+                            setEditTarget({ id: user.id, name: user.name || "", email: user.email });
+                            setEditName(user.name || "");
+                            setEditEmail(user.email);
+                          }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
                           title="Module toegang"
                           onClick={() => setModuleTarget({ id: user.id, name: user.name || user.email })}
                         >
@@ -241,6 +319,7 @@ export default function TeamSettingsPage() {
         </Dialog>
       )}
 
+      {canManageUsers ? (
       <Card>
         <CardHeader>
           <CardTitle>Registratieaanvragen</CardTitle>
@@ -289,7 +368,7 @@ export default function TeamSettingsPage() {
                             size="sm"
                             className="bg-emerald-600 text-white hover:bg-emerald-700"
                             disabled={approveRequest.isPending || rejectRequest.isPending}
-                            onClick={() => approveRequest.mutate({ requestId: request.id, role: "MEMBER" })}
+                            onClick={() => approveRequest.mutate({ requestId: request.id })}
                           >
                             <CheckCircle2 className="h-4 w-4" />
                             Goedkeuren
@@ -318,13 +397,16 @@ export default function TeamSettingsPage() {
           </Table>
         </CardContent>
       </Card>
+      ) : null}
 
       {/* Invite User Dialog */}
       <Dialog open={showInvite} onOpenChange={setShowInvite}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Gebruiker Uitnodigen</DialogTitle>
-            <DialogDescription>Maak een nieuw account aan voor een teamlid.</DialogDescription>
+            <DialogDescription>
+              Verstuur een team-uitnodiging. De gebruiker bevestigt eerst via e-mail en komt daarna als Member in de workspace.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
@@ -339,21 +421,8 @@ export default function TeamSettingsPage() {
               <Label>Wachtwoord</Label>
               <Input value={invitePassword} onChange={(e) => setInvitePassword(e.target.value)} placeholder="Minimaal 6 tekens" type="password" />
             </div>
-            <div className="space-y-2">
-              <Label>Rol</Label>
-              <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as any)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ADMIN">Admin</SelectItem>
-                  <SelectItem value="MODERATOR">Moderator</SelectItem>
-                  <SelectItem value="MEMBER">Member</SelectItem>
-                  <SelectItem value="TRIAL">Trial (7 days)</SelectItem>
-                  <SelectItem value="TESTER">Tester</SelectItem>
-                  <SelectItem value="VIEWER">Viewer (legacy)</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+              Nieuwe uitnodigingen worden standaard als <strong>Member</strong> aangemaakt na e-mailbevestiging.
             </div>
             {createUser.isError && (
               <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
@@ -364,11 +433,51 @@ export default function TeamSettingsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowInvite(false)}>Annuleren</Button>
             <Button
-              onClick={() => createUser.mutate({ name: inviteName, email: inviteEmail, password: invitePassword, role: inviteRole })}
+              onClick={() => createUser.mutate({ name: inviteName, email: inviteEmail, password: invitePassword })}
               disabled={!inviteName.trim() || !inviteEmail.trim() || invitePassword.length < 6 || createUser.isPending}
             >
               {createUser.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Aanmaken
+              Uitnodiging versturen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editTarget} onOpenChange={(open) => !open && setEditTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Gebruiker bewerken</DialogTitle>
+            <DialogDescription>Pas naam en e-mail van dit teamlid aan.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Naam</Label>
+              <Input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Naam" />
+            </div>
+            <div className="space-y-2">
+              <Label>E-mail</Label>
+              <Input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} placeholder="naam@bedrijf.com" type="email" />
+            </div>
+            {updateUserDetails.isError && (
+              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                {updateUserDetails.error.message}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTarget(null)}>Annuleren</Button>
+            <Button
+              onClick={() =>
+                editTarget && updateUserDetails.mutate({
+                  userId: editTarget.id,
+                  name: editName,
+                  email: editEmail,
+                })
+              }
+              disabled={!editName.trim() || !editEmail.trim() || updateUserDetails.isPending}
+            >
+              {updateUserDetails.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Opslaan
             </Button>
           </DialogFooter>
         </DialogContent>

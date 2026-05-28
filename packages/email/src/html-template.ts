@@ -40,3 +40,32 @@ export function generateBrandedHtml(options: BrandedHtmlOptions & { layout?: Ema
     typographyMode: options.typographyMode,
   });
 }
+
+/** Wrap HTML fragments in a minimal document for iframe preview and email clients. */
+export function normalizeHtmlEmailDocument(html: string): string {
+  const trimmed = html.trim();
+  if (!trimmed) {
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body></body></html>';
+  }
+  if (/<html[\s>]/i.test(trimmed) || /<!DOCTYPE/i.test(trimmed)) {
+    return trimmed;
+  }
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;">${trimmed}</body></html>`;
+}
+
+export function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+\n/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}

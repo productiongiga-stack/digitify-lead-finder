@@ -4,6 +4,98 @@
 
 Deze guide beschrijft hoe je Digitify Lead Search deployt naar een subdomein `leads.digitify.be` op een VPS of cloud provider.
 
+## Verbeterplan (fases)
+
+Zie **[docs/PHASES.md](docs/PHASES.md)** voor de volledige roadmap (DB, CI, RLS, Vercel, E2E).  
+Productie-setup: `./scripts/setup-production-db.sh` · Vercel env: **[docs/VERCEL.md](docs/VERCEL.md)**
+
+---
+
+## CI (GitHub Actions)
+
+Elke push en pull request naar `main` / `master` / `cursor/**` draait `.github/workflows/ci.yml`:
+
+- `pnpm test` (api, email, scoring)
+- `pnpm typecheck` (web + api types)
+- `pnpm --filter @digitify/web lint`
+- `pnpm build` (Next.js productie-build)
+- Postgres 16 service + `pnpm db:migrate` (schema-validatie)
+- Aparte **e2e** job: migrate + seed, productie-build, Playwright smoke (`/api/health`, Template Studio campagne-filter, Outbound)
+
+Lokaal hetzelfde vooraf checken:
+
+```bash
+pnpm install
+pnpm db:generate
+pnpm test
+pnpm typecheck
+pnpm --filter @digitify/web lint
+pnpm build
+```
+
+---
+
+## Workspace RLS rollout (staging → production)
+
+Postgres RLS is **opt-in** via `ENABLE_WORKSPACE_RLS=true`. The app sets `app.workspace_id` per tRPC transaction (see `packages/db/src/workspace-rls.ts`).
+
+**Before enabling in production:**
+
+1. `pnpm db:migrate` (includes `workspace_row_level_security`).
+2. `pnpm db:migrate-workspace-settings` — shared settings under `workspace:*`.
+3. `pnpm db:migrate-legacy-templates` — optional, if old `templates.library_json` exists.
+4. Seed **two OWNER accounts** (included in `pnpm db:seed`):
+   - **OWNER A:** `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`
+   - **OWNER B:** `SEED_RLS_OWNER_B_EMAIL` (default `owner-b@digitify.local`) — password defaults to `SEED_ADMIN_PASSWORD` when `SEED_RLS_OWNER_B_PASSWORD` is unset
+5. Automated checks (with RLS on):
+   ```bash
+   RUN_DB_INTEGRATION=1 ENABLE_WORKSPACE_RLS=true pnpm test:integration
+   ENABLE_WORKSPACE_RLS=true pnpm rls:smoke
+   ```
+6. **Manual browser smoke** (script prints checklist): log in as OWNER B → lead list must not show OWNER A companies; open `/leads/{id}` from A while logged in as B → 404 or access denied.
+7. Set `ENABLE_WORKSPACE_RLS=true` in staging env; smoke outbound + Template Studio + dashboard.
+8. Promote to production only after staging sign-off.
+
+**Rollback:** unset `ENABLE_WORKSPACE_RLS` (app falls back to `createdById` filters in code). RLS policies remain in DB but bypass when `app.workspace_id` is unset.
+
+---
+
+## Rate limits (multi-instance)
+
+| Surface | Backend | Env |
+|---------|---------|-----|
+| tRPC / chatbot / search | Redis TCP → memory | `REDIS_URL` |
+| Public API routes (bookings, quotes, …) | Same as tRPC | `REDIS_URL` |
+| Edge middleware (login, registration) | Upstash REST → memory per node | `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` |
+
+**Vercel + Upstash:** link Upstash in the project and copy REST URL/token into env. Self-hosted VPS: set `REDIS_URL` only; middleware limits are per-node unless you add Upstash or terminate TLS at a single edge.
+
+Verify: `RUN_REDIS_INTEGRATION=1 REDIS_URL=redis://localhost:6379 pnpm test:redis`
+
+---
+
+## Environment validation
+
+Server startup validates env via `apps/web/src/instrumentation.ts` + `packages/api/src/lib/server-env.ts` (Zod).
+
+| Variable | Development | Production |
+|----------|-------------|------------|
+| `DATABASE_URL` | Required | Required |
+| `NEXTAUTH_URL` | Valid URL | Valid URL |
+| `NEXTAUTH_SECRET` | Min. 32 chars | Min. 32 chars |
+| `SETTINGS_ENCRYPTION_KEY` | Optional (warn) | Required, min. 32 chars |
+| `CRON_SECRET` | Optional (`CRON_ALLOW_UNSIGNED_DEV=1`) | Required, min. 16 chars |
+
+Invalid config fails at boot with a list of fields — not a generic 500 on first tRPC call.
+
+---
+
+## Health check
+
+`GET /api/health` — no auth. Returns `200` with `{ status: "ok", db: "ok" }` when Postgres is reachable; `503` when the database is down. Use for load balancers and uptime monitors.
+
+---
+
 ## Vereisten
 
 - VPS of cloud server (DigitalOcean, Hetzner, AWS, etc.) met Ubuntu 22.04+
@@ -96,8 +188,9 @@ EOF
 # Genereer Prisma client
 pnpm db:generate
 
-# Push schema naar database
-pnpm db:push
+# Pas schema toe via migrations (niet db:push in productie)
+pnpm db:migrate
+pnpm db:migrate-metadata
 
 # Seed initiële data
 SEED_ADMIN_EMAIL="owner@jouwdomein.be" SEED_ADMIN_PASSWORD="sterk-wachtwoord-min-12" pnpm db:seed
@@ -194,8 +287,9 @@ git pull
 # Installeer eventuele nieuwe dependencies
 pnpm install
 
-# Push schema wijzigingen (indien nodig)
-pnpm db:push
+# Pas schema wijzigingen toe via migrations
+pnpm db:migrate
+pnpm db:migrate-metadata
 
 # Rebuild
 pnpm build

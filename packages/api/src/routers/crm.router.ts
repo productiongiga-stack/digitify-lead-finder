@@ -2,14 +2,11 @@ import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { assertLeadAccess } from "../lib/tenant";
 
-const crmSegmentSchema = z.enum(["ALL", "CUSTOMERS", "PROSPECTS"]);
+const crmSegmentSchema = z.enum(["CUSTOMERS"]);
 
-const customerRelationshipFilter = {
-  OR: [
-    { status: "WON" as const },
-    { quotes: { some: { status: "ACCEPTED" as const } } },
-    { bookings: { some: { status: { in: ["SCHEDULED", "CONFIRMED", "COMPLETED"] } } } },
-  ],
+/** Only leads explicitly marked as customers (WON), e.g. via CRM or lead profile. */
+const crmCustomerFilter = {
+  status: "WON" as const,
 };
 
 export const crmRouter = router({
@@ -18,7 +15,7 @@ export const crmRouter = router({
       z
         .object({
           search: z.string().optional(),
-          segment: crmSegmentSchema.default("ALL"),
+          segment: crmSegmentSchema.default("CUSTOMERS"),
           page: z.number().min(1).default(1),
           pageSize: z.number().min(1).max(50).default(20),
         })
@@ -26,7 +23,7 @@ export const crmRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const search = input.search?.trim();
-      const where: Record<string, unknown> = { createdById: ctx.user.id };
+      const where: Record<string, unknown> = { createdById: ctx.user.workspaceId! };
 
       if (search) {
         where.OR = [
@@ -38,13 +35,14 @@ export const crmRouter = router({
         ];
       }
 
-      if (input.segment === "CUSTOMERS") {
-        where.AND = [customerRelationshipFilter];
-      } else if (input.segment === "PROSPECTS") {
-        where.AND = [{ NOT: customerRelationshipFilter }];
-      }
+      where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), crmCustomerFilter];
 
-      const [items, total, totalCustomers, totalProspects] = await Promise.all([
+      const customerWhere = {
+        createdById: ctx.user.workspaceId!,
+        ...crmCustomerFilter,
+      };
+
+      const [items, total, totalCustomers, withQuotes, withOutbound, crossModuleLinked] = await Promise.all([
         ctx.db.lead.findMany({
           where: where as any,
           orderBy: [{ updatedAt: "desc" }],
@@ -61,7 +59,7 @@ export const crmRouter = router({
               },
             },
             quotes: {
-              where: { createdById: ctx.user.id },
+              where: { createdById: ctx.user.workspaceId! },
               orderBy: { createdAt: "desc" },
               take: 1,
               select: {
@@ -103,7 +101,7 @@ export const crmRouter = router({
               },
             },
             bookings: {
-              where: { createdById: ctx.user.id },
+              where: { createdById: ctx.user.workspaceId! },
               orderBy: { date: "desc" },
               take: 1,
               select: {
@@ -125,16 +123,28 @@ export const crmRouter = router({
           },
         }),
         ctx.db.lead.count({ where: where as any }),
+        ctx.db.lead.count({ where: customerWhere }),
         ctx.db.lead.count({
           where: {
-            createdById: ctx.user.id,
-            AND: [customerRelationshipFilter],
+            ...customerWhere,
+            quotes: { some: { createdById: ctx.user.workspaceId! } },
           },
         }),
         ctx.db.lead.count({
           where: {
-            createdById: ctx.user.id,
-            AND: [{ NOT: customerRelationshipFilter }],
+            ...customerWhere,
+            emailDrafts: { some: {} },
+          },
+        }),
+        ctx.db.lead.count({
+          where: {
+            ...customerWhere,
+            OR: [
+              { quotes: { some: { createdById: ctx.user.workspaceId! } } },
+              { emailDrafts: { some: {} } },
+              { campaignLeads: { some: {} } },
+              { reports: { some: {} } },
+            ],
           },
         }),
       ]);
@@ -145,7 +155,7 @@ export const crmRouter = router({
         ? await ctx.db.quote.groupBy({
             by: ["leadId", "status"],
             where: {
-              createdById: ctx.user.id,
+              createdById: ctx.user.workspaceId!,
               leadId: { in: leadIds },
             },
             _sum: { total: true },
@@ -192,8 +202,7 @@ export const crmRouter = router({
           openCount: 0,
           openValue: 0,
         };
-        const hasCustomerSignals =
-          lead.status === "WON" || quoteStats.acceptedCount > 0 || lead.bookings.length > 0;
+        const hasCustomerSignals = lead.status === "WON";
         const latestQuote = lead.quotes[0] ?? null;
         const latestDraft = lead.emailDrafts[0] ?? null;
         const latestReport = lead.reports[0] ?? null;
@@ -232,7 +241,9 @@ export const crmRouter = router({
         totalPages: Math.ceil(total / input.pageSize),
         summary: {
           totalCustomers,
-          totalProspects,
+          withQuotes,
+          withOutbound,
+          crossModuleLinked,
         },
       };
     }),
@@ -256,7 +267,7 @@ export const crmRouter = router({
 
       const existing = await ctx.db.lead.findFirst({
         where: {
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
           OR: [
             ...(email ? [{ email }] : []),
             { companyName },
@@ -271,7 +282,7 @@ export const crmRouter = router({
 
       const lead = await ctx.db.lead.create({
         data: {
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
           companyName,
           email: email || undefined,
           phone: input.phone?.trim() || undefined,
@@ -319,9 +330,9 @@ export const crmRouter = router({
   markAsCustomer: protectedProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       const lead = await ctx.db.lead.update({
-        where: { id: input.leadId, createdById: ctx.user.id },
+        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
         data: { status: "WON" },
         select: { id: true, companyName: true, status: true },
       });

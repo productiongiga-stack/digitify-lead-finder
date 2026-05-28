@@ -4,6 +4,7 @@ import { prisma, protectSettingValue, revealSettingValue } from "@digitify/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { userSettingKey } from "@digitify/api/src/lib/user-settings";
 import { loadGoogleOAuthClientConfig } from "@digitify/api/src/lib/google-calendar";
+import { resolveSettingDbKey, workspaceScopeFromUser } from "@digitify/api/src/lib/workspace-settings";
 
 function resolveAppUrl() {
   const candidates = [
@@ -85,15 +86,24 @@ export async function GET(request: Request) {
       throw new Error("Geen Google access token ontvangen.");
     }
 
-    const [profileResponse, calendarListResponse, currentRefreshRow] = await Promise.all([
+    const scope = workspaceScopeFromUser({
+      id: userId,
+      workspaceId: (user as { workspaceId?: string }).workspaceId,
+    });
+    const workspaceRefreshKey = resolveSettingDbKey(scope, "bookings.google_oauth_refresh_token");
+    const memberRefreshKey = userSettingKey(userId, "bookings.google_oauth_refresh_token");
+
+    const [profileResponse, calendarListResponse, workspaceRefreshRow, memberRefreshRow] = await Promise.all([
       fetch("https://openidconnect.googleapis.com/v1/userinfo", {
         headers: { Authorization: `Bearer ${tokenData.access_token}` },
       }),
       fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList", {
         headers: { Authorization: `Bearer ${tokenData.access_token}` },
       }),
-      prisma.setting.findUnique({ where: { key: userSettingKey(userId, "bookings.google_oauth_refresh_token") } }),
+      prisma.setting.findUnique({ where: { key: workspaceRefreshKey } }),
+      prisma.setting.findUnique({ where: { key: memberRefreshKey } }),
     ]);
+    const currentRefreshRow = workspaceRefreshRow || memberRefreshRow;
 
     const profile = profileResponse.ok
       ? ((await profileResponse.json()) as { email?: string })
@@ -125,13 +135,15 @@ export async function GET(request: Request) {
     ];
 
     await prisma.$transaction(
-      updates.map((entry) =>
-        prisma.setting.upsert({
-          where: { key: userSettingKey(userId, entry.key) },
-          update: { value: protectSettingValue(entry.key, entry.value) as any },
-          create: { key: userSettingKey(userId, entry.key), value: protectSettingValue(entry.key, entry.value) as any },
-        })
-      )
+      updates.map((entry) => {
+        const dbKey = resolveSettingDbKey(scope, entry.key);
+        const protectedValue = protectSettingValue(entry.key, entry.value) as any;
+        return prisma.setting.upsert({
+          where: { key: dbKey },
+          update: { value: protectedValue },
+          create: { key: dbKey, value: protectedValue },
+        });
+      })
     );
 
     const response = NextResponse.redirect(new URL("/settings/bookings?google=connected#google-agenda", request.url));

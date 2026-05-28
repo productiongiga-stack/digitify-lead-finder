@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from "@digitify/ui";
-import { ArrowLeft, Save, Loader2, Upload, X, Image, Zap, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Upload, X, Image, Zap, CheckCircle2, Sparkles, Eye, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
 
@@ -167,57 +167,58 @@ export default function BrandingSettingsPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-4">
-        <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Merk</p>
-            <p className="mt-2 text-sm font-medium">{companyName || "Nog geen bedrijfsnaam"}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Afzender</p>
-            <p className="mt-2 text-sm font-medium">{fromName || "Geen afzender"} · {fromEmail || "geen e-mail"}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Assets</p>
-            <p className="mt-2 text-sm font-medium">{logoUrl ? "Logo actief" : "Geen logo"} · {faviconUrl ? "favicon actief" : "geen favicon"}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-violet-200 bg-violet-50/80 shadow-sm dark:border-violet-900/40 dark:bg-violet-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Wijzigingen</p>
-            <p className="mt-2 text-sm font-medium">{hasChanges ? "Niet-opgeslagen wijzigingen" : "Alles opgeslagen"}</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="border-dashed">
-        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-medium">
-              {hasChanges ? "Je hebt niet-opgeslagen wijzigingen." : "Alle brandinginstellingen zijn opgeslagen."}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Pas hier logo, kleuren en e-mailafzender aan en controleer meteen de preview.
-            </p>
+      <div className={`branding-save-bar ${hasChanges ? "" : "border-emerald-500/20"}`}>
+        <div className={hasChanges ? "branding-save-bar-accent" : "branding-save-bar-accent-saved"} />
+        <div className="branding-save-bar-content">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className={`branding-save-bar-icon ${hasChanges ? "branding-save-bar-icon-dirty" : "branding-save-bar-icon-saved"}`}>
+              {hasChanges ? <AlertCircle className="h-5 w-5" /> : <CheckCircle2 className="h-5 w-5" />}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold tracking-tight">
+                {hasChanges ? "Niet-opgeslagen wijzigingen" : "Alles is opgeslagen"}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {hasChanges
+                  ? "Sla je aanpassingen op voordat je de pagina verlaat."
+                  : "Pas logo, kleuren en e-mailafzender aan en bekijk direct de preview."}
+              </p>
+            </div>
           </div>
-          <Button onClick={handleSave} disabled={batchUpdate.isPending || !hasChanges}>
-            {batchUpdate.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-            {batchUpdate.isPending ? "Opslaan..." : hasChanges ? "Wijzigingen opslaan" : "Up-to-date"}
-          </Button>
-        </CardContent>
-      </Card>
+          {hasChanges || batchUpdate.isPending ? (
+            <Button
+              onClick={handleSave}
+              disabled={batchUpdate.isPending}
+              className="shrink-0 shadow-sm"
+            >
+              {batchUpdate.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+              {batchUpdate.isPending ? "Opslaan..." : "Wijzigingen opslaan"}
+            </Button>
+          ) : (
+            <Badge variant="secondary" className="shrink-0 gap-1.5 px-3 py-1.5 text-xs font-medium">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+              Up-to-date
+            </Badge>
+          )}
+        </div>
+      </div>
 
       <Card>
         <CardContent className="p-5">
           <Tabs defaultValue="identity" className="space-y-5">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="identity">Identiteit</TabsTrigger>
-              <TabsTrigger value="assets">Assets</TabsTrigger>
-              <TabsTrigger value="preview">Preview</TabsTrigger>
+            <TabsList className="settings-domain-tabs settings-domain-tabs-cols-3 w-full">
+              <TabsTrigger value="identity" className="settings-domain-tab">
+                <Sparkles className="settings-domain-tab-icon" aria-hidden />
+                <span>Identiteit</span>
+              </TabsTrigger>
+              <TabsTrigger value="assets" className="settings-domain-tab">
+                <Image className="settings-domain-tab-icon" aria-hidden />
+                <span>Assets</span>
+              </TabsTrigger>
+              <TabsTrigger value="preview" className="settings-domain-tab">
+                <Eye className="settings-domain-tab-icon" aria-hidden />
+                <span>Preview</span>
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="identity" className="space-y-4">

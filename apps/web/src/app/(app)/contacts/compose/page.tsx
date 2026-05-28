@@ -32,14 +32,24 @@ import {
   Eye,
   Sparkles,
   ArrowLeft,
+  CalendarClock,
+  CheckCircle2,
+  ChevronRight,
+  Info,
+  PenSquare,
   ToggleLeft,
   AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
+import { cn } from "@/lib/utils";
 import { EmailPreview } from "@/components/email/preview";
 import { MailVariablesHelp } from "@/components/email/mail-variables-help";
 import { MAIL_VARIABLE_REGISTRY, extractMailVariableKeys, findUnknownMailVariables } from "@/lib/mail-variables";
 import { extractEmailTemplateMetadata, injectEmailTemplateMetadata, type EmailLayout } from "@/lib/email-content";
+import { applyEmailTemplateSelection } from "@/lib/apply-email-template";
+import { TemplatePicker } from "@/components/templates/template-picker";
+import { TemplateScopeHelp } from "@/components/templates/template-scope-help";
+import { OutboundWorkflowHelp } from "@/components/outbound/outbound-workflow-help";
 // Inline placeholder data/functions to avoid importing @digitify/email (which pulls in nodemailer/server deps)
 type PlaceholderContext = Record<string, string | number | undefined>;
 
@@ -90,9 +100,11 @@ function isValidEmail(value: string) {
 export default function ComposePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const utils = trpc.useUtils();
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const leadIdFromQuery = searchParams.get("leadId") || "";
+  const templateIdFromQuery = searchParams.get("templateId") || "";
+  const campaignIdFromQuery = searchParams.get("campaignId") || "";
+  const utils = trpc.useUtils();
 
   const [leadSearch, setLeadSearch] = useState("");
   const [selectedLeadId, setSelectedLeadId] = useState("");
@@ -107,6 +119,9 @@ export default function ComposePage() {
   const [previewWithPlaceholders, setPreviewWithPlaceholders] = useState(false);
   const [ctaText, setCtaText] = useState("");
   const [ctaUrl, setCtaUrl] = useState("");
+  const [layoutFromTemplate, setLayoutFromTemplate] = useState(false);
+  const [bodyFormat, setBodyFormat] = useState<"TEXT" | "HTML">("TEXT");
+  const [campaignFilterId, setCampaignFilterId] = useState("");
 
   // Fetch leads for the dropdown
   const { data: leadsData, isLoading: leadsLoading } = trpc.lead.list.useQuery({
@@ -116,9 +131,30 @@ export default function ComposePage() {
     sortBy: "companyName",
     sortDir: "asc",
   });
+  const leadOptions = useMemo(() => {
+    const items = leadsData?.items ?? [];
+    const seen = new Set<string>();
+    return items.filter((lead: NonNullable<typeof leadsData>["items"][number]) => {
+      const company = (lead.companyName || "").trim().toLowerCase();
+      const email = (lead.email || "").trim().toLowerCase();
+      const city = (lead.city || "").trim().toLowerCase();
+      const key = `${company}::${email}::${city}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [leadsData?.items]);
 
-  // Fetch templates
-  const { data: templates } = trpc.contact.listTemplates.useQuery();
+  const { data: campaigns } = trpc.campaign.list.useQuery();
+  const { data: templateData } = trpc.template.list.useQuery({
+    forOutbound: true,
+    campaignId: campaignFilterId || undefined,
+  });
+  const templates = templateData?.templates ?? [];
+  const preloadedTemplateQuery = trpc.template.get.useQuery(
+    { id: templateIdFromQuery },
+    { enabled: Boolean(templateIdFromQuery) },
+  );
 
   // Branding settings for email preview
   const { data: brandingSettings } = trpc.settings.getAll.useQuery(undefined, {
@@ -156,9 +192,9 @@ export default function ComposePage() {
     if (selectedLeadId === leadIdFromQuery && preloadedLeadQuery.data) {
       return preloadedLeadQuery.data;
     }
-    if (!selectedLeadId || !leadsData?.items) return null;
-    return leadsData.items.find((l: NonNullable<typeof leadsData>["items"][number]) => l.id === selectedLeadId) || null;
-  }, [selectedLeadId, leadsData, leadIdFromQuery, preloadedLeadQuery.data]);
+    if (!selectedLeadId || !leadOptions.length) return null;
+    return leadOptions.find((l: NonNullable<typeof leadsData>["items"][number]) => l.id === selectedLeadId) || null;
+  }, [selectedLeadId, leadOptions, leadIdFromQuery, preloadedLeadQuery.data]);
 
   // Build placeholder context from selected lead
   const placeholderContext = useMemo<PlaceholderContext>(() => {
@@ -251,11 +287,35 @@ export default function ComposePage() {
   }, [leadIdFromQuery]);
 
   useEffect(() => {
+    if (!campaignIdFromQuery) return;
+    setCampaignFilterId((current) => current || campaignIdFromQuery);
+  }, [campaignIdFromQuery]);
+
+  useEffect(() => {
     if (!preloadedLeadQuery.data) return;
     const lead = preloadedLeadQuery.data;
     setLeadSearch((current) => current || lead.companyName || lead.website || "");
     setToEmail((current) => current || lead.email || "");
   }, [preloadedLeadQuery.data]);
+
+  useEffect(() => {
+    if (!templateIdFromQuery || selectedTemplateId === templateIdFromQuery) return;
+    const template =
+      templates.find((item) => item.id === templateIdFromQuery) ?? preloadedTemplateQuery.data;
+    if (!template) return;
+    const applied = applyEmailTemplateSelection(template);
+    setSelectedTemplateId(templateIdFromQuery);
+    setSubject(applied.subject);
+    setBody(applied.body);
+    setBodyFormat(applied.bodyFormat);
+    setCtaText(applied.ctaText);
+    setCtaUrl(applied.ctaUrl);
+    setEmailLayout(applied.layout);
+    setLayoutFromTemplate(true);
+    if (template.campaignId) {
+      setCampaignFilterId(template.campaignId);
+    }
+  }, [templateIdFromQuery, templates, preloadedTemplateQuery.data, selectedTemplateId]);
 
   useEffect(() => {
     setEmailLayout((current) => (current === "modern" && defaultEmailLayout ? defaultEmailLayout : current));
@@ -300,27 +360,29 @@ export default function ComposePage() {
   // Handle lead selection
   function handleLeadSelect(leadId: string) {
     setSelectedLeadId(leadId);
-    const lead = leadsData?.items.find((l: NonNullable<typeof leadsData>["items"][number]) => l.id === leadId);
+    const lead = leadOptions.find((l: NonNullable<typeof leadsData>["items"][number]) => l.id === leadId);
     if (lead?.email) {
       setToEmail(lead.email);
     }
   }
 
-  // Handle template selection
   function handleTemplateSelect(templateId: string) {
     setSelectedTemplateId(templateId);
     if (templateId === "none") {
+      setLayoutFromTemplate(false);
+      setBodyFormat("TEXT");
       return;
     }
-    const template = templates?.find((t: NonNullable<typeof templates>[number]) => t.id === templateId);
-    if (template) {
-      setSubject(template.subject);
-      const parsed = extractEmailTemplateMetadata(template.body);
-      setBody(parsed.cleanBody);
-      setCtaText(parsed.ctaText);
-      setCtaUrl(parsed.ctaUrl);
-      if (parsed.layout) setEmailLayout(parsed.layout);
-    }
+    const template = templates.find((t) => t.id === templateId);
+    if (!template) return;
+    const applied = applyEmailTemplateSelection(template);
+    setSubject(applied.subject);
+    setBody(applied.body);
+    setBodyFormat(applied.bodyFormat);
+    setCtaText(applied.ctaText);
+    setCtaUrl(applied.ctaUrl);
+    setEmailLayout(applied.layout);
+    setLayoutFromTemplate(true);
   }
 
   // Save as draft
@@ -332,7 +394,7 @@ export default function ComposePage() {
         leadId: selectedLeadId,
         toEmail,
         subject,
-        body: injectEmailTemplateMetadata(body, { ctaText, ctaUrl, layout: emailLayout }),
+        body: injectEmailTemplateMetadata(body, { ctaText, ctaUrl, layout: emailLayout, bodyFormat }),
         templateId: selectedTemplateId && selectedTemplateId !== "none" ? selectedTemplateId : undefined,
       });
       setSuccessMessage("Draft opgeslagen!");
@@ -353,7 +415,7 @@ export default function ComposePage() {
         leadId: selectedLeadId,
         toEmail,
         subject,
-        body: injectEmailTemplateMetadata(body, { ctaText, ctaUrl, layout: emailLayout }),
+        body: injectEmailTemplateMetadata(body, { ctaText, ctaUrl, layout: emailLayout, bodyFormat }),
         templateId: selectedTemplateId && selectedTemplateId !== "none" ? selectedTemplateId : undefined,
       });
       await submitForApproval.mutateAsync({ id: draft.id });
@@ -375,10 +437,18 @@ export default function ComposePage() {
       if (result.draft) {
         setSubject(result.draft.subject);
         const parsed = extractEmailTemplateMetadata(result.draft.body);
-        setBody(parsed.cleanBody);
-        setCtaText(parsed.ctaText);
-        setCtaUrl(parsed.ctaUrl);
-        if (parsed.layout) setEmailLayout(parsed.layout);
+        const applied = applyEmailTemplateSelection({
+          subject: result.draft.subject,
+          cleanBody: parsed.cleanBody,
+          ctaText: parsed.ctaText,
+          ctaUrl: parsed.ctaUrl,
+          layout: parsed.layout,
+        });
+        setBody(applied.body);
+        setCtaText(applied.ctaText);
+        setCtaUrl(applied.ctaUrl);
+        if (parsed.layout) setEmailLayout(applied.layout);
+        setLayoutFromTemplate(false);
         if (result.draft.toEmail) {
           setToEmail(result.draft.toEmail);
         }
@@ -392,23 +462,32 @@ export default function ComposePage() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link href="/contacts">
-            <Button variant="ghost" size="sm">
-              <ArrowLeft className="mr-1 h-4 w-4" />
-              Terug
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight">Nieuwe E-mail</h1>
-            <p className="text-sm text-muted-foreground">
-              Schrijf en verzend een gepersonaliseerde e-mail
-            </p>
+      <Card className="compose-page-header">
+        <CardContent className="p-0">
+          <div className="compose-page-header-inner">
+            <Link href="/contacts" className="shrink-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 rounded-xl"
+                aria-label="Terug naar outbound"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+            </Link>
+            <span className="compose-page-header-icon" aria-hidden>
+              <PenSquare className="h-5 w-5" />
+            </span>
+            <div className="compose-page-header-text">
+              <h1 className="compose-page-header-title">Nieuwe e-mail</h1>
+              <p className="compose-page-header-subtitle">
+                Concept opslaan of ter goedkeuring indienen — verzending gebeurt later via
+                Outbound Center.
+              </p>
+            </div>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
       {successMessage && (
         <Card className="border-green-200 bg-green-50 p-4">
@@ -416,42 +495,66 @@ export default function ComposePage() {
         </Card>
       )}
 
-      <div className="grid gap-3 xl:grid-cols-3">
-        <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Volgende stap</p>
-            <p className="mt-2 text-sm font-medium">
-              {isComposeReady
-                ? "Deze mail is klaar om als concept op te slaan of ter goedkeuring in te dienen."
-                : "Werk eerst lead, geldig e-mailadres en placeholders netjes af."}
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Follow-up planning</p>
-            <p className="mt-2 text-sm font-medium">
-              Standaard opvolginterval: {followupDays} dagen
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Als je vandaag verzendt, komt de natuurlijke opvolgmoment rond {suggestedFollowUpDate}.
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gerelateerd</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button asChild size="sm" variant="outline">
-                <Link href="/contacts/templates">Templates</Link>
-              </Button>
-              <Button asChild size="sm" variant="ghost">
-                <Link href="/settings/email">E-mail instellingen</Link>
-              </Button>
+      <Card className="compose-page-hint">
+        <CardContent className="p-0">
+          <div className="compose-page-hint-inner">
+            <div className="compose-page-hint-main">
+              <span
+                className={cn(
+                  "compose-page-hint-icon",
+                  isComposeReady ? "compose-page-hint-icon-ready" : "compose-page-hint-icon-pending",
+                )}
+                aria-hidden
+              >
+                {isComposeReady ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : (
+                  <Info className="h-4 w-4" />
+                )}
+              </span>
+              <div className="compose-page-hint-text">
+                <p className="compose-page-hint-message">
+                  {isComposeReady
+                    ? "Klaar om op te slaan of ter goedkeuring in te dienen."
+                    : "Vul lead, geldig e-mailadres en placeholders in voordat je opslaat."}
+                </p>
+                <p className="compose-page-hint-meta">
+                  <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Opvolginterval: {followupDays} dagen
+                    {suggestedFollowUpDate ? ` · rond ${suggestedFollowUpDate}` : ""}
+                  </span>
+                  {!isComposeReady ? (
+                    <span className="text-muted-foreground/80">
+                      · Verzending via Outbound Center
+                    </span>
+                  ) : null}
+                </p>
+              </div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+            <details className="compose-page-hint-details">
+              <summary className="compose-page-hint-summary">
+                <ChevronRight className="compose-page-hint-chevron" aria-hidden />
+                Workflow &amp; snelkoppelingen
+              </summary>
+              <div className="compose-page-hint-expand">
+                <OutboundWorkflowHelp
+                  variant="compact"
+                  className="rounded-xl border border-blue-200/60 bg-blue-50/40 px-3 py-2 dark:border-blue-900/40 dark:bg-blue-950/20"
+                />
+                <div className="compose-page-hint-links">
+                  <Button asChild size="sm" variant="outline" className="rounded-lg">
+                    <Link href="/templates">E-mailtemplates</Link>
+                  </Button>
+                  <Button asChild size="sm" variant="outline" className="rounded-lg">
+                    <Link href="/settings/email">E-mailinstellingen</Link>
+                  </Button>
+                </div>
+              </div>
+            </details>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
         {/* Left: Compose Form */}
@@ -479,12 +582,12 @@ export default function ComposePage() {
                     <SelectValue placeholder={leadsLoading ? "Laden..." : "Kies een lead"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {leadsData?.items.map((lead: NonNullable<typeof leadsData>["items"][number]) => (
+                    {leadOptions.map((lead: NonNullable<typeof leadsData>["items"][number]) => (
                       <SelectItem key={lead.id} value={lead.id}>
                         {lead.companyName} {lead.city ? `- ${lead.city}` : ""} {lead.email ? `(${lead.email})` : ""}
                       </SelectItem>
                     ))}
-                    {leadsData?.items.length === 0 && (
+                    {leadOptions.length === 0 && (
                       <SelectItem value="__empty" disabled>
                         Geen leads gevonden
                       </SelectItem>
@@ -519,7 +622,14 @@ export default function ComposePage() {
               {/* Layout selector */}
               <div className="space-y-2">
                 <Label>E-mail layout</Label>
-                <Select value={emailLayout} onValueChange={(v) => setEmailLayout(v as typeof emailLayout)}>
+                <Select
+                  value={emailLayout}
+                  onValueChange={(v) => {
+                    setEmailLayout(v as typeof emailLayout);
+                    setLayoutFromTemplate(false);
+                  }}
+                  disabled={layoutFromTemplate}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Kies een layout..." />
                   </SelectTrigger>
@@ -532,7 +642,9 @@ export default function ComposePage() {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Deze layout wordt mee opgeslagen in het template of concept en ook zo verzonden.
+                  {layoutFromTemplate
+                    ? "Layout komt uit het gekozen Template Studio-template. Kies “Geen template” om handmatig te wijzigen."
+                    : "Deze layout wordt mee opgeslagen in het concept en zo verzonden."}
                 </p>
               </div>
 
@@ -559,22 +671,42 @@ export default function ComposePage() {
                 </Button>
               </div>
 
-              {/* Template selector */}
               <div className="space-y-2">
-                <Label>Template (optioneel)</Label>
-                <Select value={selectedTemplateId} onValueChange={handleTemplateSelect}>
+                <Label>Campagne (template-filter)</Label>
+                <Select
+                  value={campaignFilterId || "all"}
+                  onValueChange={(value) => {
+                    setCampaignFilterId(value === "all" ? "" : value);
+                    setSelectedTemplateId("");
+                  }}
+                >
                   <SelectTrigger>
-                    <SelectValue placeholder="Kies een template..." />
+                    <SelectValue placeholder="Alle campagnes" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">Geen template</SelectItem>
-                    {templates?.map((t: NonNullable<typeof templates>[number]) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        {t.name}
+                    <SelectItem value="all">Alle campagnes + globale templates</SelectItem>
+                    {(campaigns ?? []).map((campaign: { id: string; name: string }) => (
+                      <SelectItem key={campaign.id} value={campaign.id}>
+                        {campaign.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                <TemplateScopeHelp variant="compose" className="border-0 bg-transparent p-0 shadow-none" />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label>Template Studio</Label>
+                  <Link href="/templates" className="text-xs text-primary hover:underline">
+                    Beheren
+                  </Link>
+                </div>
+                <TemplatePicker
+                  value={selectedTemplateId || "none"}
+                  onValueChange={handleTemplateSelect}
+                  templates={templates}
+                />
               </div>
 
               <div className="space-y-2">
@@ -727,6 +859,7 @@ export default function ComposePage() {
                   <EmailPreview
                     subject={previewWithPlaceholders ? previewSubject : subject}
                     body={previewWithPlaceholders ? previewBody : body}
+                    bodyFormat={bodyFormat}
                     companyName={brandCompanyName}
                     primaryColor={brandPrimaryColor}
                     fromName={brandCompanyName}
@@ -789,6 +922,51 @@ export default function ComposePage() {
               </CardContent>
             </Card>
           )}
+
+          <Card className="compose-sidebar-preview lg:sticky lg:top-4">
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 space-y-1">
+                  <CardTitle className="text-base">HTML-voorbeeld</CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    Live preview met layout{" "}
+                    <span className="font-medium text-foreground/80">{emailLayout}</span>
+                    {previewWithPlaceholders ? " · placeholders ingevuld" : ""}
+                  </p>
+                </div>
+                <Badge variant="outline" className="shrink-0 text-[10px]">
+                  {bodyFormat === "HTML" ? "HTML" : "Tekst"}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {subject || body ? (
+                <EmailPreview
+                  compact
+                  subject={previewWithPlaceholders ? previewSubject : subject}
+                  body={previewWithPlaceholders ? previewBody : body}
+                  bodyFormat={bodyFormat}
+                  companyName={brandCompanyName}
+                  primaryColor={brandPrimaryColor}
+                  fromName={brandCompanyName}
+                  headerSlogan={brandHeaderSlogan}
+                  recipientCompany={selectedLead?.companyName || "Ontvanger"}
+                  layout={emailLayout}
+                  ctaText={ctaText}
+                  ctaUrl={ctaUrl}
+                  typographyMode={typographyMode}
+                />
+              ) : (
+                <div className="compose-sidebar-preview-empty">
+                  <Eye className="h-8 w-8 text-muted-foreground/50" />
+                  <p className="text-sm font-medium text-foreground/80">Nog geen inhoud</p>
+                  <p className="max-w-[16rem] text-xs text-muted-foreground">
+                    Vul onderwerp en bericht in om het HTML-voorbeeld te zien.
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Tips */}
           <Card>

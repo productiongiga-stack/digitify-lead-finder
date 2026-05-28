@@ -39,7 +39,7 @@ export const reviewRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const { status, page = 1, pageSize = 25 } = input ?? {};
-      const where: Record<string, unknown> = { createdById: ctx.user.id };
+      const where: Record<string, unknown> = { createdById: ctx.user.workspaceId! };
       if (status) where.status = status;
 
       const [reviews, total] = await Promise.all([
@@ -60,15 +60,15 @@ export const reviewRouter = router({
 
   getStats: protectedProcedure.query(async ({ ctx }) => {
     const [total, pending, sent, opened, reviewed, feedback, ratingResult] = await Promise.all([
-      ctx.db.reviewRequest.count({ where: { createdById: ctx.user.id } }),
-      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.id } }),
-      ctx.db.reviewRequest.count({ where: { status: "SENT", createdById: ctx.user.id } }),
-      ctx.db.reviewRequest.count({ where: { status: "OPENED", createdById: ctx.user.id } }),
-      ctx.db.reviewRequest.count({ where: { status: "REVIEWED", createdById: ctx.user.id } }),
-      ctx.db.reviewRequest.count({ where: { status: "FEEDBACK", createdById: ctx.user.id } }),
+      ctx.db.reviewRequest.count({ where: { createdById: ctx.user.workspaceId! } }),
+      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.workspaceId! } }),
+      ctx.db.reviewRequest.count({ where: { status: "SENT", createdById: ctx.user.workspaceId! } }),
+      ctx.db.reviewRequest.count({ where: { status: "OPENED", createdById: ctx.user.workspaceId! } }),
+      ctx.db.reviewRequest.count({ where: { status: "REVIEWED", createdById: ctx.user.workspaceId! } }),
+      ctx.db.reviewRequest.count({ where: { status: "FEEDBACK", createdById: ctx.user.workspaceId! } }),
       ctx.db.reviewRequest.aggregate({
         _avg: { rating: true },
-        where: { rating: { not: null }, createdById: ctx.user.id },
+        where: { rating: { not: null }, createdById: ctx.user.workspaceId! },
       }),
     ]);
     return {
@@ -93,7 +93,7 @@ export const reviewRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      if (input.leadId) await assertLeadAccess(ctx.db, ctx.user.id, input.leadId);
+      if (input.leadId) await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       return ctx.db.reviewRequest.create({
         data: {
           clientName: input.clientName,
@@ -101,7 +101,7 @@ export const reviewRouter = router({
           leadId: input.leadId || null,
           platform: input.platform,
           reviewUrl: input.reviewUrl || null,
-          createdById: ctx.user.id,
+          createdById: ctx.user.workspaceId!,
         },
       });
     }),
@@ -119,7 +119,7 @@ export const reviewRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
       const existing = await ctx.db.reviewRequest.findFirst({
-        where: { id, createdById: ctx.user.id },
+        where: { id, createdById: ctx.user.workspaceId! },
         select: { id: true },
       });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Review request niet gevonden" });
@@ -143,7 +143,7 @@ export const reviewRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const review = await ctx.db.reviewRequest.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
         include: { lead: { select: { id: true, companyName: true } } },
       });
       if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "Review request niet gevonden" });
@@ -151,7 +151,10 @@ export const reviewRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "Review request is al verzonden" });
       }
 
-      const cfg = await loadEmailSettings(ctx.db, ctx.user.id);
+      const cfg = await loadEmailSettings(ctx.db, {
+        workspaceId: ctx.user.workspaceId!,
+        memberId: ctx.user.id,
+      });
       const platformLabel = getPlatformLabel(review.platform);
       const reviewGateUrl = getReviewGateUrl(review.id);
 
@@ -212,7 +215,7 @@ export const reviewRouter = router({
     .input(z.object({ ids: z.array(z.string()).min(1).max(50) }))
     .mutation(async ({ ctx, input }) => {
       const reviews = await ctx.db.reviewRequest.findMany({
-        where: { id: { in: input.ids }, createdById: ctx.user.id },
+        where: { id: { in: input.ids }, createdById: ctx.user.workspaceId! },
         include: { lead: { select: { id: true, companyName: true } } },
       });
 
@@ -228,7 +231,10 @@ export const reviewRouter = router({
         });
       }
 
-      const cfg = await loadEmailSettings(ctx.db, ctx.user.id);
+      const cfg = await loadEmailSettings(ctx.db, {
+        workspaceId: ctx.user.workspaceId!,
+        memberId: ctx.user.id,
+      });
       const results: { id: string; success: boolean; error?: string }[] = [];
 
       for (const review of sendable) {
@@ -304,7 +310,7 @@ export const reviewRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.reviewRequest.findFirst({
-        where: { id: input.id, createdById: ctx.user.id },
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
         select: { id: true },
       });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Review request niet gevonden" });

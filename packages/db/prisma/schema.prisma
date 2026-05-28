@@ -17,8 +17,12 @@ model User {
   image          String?
   emailVerified  DateTime?
   role           UserRole  @default(MEMBER)
+  workspaceOwnerId String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+
+  workspaceOwner   User?  @relation("WorkspaceMembers", fields: [workspaceOwnerId], references: [id], onDelete: SetNull)
+  workspaceMembers User[] @relation("WorkspaceMembers")
 
   accounts       Account[]
   sessions       Session[]
@@ -45,7 +49,11 @@ model User {
   chatAssignments ChatSession[] @relation("ChatAssignee")
   reviewedRegistrationRequests RegistrationRequest[] @relation("RegistrationReviewer")
   reviewedFeedbackItems FeedbackItem[] @relation("FeedbackReviewer")
+  workspaceTasks       WorkspaceTask[]
+  workspaceInvoices    WorkspaceInvoice[]
+  workspaceSavedSearches WorkspaceSavedSearch[]
 
+  @@index([workspaceOwnerId])
   @@map("users")
 }
 
@@ -271,7 +279,8 @@ model LeadContact {
 // SCORING
 model ScoringWeight {
   id          String  @id @default(cuid())
-  factorKey   String  @unique
+  createdById String  @default("_global")
+  factorKey   String
   label       String
   description String?
   weight      Float   @default(1.0)
@@ -282,6 +291,8 @@ model ScoringWeight {
 
   factors LeadScoringFactor[]
 
+  @@unique([createdById, factorKey])
+  @@index([createdById])
   @@map("scoring_weights")
 }
 
@@ -430,22 +441,54 @@ model CampaignLead {
 }
 
 // EMAIL / CONTACT
+enum EmailTemplateType {
+  OUTREACH
+  FOLLOW_UP
+  PROPOSAL
+  REPORT
+  BOOKING
+  REVIEW
+  REENGAGEMENT
+  CUSTOM
+}
+
+enum EmailTemplateLayout {
+  modern
+  minimal
+  business
+  proposal
+  followup
+}
+
+enum EmailTemplateBodyFormat {
+  TEXT
+  HTML
+}
+
 model EmailTemplate {
-  id          String   @id @default(cuid())
+  id          String                   @id @default(cuid())
   createdById String?
   name        String
   subject     String
-  body        String   @db.Text
+  body        String                   @db.Text
+  bodyFormat  EmailTemplateBodyFormat  @default(TEXT)
+  type        EmailTemplateType        @default(CUSTOM)
+  layout      EmailTemplateLayout @default(modern)
+  description String              @default("")
+  ctaText     String              @default("")
+  ctaUrl      String              @default("")
   campaignId  String?
-  isGlobal    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isGlobal    Boolean             @default(false)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
 
   createdBy User?     @relation(fields: [createdById], references: [id], onDelete: Cascade)
   campaign  Campaign? @relation(fields: [campaignId], references: [id])
   drafts    EmailDraft[]
 
   @@index([createdById])
+  @@index([createdById, type])
+  @@index([createdById, layout])
   @@unique([createdById, name])
   @@map("email_templates")
 }
@@ -696,6 +739,129 @@ model Report {
 
   @@index([generatedById])
   @@map("reports")
+}
+
+// WORKSPACE TASKS (per workspace owner)
+enum WorkspaceTaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum WorkspaceTaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum WorkspaceTaskRelatedType {
+  LEAD
+  QUOTE
+  BOOKING
+  CLIENT
+}
+
+model WorkspaceTask {
+  id          String                    @id @default(cuid())
+  createdById String
+  title       String
+  description String                    @default("")
+  status      WorkspaceTaskStatus       @default(TODO)
+  priority    WorkspaceTaskPriority     @default(MEDIUM)
+  dueAt       DateTime?
+  relatedType WorkspaceTaskRelatedType?
+  relatedId   String?
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([createdById, status])
+  @@index([createdById, updatedAt])
+  @@map("workspace_tasks")
+}
+
+// WORKSPACE INVOICES
+enum WorkspaceInvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model WorkspaceInvoice {
+  id               String                 @id @default(cuid())
+  createdById      String
+  invoiceNumber    String
+  quoteId          String?
+  leadId           String?
+  clientName       String
+  clientEmail      String?
+  clientCompany    String?
+  clientAddress    String?
+  clientVat        String?
+  status           WorkspaceInvoiceStatus @default(DRAFT)
+  issueDate        DateTime
+  dueDate          DateTime
+  subtotal         Float
+  vatRate          Float
+  vatAmount        Float
+  total            Float
+  currency         String                 @default("EUR")
+  paymentReference String
+  notes            String?
+  reminderCount    Int                    @default(0)
+  lastReminderAt   DateTime?
+  paidAt           DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  createdBy User                  @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  quote     Quote?                @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  items     WorkspaceInvoiceItem[]
+
+  @@unique([createdById, invoiceNumber])
+  @@index([createdById, status])
+  @@index([createdById, issueDate])
+  @@index([quoteId])
+  @@map("workspace_invoices")
+}
+
+model WorkspaceInvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  name        String
+  description String?
+  quantity    Float
+  unitPrice   Float
+  total       Float
+  sortOrder   Int     @default(0)
+
+  invoice WorkspaceInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("workspace_invoice_items")
+}
+
+// WORKSPACE SAVED SEARCHES (lead search presets)
+model WorkspaceSavedSearch {
+  id          String   @id @default(cuid())
+  createdById String
+  name        String
+  query       String   @default("")
+  city        String   @default("")
+  country     String   @default("België")
+  niche       String   @default("")
+  pageSize    Int      @default(20)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([createdById, updatedAt])
+  @@map("workspace_saved_searches")
 }
 
 // SETTINGS
@@ -982,6 +1148,7 @@ model Quote {
   lead          Lead?       @relation(fields: [leadId], references: [id])
   createdBy     User        @relation(fields: [createdById], references: [id])
   items         QuoteItem[]
+  invoices      WorkspaceInvoice[]
 
   @@index([status])
   @@index([createdAt(sort: Desc)])

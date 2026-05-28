@@ -1,8 +1,29 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Activity, ArrowLeft, Copy, ExternalLink, Gauge, Globe2, Lightbulb, Mail, Phone, RefreshCcw, Shield, ShieldOff, TimerReset } from "lucide-react";
+import {
+  Activity,
+  ArrowLeft,
+  BarChart3,
+  Copy,
+  ExternalLink,
+  Gauge,
+  Globe2,
+  Lightbulb,
+  ListChecks,
+  Mail,
+  MousePointerClick,
+  Phone,
+  RefreshCcw,
+  Shield,
+  ShieldOff,
+  TimerReset,
+  TrendingUp,
+  Users,
+} from "lucide-react";
+import { DomainStatsCards, type DomainStatItem } from "@/components/domains/domain-stats-cards";
 import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from "@digitify/ui";
 import { trpc } from "@/lib/trpc/client";
 import { getAppUrl } from "@/lib/config";
@@ -115,6 +136,157 @@ export default function DomainDetailPage() {
     !analysis?.hasAnalytics ? "Analytics detectie ontbreekt. Meet verkeer en conversies." : null,
   ].filter((item): item is string => Boolean(item));
 
+  const domainStatItems = useMemo<DomainStatItem[]>(() => {
+    const loadMs = analysis?.loadTimeMs;
+    const loadLabel =
+      loadMs === undefined
+        ? "—"
+        : loadMs >= 1000
+          ? `${(loadMs / 1000).toFixed(1)}s`
+          : `${Math.round(loadMs)}ms`;
+
+    const websiteTone: DomainStatItem["tone"] =
+      websiteStatus === "Online"
+        ? "positive"
+        : websiteStatus === "Traag"
+          ? "warning"
+          : websiteStatus === "Offline"
+            ? "negative"
+            : "neutral";
+
+    const loadTone: DomainStatItem["tone"] =
+      loadMs === undefined ? "neutral" : loadMs > 3500 ? "negative" : loadMs > 2200 ? "warning" : "positive";
+
+    const healthTone: DomainStatItem["tone"] =
+      healthScore >= 80 ? "positive" : healthScore >= 60 ? "warning" : healthScore > 0 ? "negative" : "neutral";
+
+    const visitors = tracker?.summary?.uniqueVisitors ?? 0;
+    const pageviews = tracker?.summary?.pageviews ?? 0;
+    const lastSeen = tracker?.summary?.lastSeen;
+
+    const hasAnalysis =
+      analysis != null &&
+      (analysis.statusCode !== undefined ||
+        analysis.loadTimeMs !== undefined ||
+        analysis.hasSSL !== undefined);
+
+    return [
+      {
+        label: "Website",
+        value: websiteStatus,
+        icon: <Globe2 />,
+        accent: "sky",
+        tone: websiteTone,
+        valueVariant: "text",
+        empty: !hasAnalysis,
+        hint: hasAnalysis ? `HTTP ${analysis?.statusCode}` : "Analyseer opnieuw",
+      },
+      {
+        label: "Laadtijd",
+        value: loadLabel,
+        icon: <Gauge />,
+        accent: "amber",
+        tone: loadTone,
+        empty: loadMs === undefined,
+        hint:
+          loadMs === undefined
+            ? "Live refresh elke minuut"
+            : loadMs > 2500
+              ? "Boven 2,5s"
+              : "Snel genoeg",
+      },
+      {
+        label: "Health score",
+        value: hasAnalysis ? `${healthScore}/100` : "—",
+        icon: <Activity />,
+        accent: "violet",
+        tone: healthTone,
+        progress: hasAnalysis ? healthScore : undefined,
+        empty: !hasAnalysis,
+        hint: hasAnalysis
+          ? healthScore >= 80
+            ? "Sterke basis"
+            : healthScore >= 60
+              ? "Verbeterbaar"
+              : "Acties nodig"
+          : "Na eerste analyse",
+      },
+      {
+        label: "Bezoekers",
+        value: visitors,
+        icon: <Users />,
+        accent: "indigo",
+        tone: visitors > 0 ? "info" : "neutral",
+        empty: false,
+        hint: `${pageviews} pageview${pageviews !== 1 ? "s" : ""}`,
+      },
+      {
+        label: "Laatste hit",
+        value: lastSeen ? formatDate(lastSeen) : "—",
+        icon: <MousePointerClick />,
+        accent: "teal",
+        tone: lastSeen ? "info" : "neutral",
+        valueVariant: "date",
+        empty: !lastSeen,
+        hint: data?.lead?.companyName ? data.lead.companyName : "Geen gekoppelde lead",
+      },
+    ];
+  }, [
+    analysis,
+    data?.lead?.companyName,
+    healthScore,
+    tracker?.summary?.lastSeen,
+    tracker?.summary?.pageviews,
+    tracker?.summary?.uniqueVisitors,
+    websiteStatus,
+  ]);
+
+  const trafficStatItems = useMemo<DomainStatItem[]>(() => {
+    const visitors = tracker?.summary?.uniqueVisitors ?? 0;
+    const pageviews = tracker?.summary?.pageviews ?? 0;
+    const lastSeen = tracker?.summary?.lastSeen;
+    const hasAnalysis =
+      analysis != null &&
+      (analysis.statusCode !== undefined ||
+        analysis.loadTimeMs !== undefined ||
+        analysis.hasSSL !== undefined);
+    const healthTone: DomainStatItem["tone"] =
+      healthScore >= 80 ? "positive" : healthScore >= 60 ? "warning" : healthScore > 0 ? "negative" : "neutral";
+
+    return [
+      {
+        label: "Unieke bezoekers",
+        value: visitors,
+        icon: <Users />,
+        accent: "indigo",
+        tone: visitors > 0 ? "info" : "neutral",
+        hint: `${pageviews} pageview${pageviews !== 1 ? "s" : ""} totaal`,
+      },
+      {
+        label: "Laatste bezoek",
+        value: lastSeen ? formatDate(lastSeen) : "—",
+        icon: <MousePointerClick />,
+        accent: "teal",
+        tone: lastSeen ? "info" : "neutral",
+        valueVariant: "date",
+        empty: !lastSeen,
+        hint: lastSeen ? "Laatste tracker-hit" : "Realtime na plaatsen tracker",
+      },
+      {
+        label: "Gezondheid",
+        value: hasAnalysis ? `${healthScore}/100` : "—",
+        icon: <Activity />,
+        accent: "violet",
+        tone: healthTone,
+        progress: hasAnalysis ? healthScore : undefined,
+        empty: !hasAnalysis,
+        hint: hasAnalysis
+          ? "Uptime, SEO, snelheid & basics"
+          : "Eerst domein analyseren",
+      },
+    ];
+  }, [analysis, healthScore, tracker?.summary?.lastSeen, tracker?.summary?.pageviews, tracker?.summary?.uniqueVisitors]);
+
   async function copyTrackerCode() {
     if (!trackerCode) return;
     await navigator.clipboard.writeText(trackerCode);
@@ -125,6 +297,11 @@ export default function DomainDetailPage() {
     return (
       <div className="space-y-5">
         <Skeleton className="h-8 w-56" />
+        <div className="domain-stats-grid">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <Skeleton key={index} className="h-[5.75rem] rounded-xl" />
+          ))}
+        </div>
         <div className="grid gap-4 lg:grid-cols-3">
           <Skeleton className="h-48" />
           <Skeleton className="h-48 lg:col-span-2" />
@@ -191,53 +368,22 @@ export default function DomainDetailPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Website</p>
-            <p className="mt-2 text-2xl font-semibold">{websiteStatus}</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {analysis?.statusCode ? `HTTP ${analysis.statusCode}` : "Nog geen analyse"}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Laadtijd</p>
-            <p className="mt-2 text-2xl font-semibold">{analysis?.loadTimeMs ? `${Math.round(analysis.loadTimeMs)}ms` : "-"}</p>
-            <p className="mt-1 text-sm text-muted-foreground">Auto-refresht elke minuut in het dashboard</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Health score</p>
-            <p className="mt-2 text-2xl font-semibold">{healthScore}/100</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {healthScore >= 80 ? "Sterke basis" : healthScore >= 60 ? "Verbeterbaar" : "Prioritaire acties nodig"}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Bezoekers</p>
-            <p className="mt-2 text-2xl font-semibold">{tracker?.summary?.uniqueVisitors ?? 0}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{tracker?.summary?.pageviews ?? 0} pageviews</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">Laatste hit</p>
-            <p className="mt-2 text-base font-semibold">{formatDate(tracker?.summary?.lastSeen)}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{data.lead?.companyName || "Geen gekoppelde lead"}</p>
-          </CardContent>
-        </Card>
-      </div>
+      <DomainStatsCards items={domainStatItems} />
 
       <Tabs defaultValue="analysis" className="space-y-4">
-        <TabsList className="grid w-full max-w-lg grid-cols-3">
-          <TabsTrigger value="analysis">Analyse</TabsTrigger>
-          <TabsTrigger value="traffic">Verkeer</TabsTrigger>
-          <TabsTrigger value="actions">Acties</TabsTrigger>
+        <TabsList className="settings-domain-tabs settings-domain-tabs-cols-3 w-full max-w-2xl">
+          <TabsTrigger value="analysis" className="settings-domain-tab">
+            <BarChart3 className="settings-domain-tab-icon" aria-hidden />
+            <span>Analyse</span>
+          </TabsTrigger>
+          <TabsTrigger value="traffic" className="settings-domain-tab">
+            <TrendingUp className="settings-domain-tab-icon" aria-hidden />
+            <span>Verkeer</span>
+          </TabsTrigger>
+          <TabsTrigger value="actions" className="settings-domain-tab">
+            <ListChecks className="settings-domain-tab-icon" aria-hidden />
+            <span>Acties</span>
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="analysis" className="space-y-4">
@@ -418,29 +564,7 @@ export default function DomainDetailPage() {
         </TabsContent>
 
         <TabsContent value="traffic" className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-3">
-            <Card>
-              <CardContent className="p-5">
-                <p className="text-xs uppercase tracking-wider text-muted-foreground">Unieke bezoekers</p>
-                <p className="mt-2 text-3xl font-semibold">{tracker?.summary?.uniqueVisitors ?? 0}</p>
-                <p className="mt-1 text-sm text-muted-foreground">{tracker?.summary?.pageviews ?? 0} pageviews totaal</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-5">
-                <p className="text-xs uppercase tracking-wider text-muted-foreground">Laatste bezoek</p>
-                <p className="mt-2 text-lg font-semibold">{formatDate(tracker?.summary?.lastSeen)}</p>
-                <p className="mt-1 text-sm text-muted-foreground">Realtime zodra de tracker geplaatst is</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-5">
-                <p className="text-xs uppercase tracking-wider text-muted-foreground">Gezondheid</p>
-                <p className="mt-2 text-3xl font-semibold">{healthScore}/100</p>
-                <p className="mt-1 text-sm text-muted-foreground">Combineert uptime, SEO, snelheid en basics</p>
-              </CardContent>
-            </Card>
-          </div>
+          <DomainStatsCards items={trafficStatItems} columns={3} />
 
           <div className="grid gap-4 xl:grid-cols-2">
             <Card>

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { getCurrentUser } from "@/lib/auth/session";
+import { getCurrentUser, workspaceIdFor } from "@/lib/auth/session";
 import { buildQuotePdfHtml, renderQuotePdfBuffer } from "@/lib/quote-pdf";
 
 export const runtime = "nodejs";
@@ -19,10 +19,11 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     return NextResponse.json({ error: "Niet geauthenticeerd" }, { status: 401 });
   }
   const userId = (currentUser as any).id as string;
+  const workspaceId = workspaceIdFor(currentUser as { id: string; workspaceId?: string });
 
   const { id } = await params;
   const quote = await prisma.quote.findFirst({
-    where: { id, createdById: userId },
+    where: { id, createdById: workspaceId },
     include: { items: { orderBy: { sortOrder: "asc" } } },
   });
 

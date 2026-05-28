@@ -6,8 +6,14 @@
   "types": "./src/index.ts",
   "scripts": {
     "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate-metadata": "tsx prisma/migrate-template-metadata.ts",
+    "db:migrate-workspace-settings": "tsx prisma/migrate-workspace-settings.ts",
+    "db:migrate-legacy-templates": "tsx prisma/migrate-legacy-templates.ts",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
+    "db:rls-smoke": "tsx prisma/rls-staging-smoke.ts",
     "db:encrypt-secrets": "tsx prisma/encrypt-secret-settings.ts",
     "studio": "prisma studio"
   },
