@@ -2,6 +2,8 @@ import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { sendBrandedEmail } from "../lib/email-sender";
+import { sendApprovedQuoteDraft } from "../lib/quote-outbound-email";
+import { extractInvoiceIdFromDraftBody } from "../lib/invoice-outbound";
 import { getSettingString } from "../lib/settings";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 import { assertLeadAccess } from "../lib/tenant";
@@ -259,6 +261,7 @@ export const contactRouter = router({
         subject: z.string().optional(),
         body: z.string().optional(),
         toEmail: z.string().email().optional(),
+        templateId: z.string().nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -273,12 +276,22 @@ export const contactRouter = router({
       if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang om dit concept te bewerken." });
       }
-      if (draft.status !== "DRAFT" && draft.status !== "REJECTED") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Can only edit drafts or rejected emails" });
+      const editableStatuses = ["DRAFT", "REJECTED", "PENDING_APPROVAL", "APPROVED", "FAILED"];
+      if (!editableStatuses.includes(draft.status)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Deze e-mail kan niet meer worden bewerkt." });
       }
 
       const { id, ...data } = input;
-      return ctx.db.emailDraft.update({ where: { id }, data: { ...data, status: "DRAFT" } });
+      const nextStatus = draft.status === "PENDING_APPROVAL" ? "PENDING_APPROVAL" : "DRAFT";
+      const approvalReset =
+        draft.status === "APPROVED"
+          ? { approverId: null, approvedAt: null, rejectedAt: null, rejectionNote: null }
+          : {};
+
+      return ctx.db.emailDraft.update({
+        where: { id },
+        data: { ...data, status: nextStatus, ...approvalReset },
+      });
     }),
 
   submitForApproval: protectedProcedure
@@ -403,15 +416,23 @@ export const contactRouter = router({
             10,
           ) || 3;
 
-        const result = await sendBrandedEmail(ctx.db, {
-          toEmail: draft.toEmail,
-          subject: draft.subject,
-          body: draft.body,
-          recipientCompany: draft.lead?.companyName ?? draft.toEmail,
-          leadId: draft.leadId,
-          userId: ctx.user.id,
-          trackingDraftId: draft.id,
-        });
+        const result =
+          draft.type === "QUOTE"
+            ? await sendApprovedQuoteDraft(
+                ctx.db,
+                draft,
+                ctx.user.id,
+                ctx.user.workspaceId!,
+              )
+            : await sendBrandedEmail(ctx.db, {
+                toEmail: draft.toEmail,
+                subject: draft.subject,
+                body: draft.body,
+                recipientCompany: draft.lead?.companyName ?? draft.toEmail,
+                leadId: draft.leadId,
+                userId: ctx.user.id,
+                trackingDraftId: draft.id,
+              });
 
         if (!result.success) {
           await ctx.db.emailDraft.update({
@@ -438,13 +459,28 @@ export const contactRouter = router({
           },
         });
 
+        const invoiceId = extractInvoiceIdFromDraftBody(draft.body);
+        if (invoiceId) {
+          await ctx.db.workspaceInvoice.updateMany({
+            where: {
+              id: invoiceId,
+              createdById: ctx.user.workspaceId!,
+              status: "DRAFT",
+            },
+            data: { status: "SENT" },
+          });
+        }
+
         // Create activity record
         await ctx.db.activity.create({
           data: {
             leadId: draft.leadId,
             userId: ctx.user.id,
-            type: "EMAIL_SENT",
-            title: `E-mail verzonden naar ${draft.toEmail}`,
+            type: draft.type === "QUOTE" ? "QUOTE_SENT" : "EMAIL_SENT",
+            title:
+              draft.type === "QUOTE"
+                ? `Offerte per e-mail verstuurd naar ${draft.toEmail}`
+                : `E-mail verzonden naar ${draft.toEmail}`,
             metadata: { followUpDays },
           },
         });

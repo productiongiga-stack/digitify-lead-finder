@@ -21,11 +21,13 @@ import {
   Switch,
   Textarea,
 } from "@digitify/ui";
-import { LayoutTemplate } from "lucide-react";
+import { LayoutTemplate, Code2, Type } from "lucide-react";
 import { EmailPreview } from "@/components/email/preview";
 import { MailVariablesHelp } from "@/components/email/mail-variables-help";
+import { useToast } from "@/components/feedback/toast-provider";
 import type { EmailLayout, TemplateType } from "@/lib/email-content";
 import { LAYOUT_CATALOG, TEMPLATE_TYPES } from "@/lib/template-studio";
+import { EmailLayoutPicker, EmailLayoutPickerHint } from "@/components/templates/email-layout-picker";
 import { TemplateScopeHelp } from "@/components/templates/template-scope-help";
 
 export type StudioForm = {
@@ -33,6 +35,7 @@ export type StudioForm = {
   name: string;
   subject: string;
   body: string;
+  bodyFormat: "TEXT" | "HTML";
   layout: EmailLayout;
   type: TemplateType;
   description: string;
@@ -46,6 +49,7 @@ export const EMPTY_STUDIO_FORM: StudioForm = {
   name: "",
   subject: "",
   body: "",
+  bodyFormat: "TEXT",
   layout: "modern",
   type: "OUTREACH",
   description: "",
@@ -54,6 +58,25 @@ export const EMPTY_STUDIO_FORM: StudioForm = {
   campaignId: "",
   isGlobal: false,
 };
+
+const DEFAULT_HTML_TEMPLATE = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body style="margin:0;padding:24px;font-family:Arial,Helvetica,sans-serif;background:#f8fafc;color:#374151;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:12px;">
+    <tr>
+      <td style="padding:32px;">
+        <p style="margin:0 0 16px;font-size:16px;line-height:1.6;">Beste {{contactName}},</p>
+        <p style="margin:0 0 16px;font-size:16px;line-height:1.6;">Plak hier je HTML-opmaak of pas deze template aan.</p>
+        <p style="margin:0;font-size:16px;line-height:1.6;">{{senderName}}</p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 
 type TemplateStudioEditorProps = {
   open: boolean;
@@ -76,14 +99,26 @@ export function TemplateStudioEditor({
   previewPrimaryColor,
   previewHeaderSlogan,
 }: TemplateStudioEditorProps) {
+  const { showToast } = useToast();
   const utils = trpc.useUtils();
   const { data: campaigns } = trpc.campaign.list.useQuery(undefined, { enabled: open });
 
   const save = trpc.template.save.useMutation({
     onSuccess: () => {
       utils.template.list.invalidate();
+      showToast({
+        title: form.id ? "Template bijgewerkt" : "Template aangemaakt",
+        description: "Je wijzigingen zijn opgeslagen in Template Studio.",
+      });
       onSaved();
       onOpenChange(false);
+    },
+    onError: (error) => {
+      showToast({
+        title: "Opslaan mislukt",
+        description: error.message,
+        variant: "error",
+      });
     },
   });
 
@@ -94,8 +129,27 @@ export function TemplateStudioEditor({
   );
 
   function insertVariable(key: string) {
-    const token = `{{${key}}}`;
-    onFormChange({ ...form, body: form.body ? `${form.body}\n${token}` : token });
+    const token = form.bodyFormat === "HTML" ? `{{${key}}}` : `{{${key}}}`;
+    onFormChange({ ...form, body: form.body ? `${form.body}${form.bodyFormat === "HTML" ? " " : "\n"}${token}` : token });
+  }
+
+  function setBodyFormat(next: "TEXT" | "HTML") {
+    if (next === form.bodyFormat) return;
+    if (next === "HTML") {
+      onFormChange({
+        ...form,
+        bodyFormat: "HTML",
+        body: form.body.trim() && !form.body.includes("<") ? `<p>${form.body.replace(/\n\n/g, "</p><p>").replace(/\n/g, "<br>")}</p>` : form.body.trim() || DEFAULT_HTML_TEMPLATE,
+        ctaText: "",
+        ctaUrl: "",
+      });
+      return;
+    }
+    onFormChange({
+      ...form,
+      bodyFormat: "TEXT",
+      body: form.body.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n\n").replace(/<[^>]+>/g, "").trim() || "",
+    });
   }
 
   function handleSave() {
@@ -105,11 +159,12 @@ export function TemplateStudioEditor({
       name: form.name.trim(),
       subject: form.subject.trim(),
       body: form.body.trim(),
+      bodyFormat: form.bodyFormat,
       layout: form.layout,
       type: form.type,
       description: form.description.trim() || undefined,
-      ctaText: form.ctaText.trim() || undefined,
-      ctaUrl: form.ctaUrl.trim() || undefined,
+      ctaText: form.bodyFormat === "HTML" ? undefined : form.ctaText.trim() || undefined,
+      ctaUrl: form.bodyFormat === "HTML" ? undefined : form.ctaUrl.trim() || undefined,
       campaignId: form.campaignId || null,
       isGlobal: form.isGlobal,
     });
@@ -168,43 +223,73 @@ export function TemplateStudioEditor({
             </div>
 
             <div className="space-y-2">
-              <Label>HTML layout — elk template kan een eigen look krijgen</Label>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {LAYOUT_CATALOG.map((layout) => (
-                  <button
-                    key={layout.id}
-                    type="button"
-                    onClick={() => onFormChange({ ...form, layout: layout.id })}
-                    className={`rounded-xl border p-3 text-left transition-all ${
-                      form.layout === layout.id
-                        ? "border-primary ring-2 ring-primary/30 bg-primary/5"
-                        : "border-border/60 hover:border-primary/40"
-                    }`}
-                  >
-                    <div className={`mb-2 h-2 rounded-full bg-gradient-to-r ${layout.accent}`} />
-                    <p className="text-sm font-medium">{layout.label}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{layout.description}</p>
-                  </button>
-                ))}
+              <Label>Inhoudstype</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBodyFormat("TEXT")}
+                  className={`flex items-center gap-2 rounded-xl border p-3 text-left text-sm transition-all ${
+                    form.bodyFormat === "TEXT"
+                      ? "border-primary ring-2 ring-primary/30 bg-primary/5"
+                      : "border-border/60 hover:border-primary/40"
+                  }`}
+                >
+                  <Type className="h-4 w-4 shrink-0" />
+                  <span>
+                    <span className="font-medium">Tekst + layout</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">Automatische branded HTML</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBodyFormat("HTML")}
+                  className={`flex items-center gap-2 rounded-xl border p-3 text-left text-sm transition-all ${
+                    form.bodyFormat === "HTML"
+                      ? "border-primary ring-2 ring-primary/30 bg-primary/5"
+                      : "border-border/60 hover:border-primary/40"
+                  }`}
+                >
+                  <Code2 className="h-4 w-4 shrink-0" />
+                  <span>
+                    <span className="font-medium">Eigen HTML</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">Plak en bekijk je opmaak</span>
+                  </span>
+                </button>
               </div>
-              {layoutInfo ? (
+            </div>
+
+            {form.bodyFormat === "TEXT" ? (
+            <div className="space-y-2">
+              <Label>HTML layout — elk template kan een eigen look krijgen</Label>
+              <EmailLayoutPicker
+                value={form.layout}
+                onChange={(layout) => onFormChange({ ...form, layout })}
+              />
+              <EmailLayoutPickerHint layoutId={form.layout} />
+            </div>
+            ) : null}
+
+            <div className="space-y-1.5">
+              <Label>{form.bodyFormat === "HTML" ? "HTML code" : "Bericht"}</Label>
+              <Textarea
+                rows={form.bodyFormat === "HTML" ? 16 : 10}
+                className="font-mono text-sm"
+                value={form.body}
+                onChange={(e) => onFormChange({ ...form, body: e.target.value })}
+                placeholder={
+                  form.bodyFormat === "HTML"
+                    ? "<!DOCTYPE html>..."
+                    : "Beste {{contactName}}, ..."
+                }
+              />
+              {form.bodyFormat === "HTML" ? (
                 <p className="text-xs text-muted-foreground">
-                  Aanbevolen voor: {layoutInfo.bestFor.join(", ")}
+                  Plak volledige HTML of een fragment. Placeholders zoals {"{{contactName}}"} werken ook in HTML.
                 </p>
               ) : null}
             </div>
 
-            <div className="space-y-1.5">
-              <Label>Bericht</Label>
-              <Textarea
-                rows={10}
-                className="font-mono text-sm"
-                value={form.body}
-                onChange={(e) => onFormChange({ ...form, body: e.target.value })}
-                placeholder="Beste {{contactName}}, ..."
-              />
-            </div>
-
+            {form.bodyFormat === "TEXT" ? (
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>CTA tekst (optioneel)</Label>
@@ -223,6 +308,7 @@ export function TemplateStudioEditor({
                 />
               </div>
             </div>
+            ) : null}
 
             <div className="space-y-3 rounded-xl border border-border/60 p-3">
               <p className="text-sm font-medium">Zichtbaarheid in Outbound</p>
@@ -278,21 +364,24 @@ export function TemplateStudioEditor({
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">{form.type}</Badge>
-              <Badge variant="secondary">{form.layout}</Badge>
+              {form.bodyFormat === "HTML" ? <Badge variant="secondary">HTML</Badge> : <Badge variant="secondary">{form.layout}</Badge>}
               {form.ctaText ? <Badge>CTA</Badge> : null}
               {form.isGlobal ? <Badge variant="outline">Alle campagnes</Badge> : null}
             </div>
             <div className="sticky top-0 rounded-xl border bg-muted/20 p-3">
               <p className="mb-3 flex items-center gap-2 text-sm font-medium">
                 <LayoutTemplate className="h-4 w-4" />
-                Live preview — {layoutInfo?.label || form.layout}
+                Live preview — {form.bodyFormat === "HTML" ? "eigen HTML" : layoutInfo?.label || form.layout}
               </p>
               <EmailPreview
                 subject={form.subject || "Voorbeeld onderwerp"}
                 body={
                   form.body ||
-                  "Beste {{contactName}},\n\nDit is je unieke template preview.\n\n{{senderName}}"
+                  (form.bodyFormat === "HTML"
+                    ? DEFAULT_HTML_TEMPLATE
+                    : "Beste {{contactName}},\n\nDit is je unieke template preview.\n\n{{senderName}}")
                 }
+                bodyFormat={form.bodyFormat}
                 companyName={previewCompanyName}
                 primaryColor={previewPrimaryColor}
                 fromName={previewCompanyName}
@@ -308,7 +397,7 @@ export function TemplateStudioEditor({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Annuleren</Button>
-          <Button onClick={handleSave} disabled={!isValid || save.isPending}>
+          <Button type="button" onClick={handleSave} disabled={!isValid || save.isPending}>
             {save.isPending ? "Opslaan..." : form.id ? "Bijwerken" : "Template aanmaken"}
           </Button>
         </DialogFooter>
@@ -322,6 +411,7 @@ export function templateToForm(template: {
   name: string;
   subject: string;
   cleanBody: string;
+  bodyFormat?: string;
   layout: string;
   type: string;
   description: string;
@@ -335,6 +425,7 @@ export function templateToForm(template: {
     name: template.name,
     subject: template.subject,
     body: template.cleanBody,
+    bodyFormat: template.bodyFormat === "HTML" ? "HTML" : "TEXT",
     layout: (template.layout as EmailLayout) || "modern",
     type: (template.type as TemplateType) || "CUSTOM",
     description: template.description || "",
@@ -351,6 +442,7 @@ export function starterToForm(starter: {
   subject: string;
   body: string;
   layout: EmailLayout;
+  bodyFormat?: "TEXT" | "HTML";
   description: string;
   ctaText?: string;
   ctaUrl?: string;
@@ -359,6 +451,7 @@ export function starterToForm(starter: {
     name: starter.name,
     subject: starter.subject,
     body: starter.body,
+    bodyFormat: starter.bodyFormat === "HTML" ? "HTML" : "TEXT",
     layout: starter.layout,
     type: starter.type,
     description: starter.description,

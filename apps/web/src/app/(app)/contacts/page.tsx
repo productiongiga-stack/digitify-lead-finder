@@ -23,7 +23,6 @@ import {
   TabsTrigger,
   Input,
   Checkbox,
-  StatsCards,
   type StatItem,
 } from "@digitify/ui";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
@@ -44,24 +43,52 @@ import {
   ShieldCheck,
   Trash2,
   X,
+  Receipt,
+  LayoutGrid,
+  Info,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { EmailPreview } from "@/components/email/preview";
 import { extractEmailTemplateMetadata } from "@/lib/email-content";
 import {
-  OUTBOUND_FLOW_SUMMARY,
   OUTBOUND_STAT_CARD_STATUSES,
+  OUTBOUND_STAT_CARD_LABELS,
   type OutboundStatCardStatus,
   OUTBOUND_STATUS_LABELS,
   OUTBOUND_STATUS_OPTIONS,
   OUTBOUND_STATUS_VARIANTS,
   SEND_OUTBOUND_TOOLTIP,
   canSendOutboundDraft,
-  formatWorkqueueSummary,
+  canEditOutboundDraft,
   getOutboundStatusLabel,
   getSendButtonLabel,
 } from "@/lib/contact-status";
 import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
+import { OutboundInfoPanel } from "@/components/outbound/outbound-info-panel";
+import { OutboundStatsCards } from "@/components/outbound/outbound-stats-cards";
+import {
+  extractQuoteIdFromDraftBody,
+  getQuoteConfiguratorUrl,
+} from "@/lib/quote-outbound";
+
+function QuoteConfiguratorButton({
+  draft,
+}: {
+  draft: { id: string; type: string; body: string };
+}) {
+  if (draft.type !== "QUOTE") return null;
+  const quoteId = extractQuoteIdFromDraftBody(draft.body);
+  if (!quoteId) return null;
+
+  return (
+    <Button asChild variant="outline" size="sm">
+      <Link href={getQuoteConfiguratorUrl(quoteId, `/contacts/drafts/${draft.id}`)}>
+        <Receipt className="mr-1.5 h-3.5 w-3.5" />
+        Configurator
+      </Link>
+    </Button>
+  );
+}
 
 export default function ContactsPage() {
   const searchParams = useSearchParams();
@@ -85,6 +112,9 @@ export default function ContactsPage() {
     staleTime: 60_000,
   });
   const { data: followUpQueue } = trpc.contact.getFollowUpQueue.useQuery(undefined, {
+    staleTime: 60_000,
+  });
+  const { data: topbarStats } = trpc.contact.getTopbarStats.useQuery(undefined, {
     staleTime: 60_000,
   });
 
@@ -139,10 +169,6 @@ export default function ContactsPage() {
     failed: drafts.filter((item) => item.status === "FAILED").length,
   };
   const activeFilterCount = (statusFilter ? 1 : 0) + (searchFilter.trim() ? 1 : 0);
-  const nextActionHref =
-    stats.pending > 0 ? "/contacts/approval" : stats.failed > 0 ? "/contacts" : "/contacts/compose";
-  const nextActionLabel =
-    stats.pending > 0 ? "Werk eerst de goedkeuringswachtrij af." : stats.failed > 0 ? "Los mislukte mails eerst op." : "Er is ruimte om nieuwe outreach op te starten.";
   const followUpItems = followUpQueue?.items ?? [];
 
   const outboundStatItems = useMemo<StatItem[]>(() => {
@@ -168,11 +194,11 @@ export default function ContactsPage() {
       const count = countByStatus[status];
       const active = statusFilter === status;
       return {
-        label: getOutboundStatusLabel(status),
+        label: OUTBOUND_STAT_CARD_LABELS[status],
         value: count,
         icon: meta[status].icon,
         tone: meta[status].tone,
-        hint: active ? "Filter actief" : count > 0 ? "Klik om te filteren" : undefined,
+        active,
         onClick: () => setStatusFilter((current) => (current === status ? "" : status)),
       };
     });
@@ -183,6 +209,7 @@ export default function ContactsPage() {
         label: "Inkomend",
         value: "Inbox",
         icon: <Inbox />,
+        tone: "info" as const,
         href: "/contacts/inbox",
         hint: "Ontvangen e-mail",
       },
@@ -273,9 +300,15 @@ export default function ContactsPage() {
       </div>
 
       <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="grid h-10 w-full max-w-xs grid-cols-2 rounded-full bg-muted/60 p-1">
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="info">Info</TabsTrigger>
+        <TabsList className="page-view-tabs">
+          <TabsTrigger value="overview" className="page-view-tabs-trigger">
+            <LayoutGrid />
+            Overzicht
+          </TabsTrigger>
+          <TabsTrigger value="info" className="page-view-tabs-trigger">
+            <Info />
+            Info
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
@@ -380,97 +413,24 @@ export default function ContactsPage() {
         </Card>
       ) : null}
 
-      <StatsCards items={outboundStatItems} columns={6} loading={isLoading} />
+      <OutboundStatsCards items={outboundStatItems} loading={isLoading} />
 
       </TabsContent>
 
       <TabsContent value="info" className="space-y-4">
-      <Card className="border-dashed">
-        <CardContent className="p-3 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Flow:</span> {OUTBOUND_FLOW_SUMMARY}{" "}
-          <span className="font-medium text-foreground">Tip:</span> status{" "}
-          <span className="font-medium">{OUTBOUND_STATUS_LABELS.FAILED}</span> kan je opnieuw verzenden na correctie van SMTP/domein.
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-3 xl:grid-cols-3">
-        <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Volgende actie</p>
-            <p className="mt-2 text-sm font-medium">{nextActionLabel}</p>
-            <Button asChild size="sm" variant="outline" className="mt-3">
-              <Link href={nextActionHref}>
-                {stats.pending > 0 ? "Open goedkeuringswachtrij" : stats.failed > 0 ? "Open mislukte mails" : "Nieuwe e-mail maken"}
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
-        <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Werkqueue</p>
-            <p className="mt-2 text-sm font-medium">
-              {formatWorkqueueSummary(stats)}
-            </p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Zo zie je sneller waar de outreachflow vandaag blijft hangen.
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gerelateerd</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button asChild size="sm" variant="outline">
-                <Link href="/templates">Templates</Link>
-              </Button>
-              <Button asChild size="sm" variant="ghost">
-                <Link href="/settings/integrations">SMTP & inbox</Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="border-border/60 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Follow-up herinneringen</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {followUpItems.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Geen follow-ups die vandaag aandacht vragen. Nieuwe reminders worden opgebouwd op basis van verzonden mails en het ingestelde interval van {followUpQueue?.followupDays ?? 3} dagen.
-            </p>
-          ) : (
-            <>
-              <p className="text-xs text-muted-foreground">
-                Deze leads kregen al een mail en zijn na {followUpQueue?.followupDays ?? 3} dagen nog niet verder geraakt in de pipeline.
-              </p>
-              <div className="grid gap-2">
-                {followUpItems.map((item) => (
-                  <div key={item.id} className="flex flex-col gap-2 rounded-lg border bg-muted/20 p-3 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <Link href={`/leads/${item.lead.id}`} className="text-sm font-medium hover:text-primary">
-                        {item.lead.companyName}
-                      </Link>
-                      <p className="text-xs text-muted-foreground">
-                        {item.subject} · {item.daysSinceSent} dagen geleden verzonden
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button asChild size="sm" variant="outline">
-                        <Link href={`/contacts/compose?leadId=${item.lead.id}`}>Nieuwe follow-up</Link>
-                      </Button>
-                      <Button asChild size="sm" variant="ghost">
-                        <Link href={`/leads/${item.lead.id}`}>Open lead</Link>
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+        <OutboundInfoPanel
+          loading={isLoading}
+          stats={stats}
+          drafts={drafts.map((draft) => ({
+            id: draft.id,
+            status: draft.status,
+            subject: draft.subject,
+            lead: { id: draft.lead.id, companyName: draft.lead.companyName },
+          }))}
+          followUpDays={followUpQueue?.followupDays}
+          followUpItems={followUpItems}
+          topbarFollowUpCount={topbarStats?.followUpCount}
+        />
       </TabsContent>
 
       <TabsContent value="overview" className="space-y-4">
@@ -501,7 +461,10 @@ export default function ContactsPage() {
                     </Link>
                     </div>
                   </div>
-                  <Badge variant={OUTBOUND_STATUS_VARIANTS[draft.status] || "secondary"}>
+                  <Badge
+                    variant={OUTBOUND_STATUS_VARIANTS[draft.status] || "secondary"}
+                    className="whitespace-nowrap px-3 py-1 text-xs font-semibold"
+                  >
                     {OUTBOUND_STATUS_LABELS[draft.status] || draft.status}
                   </Badge>
                 </div>
@@ -509,12 +472,22 @@ export default function ContactsPage() {
                   {draft.author.name} · {formatDate(draft.createdAt)}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <Button asChild variant="outline" size="sm">
-                    <Link href={`/contacts/drafts/${draft.id}`}>
-                      <Eye className="mr-1.5 h-3.5 w-3.5" />
-                      Open
-                    </Link>
-                  </Button>
+                  {canEditOutboundDraft(draft.status) ? (
+                    <Button asChild variant="outline" size="sm">
+                      <Link href={`/contacts/drafts/${draft.id}`}>
+                        <PenSquare className="mr-1.5 h-3.5 w-3.5" />
+                        Bewerken
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button asChild variant="outline" size="sm">
+                      <Link href={`/contacts/drafts/${draft.id}`}>
+                        <Eye className="mr-1.5 h-3.5 w-3.5" />
+                        Open
+                      </Link>
+                    </Button>
+                  )}
+                  <QuoteConfiguratorButton draft={draft} />
                   {canSendOutboundDraft(draft.status) ? (
                     <Button
                       variant="default"
@@ -606,7 +579,10 @@ export default function ContactsPage() {
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={OUTBOUND_STATUS_VARIANTS[draft.status] || "secondary"}>
+                    <Badge
+                      variant={OUTBOUND_STATUS_VARIANTS[draft.status] || "secondary"}
+                      className="whitespace-nowrap px-3 py-1 text-xs font-semibold"
+                    >
                       {OUTBOUND_STATUS_LABELS[draft.status] || draft.status}
                     </Badge>
                   </TableCell>
@@ -642,6 +618,17 @@ export default function ContactsPage() {
                           />
                         </DialogContent>
                       </Dialog>
+
+                      {canEditOutboundDraft(draft.status) ? (
+                        <Button asChild variant="ghost" size="sm">
+                          <Link href={`/contacts/drafts/${draft.id}`}>
+                            <PenSquare className="mr-1 h-3.5 w-3.5" />
+                            Bewerken
+                          </Link>
+                        </Button>
+                      ) : null}
+
+                      <QuoteConfiguratorButton draft={draft} />
 
                       {canSendOutboundDraft(draft.status) && (
                         <Button

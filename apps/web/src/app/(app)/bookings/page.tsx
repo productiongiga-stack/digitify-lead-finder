@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { cn } from "@/lib/utils";
 import { readSettingBoolean, readSettingString } from "@/lib/settings";
@@ -15,7 +15,7 @@ import {
 import {
   Calendar, Plus, Clock, CheckCircle2, XCircle, Trash2, Pencil,
   CalendarCheck, CalendarX, BarChart3, Settings2, ArrowRight, Sparkles, CalendarClock, Activity, Download,
-  Search, Tags, X,
+  Search, Tags, X, Globe, ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
@@ -60,6 +60,59 @@ function isSameCalendarDay(left: Date, right: Date) {
     left.getDate() === right.getDate()
   );
 }
+
+function startOfDay(value: Date) {
+  const copy = new Date(value);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+function addDays(value: Date, days: number) {
+  const copy = new Date(value);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function formatAgendaDayLabel(value: Date) {
+  const today = startOfDay(new Date());
+  const target = startOfDay(value);
+  if (target.getTime() === today.getTime()) return "Vandaag";
+  const tomorrow = addDays(today, 1);
+  if (target.getTime() === tomorrow.getTime()) return "Morgen";
+  return formatDateNice(value).split(" om ")[0] || formatDateNice(value);
+}
+
+function formatAgendaTime(value: Date, allDay?: boolean) {
+  if (allDay) return "Hele dag";
+  return value.toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" });
+}
+
+type AgendaListItem =
+  | {
+      kind: "booking";
+      id: string;
+      title: string;
+      start: Date;
+      end: Date;
+      booking: {
+        id: string;
+        clientName: string;
+        clientEmail: string | null;
+        status: string;
+        duration: number;
+        googleSyncState: string | null;
+        eventType?: { name: string; color: string | null } | null;
+      };
+    }
+  | {
+      kind: "google";
+      id: string;
+      title: string;
+      start: Date;
+      end: Date;
+      htmlLink: string | null;
+      allDay: boolean;
+    };
 
 function getSyncBadge(state: string | null | undefined) {
   if (state === "SYNCED") return { label: "Synced", variant: "success" as const };
@@ -109,8 +162,68 @@ export default function BookingsPage() {
   const [confirmNotes, setConfirmNotes] = useState("");
   const [confirmSubmitting, setConfirmSubmitting] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
+  const [bookingsTab, setBookingsTab] = useState("list");
   const { showToast } = useToast();
   const utils = trpc.useUtils();
+
+  const agendaRangeStart = useMemo(() => startOfDay(new Date()), []);
+  const agendaRangeEnd = useMemo(() => {
+    const end = addDays(agendaRangeStart, 14);
+    end.setHours(23, 59, 59, 999);
+    return end;
+  }, [agendaRangeStart]);
+
+  const { data: agendaData, isLoading: agendaLoading } = trpc.booking.getAgenda.useQuery(
+    { from: agendaRangeStart.toISOString(), to: agendaRangeEnd.toISOString() },
+    { enabled: bookingsTab === "agenda" }
+  );
+
+  const agendaByDay = useMemo(() => {
+    if (!agendaData) return [] as Array<{ day: Date; items: AgendaListItem[] }>;
+    const items: AgendaListItem[] = [];
+    for (const booking of agendaData.bookings) {
+      const start = new Date(booking.date);
+      items.push({
+        kind: "booking",
+        id: booking.id,
+        title: booking.clientName,
+        start,
+        end: new Date(start.getTime() + booking.duration * 60_000),
+        booking: {
+          id: booking.id,
+          clientName: booking.clientName,
+          clientEmail: booking.clientEmail,
+          status: booking.status,
+          duration: booking.duration,
+          googleSyncState: booking.googleSyncState,
+          eventType: booking.eventType,
+        },
+      });
+    }
+    for (const event of agendaData.externalGoogleEvents) {
+      items.push({
+        kind: "google",
+        id: event.id,
+        title: event.title,
+        start: new Date(event.start),
+        end: new Date(event.end),
+        htmlLink: event.htmlLink,
+        allDay: event.allDay,
+      });
+    }
+    items.sort((left, right) => left.start.getTime() - right.start.getTime());
+    const groups = new Map<string, AgendaListItem[]>();
+    for (const item of items) {
+      const key = startOfDay(item.start).toISOString();
+      const dayItems = groups.get(key) || [];
+      dayItems.push(item);
+      groups.set(key, dayItems);
+    }
+    return Array.from(groups.entries()).map(([key, dayItems]) => ({
+      day: new Date(key),
+      items: dayItems,
+    }));
+  }, [agendaData]);
 
   const { data, isLoading } = trpc.booking.list.useQuery(
     {
@@ -406,13 +519,16 @@ export default function BookingsPage() {
       {/* Shared filters rendered once, used by both List and Overview tabs */}
       <section className={cn("bookings-filters", effectiveCompactMode && "gap-2 p-3")} aria-label="Boekingen filteren">
         <div className="flex flex-wrap items-center justify-between gap-2 md:col-span-2 lg:col-span-4">
-          <p className="text-sm font-semibold tracking-tight text-foreground">Filteren</p>
+          <div>
+            <p className="text-sm font-semibold tracking-tight text-foreground">Filteren</p>
+            <p className="text-xs text-muted-foreground">Zoek en verfijn afspraken op periode, type en klant.</p>
+          </div>
           {search.trim() || dateFrom || dateTo || eventTypeFilter !== "__all" ? (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              className="h-8 text-xs text-muted-foreground"
+              className="h-8 rounded-lg border border-border/60 bg-background/80 px-3 text-xs text-muted-foreground hover:bg-background"
               onClick={() => {
                 setSearch("");
                 setDateFrom("");
@@ -492,11 +608,12 @@ export default function BookingsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="list" className="space-y-4">
-        <TabsList className="grid h-10 w-full max-w-md grid-cols-3 rounded-full bg-muted/60 p-1">
-          <TabsTrigger value="list">Lijst</TabsTrigger>
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="automations">Automations</TabsTrigger>
+      <Tabs value={bookingsTab} onValueChange={setBookingsTab} className="space-y-4">
+        <TabsList className="bookings-view-tabs">
+          <TabsTrigger value="list" className="bookings-view-tab-trigger">Lijst</TabsTrigger>
+          <TabsTrigger value="agenda" className="bookings-view-tab-trigger">Agenda</TabsTrigger>
+          <TabsTrigger value="overview" className="bookings-view-tab-trigger">Overzicht</TabsTrigger>
+          <TabsTrigger value="automations" className="bookings-view-tab-trigger">Automations</TabsTrigger>
         </TabsList>
 
         <TabsContent value="list" className="space-y-4">
@@ -535,6 +652,114 @@ export default function BookingsPage() {
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="agenda" className="space-y-4">
+          <Card className="app-surface">
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base">Gecombineerde agenda</CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Digitify-boekingen en overige afspraken uit je gekoppelde Google Agenda (14 dagen vooruit).
+                  </p>
+                </div>
+                {agendaData?.googleEnabled ? (
+                  <Badge variant="secondary" className="gap-1.5">
+                    <Globe className="h-3.5 w-3.5" />
+                    {agendaData.googleAccountEmail || "Google gekoppeld"}
+                  </Badge>
+                ) : (
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/settings/bookings#google-agenda">Google Agenda koppelen</Link>
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-0">
+              {agendaLoading ? (
+                <div className="space-y-3">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-16 w-full" />)}</div>
+              ) : !agendaByDay.length ? (
+                <EmptyState
+                  icon={<CalendarClock />}
+                  title="Geen afspraken in deze periode"
+                  description={
+                    agendaData?.googleEnabled
+                      ? "Er staan geen boekingen of externe Google-afspraken in de komende 14 dagen."
+                      : "Koppel Google Agenda om externe afspraken naast je boekingen te tonen."
+                  }
+                />
+              ) : (
+                <div className="space-y-5">
+                  {agendaByDay.map((group) => (
+                    <section key={group.day.toISOString()} className="space-y-2">
+                      <h3 className="text-sm font-semibold text-foreground">{formatAgendaDayLabel(group.day)}</h3>
+                      <div className="space-y-2">
+                        {group.items.map((item) => {
+                          if (item.kind === "booking") {
+                            const statusInfo = STATUS_MAP[item.booking.status] ?? { label: item.booking.status, variant: "secondary" as const };
+                            const syncInfo = getSyncBadge(item.booking.googleSyncState);
+                            return (
+                              <div
+                                key={`booking-${item.id}`}
+                                className="flex flex-col gap-2 rounded-xl border border-border/60 bg-background/50 p-3 sm:flex-row sm:items-center sm:justify-between"
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <p className="font-medium">{item.title}</p>
+                                    <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                                    <Badge variant={syncInfo.variant}>{syncInfo.label}</Badge>
+                                    <Badge variant="outline">Digitify</Badge>
+                                  </div>
+                                  {item.booking.eventType?.name ? (
+                                    <p className="text-xs text-muted-foreground">{item.booking.eventType.name}</p>
+                                  ) : null}
+                                </div>
+                                <p className="shrink-0 text-sm text-muted-foreground">
+                                  {formatAgendaTime(item.start)} – {formatAgendaTime(item.end)}
+                                </p>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={`google-${item.id}`}
+                              className="flex flex-col gap-2 rounded-xl border border-dashed border-sky-300/70 bg-sky-50/50 p-3 dark:border-sky-800/60 dark:bg-sky-950/20 sm:flex-row sm:items-center sm:justify-between"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="font-medium">{item.title}</p>
+                                  <Badge variant="outline" className="gap-1 border-sky-300/80 text-sky-800 dark:text-sky-200">
+                                    <Globe className="h-3 w-3" />
+                                    Google Agenda
+                                  </Badge>
+                                </div>
+                              </div>
+                              <div className="flex shrink-0 items-center gap-3">
+                                <p className="text-sm text-muted-foreground">
+                                  {formatAgendaTime(item.start, item.allDay)}
+                                  {!item.allDay ? ` – ${formatAgendaTime(item.end)}` : ""}
+                                </p>
+                                {item.htmlLink ? (
+                                  <Button variant="ghost" size="sm" className="h-8 px-2" asChild>
+                                    <a href={item.htmlLink} target="_blank" rel="noreferrer">
+                                      <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                                      Open
+                                    </a>
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
                 </div>
               )}
             </CardContent>

@@ -43,6 +43,7 @@ const QUOTE_CONFIG_SETTING_KEYS = [
   "quotes.embed_product_specs_json",
   "quotes.embed_category_icons_json",
   "quotes.embed_product_icons_json",
+  "quotes.embed_icon_library_json",
 ];
 
 function splitName(value: string | null | undefined) {
@@ -197,6 +198,7 @@ export async function GET(request: Request) {
       productSpecsJson: map["quotes.embed_product_specs_json"] || "{}",
       categoryIconsJson: map["quotes.embed_category_icons_json"] || "{}",
       productIconsJson: map["quotes.embed_product_icons_json"] || "{}",
+      iconLibraryJson: map["quotes.embed_icon_library_json"] || "[]",
     },
     editingQuote: editingQuote
       ? {

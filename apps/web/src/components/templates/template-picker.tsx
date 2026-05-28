@@ -26,6 +26,7 @@ type TemplatePickerProps = {
   templates: TemplatePickerItem[];
   placeholder?: string;
   emptyLabel?: string;
+  disabled?: boolean;
 };
 
 export function TemplatePicker({
@@ -34,9 +35,10 @@ export function TemplatePicker({
   templates,
   placeholder = "Kies een template...",
   emptyLabel = "Geen template",
+  disabled = false,
 }: TemplatePickerProps) {
   return (
-    <Select value={value || "none"} onValueChange={onValueChange}>
+    <Select value={value || "none"} onValueChange={onValueChange} disabled={disabled}>
       <SelectTrigger>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>

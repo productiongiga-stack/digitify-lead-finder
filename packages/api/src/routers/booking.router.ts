@@ -8,6 +8,7 @@ import { log } from "../lib/logger";
 import {
   deleteGoogleBookingEvent,
   isGoogleSlotAvailable,
+  listGoogleCalendarEvents,
   upsertGoogleBookingEvent,
 } from "../lib/google-calendar";
 import {
@@ -1166,16 +1167,87 @@ export const bookingRouter = router({
       };
     }),
 
+  getAgenda: protectedProcedure
+    .input(
+      z
+        .object({
+          from: z.string().optional(),
+          to: z.string().optional(),
+        })
+        .optional()
+    )
+    .query(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      const now = new Date();
+      const from = input?.from ? new Date(input.from) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const to = input?.to
+        ? new Date(input.to)
+        : new Date(from.getFullYear(), from.getMonth(), from.getDate() + 14, 23, 59, 59, 999);
+
+      const [bookings, google] = await Promise.all([
+        ctx.db.booking.findMany({
+          where: {
+            createdById: workspaceId,
+            date: { gte: from, lte: to },
+            status: { notIn: ["REJECTED", "CANCELLED"] },
+          },
+          orderBy: { date: "asc" },
+          include: {
+            eventType: { select: { id: true, name: true, color: true } },
+            hostUser: { select: { id: true, name: true, email: true } },
+          },
+        }),
+        listGoogleCalendarEvents(ctx.db as any, {
+          timeMin: from,
+          timeMax: to,
+          userId: workspaceId,
+        }),
+      ]);
+
+      const linkedGoogleIds = new Set(
+        bookings
+          .map((booking) => getStoredGoogleEventId(booking))
+          .filter((value): value is string => Boolean(value))
+      );
+
+      return {
+        from: from.toISOString(),
+        to: to.toISOString(),
+        googleEnabled: google.enabled,
+        googleAccountEmail: google.accountEmail,
+        googleCalendarId: google.calendarId,
+        bookings,
+        externalGoogleEvents: google.events.filter((event) => !linkedGoogleIds.has(event.id)),
+      };
+    }),
+
   testGoogleSync: protectedProcedure.mutation(async ({ ctx }) => {
+    const workspaceId = ctx.user.workspaceId!;
     const now = new Date();
-    const result = await isGoogleSlotAvailable(ctx.db as any, {
+    const slot = await isGoogleSlotAvailable(ctx.db as any, {
       start: now,
       end: new Date(now.getTime() + 15 * 60_000),
-      userId: ctx.user.id,
+      userId: workspaceId,
     });
+
+    let upcomingGoogleEvents = 0;
+    if (slot.enabled) {
+      try {
+        const listed = await listGoogleCalendarEvents(ctx.db as any, {
+          timeMin: now,
+          timeMax: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+          userId: workspaceId,
+        });
+        upcomingGoogleEvents = listed.events.length;
+      } catch {
+        upcomingGoogleEvents = 0;
+      }
+    }
+
     return {
-      enabled: result.enabled,
-      available: result.available,
+      enabled: slot.enabled,
+      available: slot.available,
+      upcomingGoogleEvents,
       checkedAt: new Date(),
     };
   }),

@@ -31,7 +31,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@digitify/ui";
+import { OutboundDraftStatusBanner } from "@/components/outbound/outbound-draft-status-banner";
+import { PageInfoCards } from "@/components/shared/page-info-cards";
 import {
+  LayoutGrid,
+  Info,
   Search,
   MapPin,
   Building,
@@ -41,9 +45,9 @@ import {
   Phone,
   ExternalLink,
   Check,
-  AlertCircle,
-  Settings,
   RefreshCw,
+  Search as SearchIcon,
+  Users,
   Save,
   ChevronLeft,
   ChevronRight,
@@ -468,9 +472,15 @@ export default function LeadSearchPage() {
       </div>
 
       <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="grid h-10 w-full max-w-xs grid-cols-2 rounded-full bg-muted/60 p-1">
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="info">Info</TabsTrigger>
+        <TabsList className="page-view-tabs">
+          <TabsTrigger value="overview" className="page-view-tabs-trigger">
+            <LayoutGrid />
+            Overzicht
+          </TabsTrigger>
+          <TabsTrigger value="info" className="page-view-tabs-trigger">
+            <Info />
+            Info
+          </TabsTrigger>
         </TabsList>
 
       <TabsContent value="overview" className="space-y-4">
@@ -483,28 +493,16 @@ export default function LeadSearchPage() {
           }}
         />
       )}
-      {/* API key missing warning */}
-      {apiKeyMissing && (
-        <Card className="border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30">
-          <CardContent className="flex items-center gap-3 p-4">
-            <AlertCircle className="h-5 w-5 shrink-0 text-amber-600" />
-            <div className="flex-1">
-              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                Google Places API key niet geconfigureerd
-              </p>
-              <p className="text-xs text-amber-700 dark:text-amber-300">
-                Configureer de Google Places API key in de instellingen om te zoeken.
-              </p>
-            </div>
-            <Link href="/settings/integrations">
-              <Button size="sm" variant="outline" className="shrink-0">
-                <Settings className="mr-2 h-3 w-3" />
-                Instellingen
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-      )}
+      {apiKeyMissing ? (
+        <OutboundDraftStatusBanner
+          variant="warning"
+          eyebrow="Google Places"
+          icon={MapPin}
+          title="API key niet geconfigureerd"
+          detail="Voeg je Google Places API key toe onder Integraties om te zoeken op niche, stad en zoekterm."
+          action={{ label: "Integraties openen", href: "/settings/integrations" }}
+        />
+      ) : null}
 
       {/* Search error (non-API-key) */}
       {searchMutation.error && !apiKeyMissing ? (
@@ -1150,37 +1148,29 @@ export default function LeadSearchPage() {
       </TabsContent>
 
       <TabsContent value="info" className="space-y-4">
-        <div className="grid gap-3 lg:grid-cols-3">
-          <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-            <CardContent className="p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Voor wie</p>
-              <p className="mt-2 text-sm font-medium">
-                Voor teams die snel lokale bedrijven willen vinden en direct in leadflow willen zetten.
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-            <CardContent className="p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Hoe gebruiken</p>
-              <p className="mt-2 text-sm font-medium">
-                Zoek op niche + stad, selecteer kansrijke resultaten en stuur ze meteen naar leads of campagnes.
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-            <CardContent className="p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gerelateerd</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button asChild size="sm" variant="outline">
-                  <Link href="/campaigns">Campagnes</Link>
-                </Button>
-                <Button asChild size="sm" variant="ghost">
-                  <Link href="/leads">Leads</Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        <PageInfoCards
+          cards={[
+            {
+              eyebrow: "Voor wie",
+              body: "Voor teams die snel lokale bedrijven willen vinden en direct in de leadflow willen zetten.",
+              tone: "emerald",
+              icon: Users,
+            },
+            {
+              eyebrow: "Hoe gebruiken",
+              body: "Zoek op niche en stad, selecteer kansrijke resultaten en stuur ze meteen naar leads of campagnes.",
+              tone: "amber",
+              icon: SearchIcon,
+            },
+          ]}
+          related={{
+            links: [
+              { label: "Campagnes", href: "/campaigns" },
+              { label: "Leads", href: "/leads" },
+              { label: "Integraties", href: "/settings/integrations" },
+            ],
+          }}
+        />
       </TabsContent>
       </Tabs>
 

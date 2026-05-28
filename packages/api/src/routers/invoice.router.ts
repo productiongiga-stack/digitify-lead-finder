@@ -3,10 +3,35 @@ import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
 import { migrateLegacyWorkspaceInvoices } from "../lib/migrate-workspace-invoices";
 import { nextInvoiceNumber, serializeInvoice } from "../lib/invoice-serializer";
+import { buildInvoiceOutboundBody } from "../lib/invoice-outbound";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { workspaceScopeFromUser } from "../lib/workspace-settings";
 
 const invoiceInclude = { items: { orderBy: { sortOrder: "asc" as const } } };
+
+const invoiceItemInput = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  quantity: z.number().positive(),
+  unitPrice: z.number().min(0),
+});
+
+const MANUAL_INVOICE_STATUSES = ["DRAFT", "PARTIALLY_PAID", "PAID", "CANCELLED"] as const;
+
+function recalcInvoiceTotals(items: Array<{ quantity: number; unitPrice: number }>, vatRate: number) {
+  const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  const vatAmount = Math.round(subtotal * (vatRate / 100) * 100) / 100;
+  return { subtotal, vatAmount, total: subtotal + vatAmount };
+}
+
+function assertInvoiceEditable(status: string) {
+  if (status === "PAID" || status === "CANCELLED") {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Betaalde of geannuleerde facturen kunnen niet meer worden aangepast.",
+    });
+  }
+}
 
 export const invoiceRouter = router({
   list: protectedProcedure
@@ -29,20 +54,57 @@ export const invoiceRouter = router({
         orderBy: { issueDate: "desc" },
       });
 
-      let items = rows.map(serializeInvoice);
-      if (input.status) items = items.filter((item) => item.status === input.status);
+      const allItems = rows.map(serializeInvoice);
+      const items = input.status
+        ? allItems.filter((item) => item.status === input.status)
+        : allItems;
+      const openItems = allItems.filter((item) => !["PAID", "CANCELLED"].includes(item.status));
       const summary = {
-        total: items.length,
-        draft: items.filter((item) => item.status === "DRAFT").length,
-        sent: items.filter((item) => item.status === "SENT").length,
-        overdue: items.filter((item) => item.status === "OVERDUE").length,
-        paid: items.filter((item) => item.status === "PAID").length,
-        totalOpenAmount: items
-          .filter((item) => !["PAID", "CANCELLED"].includes(item.status))
-          .reduce((sum, item) => sum + item.total, 0),
+        total: allItems.length,
+        open: openItems.length,
+        draft: allItems.filter((item) => item.status === "DRAFT").length,
+        sent: allItems.filter((item) => item.status === "SENT").length,
+        overdue: allItems.filter((item) => item.status === "OVERDUE").length,
+        paid: allItems.filter((item) => item.status === "PAID").length,
+        totalOpenAmount: openItems.reduce((sum, item) => sum + item.total, 0),
       };
-      return { items, summary };
+      const invoicedQuoteIds = allItems
+        .map((item) => item.quoteId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0);
+      return { items, summary, invoicedQuoteIds };
     }),
+
+  listBillableQuotes: protectedProcedure.query(async ({ ctx }) => {
+    const scope = workspaceScopeFromUser(ctx.user);
+    await migrateLegacyWorkspaceInvoices(ctx.db, scope);
+
+    const invoicedRows = await ctx.db.workspaceInvoice.findMany({
+      where: { createdById: scope.workspaceId, quoteId: { not: null } },
+      select: { quoteId: true },
+    });
+    const invoicedQuoteIds = invoicedRows
+      .map((row) => row.quoteId)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+
+    return ctx.db.quote.findMany({
+      where: {
+        createdById: scope.workspaceId,
+        status: "ACCEPTED",
+        items: { some: {} },
+        ...(invoicedQuoteIds.length > 0 ? { id: { notIn: invoicedQuoteIds } } : {}),
+      },
+      orderBy: [{ acceptedAt: "desc" }, { updatedAt: "desc" }],
+      select: {
+        id: true,
+        quoteNumber: true,
+        clientName: true,
+        clientCompany: true,
+        total: true,
+        acceptedAt: true,
+        _count: { select: { items: true } },
+      },
+    });
+  }),
 
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
@@ -103,7 +165,7 @@ export const invoiceRouter = router({
           clientCompany: quote.clientCompany,
           clientAddress: quote.clientAddress,
           clientVat: quote.clientVat,
-          status: quote.status === "ACCEPTED" ? "SENT" : "DRAFT",
+          status: "DRAFT",
           issueDate,
           dueDate,
           subtotal: quote.subtotal,
@@ -140,16 +202,94 @@ export const invoiceRouter = router({
       return serializeInvoice(row);
     }),
 
+  update: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        clientName: z.string().min(1).optional(),
+        clientEmail: z.string().email().optional().or(z.literal("")),
+        clientCompany: z.string().optional(),
+        clientAddress: z.string().optional(),
+        clientVat: z.string().optional(),
+        dueDate: z.string().datetime().optional(),
+        vatRate: z.number().min(0).max(100).optional(),
+        notes: z.string().optional(),
+        items: z.array(invoiceItemInput).min(1).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromUser(ctx.user);
+      const row = await ctx.db.workspaceInvoice.findFirst({
+        where: { id: input.id, createdById: scope.workspaceId },
+        include: invoiceInclude,
+      });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
+      assertInvoiceEditable(row.status);
+
+      const vatRate = input.vatRate ?? row.vatRate;
+      const items =
+        input.items ??
+        row.items.map((item) => ({
+          name: item.name,
+          description: item.description ?? undefined,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        }));
+
+      const totals = recalcInvoiceTotals(items, vatRate);
+
+      const updated = await ctx.db.$transaction(async (tx) => {
+        if (input.items) {
+          await tx.workspaceInvoiceItem.deleteMany({ where: { invoiceId: row.id } });
+          await tx.workspaceInvoiceItem.createMany({
+            data: items.map((item, index) => ({
+              invoiceId: row.id,
+              name: item.name,
+              description: item.description,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              total: item.quantity * item.unitPrice,
+              sortOrder: index,
+            })),
+          });
+        }
+
+        return tx.workspaceInvoice.update({
+          where: { id: row.id },
+          data: {
+            clientName: input.clientName ?? row.clientName,
+            clientEmail:
+              input.clientEmail !== undefined
+                ? input.clientEmail || null
+                : row.clientEmail,
+            clientCompany: input.clientCompany ?? row.clientCompany,
+            clientAddress: input.clientAddress ?? row.clientAddress,
+            clientVat: input.clientVat ?? row.clientVat,
+            dueDate: input.dueDate ? new Date(input.dueDate) : row.dueDate,
+            vatRate,
+            notes: input.notes ?? row.notes,
+            subtotal: totals.subtotal,
+            vatAmount: totals.vatAmount,
+            total: totals.total,
+          },
+          include: invoiceInclude,
+        });
+      });
+
+      return serializeInvoice(updated);
+    }),
+
   updateStatus: protectedProcedure
     .input(
       z.object({
         id: z.string(),
-        status: z.enum(["DRAFT", "SENT", "PARTIALLY_PAID", "PAID", "OVERDUE", "CANCELLED"]),
+        status: z.enum(MANUAL_INVOICE_STATUSES),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromUser(ctx.user);
       const row = await ctx.db.workspaceInvoice.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: scope.workspaceId },
       });
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
 
@@ -164,6 +304,75 @@ export const invoiceRouter = router({
       return serializeInvoice(updated);
     }),
 
+  createOutboundDraft: protectedProcedure
+    .input(z.object({ invoiceId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromUser(ctx.user);
+      const invoice = await ctx.db.workspaceInvoice.findFirst({
+        where: { id: input.invoiceId, createdById: scope.workspaceId },
+      });
+      if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
+      if (!invoice.leadId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Deze factuur heeft geen gekoppelde lead voor Outbound.",
+        });
+      }
+      if (!invoice.clientEmail) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Voeg eerst een klant-e-mailadres toe aan de factuur.",
+        });
+      }
+      if (invoice.status === "PAID" || invoice.status === "CANCELLED") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Deze factuur kan niet meer worden verstuurd.",
+        });
+      }
+
+      if (invoice.status !== "DRAFT") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Alleen concept-facturen kunnen via Outbound worden verstuurd.",
+        });
+      }
+
+      const body = buildInvoiceOutboundBody({
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        clientName: invoice.clientName,
+        total: invoice.total,
+        currency: invoice.currency,
+        dueDate: invoice.dueDate,
+        paymentReference: invoice.paymentReference,
+      });
+
+      const draft = await ctx.db.emailDraft.create({
+        data: {
+          leadId: invoice.leadId,
+          subject: `Factuur ${invoice.invoiceNumber}`,
+          body,
+          toEmail: invoice.clientEmail,
+          status: "PENDING_APPROVAL",
+          type: "TRANSACTIONAL",
+          authorId: ctx.user.id,
+        },
+      });
+
+      await ctx.db.activity.create({
+        data: {
+          leadId: invoice.leadId,
+          userId: ctx.user.id,
+          type: "EMAIL_DRAFTED",
+          title: `Factuur ${invoice.invoiceNumber} ingediend ter goedkeuring`,
+          metadata: { invoiceId: invoice.id },
+        },
+      });
+
+      return { draftId: draft.id };
+    }),
+
   sendReminder: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
@@ -174,6 +383,12 @@ export const invoiceRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
 
       const current = serializeInvoice(row);
+      if (current.status === "DRAFT") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Verstuur de factuur eerst via Outbound voordat je een herinnering stuurt.",
+        });
+      }
       if (!current.clientEmail) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -207,7 +422,6 @@ export const invoiceRouter = router({
       const updated = await ctx.db.workspaceInvoice.update({
         where: { id: input.id },
         data: {
-          status: row.status === "DRAFT" ? "SENT" : row.status,
           reminderCount: row.reminderCount + 1,
           lastReminderAt: new Date(),
         },

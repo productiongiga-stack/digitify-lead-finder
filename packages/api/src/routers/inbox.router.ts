@@ -6,7 +6,7 @@ import nodemailer from "nodemailer";
 import { createHash } from "node:crypto";
 import { type PrismaClient, Prisma } from "@digitify/db";
 import { normalizeTlsOptions } from "../lib/email-utils";
-import { buildLeadContext, generateBrandedHtml, replacePlaceholders, type EmailLayout } from "@digitify/email";
+import { buildLeadContext, generateBrandedHtml, normalizeHtmlEmailDocument, replacePlaceholders, type EmailLayout } from "@digitify/email";
 import { loadEmailSettings } from "../lib/email-sender";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
 import { ensureLeadLink } from "../lib/lead-link";
@@ -332,13 +332,16 @@ async function sendInboxMessage(params: {
   const subject = replacePlaceholders(params.input.subject.trim(), placeholderContext, { removeMissing: true }).trim() || "Bericht";
   const resolvedBody = replacePlaceholders(params.input.body.trim(), placeholderContext, { removeMissing: true }).trim();
   const templateMetadata = extractEmailTemplateMetadata(resolvedBody);
-  const plainBody = [
-    templateMetadata.cleanBody,
-    emailSettings.signature.trim() ? emailSettings.signature.trim() : "",
-    emailSettings.footer.trim() ? emailSettings.footer.trim() : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const isHtmlBody = templateMetadata.bodyFormat === "HTML";
+  const plainBody = isHtmlBody
+    ? templateMetadata.cleanBody
+    : [
+        templateMetadata.cleanBody,
+        emailSettings.signature.trim() ? emailSettings.signature.trim() : "",
+        emailSettings.footer.trim() ? emailSettings.footer.trim() : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
   const draft = await params.db.emailDraft.create({
     data: {
       leadId: linkedLead.id,
@@ -351,22 +354,24 @@ async function sendInboxMessage(params: {
     },
   });
   const trackingPixel = `<img src="${resolveAppUrl()}/api/public/email/open/${encodeURIComponent(draft.id)}" alt="" width="1" height="1" style="display:none;border:0;outline:none;"/>`;
-  const htmlBody = generateBrandedHtml({
-    subject,
-    body: plainBody,
-    companyName: emailSettings.companyName || fromName || "Digitify",
-    primaryColor: emailSettings.primaryColor,
-    fromName,
-    fromEmail,
-    headerSlogan: emailSettings.headerSlogan,
-    recipientCompany: linkedLead?.companyName || params.input.to,
-    logoUrl: emailSettings.logoUrl,
-    hidePoweredBy: true,
-    layout: templateMetadata.layout || resolveLayoutForType(params.input.type, emailSettings.defaultLayout),
-    ctaText: templateMetadata.ctaText,
-    ctaUrl: templateMetadata.ctaUrl,
-    typographyMode: emailSettings.typographyMode,
-  });
+  const htmlBody = isHtmlBody
+    ? normalizeHtmlEmailDocument(plainBody)
+    : generateBrandedHtml({
+        subject,
+        body: plainBody,
+        companyName: emailSettings.companyName || fromName || "Digitify",
+        primaryColor: emailSettings.primaryColor,
+        fromName,
+        fromEmail,
+        headerSlogan: emailSettings.headerSlogan,
+        recipientCompany: linkedLead?.companyName || params.input.to,
+        logoUrl: emailSettings.logoUrl,
+        hidePoweredBy: true,
+        layout: templateMetadata.layout || resolveLayoutForType(params.input.type, emailSettings.defaultLayout),
+        ctaText: templateMetadata.ctaText,
+        ctaUrl: templateMetadata.ctaUrl,
+        typographyMode: emailSettings.typographyMode,
+      });
   const htmlBodyWithTracking = `${htmlBody}${trackingPixel}`;
 
   const transporter = nodemailer.createTransport({

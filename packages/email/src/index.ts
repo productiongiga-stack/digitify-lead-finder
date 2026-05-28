@@ -1,7 +1,7 @@
 export { SmtpProvider } from "./providers/smtp";
 export { ConsoleProvider } from "./providers/console";
 export { renderTemplate, renderSubject, htmlFromText } from "./template-renderer";
-export { generateBrandedHtml } from "./html-template";
+export { generateBrandedHtml, normalizeHtmlEmailDocument, htmlToPlainText } from "./html-template";
 export type { BrandedHtmlOptions } from "./html-template";
 export { generateLayout } from "./layouts";
 export type { EmailLayout, LayoutOptions } from "./layouts";

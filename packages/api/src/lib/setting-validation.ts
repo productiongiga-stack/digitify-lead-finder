@@ -4,6 +4,12 @@ const KEY_PATTERN = /^[a-z0-9]+(?:\.[a-z0-9_]+)+$/;
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 const HOST_PATTERN = /^(?=.{1,255}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i;
 const DEFAULT_MAX_STRING_LENGTH = 10_000;
+const LARGE_STRING_MAX_LENGTH = 100_000;
+const LARGE_STRING_SETTING_KEYS = new Set([
+  "email.custom_html",
+  "email.custom_html_presets_json",
+  "email.default_layout_by_type_json",
+]);
 const MAX_IMAGE_DATA_URL_LENGTH = 3_000_000;
 const LEGACY_KEY_PATTERN = /^[a-z0-9_]+$/;
 const LEGACY_SETTING_KEYS = new Set([
@@ -27,6 +33,7 @@ const BOOLEAN_SETTING_KEYS = new Set([
 const ENUM_SETTING_KEYS = new Map<string, readonly string[]>([
   ["email.provider", ["smtp", "console"]],
   ["email.default_layout", ["modern", "minimal", "business", "proposal", "followup"]],
+  ["email.design_mode", ["preset", "custom"]],
   ["display.typography_mode", ["compact", "normal"]],
   ["api.ai_provider", ["anthropic", "openai"]],
 ]);
@@ -97,7 +104,9 @@ function isLikelyHostKey(key: string) {
 function validateStringValue(key: string, value: string) {
   const maxLength = isImageAssetKey(key) && value.startsWith("data:image/")
     ? MAX_IMAGE_DATA_URL_LENGTH
-    : DEFAULT_MAX_STRING_LENGTH;
+    : LARGE_STRING_SETTING_KEYS.has(key)
+      ? LARGE_STRING_MAX_LENGTH
+      : DEFAULT_MAX_STRING_LENGTH;
   if (value.length > maxLength) {
     invalid(`Instelling "${key}" is te lang (max ${maxLength} tekens).`);
   }

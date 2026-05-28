@@ -4,6 +4,13 @@ import { protectedProcedure, router } from "../trpc";
 import { assertLeadAccess } from "../lib/tenant";
 import { migrateLegacyWorkspaceTasks } from "../lib/migrate-workspace-tasks";
 import { workspaceScopeFromUser } from "../lib/workspace-settings";
+import {
+  deleteGoogleTaskEvent,
+  extractGoogleEventId,
+  getGoogleBookingEvent,
+  upsertGoogleEventIdInNotes,
+  upsertGoogleTaskEvent,
+} from "../lib/google-calendar";
 
 async function resolveRelatedLabels(
   db: any,
@@ -90,10 +97,11 @@ function serializeTask(row: {
   createdAt: Date;
   updatedAt: Date;
 }) {
+  const cleanDescription = upsertGoogleEventIdInNotes(row.description, null) || "";
   return {
     id: row.id,
     title: row.title,
-    description: row.description,
+    description: cleanDescription,
     status: row.status as "TODO" | "IN_PROGRESS" | "DONE",
     priority: row.priority as "LOW" | "MEDIUM" | "HIGH",
     dueAt: row.dueAt ? row.dueAt.toISOString() : null,
@@ -102,6 +110,11 @@ function serializeTask(row: {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function sameCalendarDay(a: Date | null, b: Date | null) {
+  if (!a || !b) return false;
+  return a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
 }
 
 export const taskRouter = router({
@@ -136,6 +149,37 @@ export const taskRouter = router({
           _count: { _all: true },
         }),
       ]);
+
+      const rowsWithEvent = rows.filter((row) => extractGoogleEventId(row.description));
+      if (rowsWithEvent.length > 0) {
+        await Promise.all(
+          rowsWithEvent.map(async (row) => {
+            const eventId = extractGoogleEventId(row.description);
+            if (!eventId) return;
+            const remote = await getGoogleBookingEvent(ctx.db, eventId, ctx.user.id).catch(() => null);
+            if (!remote || !remote.enabled) return;
+
+            if (!remote.found || remote.cancelled) {
+              const cleaned = upsertGoogleEventIdInNotes(row.description, null) || "";
+              if (cleaned !== row.description) {
+                await ctx.db.workspaceTask.update({
+                  where: { id: row.id },
+                  data: { description: cleaned },
+                });
+              }
+              return;
+            }
+
+            if (remote.start && !sameCalendarDay(row.dueAt, remote.start)) {
+              await ctx.db.workspaceTask.update({
+                where: { id: row.id },
+                data: { dueAt: remote.start },
+              });
+              row.dueAt = remote.start;
+            }
+          }),
+        );
+      }
 
       rows.sort((a, b) => {
         if (a.status !== b.status) {
@@ -207,13 +251,32 @@ export const taskRouter = router({
         data: {
           createdById: ctx.user.workspaceId!,
           title: input.title.trim(),
-          description: input.description?.trim() || "",
+          description: upsertGoogleEventIdInNotes(input.description?.trim() || "", null) || "",
           priority: input.priority,
           dueAt: input.dueAt ? new Date(input.dueAt) : null,
           relatedType: input.relatedType ?? null,
           relatedId: input.relatedId ?? null,
         },
       });
+      if (row.dueAt) {
+        const sync = await upsertGoogleTaskEvent(ctx.db, {
+          taskId: row.id,
+          title: row.title,
+          description: upsertGoogleEventIdInNotes(row.description, null) || "",
+          dueAt: row.dueAt,
+          existingEventId: extractGoogleEventId(row.description),
+          userId: ctx.user.id,
+        }).catch(() => ({ synced: false, eventId: null }));
+
+        if (sync.synced && sync.eventId) {
+          const description = upsertGoogleEventIdInNotes(row.description, sync.eventId) || "";
+          const updated = await ctx.db.workspaceTask.update({
+            where: { id: row.id },
+            data: { description },
+          });
+          return serializeTask(updated);
+        }
+      }
       return serializeTask(row);
     }),
 
@@ -238,24 +301,67 @@ export const taskRouter = router({
         where: { id: input.id },
         data: {
           ...(input.title !== undefined ? { title: input.title.trim() } : {}),
-          ...(input.description !== undefined ? { description: input.description.trim() } : {}),
+          ...(input.description !== undefined
+            ? { description: upsertGoogleEventIdInNotes(input.description.trim(), extractGoogleEventId(existing.description)) || "" }
+            : {}),
           ...(input.status !== undefined ? { status: input.status } : {}),
           ...(input.priority !== undefined ? { priority: input.priority } : {}),
           ...(input.dueAt !== undefined ? { dueAt: input.dueAt ? new Date(input.dueAt) : null } : {}),
         },
       });
+
+      const eventId = extractGoogleEventId(row.description);
+      if (row.dueAt) {
+        const sync = await upsertGoogleTaskEvent(ctx.db, {
+          taskId: row.id,
+          title: row.title,
+          description: upsertGoogleEventIdInNotes(row.description, null) || "",
+          dueAt: row.dueAt,
+          existingEventId: eventId,
+          userId: ctx.user.id,
+        }).catch(() => ({ synced: false, eventId: eventId || null }));
+
+        if (sync.synced) {
+          const description = upsertGoogleEventIdInNotes(row.description, sync.eventId || null) || "";
+          if (description !== row.description) {
+            const updated = await ctx.db.workspaceTask.update({
+              where: { id: row.id },
+              data: { description },
+            });
+            return serializeTask(updated);
+          }
+        }
+      } else if (eventId) {
+        await deleteGoogleTaskEvent(ctx.db, eventId, ctx.user.id).catch(() => undefined);
+        const cleaned = upsertGoogleEventIdInNotes(row.description, null) || "";
+        if (cleaned !== row.description) {
+          const updated = await ctx.db.workspaceTask.update({
+            where: { id: row.id },
+            data: { description: cleaned },
+          });
+          return serializeTask(updated);
+        }
+      }
       return serializeTask(row);
     }),
 
   remove: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.db.workspaceTask.findFirst({
+        where: { id: input.id, createdById: ctx.user.workspaceId! },
+      });
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Taak niet gevonden." });
+      }
+      const eventId = extractGoogleEventId(existing.description);
+      if (eventId) {
+        await deleteGoogleTaskEvent(ctx.db, eventId, ctx.user.id).catch(() => undefined);
+      }
       const result = await ctx.db.workspaceTask.deleteMany({
         where: { id: input.id, createdById: ctx.user.workspaceId! },
       });
-      if (result.count === 0) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Taak niet gevonden." });
-      }
+      if (result.count === 0) throw new TRPCError({ code: "NOT_FOUND", message: "Taak niet gevonden." });
       return { success: true };
     }),
 });

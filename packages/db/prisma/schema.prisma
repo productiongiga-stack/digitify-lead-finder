@@ -460,13 +460,19 @@ enum EmailTemplateLayout {
   followup
 }
 
+enum EmailTemplateBodyFormat {
+  TEXT
+  HTML
+}
+
 model EmailTemplate {
-  id          String              @id @default(cuid())
+  id          String                   @id @default(cuid())
   createdById String?
   name        String
   subject     String
-  body        String              @db.Text
-  type        EmailTemplateType   @default(CUSTOM)
+  body        String                   @db.Text
+  bodyFormat  EmailTemplateBodyFormat  @default(TEXT)
+  type        EmailTemplateType        @default(CUSTOM)
   layout      EmailTemplateLayout @default(modern)
   description String              @default("")
   ctaText     String              @default("")

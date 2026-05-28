@@ -6,6 +6,7 @@ import {
   isValidEmail,
   normalizeKey,
   parseEmojiMap,
+  parseIconLibrary,
   sanitizeNumber,
 } from "@/lib/quote-configurator-utils";
 import {
@@ -15,6 +16,7 @@ import {
   QuoteStudioBar,
   QuoteSummaryAside,
 } from "@/components/quotes/quote-embed-layout";
+import { QuoteIconPicker } from "@/components/quotes/quote-icon-picker";
 import { QuoteDetailsStep } from "@/components/quotes/quote-embed-steps";
 import {
   buildFallbackSpecs,
@@ -55,6 +57,7 @@ type RemotePayload = {
     stepDetailsHint: string;
     categoryIconsJson: string;
     productIconsJson: string;
+    iconLibraryJson: string;
     serviceTitle: string;
     productTitle: string;
     specsTitle: string;
@@ -138,28 +141,6 @@ function isPreviewPayload(value: unknown): value is RemotePayload {
     );
   });
 }
-
-const EMOJI_DROPDOWN_OPTIONS = [
-  "💻",
-  "🛍️",
-  "🎬",
-  "🎥",
-  "📸",
-  "📣",
-  "🔎",
-  "🌐",
-  "⚙️",
-  "🧩",
-  "🧠",
-  "🎨",
-  "🖨️",
-  "📈",
-  "💡",
-  "📦",
-  "📱",
-  "🔧",
-  "🚀",
-];
 
 function getCategoryIcon(category: string, categoryIcons: Record<string, string>) {
   const custom = categoryIcons[category] || categoryIcons[normalizeKey(category)];
@@ -315,6 +296,7 @@ function readQuoteConfiguratorUrlState() {
       leadId: "",
       chatSessionId: "",
       quoteId: "",
+      returnTo: "",
     };
   }
   const params = new URLSearchParams(window.location.search);
@@ -327,6 +309,7 @@ function readQuoteConfiguratorUrlState() {
     leadId: params.get("leadId")?.trim() || "",
     chatSessionId: params.get("chatSessionId")?.trim() || "",
     quoteId: params.get("quoteId")?.trim() || "",
+    returnTo: params.get("returnTo")?.trim() || "",
   };
 }
 
@@ -338,6 +321,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
   const leadIdParam = urlState.leadId;
   const chatSessionIdParam = urlState.chatSessionId;
   const quoteIdParam = urlState.quoteId;
+  const returnToParam = urlState.returnTo;
   const [payload, setPayload] = useState<RemotePayload | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [isLivePreview, setIsLivePreview] = useState(false);
@@ -519,6 +503,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
     stepDetailsHint: "Vul tenslotte uw gegevens in om de offerteaanvraag te versturen.",
     categoryIconsJson: "{}",
     productIconsJson: "{}",
+    iconLibraryJson: "[]",
     serviceTitle: "Welke dienst zoekt u?",
     productTitle: "Kies uw product",
     specsTitle: "Specificaties",
@@ -547,6 +532,10 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
   const productIconsMap = useMemo(
     () => parseEmojiMap(settings.productIconsJson || "{}"),
     [settings.productIconsJson],
+  );
+  const iconLibrary = useMemo(
+    () => parseIconLibrary(settings.iconLibraryJson || "[]"),
+    [settings.iconLibraryJson],
   );
 
   const servicesByCategory = useMemo(() => {
@@ -720,6 +709,38 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
     });
   }
 
+  function editCartItem(cartKey: string) {
+    const entry = cart[cartKey];
+    if (!entry) return;
+
+    const productId = entry.source === "product" ? cartKey : entry.serviceId;
+    const service = (payload?.services || []).find((item) => item.id === productId);
+    if (!service) return;
+
+    setSelectedCategory(service.category);
+    setSelectedProductId(service.id);
+    setCurrentStep(3);
+  }
+
+  function updateCartItem(
+    cartKey: string,
+    update: { customName?: string; unitPrice?: number; quantity?: number },
+  ) {
+    setCart((current) => {
+      const existing = current[cartKey];
+      if (!existing) return current;
+      return {
+        ...current,
+        [cartKey]: {
+          ...existing,
+          ...(update.customName !== undefined ? { customName: update.customName.trim() || existing.customName } : {}),
+          ...(update.unitPrice !== undefined ? { unitPrice: Math.max(0, update.unitPrice) } : {}),
+          ...(update.quantity !== undefined ? { quantity: Math.max(1, update.quantity) } : {}),
+        },
+      };
+    });
+  }
+
   function toggleSpecOption(section: SpecOptionSection, option: SpecOption) {
     if (!selectedProduct) return;
     const key = optionCartKey(selectedProduct.id, option.key);
@@ -840,14 +861,22 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
   }
 
   const cartItems = useMemo(() => {
+    const services = payload?.services || [];
     return Object.entries(cart)
       .map(([cartKey, entry]) => {
-        const service = (payload?.services || []).find((item) => item.id === entry.serviceId);
+        const service = services.find((item) => item.id === entry.serviceId);
+        const linkedProduct =
+          entry.source === "product"
+            ? service
+            : services.find((item) => item.id === entry.serviceId);
         const category = entry.customCategory || service?.category || "Extra";
         const name = entry.customName || service?.name || "Optie";
         const description = entry.customDescription || service?.description || "";
+        const isCustomLine = cartKey.startsWith("quote:") || (!linkedProduct && entry.source !== "product");
+        const isConfigurable = Boolean(linkedProduct && !isPreviewRoute);
         return {
           cartKey,
+          serviceId: entry.serviceId,
           source: entry.source,
           category,
           name,
@@ -858,10 +887,12 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
           packageLabel: entry.packageLabel,
           packageKey: entry.packageKey,
           isConfirmed: Boolean(confirmedProducts[cartKey]),
+          isConfigurable,
+          isCustomLine,
         };
       })
       .filter((item) => item.quantity > 0 && item.unitPrice >= 0);
-  }, [cart, confirmedProducts, payload?.services]);
+  }, [cart, confirmedProducts, isPreviewRoute, payload?.services]);
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.total, 0);
   const discountRaw = sanitizeNumber(discountInput);
@@ -1025,7 +1056,8 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
 
     setStatus({ type: "success", message: `${data.message} Referentie: ${data.quoteNumber}.` });
     if (isInternalMode && data.quoteId) {
-      window.location.href = `/quotes/${encodeURIComponent(data.quoteId)}`;
+      window.location.href =
+        returnToParam || `/quotes/${encodeURIComponent(data.quoteId)}`;
     }
   }
 
@@ -1151,13 +1183,21 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                         className="rounded-[18px] border bg-white p-3 text-left transition hover:shadow-sm sm:p-4"
                         style={{ borderColor: selected ? accentColor : "#e2e3e7", boxShadow: selected ? `0 0 0 2px ${accentColor}33 inset` : "none" }}
                       >
-                        <button
-                          type="button"
+                        <div
+                          role="button"
+                          tabIndex={0}
                           onClick={() => {
                             setSelectedCategory(group.category);
                             setSelectedProductId("");
                           }}
-                          className="w-full text-left"
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              setSelectedCategory(group.category);
+                              setSelectedProductId("");
+                            }
+                          }}
+                          className="w-full cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c9811b]/40"
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-[#f5f6f8] text-lg">
@@ -1174,28 +1214,21 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                           <p className="mt-2 text-sm font-semibold" style={{ color: accentColor }}>
                             Vanaf {formatCurrency(group.minPrice)}
                           </p>
-                        </button>
+                        </div>
                         <div className="mt-3">
-                          <select
+                          <QuoteIconPicker
+                            compact
                             value={categoryIconsMap[group.category] || ""}
-                            onChange={(event) =>
+                            iconLibrary={iconLibrary}
+                            placeholder="Categorie-icoon"
+                            onChange={(icon) =>
                               sendPreviewAction({
                                 action: "set-category-icon",
                                 category: group.category,
-                                emoji: event.target.value,
+                                emoji: icon,
                               })
                             }
-                            className="h-8 w-full rounded border px-2 text-xs"
-                          >
-                            <option value="">Geen</option>
-                            {[...new Set([categoryIconsMap[group.category] || "", ...EMOJI_DROPDOWN_OPTIONS])]
-                              .filter((emoji) => emoji.length > 0)
-                              .map((emoji) => (
-                                <option key={`cat-emoji-${group.category}-${emoji}`} value={emoji}>
-                                  {emoji}
-                                </option>
-                              ))}
-                          </select>
+                          />
                         </div>
                         <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
                           <input
@@ -1235,46 +1268,32 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                       <p className="text-sm font-semibold" style={{ color: darkColor }}>+ Nieuwe dienst/categorie</p>
                       <p className="mt-1 text-xs text-[#7b818c]">Maak een nieuwe dienst (categorie) met een eerste product.</p>
                       <div className="mt-3 space-y-2">
-                        <div className="grid grid-cols-[1fr_74px] gap-2">
-                          <input
-                            value={newCategoryName}
-                            onChange={(event) => setNewCategoryName(event.target.value)}
-                            className="h-8 rounded border px-2 text-xs"
-                            placeholder="Dienstnaam"
-                          />
-                          <select
-                            value={newCategoryEmoji}
-                            onChange={(event) => setNewCategoryEmoji(event.target.value)}
-                            className="h-8 rounded border px-2 text-xs"
-                          >
-                            <option value="">Geen</option>
-                            {EMOJI_DROPDOWN_OPTIONS.map((emoji) => (
-                              <option key={`new-category-emoji-${emoji}`} value={emoji}>
-                                {emoji}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="grid grid-cols-[1fr_74px] gap-2">
-                          <input
-                            value={newServiceName}
-                            onChange={(event) => setNewServiceName(event.target.value)}
-                            className="h-8 rounded border px-2 text-xs"
-                            placeholder="Eerste productnaam"
-                          />
-                          <select
-                            value={newProductEmoji}
-                            onChange={(event) => setNewProductEmoji(event.target.value)}
-                            className="h-8 rounded border px-2 text-xs"
-                          >
-                            <option value="">Geen</option>
-                            {EMOJI_DROPDOWN_OPTIONS.map((emoji) => (
-                              <option key={`new-product-emoji-${emoji}`} value={emoji}>
-                                {emoji}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                        <input
+                          value={newCategoryName}
+                          onChange={(event) => setNewCategoryName(event.target.value)}
+                          className="h-8 w-full rounded border px-2 text-xs"
+                          placeholder="Dienstnaam"
+                        />
+                        <QuoteIconPicker
+                          compact
+                          value={newCategoryEmoji}
+                          iconLibrary={iconLibrary}
+                          placeholder="Categorie-icoon"
+                          onChange={setNewCategoryEmoji}
+                        />
+                        <input
+                          value={newServiceName}
+                          onChange={(event) => setNewServiceName(event.target.value)}
+                          className="h-8 w-full rounded border px-2 text-xs"
+                          placeholder="Eerste productnaam"
+                        />
+                        <QuoteIconPicker
+                          compact
+                          value={newProductEmoji}
+                          iconLibrary={iconLibrary}
+                          placeholder="Product-icoon"
+                          onChange={setNewProductEmoji}
+                        />
                         <div className="grid grid-cols-[1fr_auto] gap-2">
                           <input
                             type="number"
@@ -1368,7 +1387,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                             </button>
                           </div>
                           <div className="mt-3 space-y-2">
-                            <div className="grid grid-cols-[1fr_72px] gap-2">
+                            <div className="grid gap-2 sm:grid-cols-[1fr_140px]">
                               <input
                                 defaultValue={service.name}
                                 onBlur={(event) =>
@@ -1380,26 +1399,19 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                 }
                                 className="h-8 w-full rounded border px-2 text-sm"
                               />
-                              <select
+                              <QuoteIconPicker
+                                compact
                                 value={getServiceIcon(service, productIconsMap)}
-                                onChange={(event) =>
+                                iconLibrary={iconLibrary}
+                                placeholder="Product-icoon"
+                                onChange={(icon) =>
                                   sendPreviewAction({
                                     action: "set-product-icon",
                                     productId: service.id,
-                                    emoji: event.target.value,
+                                    emoji: icon,
                                   })
                                 }
-                                className="h-8 w-full rounded border px-2 text-xs"
-                              >
-                                <option value="">Geen</option>
-                                {[...new Set([getServiceIcon(service, productIconsMap), ...EMOJI_DROPDOWN_OPTIONS])]
-                                  .filter((emoji) => emoji.length > 0)
-                                  .map((emoji) => (
-                                    <option key={`product-emoji-${service.id}-${emoji}`} value={emoji}>
-                                      {emoji}
-                                    </option>
-                                  ))}
-                              </select>
+                              />
                             </div>
                             <input
                               defaultValue={service.description || ""}
@@ -1546,13 +1558,20 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                   </button>
                                 ) : null}
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => updatePackage(option)}
-                                className="w-full rounded-lg p-2 text-left"
-                              >
-                                {isPreviewRoute ? (
-                                  <div className="space-y-2" onClick={(event) => event.stopPropagation()}>
+                              {isPreviewRoute ? (
+                                <div className="w-full rounded-lg p-2 text-left">
+                                  <button
+                                    type="button"
+                                    onClick={() => updatePackage(option)}
+                                    className="mb-2 rounded border px-2 py-0.5 text-[10px] font-semibold"
+                                    style={{
+                                      borderColor: isActive ? accentColor : "#e1e3e8",
+                                      backgroundColor: isActive ? `${accentColor}22` : "transparent",
+                                    }}
+                                  >
+                                    {isActive ? "Actief pakket" : "Maak actief"}
+                                  </button>
+                                  <div className="space-y-2">
                                     <input
                                       defaultValue={option.label}
                                       onBlur={(event) =>
@@ -1594,17 +1613,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                       className="h-8 w-full rounded border px-2 text-xs"
                                     />
                                   </div>
-                                ) : (
-                                  <>
-                                    <p className="text-sm font-semibold">{option.label}</p>
-                                    <p className="mt-1 text-xs text-[#757b86]">{option.subtitle}</p>
-                                    <p className="mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-bold" style={{ backgroundColor: `${accentColor}22`, color: "#8b5d12" }}>
-                                      {formatCurrency(option.price)}
-                                    </p>
-                                  </>
-                                )}
-                                {isPreviewRoute ? (
-                                  <div className="mt-2 space-y-1" onClick={(event) => event.stopPropagation()}>
+                                  <div className="mt-2 space-y-1">
                                     {(option.features || []).map((feature, featureIndex) => (
                                       <div key={`${option.key}-feature-${featureIndex}`} className="flex items-center gap-1">
                                         <input
@@ -1652,14 +1661,27 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                       + Bullet
                                     </button>
                                   </div>
-                                ) : option.features.length > 0 ? (
-                                  <ul className="mt-2 space-y-1 text-xs text-[#6e7480]">
-                                    {option.features.map((feature) => (
-                                      <li key={feature}>✓ {feature}</li>
-                                    ))}
-                                  </ul>
-                                ) : null}
-                              </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => updatePackage(option)}
+                                  className="w-full rounded-lg p-2 text-left"
+                                >
+                                  <p className="text-sm font-semibold">{option.label}</p>
+                                  <p className="mt-1 text-xs text-[#757b86]">{option.subtitle}</p>
+                                  <p className="mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-bold" style={{ backgroundColor: `${accentColor}22`, color: "#8b5d12" }}>
+                                    {formatCurrency(option.price)}
+                                  </p>
+                                  {option.features.length > 0 ? (
+                                    <ul className="mt-2 space-y-1 text-xs text-[#6e7480]">
+                                      {option.features.map((feature) => (
+                                        <li key={feature}>✓ {feature}</li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
+                                </button>
+                              )}
                             </div>
                           );
                         })}
@@ -1689,20 +1711,27 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                               const enabled = Boolean(cart[key]);
                               return (
                                 <div key={key} className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleSpecOption(section, option)}
-                                    className="flex w-full items-center justify-between rounded-lg border bg-white px-3 py-2 text-left"
-                                    style={{ borderColor: enabled ? accentColor : "#e1e3e8" }}
-                                  >
-                                    <div className="flex items-center gap-2">
-                                      <span className="inline-flex h-4 w-4 items-center justify-center rounded border text-[10px]" style={{ borderColor: enabled ? accentColor : "#ced2da", color: enabled ? darkColor : "#7b8190", backgroundColor: enabled ? accentColor : "#fff" }}>
-                                        {enabled ? "✓" : ""}
-                                      </span>
-                                      {isPreviewRoute ? (
+                                  {isPreviewRoute ? (
+                                    <div
+                                      className="flex w-full items-center justify-between gap-2 rounded-lg border bg-white px-3 py-2"
+                                      style={{ borderColor: enabled ? accentColor : "#e1e3e8" }}
+                                    >
+                                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleSpecOption(section, option)}
+                                          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px]"
+                                          style={{
+                                            borderColor: enabled ? accentColor : "#ced2da",
+                                            color: enabled ? darkColor : "#7b8190",
+                                            backgroundColor: enabled ? accentColor : "#fff",
+                                          }}
+                                          aria-label={enabled ? "Optie uit" : "Optie aan"}
+                                        >
+                                          {enabled ? "✓" : ""}
+                                        </button>
                                         <input
                                           defaultValue={option.label}
-                                          onClick={(event) => event.stopPropagation()}
                                           onBlur={(event) =>
                                             sendPreviewAction({
                                               action: "update-option",
@@ -1711,14 +1740,10 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                               patch: { label: event.target.value },
                                             })
                                           }
-                                          className="h-7 rounded border px-2 text-xs"
+                                          className="h-7 min-w-0 flex-1 rounded border px-2 text-xs"
                                         />
-                                      ) : (
-                                        <span className="text-sm">{option.label}</span>
-                                      )}
-                                    </div>
-                                    {isPreviewRoute ? (
-                                      <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
+                                      </div>
+                                      <div className="flex shrink-0 items-center gap-1">
                                         <input
                                           type="number"
                                           min="0"
@@ -1736,12 +1761,33 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
                                         />
                                         <span className="text-xs">{option.unit || ""}</span>
                                       </div>
-                                    ) : (
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleSpecOption(section, option)}
+                                      className="flex w-full items-center justify-between rounded-lg border bg-white px-3 py-2 text-left"
+                                      style={{ borderColor: enabled ? accentColor : "#e1e3e8" }}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span
+                                          className="inline-flex h-4 w-4 items-center justify-center rounded border text-[10px]"
+                                          style={{
+                                            borderColor: enabled ? accentColor : "#ced2da",
+                                            color: enabled ? darkColor : "#7b8190",
+                                            backgroundColor: enabled ? accentColor : "#fff",
+                                          }}
+                                        >
+                                          {enabled ? "✓" : ""}
+                                        </span>
+                                        <span className="text-sm">{option.label}</span>
+                                      </div>
                                       <span className="text-sm font-semibold" style={{ color: "#c9811b" }}>
-                                        +{formatCurrency(option.price)}{option.unit || ""}
+                                        +{formatCurrency(option.price)}
+                                        {option.unit || ""}
                                       </span>
-                                    )}
-                                  </button>
+                                    </button>
+                                  )}
                                   {isPreviewRoute ? (
                                     <button
                                       type="button"
@@ -2370,6 +2416,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
             isEditingQuote={Boolean(payload.editingQuote)}
             selectedCategory={selectedCategory}
             selectedProductName={selectedProduct?.name || ""}
+            selectedProductId={selectedProductId}
             subtotal={subtotal}
             discount={discount}
             vatRate={vatRate}
@@ -2380,6 +2427,8 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
             darkColor={darkColor}
             onRemoveFromCart={removeFromCart}
             onAdjustQuantity={adjustQuantity}
+            onEditCartItem={editCartItem}
+            onUpdateCartItem={updateCartItem}
           />
         </div>
 

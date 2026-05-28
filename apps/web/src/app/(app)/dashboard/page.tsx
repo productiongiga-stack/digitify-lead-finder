@@ -1005,11 +1005,11 @@ export default function DashboardPage() {
       />
 
       <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="grid h-10 w-full max-w-xs grid-cols-2 rounded-full bg-muted/60 p-1">
-          <TabsTrigger value="overview" className="rounded-full text-xs sm:text-sm">
+        <TabsList className="page-view-tabs">
+          <TabsTrigger value="overview" className="page-view-tabs-trigger">
             Overzicht
           </TabsTrigger>
-          <TabsTrigger value="info" className="rounded-full text-xs sm:text-sm">
+          <TabsTrigger value="info" className="page-view-tabs-trigger">
             Statistieken
           </TabsTrigger>
         </TabsList>

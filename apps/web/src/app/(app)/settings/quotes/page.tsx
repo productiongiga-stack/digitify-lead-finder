@@ -2,7 +2,28 @@
 
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowLeft, ArrowUp, Check, Copy, GripVertical, Plus, Receipt, Save, Settings2, Sparkles, Trash2 } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowUp,
+  Check,
+  Copy,
+  FileText,
+  GripVertical,
+  Info,
+  Layers,
+  ListOrdered,
+  MousePointer2,
+  Package,
+  Palette,
+  Plus,
+  Receipt,
+  Save,
+  Settings2,
+  Smile,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import {
   Button,
   Card,
@@ -24,7 +45,16 @@ import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/components/feedback/toast-provider";
 import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 import { getAppUrl } from "@/lib/config";
-import { normalizeKey, parseEmojiMap, stringifyEmojiMap } from "@/lib/quote-configurator-utils";
+import {
+  normalizeKey,
+  parseEmojiMap,
+  parseIconLibrary,
+  stringifyEmojiMap,
+  stringifyIconLibrary,
+  type QuoteIconLibraryItem,
+} from "@/lib/quote-configurator-utils";
+import { QuoteIconLibraryPanel, QuoteIconPicker } from "@/components/quotes/quote-icon-picker";
+import { ConfiguratorIcon } from "@/components/quotes/quote-embed-layout";
 import type {
   PackageOption as BuilderPackage,
   ProductSpecConfig as BuilderSpec,
@@ -50,7 +80,7 @@ type EditableService = {
 type ReusableBlockTemplateType = "web" | "media" | "marketing" | "addons";
 type PreviewViewport = "desktop" | "tablet" | "mobile";
 type SettingsTab = "studio" | "config" | "catalog" | "all";
-type ConfiguratorInfoTab = "general" | "branding" | "colors" | "steps" | "icons";
+type ConfiguratorInfoTab = "general" | "branding" | "colors" | "steps" | "icons" | "pdf";
 type PreviewSelectionState = {
   currentStep: number;
   selectedCategory: string;
@@ -84,6 +114,7 @@ type QuotePreviewPayload = {
     stepDetailsHint: string;
     categoryIconsJson: string;
     productIconsJson: string;
+    iconLibraryJson: string;
     serviceTitle: string;
     productTitle: string;
     specsTitle: string;
@@ -140,6 +171,7 @@ type StudioSnapshot = {
   detailsTitle: string;
   categoryIconsJson: string;
   productIconsJson: string;
+  iconLibraryJson: string;
   services: EditableService[];
   builderSpecsMap: BuilderSpecsMap;
 };
@@ -244,28 +276,6 @@ function buildDefaultQuestions(): BuilderQuestion[] {
     },
   ];
 }
-
-const EMOJI_DROPDOWN_OPTIONS = [
-  "💻",
-  "🛍️",
-  "🎬",
-  "🎥",
-  "📸",
-  "📣",
-  "🔎",
-  "🌐",
-  "⚙️",
-  "🧩",
-  "🧠",
-  "🎨",
-  "🖨️",
-  "📈",
-  "💡",
-  "📦",
-  "📱",
-  "🔧",
-  "🚀",
-];
 
 function buildProductSpecsTemplate(services: EditableService[]) {
   const activeServices = services
@@ -924,6 +934,7 @@ export default function QuoteSettingsPage() {
   const [productSpecsInfo, setProductSpecsInfo] = useState<string | null>(null);
   const [categoryIconsJson, setCategoryIconsJson] = useState("{}");
   const [productIconsJson, setProductIconsJson] = useState("{}");
+  const [iconLibraryJson, setIconLibraryJson] = useState("[]");
   const [iconsError, setIconsError] = useState<string | null>(null);
   const [iconsInfo, setIconsInfo] = useState<string | null>(null);
   const [builderSpecsMap, setBuilderSpecsMap] = useState<BuilderSpecsMap>({});
@@ -1070,6 +1081,7 @@ export default function QuoteSettingsPage() {
     setProductSpecsJson(getJsonSetting("quotes.embed_product_specs_json", "{}"));
     setCategoryIconsJson(getJsonSetting("quotes.embed_category_icons_json", "{}"));
     setProductIconsJson(getJsonSetting("quotes.embed_product_icons_json", "{}"));
+    setIconLibraryJson(getJsonSetting("quotes.embed_icon_library_json", "[]"));
     setLoaded(true);
   }, [
     settings,
@@ -1123,6 +1135,7 @@ export default function QuoteSettingsPage() {
     productSpecsJson,
     categoryIconsJson,
     productIconsJson,
+    iconLibraryJson,
   ]);
 
   useEffect(() => {
@@ -1229,6 +1242,7 @@ export default function QuoteSettingsPage() {
         stepDetailsHint,
         categoryIconsJson,
         productIconsJson,
+        iconLibraryJson,
         serviceTitle,
         productTitle,
         specsTitle,
@@ -1273,6 +1287,7 @@ export default function QuoteSettingsPage() {
       stepDetailsHint,
       categoryIconsJson,
       productIconsJson,
+      iconLibraryJson,
       serviceTitle,
       productTitle,
       specsTitle,
@@ -1308,6 +1323,7 @@ export default function QuoteSettingsPage() {
   const bgRgb = hexToRgb(bgColor);
   const categoryIconsMap = useMemo(() => parseEmojiMap(categoryIconsJson), [categoryIconsJson]);
   const productIconsMap = useMemo(() => parseEmojiMap(productIconsJson), [productIconsJson]);
+  const iconLibrary = useMemo(() => parseIconLibrary(iconLibraryJson), [iconLibraryJson]);
 
   useEffect(() => {
     const parsed = parseJsonEditorValue(productSpecsJson);
@@ -1924,6 +1940,7 @@ export default function QuoteSettingsPage() {
     detailsTitle,
     categoryIconsJson,
     productIconsJson,
+    iconLibraryJson,
     services,
     builderSpecsMap,
   ]);
@@ -2035,28 +2052,32 @@ export default function QuoteSettingsPage() {
     return prefixed ? getBuilderProductKey(prefixed) : "";
   }
 
+  async function uploadConfiguratorImage(file: File) {
+    if (!file.type.startsWith("image/")) {
+      throw new Error("Kies een PNG, JPG, SVG of WebP bestand.");
+    }
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch("/api/upload", {
+      method: "POST",
+      body: formData,
+    });
+    const payload = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
+    if (!response.ok || !payload.url) {
+      throw new Error(payload.error || "Kon het bestand niet uploaden.");
+    }
+    return payload.url;
+  }
+
   async function handleConfiguratorLogoUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      showToast({ title: "Upload mislukt", description: "Kies een PNG, JPG, SVG, ICO of WebP bestand.", variant: "error" });
-      return;
-    }
 
     setLogoUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-      const payload = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
-      if (!response.ok || !payload.url) {
-        throw new Error(payload.error || "Kon het logo niet uploaden.");
-      }
-      setLogoUrl(payload.url);
+      const url = await uploadConfiguratorImage(file);
+      setLogoUrl(url);
       showToast({ title: "Logo geupload", description: "Het configurator-logo is klaar om te publiceren." });
     } catch (error) {
       showToast({
@@ -2067,6 +2088,25 @@ export default function QuoteSettingsPage() {
     } finally {
       setLogoUploading(false);
     }
+  }
+
+  async function uploadIconLibraryFile(file: File) {
+    try {
+      return await uploadConfiguratorImage(file);
+    } catch (error) {
+      showToast({
+        title: "Upload mislukt",
+        description: error instanceof Error ? error.message : "Kon het icoon niet uploaden.",
+        variant: "error",
+      });
+      return null;
+    }
+  }
+
+  function updateIconLibrary(items: QuoteIconLibraryItem[]) {
+    setIconLibraryJson(stringifyIconLibrary(items));
+    setIconsError(null);
+    setIconsInfo(null);
   }
 
   function setCategoryIcon(category: string, emoji: string) {
@@ -2714,6 +2754,7 @@ export default function QuoteSettingsPage() {
       detailsTitle,
       categoryIconsJson,
       productIconsJson,
+      iconLibraryJson,
       services: services.map((service) => ({ ...service })),
       builderSpecsMap: JSON.parse(JSON.stringify(builderSpecsMap)) as BuilderSpecsMap,
     };
@@ -2750,6 +2791,7 @@ export default function QuoteSettingsPage() {
     setDetailsTitle(snapshot.detailsTitle);
     setCategoryIconsJson(snapshot.categoryIconsJson);
     setProductIconsJson(snapshot.productIconsJson);
+    setIconLibraryJson(snapshot.iconLibraryJson ?? "[]");
     setServices(snapshot.services.map((service) => ({ ...service })));
     setBuilderSpecsMap(JSON.parse(JSON.stringify(snapshot.builderSpecsMap)) as BuilderSpecsMap);
     setProductSpecsJson(
@@ -3064,6 +3106,7 @@ export default function QuoteSettingsPage() {
       { key: "quotes.embed_product_specs_json", value: specsPayload },
       { key: "quotes.embed_category_icons_json", value: categoryIconsJson },
       { key: "quotes.embed_product_icons_json", value: productIconsJson },
+      { key: "quotes.embed_icon_library_json", value: iconLibraryJson },
     ];
   }
 
@@ -3373,32 +3416,6 @@ export default function QuoteSettingsPage() {
         </p>
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-4">
-        <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Modus</p>
-            <p className="mt-2 text-sm font-medium">{configMode === "advanced" ? "Advanced studio" : "Simple studio"}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Catalogus</p>
-            <p className="mt-2 text-sm font-medium">{services.filter((service) => service.isActive).length} actieve diensten</p>
-          </CardContent>
-        </Card>
-        <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Publicatie</p>
-            <p className="mt-2 text-sm font-medium">{hasUnpublishedChanges ? "Concept met wijzigingen" : "Gepubliceerde versie actief"}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-violet-200 bg-violet-50/80 shadow-sm dark:border-violet-900/40 dark:bg-violet-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Preview</p>
-            <p className="mt-2 text-sm font-medium">{previewViewport === "desktop" ? "Desktop" : previewViewport === "tablet" ? "Tablet" : "Mobiel"} weergave</p>
-          </CardContent>
-        </Card>
-      </div>
 
       {!studioOnlyMode ? (
       <Card>
@@ -3632,14 +3649,19 @@ export default function QuoteSettingsPage() {
                 </Button>
               </div>
               <p className="mb-3 text-xs text-muted-foreground">
-                Stel iconen in per categorie of product. Gebruik emoji zoals `💻`, `🎬`, `📣`, `⚙️`.
+                Upload iconen in de bibliotheek en kies ze per categorie of product in de configurator en bij Producten & diensten.
               </p>
+              <QuoteIconLibraryPanel
+                iconLibrary={iconLibrary}
+                onChange={updateIconLibrary}
+                onUploadFile={uploadIconLibraryFile}
+              />
               {configMode === "advanced" ? (
-                <div className="grid gap-3 lg:grid-cols-2">
+                <div className="mt-3 grid gap-3 lg:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Categorie icons JSON</Label>
                     <Textarea value={categoryIconsJson} onChange={(event) => setCategoryIconsJson(event.target.value)} rows={6} className="font-mono text-xs" />
-                    <p className="text-xs text-muted-foreground">Voorbeeld: {`{ "Webdesign": "💻", "Media": "🎬" }`}</p>
+                    <p className="text-xs text-muted-foreground">Voorbeeld: {`{ "Webdesign": "💻", "Media": "https://..." }`}</p>
                   </div>
                   <div className="space-y-2">
                     <Label>Product icons JSON</Label>
@@ -3648,8 +3670,8 @@ export default function QuoteSettingsPage() {
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground">
-                  Gebruik de icon-inputs in `Producten & diensten` hieronder voor snelle no-code aanpassingen.
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Gebruik de icon-kiezers in `Producten & diensten` hieronder of in de live preview.
                 </p>
               )}
               {iconsError ? (
@@ -4494,44 +4516,26 @@ export default function QuoteSettingsPage() {
                         onChange={(event) => updateService(index, "category", event.target.value)}
                         placeholder="Categorie"
                       />
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={categoryIconsMap[service.category] || ""}
-                          onChange={(event) => setCategoryIcon(service.category, event.target.value)}
-                          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                        >
-                          <option value="">Categorie emoji</option>
-                          {[...new Set([categoryIconsMap[service.category] || "", ...EMOJI_DROPDOWN_OPTIONS])]
-                            .filter((emoji) => emoji.length > 0)
-                            .map((emoji) => (
-                              <option key={`cat-row-${service.category}-${emoji}`} value={emoji}>
-                                {emoji}
-                              </option>
-                            ))}
-                        </select>
-                      </div>
+                      <QuoteIconPicker
+                        value={categoryIconsMap[service.category] || ""}
+                        iconLibrary={iconLibrary}
+                        placeholder="Categorie-icoon"
+                        onChange={(icon) => setCategoryIcon(service.category, icon)}
+                      />
                     </div>
                     <div className="grid gap-2">
-                      <div className="grid gap-2 sm:grid-cols-[1fr_120px]">
+                      <div className="grid gap-2 sm:grid-cols-[1fr_140px]">
                         <Input
                           value={service.name}
                           onChange={(event) => updateService(index, "name", event.target.value)}
                           placeholder="Naam van de dienst"
                         />
-                        <select
+                        <QuoteIconPicker
                           value={productIconsMap[getProductIconKey(service)] || ""}
-                          onChange={(event) => setProductIcon(service, event.target.value)}
-                          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                        >
-                          <option value="">Emoji</option>
-                          {[...new Set([productIconsMap[getProductIconKey(service)] || "", ...EMOJI_DROPDOWN_OPTIONS])]
-                            .filter((emoji) => emoji.length > 0)
-                            .map((emoji) => (
-                              <option key={`product-row-${getProductIconKey(service)}-${emoji}`} value={emoji}>
-                                {emoji}
-                              </option>
-                            ))}
-                        </select>
+                          iconLibrary={iconLibrary}
+                          placeholder="Product-icoon"
+                          onChange={(icon) => setProductIcon(service, icon)}
+                        />
                       </div>
                       <Textarea
                         value={service.description}
@@ -4647,14 +4651,73 @@ export default function QuoteSettingsPage() {
           </div>
 
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
-            <div className="rounded-xl border p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Element Inspector
-              </p>
-              <p className="mb-3 text-xs text-muted-foreground">
-                Selectie uit preview: stap {previewSelection.currentStep}, categorie "{previewSelection.selectedCategory || "-"}", product "{selectedPreviewService?.name || "-"}".
-              </p>
+            <div className="overflow-hidden rounded-xl border border-border/60 bg-card/80 shadow-sm">
+              <div className="flex items-start gap-3 border-b border-border/60 bg-muted/25 px-4 py-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-background text-muted-foreground">
+                  <MousePointer2 className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-foreground">Element Inspector</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Bewerk het geselecteerde product rechtstreeks vanuit de live preview.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 border-b border-border/50 px-4 py-2.5">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background px-2.5 py-1 text-[11px] font-medium text-foreground">
+                  <ListOrdered className="h-3 w-3 text-muted-foreground" />
+                  Stap {previewSelection.currentStep}
+                  <span className="text-muted-foreground">
+                    ·{" "}
+                    {[
+                      stepServiceLabel,
+                      stepProductLabel,
+                      stepSpecsLabel,
+                      stepDetailsLabel,
+                    ][previewSelection.currentStep - 1] || "Configurator"}
+                  </span>
+                </span>
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
+                    previewSelection.selectedCategory
+                      ? "border-border/70 bg-background text-foreground"
+                      : "border-dashed border-border/60 bg-muted/20 text-muted-foreground"
+                  }`}
+                >
+                  <Layers className="h-3 w-3 shrink-0" />
+                  {previewSelection.selectedCategory || "Geen categorie"}
+                </span>
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
+                    selectedPreviewService
+                      ? "border-border/70 bg-background text-foreground"
+                      : "border-dashed border-border/60 bg-muted/20 text-muted-foreground"
+                  }`}
+                >
+                  <Package className="h-3 w-3 shrink-0" />
+                  {selectedPreviewService?.name || "Geen product"}
+                </span>
+              </div>
+
+              <div className="p-4">
               {selectedPreviewService ? (
+                <>
+                  <div className="mb-4 flex items-center gap-3 rounded-xl border border-border/60 bg-muted/15 p-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/60 bg-background text-xl">
+                      <ConfiguratorIcon
+                        value={productIconsMap[getProductIconKey(selectedPreviewService)] || "📦"}
+                        label={selectedPreviewService.name}
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-foreground">{selectedPreviewService.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">{selectedPreviewService.category}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                      Actief
+                    </span>
+                  </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div className="space-y-1 sm:col-span-2">
                     <Label className="text-xs">Productnaam</Label>
@@ -4681,24 +4744,13 @@ export default function QuoteSettingsPage() {
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Emoji</Label>
-                    <select
+                    <Label className="text-xs">Icoon</Label>
+                    <QuoteIconPicker
                       value={productIconsMap[getProductIconKey(selectedPreviewService)] || ""}
-                      onChange={(event) => setProductIcon(selectedPreviewService, event.target.value)}
-                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                    >
-                      <option value="">Geen</option>
-                      {[...new Set([
-                        productIconsMap[getProductIconKey(selectedPreviewService)] || "",
-                        ...EMOJI_DROPDOWN_OPTIONS,
-                      ])]
-                        .filter((emoji) => emoji.length > 0)
-                        .map((emoji) => (
-                          <option key={`inspector-emoji-${emoji}`} value={emoji}>
-                            {emoji}
-                          </option>
-                        ))}
-                    </select>
+                      iconLibrary={iconLibrary}
+                      placeholder="Product-icoon"
+                      onChange={(icon) => setProductIcon(selectedPreviewService, icon)}
+                    />
                   </div>
                   <div className="space-y-1 sm:col-span-2">
                     <Label className="text-xs">Beschrijving</Label>
@@ -4740,16 +4792,37 @@ export default function QuoteSettingsPage() {
                     />
                   </div>
                   {selectedPreviewSpec ? (
-                    <div className="sm:col-span-2 rounded-lg border bg-muted/20 p-2 text-xs text-muted-foreground">
-                      {selectedPreviewSpec.packages?.length || 0} pakketten · {(selectedPreviewSpec.optionSections || []).reduce((sum, section) => sum + section.options.length, 0)} opties · {(selectedPreviewSpec.questions || []).length} vragen
+                    <div className="sm:col-span-2 flex flex-wrap gap-2 rounded-lg border border-border/60 bg-muted/15 p-2.5">
+                      <span className="rounded-md bg-background px-2 py-1 text-[11px] font-medium text-foreground">
+                        {selectedPreviewSpec.packages?.length || 0} pakketten
+                      </span>
+                      <span className="rounded-md bg-background px-2 py-1 text-[11px] font-medium text-foreground">
+                        {(selectedPreviewSpec.optionSections || []).reduce((sum, section) => sum + section.options.length, 0)} opties
+                      </span>
+                      <span className="rounded-md bg-background px-2 py-1 text-[11px] font-medium text-foreground">
+                        {(selectedPreviewSpec.questions || []).length} vragen
+                      </span>
                     </div>
                   ) : null}
                 </div>
+                </>
               ) : (
-                <p className="text-xs text-muted-foreground">
-                  Selecteer een product in de preview om de inspector te gebruiken.
-                </p>
+                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-8 text-center">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-border/60 bg-background text-muted-foreground">
+                    <MousePointer2 className="h-5 w-5" />
+                  </div>
+                  <p className="text-sm font-semibold text-foreground">Nog niets geselecteerd</p>
+                  <p className="mt-1 max-w-[280px] text-xs leading-relaxed text-muted-foreground">
+                    Klik in de preview op een product (stap 2) om naam, icoon, prijs en specificaties hier te bewerken.
+                  </p>
+                  <div className="mt-4 flex flex-wrap justify-center gap-2 text-[11px] text-muted-foreground">
+                    <span className="rounded-md border border-border/60 bg-background px-2 py-1">1 · Dienst</span>
+                    <span className="rounded-md border border-primary/30 bg-primary/5 px-2 py-1 font-medium text-foreground">2 · Product</span>
+                    <span className="rounded-md border border-border/60 bg-background px-2 py-1">3 · Specificaties</span>
+                  </div>
+                </div>
               )}
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -4809,13 +4882,32 @@ export default function QuoteSettingsPage() {
                 Pas de publieke configurator per onderdeel aan. Publiceer bovenaan wanneer alles klopt.
               </p>
             </div>
-            <Tabs value={configInfoTab} onValueChange={(value) => setConfigInfoTab(value as ConfiguratorInfoTab)}>
-              <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-xl bg-muted/50 p-1 sm:grid-cols-5">
-                <TabsTrigger value="general">Info</TabsTrigger>
-                <TabsTrigger value="branding">Branding</TabsTrigger>
-                <TabsTrigger value="colors">Kleuren</TabsTrigger>
-                <TabsTrigger value="steps">Stappen</TabsTrigger>
-                <TabsTrigger value="icons">Iconen</TabsTrigger>
+            <Tabs value={configInfoTab} onValueChange={(value) => setConfigInfoTab(value as ConfiguratorInfoTab)} className="space-y-4">
+              <TabsList className="settings-domain-tabs settings-domain-tabs-cols-6">
+                <TabsTrigger value="general" className="settings-domain-tab">
+                  <Info className="settings-domain-tab-icon" />
+                  Info
+                </TabsTrigger>
+                <TabsTrigger value="branding" className="settings-domain-tab">
+                  <Sparkles className="settings-domain-tab-icon" />
+                  Branding
+                </TabsTrigger>
+                <TabsTrigger value="colors" className="settings-domain-tab">
+                  <Palette className="settings-domain-tab-icon" />
+                  Kleuren
+                </TabsTrigger>
+                <TabsTrigger value="steps" className="settings-domain-tab">
+                  <ListOrdered className="settings-domain-tab-icon" />
+                  Stappen
+                </TabsTrigger>
+                <TabsTrigger value="icons" className="settings-domain-tab">
+                  <Smile className="settings-domain-tab-icon" />
+                  Iconen
+                </TabsTrigger>
+                <TabsTrigger value="pdf" className="settings-domain-tab">
+                  <FileText className="settings-domain-tab-icon" />
+                  PDF
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="general" className="mt-3">
@@ -4983,161 +5075,163 @@ export default function QuoteSettingsPage() {
                     <Input value={detailsTitle} onChange={(event) => setDetailsTitle(event.target.value)} />
                   </div>
                   <div className="space-y-1 sm:col-span-2">
-                    <Label className="text-xs">Categorie iconen JSON</Label>
-                    <Textarea value={categoryIconsJson} onChange={(event) => setCategoryIconsJson(event.target.value)} rows={4} className="font-mono text-xs" />
+                    <QuoteIconLibraryPanel
+                      iconLibrary={iconLibrary}
+                      onChange={updateIconLibrary}
+                      onUploadFile={uploadIconLibraryFile}
+                    />
                   </div>
                   <div className="space-y-1 sm:col-span-2">
-                    <Label className="text-xs">Product iconen JSON</Label>
-                    <Textarea value={productIconsJson} onChange={(event) => setProductIconsJson(event.target.value)} rows={4} className="font-mono text-xs" />
                     <p className="text-xs text-muted-foreground">
-                      Gebruik emoji, of een afbeeldings-URL/data-URL als icoon. Voorbeelden: {`{ "Webdesign": "💻" }`} of {`{ "SEO": "https://..." }`}.
+                      Wijs iconen toe per categorie en product in de live preview of bij Producten & diensten. Publiceer om wijzigingen op de embed te tonen.
                     </p>
                   </div>
                 </div>
               </TabsContent>
+
+              <TabsContent value="pdf" className="mt-3 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-muted/20 px-3 py-2.5">
+                  <p className="text-xs text-muted-foreground">
+                    Branding, content en opmaak voor gegenereerde offerte-PDF&apos;s.
+                  </p>
+                  <Button type="button" size="sm" variant="outline" onClick={() => void savePdfSettingsOnly()} disabled={batchUpdate.isPending}>
+                    <Save className="mr-2 h-4 w-4" />
+                    {batchUpdate.isPending ? "Opslaan..." : "PDF instellingen opslaan"}
+                  </Button>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">PDF bedrijfsnaam</Label>
+                    <Input value={pdfBrandName} onChange={(event) => setPdfBrandName(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">PDF tagline</Label>
+                    <Input value={pdfBrandTagline} onChange={(event) => setPdfBrandTagline(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Logo URL</Label>
+                    <Input value={pdfLogoUrl} onChange={(event) => setPdfLogoUrl(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Header kleur</Label>
+                    <input
+                      type="color"
+                      value={isHexColor(pdfHeaderBgColor) ? pdfHeaderBgColor : "#0A0D12"}
+                      onChange={(event) => setPdfHeaderBgColor(event.target.value)}
+                      className="h-10 w-full rounded border"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Accent kleur</Label>
+                    <input
+                      type="color"
+                      value={isHexColor(pdfAccentColor) ? pdfAccentColor : "#F6AD49"}
+                      onChange={(event) => setPdfAccentColor(event.target.value)}
+                      className="h-10 w-full rounded border"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Pagina achtergrond</Label>
+                    <input
+                      type="color"
+                      value={isHexColor(pdfPageBgColor) ? pdfPageBgColor : "#ECECEE"}
+                      onChange={(event) => setPdfPageBgColor(event.target.value)}
+                      className="h-10 w-full rounded border"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Intro titel</Label>
+                    <Input value={pdfIntroTitle} onChange={(event) => setPdfIntroTitle(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Over ons titel</Label>
+                    <Input value={pdfAboutTitle} onChange={(event) => setPdfAboutTitle(event.target.value)} />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label className="text-xs">Intro tekst</Label>
+                    <Textarea value={pdfIntroText} onChange={(event) => setPdfIntroText(event.target.value)} rows={3} />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label className="text-xs">Over ons tekst</Label>
+                    <Textarea value={pdfAboutText} onChange={(event) => setPdfAboutText(event.target.value)} rows={3} />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label className="text-xs">Footer tekst (optioneel)</Label>
+                    <Input value={pdfFooterText} onChange={(event) => setPdfFooterText(event.target.value)} placeholder="contact@bedrijf.be • +32 ... • www.bedrijf.be • BTW: ..." />
+                  </div>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Diensten & aanpak titel</Label>
+                    <Input value={pdfServicesTitle} onChange={(event) => setPdfServicesTitle(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Proces titel</Label>
+                    <Input value={pdfProcessTitle} onChange={(event) => setPdfProcessTitle(event.target.value)} />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label className="text-xs">Service kaarten JSON</Label>
+                    <Textarea value={pdfServicesCardsJson} onChange={(event) => setPdfServicesCardsJson(event.target.value)} rows={8} className="font-mono text-xs" />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label className="text-xs">Proces stappen JSON</Label>
+                    <Textarea value={pdfProcessStepsJson} onChange={(event) => setPdfProcessStepsJson(event.target.value)} rows={6} className="font-mono text-xs" />
+                  </div>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Tips titel</Label>
+                    <Input value={pdfTipsTitle} onChange={(event) => setPdfTipsTitle(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Volgende stappen titel</Label>
+                    <Input value={pdfNextStepsTitle} onChange={(event) => setPdfNextStepsTitle(event.target.value)} />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label className="text-xs">Tips JSON</Label>
+                    <Textarea value={pdfTipsJson} onChange={(event) => setPdfTipsJson(event.target.value)} rows={8} className="font-mono text-xs" />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
+                    <Label className="text-xs">Volgende stappen JSON (array van strings)</Label>
+                    <Textarea value={pdfNextStepsJson} onChange={(event) => setPdfNextStepsJson(event.target.value)} rows={5} className="font-mono text-xs" />
+                  </div>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Handtekening klant titel</Label>
+                    <Input value={pdfSignatureClientTitle} onChange={(event) => setPdfSignatureClientTitle(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Handtekening bedrijf titel</Label>
+                    <Input value={pdfSignatureCompanyTitle} onChange={(event) => setPdfSignatureCompanyTitle(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Bedrijf ondertekenaar</Label>
+                    <Input value={pdfSignatureCompanySigner} onChange={(event) => setPdfSignatureCompanySigner(event.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Functie ondertekenaar</Label>
+                    <Input value={pdfSignatureCompanyRole} onChange={(event) => setPdfSignatureCompanyRole(event.target.value)} />
+                  </div>
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Placeholders ondersteund in tekstvelden: <span className="font-mono">{`{{clientName}}`}</span>, <span className="font-mono">{`{{clientCompany}}`}</span>, <span className="font-mono">{`{{quoteNumber}}`}</span>, <span className="font-mono">{`{{validUntil}}`}</span>, <span className="font-mono">{`{{brandName}}`}</span>, <span className="font-mono">{`{{total}}`}</span>.
+                </p>
+              </TabsContent>
             </Tabs>
-          </div>
-
-          <div className="rounded-xl border p-3">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                PDF Export Instellingen
-              </p>
-              <Button type="button" size="sm" variant="outline" onClick={() => void savePdfSettingsOnly()} disabled={batchUpdate.isPending}>
-                <Save className="mr-2 h-4 w-4" />
-                {batchUpdate.isPending ? "Opslaan..." : "PDF instellingen opslaan"}
-              </Button>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="space-y-1">
-                <Label className="text-xs">PDF bedrijfsnaam</Label>
-                <Input value={pdfBrandName} onChange={(event) => setPdfBrandName(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">PDF tagline</Label>
-                <Input value={pdfBrandTagline} onChange={(event) => setPdfBrandTagline(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Logo URL</Label>
-                <Input value={pdfLogoUrl} onChange={(event) => setPdfLogoUrl(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Header kleur</Label>
-                <input
-                  type="color"
-                  value={isHexColor(pdfHeaderBgColor) ? pdfHeaderBgColor : "#0A0D12"}
-                  onChange={(event) => setPdfHeaderBgColor(event.target.value)}
-                  className="h-10 w-full rounded border"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Accent kleur</Label>
-                <input
-                  type="color"
-                  value={isHexColor(pdfAccentColor) ? pdfAccentColor : "#F6AD49"}
-                  onChange={(event) => setPdfAccentColor(event.target.value)}
-                  className="h-10 w-full rounded border"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Pagina achtergrond</Label>
-                <input
-                  type="color"
-                  value={isHexColor(pdfPageBgColor) ? pdfPageBgColor : "#ECECEE"}
-                  onChange={(event) => setPdfPageBgColor(event.target.value)}
-                  className="h-10 w-full rounded border"
-                />
-              </div>
-            </div>
-
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label className="text-xs">Intro titel</Label>
-                <Input value={pdfIntroTitle} onChange={(event) => setPdfIntroTitle(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Over ons titel</Label>
-                <Input value={pdfAboutTitle} onChange={(event) => setPdfAboutTitle(event.target.value)} />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <Label className="text-xs">Intro tekst</Label>
-                <Textarea value={pdfIntroText} onChange={(event) => setPdfIntroText(event.target.value)} rows={3} />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <Label className="text-xs">Over ons tekst</Label>
-                <Textarea value={pdfAboutText} onChange={(event) => setPdfAboutText(event.target.value)} rows={3} />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <Label className="text-xs">Footer tekst (optioneel)</Label>
-                <Input value={pdfFooterText} onChange={(event) => setPdfFooterText(event.target.value)} placeholder="contact@bedrijf.be • +32 ... • www.bedrijf.be • BTW: ..." />
-              </div>
-            </div>
-
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label className="text-xs">Diensten & aanpak titel</Label>
-                <Input value={pdfServicesTitle} onChange={(event) => setPdfServicesTitle(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Proces titel</Label>
-                <Input value={pdfProcessTitle} onChange={(event) => setPdfProcessTitle(event.target.value)} />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <Label className="text-xs">Service kaarten JSON</Label>
-                <Textarea value={pdfServicesCardsJson} onChange={(event) => setPdfServicesCardsJson(event.target.value)} rows={8} className="font-mono text-xs" />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <Label className="text-xs">Proces stappen JSON</Label>
-                <Textarea value={pdfProcessStepsJson} onChange={(event) => setPdfProcessStepsJson(event.target.value)} rows={6} className="font-mono text-xs" />
-              </div>
-            </div>
-
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label className="text-xs">Tips titel</Label>
-                <Input value={pdfTipsTitle} onChange={(event) => setPdfTipsTitle(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Volgende stappen titel</Label>
-                <Input value={pdfNextStepsTitle} onChange={(event) => setPdfNextStepsTitle(event.target.value)} />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <Label className="text-xs">Tips JSON</Label>
-                <Textarea value={pdfTipsJson} onChange={(event) => setPdfTipsJson(event.target.value)} rows={8} className="font-mono text-xs" />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <Label className="text-xs">Volgende stappen JSON (array van strings)</Label>
-                <Textarea value={pdfNextStepsJson} onChange={(event) => setPdfNextStepsJson(event.target.value)} rows={5} className="font-mono text-xs" />
-              </div>
-            </div>
-
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label className="text-xs">Handtekening klant titel</Label>
-                <Input value={pdfSignatureClientTitle} onChange={(event) => setPdfSignatureClientTitle(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Handtekening bedrijf titel</Label>
-                <Input value={pdfSignatureCompanyTitle} onChange={(event) => setPdfSignatureCompanyTitle(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Bedrijf ondertekenaar</Label>
-                <Input value={pdfSignatureCompanySigner} onChange={(event) => setPdfSignatureCompanySigner(event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Functie ondertekenaar</Label>
-                <Input value={pdfSignatureCompanyRole} onChange={(event) => setPdfSignatureCompanyRole(event.target.value)} />
-              </div>
-            </div>
-
-            <p className="mt-2 text-xs text-muted-foreground">
-              Placeholders ondersteund in tekstvelden: <span className="font-mono">{`{{clientName}}`}</span>, <span className="font-mono">{`{{clientCompany}}`}</span>, <span className="font-mono">{`{{quoteNumber}}`}</span>, <span className="font-mono">{`{{validUntil}}`}</span>, <span className="font-mono">{`{{brandName}}`}</span>, <span className="font-mono">{`{{total}}`}</span>.
-            </p>
           </div>
         </CardContent>
       </Card>
       ) : null}
+
     </div>
   );
 }

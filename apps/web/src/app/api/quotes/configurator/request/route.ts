@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { getCurrentUser, workspaceIdFor } from "@/lib/auth/session";
 import { log } from "@digitify/api/src/lib/logger";
+import { syncQuoteOutboundDrafts } from "@digitify/api/src/lib/quote-outbound-email";
 
 async function resolveLeadId(params: {
   workspaceId: string;
@@ -228,6 +229,8 @@ export async function POST(request: Request) {
           },
         }).catch(() => null);
       }
+
+      await syncQuoteOutboundDrafts(prisma, quote.id, workspaceId);
 
       return NextResponse.json({
         success: true,

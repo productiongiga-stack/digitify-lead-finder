@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import {
   Badge,
@@ -8,21 +10,19 @@ import {
   Card,
   CardContent,
   EmptyState,
-  Input,
   Skeleton,
 } from "@digitify/ui";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
 import {
   Copy,
   LayoutTemplate,
   Library,
   Plus,
-  Search,
+  Send,
   Sparkles,
   Trash2,
   Wand2,
 } from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import {
   EMPTY_STUDIO_FORM,
   TemplateStudioEditor,
@@ -30,17 +30,32 @@ import {
   templateToForm,
   type StudioForm,
 } from "@/components/templates/template-studio-editor";
-import {
-  LAYOUT_CATALOG,
-  TEMPLATE_TYPES,
-  templateTypeLabel,
-  type TemplateType,
-} from "@/lib/template-studio";
+import { templateTypeLabel, type TemplateType } from "@/lib/template-studio";
 import type { RouterOutputs } from "@/lib/trpc/client";
 import { TemplateScopeHelp } from "@/components/templates/template-scope-help";
+import { TemplateStudioToolbar } from "@/components/templates/template-studio-toolbar";
 
 type StarterTemplate = RouterOutputs["template"]["starterPack"]["items"][number];
+
+const TEMPLATE_CARD_ACCENT: Record<string, string> = {
+  OUTREACH: "templates-catalog-accent-outreach",
+  FOLLOW_UP: "templates-catalog-accent-followup",
+  PROPOSAL: "templates-catalog-accent-proposal",
+  REPORT: "templates-catalog-accent-report",
+  BOOKING: "templates-catalog-accent-booking",
+  REVIEW: "templates-catalog-accent-review",
+  REENGAGEMENT: "templates-catalog-accent-reengagement",
+  CUSTOM: "templates-catalog-accent-custom",
+};
+
+function templateExcerpt(template: { description?: string | null; cleanBody?: string | null }) {
+  const raw = (template.description?.trim() || template.cleanBody?.trim() || "").replace(/\s+/g, " ");
+  if (!raw) return "Geen preview beschikbaar";
+  return raw.length > 120 ? `${raw.slice(0, 117)}…` : raw;
+}
+
 export default function TemplatesPage() {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<TemplateType | "ALL">("ALL");
   const [campaignFilterId, setCampaignFilterId] = useState("");
@@ -52,6 +67,9 @@ export default function TemplatesPage() {
   const { data, isLoading } = trpc.template.list.useQuery({
     type: typeFilter === "ALL" ? undefined : typeFilter,
     search: search.trim() || undefined,
+    campaignId: campaignFilterId || undefined,
+  });
+  const { data: countData } = trpc.template.list.useQuery({
     campaignId: campaignFilterId || undefined,
   });
   const { data: starterPack } = trpc.template.starterPack.useQuery(undefined, {
@@ -90,11 +108,15 @@ export default function TemplatesPage() {
     : "";
 
   const templates = data?.templates || [];
-  const layoutAccent = useMemo(
-    () => Object.fromEntries(LAYOUT_CATALOG.map((l) => [l.id, l.accent])) as Record<string, string>,
-    [],
-  );
-
+  const typeCounts = useMemo(() => {
+    const items = countData?.templates ?? [];
+    const counts: Partial<Record<TemplateType | "ALL", number>> = { ALL: items.length };
+    for (const template of items) {
+      const key = template.type as TemplateType;
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }, [countData?.templates]);
   function openCreate(fromStarter?: StarterTemplate) {
     setForm(fromStarter ? starterToForm(fromStarter) : { ...EMPTY_STUDIO_FORM });
     setEditorOpen(true);
@@ -105,8 +127,12 @@ export default function TemplatesPage() {
     setEditorOpen(true);
   }
 
+  function openOutbound(templateId: string) {
+    router.push(`/contacts/compose?templateId=${templateId}`);
+  }
+
   return (
-    <div className="app-page">
+    <div className="app-page space-y-4">
       <div className="app-page-header">
         <div className="app-page-heading">
           <h1 className="app-page-title">Template Studio</h1>
@@ -134,6 +160,12 @@ export default function TemplatesPage() {
           >
             <Sparkles className="mr-2 h-4 w-4" />
             {seedPack.isPending ? "Laden..." : "Starter pack"}
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/contacts/compose">
+              <Send className="mr-2 h-4 w-4" />
+              Outbound opstellen
+            </Link>
           </Button>
           <Button size="sm" onClick={() => openCreate()}>
             <Plus className="mr-2 h-4 w-4" />
@@ -164,75 +196,50 @@ export default function TemplatesPage() {
 
       <TemplateScopeHelp variant="studio" />
 
-      <div className="flex flex-col gap-4 lg:flex-row">
-        <aside className="lg:w-56 shrink-0 space-y-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              placeholder="Zoek templates..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              Campagne-filter
-            </p>
-            <Select
-              value={campaignFilterId || "all"}
-              onValueChange={(value) => setCampaignFilterId(value === "all" ? "" : value)}
-            >
-              <SelectTrigger className="h-9" data-testid="template-campaign-filter">
-                <SelectValue placeholder="Alle templates" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Alle campagnes + globaal</SelectItem>
-                {(campaigns ?? []).map((campaign: { id: string; name: string }) => (
-                  <SelectItem key={campaign.id} value={campaign.id}>
-                    {campaign.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex flex-wrap gap-1.5 lg:flex-col">
-            <Button
-              variant={typeFilter === "ALL" ? "default" : "outline"}
-              size="sm"
-              className="justify-start"
-              onClick={() => setTypeFilter("ALL")}
-            >
-              Alles ({data?.total ?? 0})
-            </Button>
-            {TEMPLATE_TYPES.map((entry) => (
-              <Button
-                key={entry.id}
-                variant={typeFilter === entry.id ? "default" : "outline"}
-                size="sm"
-                className="justify-start"
-                onClick={() => setTypeFilter(entry.id)}
-              >
-                {entry.label}
-              </Button>
-            ))}
-          </div>
+      <div className="templates-studio-layout">
+        <aside className="templates-studio-sidebar">
+          <TemplateStudioToolbar
+            variant="sidebar"
+            search={search}
+            onSearchChange={setSearch}
+            campaignFilterId={campaignFilterId}
+            onCampaignFilterChange={setCampaignFilterId}
+            campaigns={campaigns ?? []}
+            typeFilter={typeFilter}
+            onTypeFilterChange={setTypeFilter}
+            typeCounts={typeCounts}
+          />
         </aside>
 
-        <div className="min-w-0 flex-1 space-y-4">
+        <section className="templates-studio-main" aria-label="Opgeslagen templates">
+          <div className="templates-studio-main-header">
+            <div>
+              <p className="templates-studio-main-title">Bibliotheek</p>
+              <p className="templates-studio-main-meta">
+                {isLoading
+                  ? "Templates laden…"
+                  : `${templates.length} template${templates.length === 1 ? "" : "s"} in deze selectie`}
+              </p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => openCreate()}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Nieuw
+            </Button>
+          </div>
+
           {isLoading ? (
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-52 rounded-2xl" />
+            <div className="templates-catalog-grid">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-44 rounded-xl" />
               ))}
             </div>
           ) : templates.length === 0 ? (
-            <Card className="app-surface">
-              <CardContent className="py-8">
+            <Card className="border-border/60 bg-card/95">
+              <CardContent className="py-10">
                 <EmptyState
                   icon={<Library />}
                   title="Nog geen templates"
-                  description="Start met het starter pack of maak je eerste unieke template."
+                  description="Start met het starter pack hieronder of maak je eerste template."
                   action={
                     <div className="flex flex-wrap justify-center gap-2">
                       <Button variant="outline" onClick={() => seedPack.mutate()} disabled={seedPack.isPending}>
@@ -249,102 +256,128 @@ export default function TemplatesPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="templates-catalog-grid">
               {templates.map((template) => (
-                <Card
+                <article
                   key={template.id}
-                  className="group cursor-pointer overflow-hidden border-border/60 transition-shadow hover:shadow-md"
+                  className={cn(
+                    "group templates-catalog-card",
+                    TEMPLATE_CARD_ACCENT[template.type] ?? TEMPLATE_CARD_ACCENT.CUSTOM,
+                  )}
                   onClick={() => openEdit(template)}
                 >
-                  <div className={`h-1.5 bg-gradient-to-r ${layoutAccent[template.layout] || "from-slate-400 to-slate-600"}`} />
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="font-medium truncate">{template.name}</p>
-                        <p className="mt-1 text-xs text-muted-foreground line-clamp-1">{template.subject}</p>
+                  <div className="templates-catalog-card-accent" aria-hidden="true" />
+                  <div className="templates-catalog-card-body">
+                    <div className="templates-catalog-card-header">
+                      <span className="templates-catalog-card-icon" aria-hidden>
+                        <LayoutTemplate className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="templates-catalog-card-title">{template.name}</h3>
+                        <p className="templates-catalog-card-subject">{template.subject}</p>
                       </div>
-                      <LayoutTemplate className="h-4 w-4 shrink-0 text-muted-foreground" />
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      <Badge variant="outline" className="text-[10px]">
-                        {templateTypeLabel(template.type)}
-                      </Badge>
-                      <Badge variant="secondary" className="text-[10px]">
+
+                    <div className="templates-catalog-tags">
+                      <span className="templates-catalog-tag">{templateTypeLabel(template.type)}</span>
+                      <span className="templates-catalog-tag templates-catalog-tag-muted">
                         {template.layout}
-                      </Badge>
+                      </span>
+                      {template.bodyFormat === "HTML" ? (
+                        <span className="templates-catalog-tag templates-catalog-tag-muted">HTML</span>
+                      ) : null}
                       {template.ctaText ? (
-                        <Badge className="text-[10px]">CTA</Badge>
-                      ) : null}
-                      {template.isGlobal ? (
-                        <Badge variant="outline" className="text-[10px]">
-                          Alle campagnes
-                        </Badge>
+                        <span className="templates-catalog-tag templates-catalog-tag-cta">CTA</span>
                       ) : null}
                     </div>
-                    {template.description ? (
-                      <p className="mt-2 text-xs text-muted-foreground line-clamp-2">{template.description}</p>
-                    ) : (
-                      <p className="mt-2 text-xs text-muted-foreground line-clamp-2">{template.cleanBody}</p>
-                    )}
-                    {template.campaign ? (
-                      <Badge variant="outline" className="mt-2 text-[10px]">
-                        {template.campaign.name}
-                      </Badge>
-                    ) : null}
-                    <div className="mt-3 flex items-center justify-between">
-                      <span className="text-[10px] text-muted-foreground">{formatDate(template.updatedAt)}</span>
-                      <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            duplicate.mutate({ id: template.id });
-                          }}
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (confirm("Template verwijderen?")) remove.mutate({ id: template.id });
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                        </Button>
-                      </div>
+
+                    <div className="templates-catalog-preview">
+                      <p>{templateExcerpt(template)}</p>
                     </div>
-                  </CardContent>
-                </Card>
+
+                    <div className="templates-catalog-meta">
+                      <span>{formatDate(template.updatedAt)}</span>
+                      {template.campaign ? (
+                        <span className="templates-catalog-meta-badge">{template.campaign.name}</span>
+                      ) : template.isGlobal ? (
+                        <span className="templates-catalog-meta-badge">Globaal</span>
+                      ) : null}
+                    </div>
+
+                    <div
+                      className="templates-catalog-card-actions"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      role="presentation"
+                    >
+                      <Button
+                        size="sm"
+                        className="templates-catalog-outbound-btn h-8 flex-1 px-3 text-xs sm:flex-none"
+                        onClick={() => openOutbound(template.id)}
+                      >
+                        <Send className="mr-1.5 h-3.5 w-3.5" />
+                        Outbound
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        className="templates-catalog-icon-btn h-8 w-8"
+                        title="Dupliceren"
+                        onClick={() => duplicate.mutate({ id: template.id })}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        className="templates-catalog-icon-btn templates-catalog-icon-btn-danger h-8 w-8"
+                        title="Verwijderen"
+                        onClick={() => {
+                          if (confirm("Template verwijderen?")) remove.mutate({ id: template.id });
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                </article>
               ))}
             </div>
           )}
-
-          <Card className="app-surface">
-            <CardContent className="p-4">
-              <p className="mb-3 text-sm font-medium">Snel starten — unieke starter templates</p>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                {(starterPack?.items ?? []).map((starter) => (
-                  <button
-                    key={starter.name}
-                    type="button"
-                    onClick={() => openCreate(starter)}
-                    className="rounded-xl border border-border/60 bg-background/45 p-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/5"
-                  >
-                    <div className={`mb-2 h-1 rounded-full bg-gradient-to-r ${layoutAccent[starter.layout]}`} />
-                    <p className="text-sm font-medium">{starter.name}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{starter.description}</p>
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        </section>
       </div>
+
+      <section className="templates-studio-starter" aria-label="Starter templates">
+        <div className="templates-studio-starter-header">
+          <div>
+            <p className="templates-studio-starter-title">Snel starten</p>
+            <p className="templates-studio-starter-sub">
+              Unieke starter templates — elk met eigen layout en copy
+            </p>
+          </div>
+          <Badge variant="outline" className="text-[10px] font-medium uppercase tracking-wide">
+            Starter pack
+          </Badge>
+        </div>
+        <div className="templates-studio-starter-body">
+          <div className="templates-starter-grid">
+            {(starterPack?.items ?? []).map((starter) => (
+              <button
+                key={starter.name}
+                type="button"
+                onClick={() => openCreate(starter)}
+                className="templates-starter-card"
+              >
+                <p className="text-sm font-semibold leading-snug text-foreground">{starter.name}</p>
+                <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{starter.description}</p>
+                <p className="templates-starter-card-meta">
+                  {templateTypeLabel(starter.type)} · {starter.layout}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
 
       <TemplateStudioEditor
         open={editorOpen}

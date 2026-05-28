@@ -28,6 +28,25 @@ describe("email layout parity", () => {
     });
   }
 
+  it("produces structurally different HTML per layout", () => {
+    const htmlByLayout = Object.fromEntries(
+      layouts.map((layout) => [layout, generateLayout(layout, baseOptions)]),
+    ) as Record<(typeof layouts)[number], string>;
+
+    expect(htmlByLayout.modern).toContain("UPDATE");
+    expect(htmlByLayout.minimal).toContain("Georgia");
+    expect(htmlByLayout.business).toContain("Betreft:");
+    expect(htmlByLayout.proposal).toContain("OFFERTE");
+    expect(htmlByLayout.followup).toContain("Follow-up");
+
+    for (const left of layouts) {
+      for (const right of layouts) {
+        if (left === right) continue;
+        expect(htmlByLayout[left]).not.toBe(htmlByLayout[right]);
+      }
+    }
+  });
+
   it("sanitizes unsafe CTA urls in output", () => {
     const html = generateBrandedHtml({
       ...baseOptions,

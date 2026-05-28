@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ComponentType, type ReactNode } from "react";
 import { trpc } from "@/lib/trpc/client";
 import Link from "next/link";
 import {
@@ -12,13 +12,11 @@ import {
   CardDescription,
   Input,
   Label,
-  Separator,
   Switch,
   Skeleton,
   Textarea,
 } from "@digitify/ui";
 import {
-  MessageSquare,
   Copy,
   Check,
   Palette,
@@ -30,10 +28,75 @@ import {
   Save,
   Loader2,
   ArrowLeft,
+  ChevronDown,
+  Zap,
+  MessageSquare,
+  Bot,
+  Paintbrush,
 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
 import { getAppUrl } from "@/lib/config";
 import { readSettingBoolean, readSettingString } from "@/lib/settings";
+import { cn } from "@/lib/utils";
+
+type SettingsSectionId = "behavior" | "messages" | "ai" | "appearance" | "embed";
+
+function CollapsibleSection({
+  id,
+  title,
+  description,
+  icon: Icon,
+  open,
+  onToggle,
+  children,
+  trailing,
+}: {
+  id: SettingsSectionId;
+  title: string;
+  description: string;
+  icon: ComponentType<{ className?: string }>;
+  open: boolean;
+  onToggle: (id: SettingsSectionId) => void;
+  children: ReactNode;
+  trailing?: ReactNode;
+}) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-border/55 bg-card/50">
+      <button
+        type="button"
+        id={`chatbot-section-${id}`}
+        aria-expanded={open}
+        aria-controls={`chatbot-section-panel-${id}`}
+        onClick={() => onToggle(id)}
+        className="flex w-full items-start gap-3 p-4 text-left transition-colors hover:bg-muted/30"
+      >
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold tracking-tight">{title}</p>
+            {trailing}
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+        </div>
+        <ChevronDown
+          className={cn("mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
+        />
+      </button>
+      {open ? (
+        <div
+          id={`chatbot-section-panel-${id}`}
+          role="region"
+          aria-labelledby={`chatbot-section-${id}`}
+          className="space-y-4 border-t border-border/50 px-4 pb-4 pt-3"
+        >
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function normalizeHexColor(value: string, fallback = "#f9ae5a") {
   const trimmed = value.trim();
@@ -90,7 +153,18 @@ export default function ChatbotSettingsPage() {
   const [botLanguage, setBotLanguage] = useState("Nederlands");
   const [copiedMode, setCopiedMode] = useState<"script" | "iframe" | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [openSections, setOpenSections] = useState<Record<SettingsSectionId, boolean>>({
+    behavior: true,
+    messages: false,
+    ai: false,
+    appearance: false,
+    embed: false,
+  });
   const hydratedRef = useRef(false);
+
+  function toggleSection(id: SettingsSectionId) {
+    setOpenSections((current) => ({ ...current, [id]: !current[id] }));
+  }
 
   useEffect(() => {
     if (!settings || hydratedRef.current) return;
@@ -228,243 +302,242 @@ export default function ChatbotSettingsPage() {
           Chatbot Instellingen
         </h1>
         <p className="text-sm text-muted-foreground">
-          Configureer en beheer chatbot widgets voor klantwebsites
+          Open een sectie om instellingen aan te passen — niet alles tegelijk op het scherm.
         </p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Widget Instellingen */}
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
               <Settings2 className="h-4 w-4" />
               Widget Instellingen
             </CardTitle>
             <CardDescription>
-              Pas het uiterlijk en gedrag van de chatbot widget aan
+              Gedrag, teksten, AI en uiterlijk — per onderdeel uitklapbaar.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-5">
-            {/* Active toggle */}
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div>
-                <Label>Chatbot Actief</Label>
-                <p className="text-xs text-muted-foreground">
-                  Schakel de chatbot widget in of uit
-                </p>
+          <CardContent className="space-y-3">
+            <CollapsibleSection
+              id="behavior"
+              title="Gedrag & status"
+              description="Aan/uit, automatisering en widgetpositie op de site."
+              icon={Zap}
+              open={openSections.behavior}
+              onToggle={toggleSection}
+              trailing={
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                    enabled ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {enabled ? "Actief" : "Uit"}
+                </span>
+              }
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <Label>Chatbot actief</Label>
+                    <p className="text-xs text-muted-foreground">Schakel de widget in of uit.</p>
+                  </div>
+                  <Switch checked={enabled} onCheckedChange={setEnabled} />
+                </div>
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <Label>Automatische berichten</Label>
+                    <p className="text-xs text-muted-foreground">Bot antwoordt zelfstandig tijdens gesprekken.</p>
+                  </div>
+                  <Switch checked={autoMessagesEnabled} onCheckedChange={setAutoMessagesEnabled} />
+                </div>
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <Label>AI-antwoorden</Label>
+                    <p className="text-xs text-muted-foreground">Gebruik training/context voor slimmere antwoorden.</p>
+                  </div>
+                  <Switch checked={aiResponsesEnabled} onCheckedChange={setAiResponsesEnabled} />
+                </div>
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <Label>Naam vóór start chat</Label>
+                    <p className="text-xs text-muted-foreground">Vraag eerst de naam van de bezoeker.</p>
+                  </div>
+                  <Switch checked={askNameBeforeChat} onCheckedChange={setAskNameBeforeChat} />
+                </div>
               </div>
-              <Switch checked={enabled} onCheckedChange={setEnabled} />
-            </div>
-
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div>
-                <Label>Automatische berichten</Label>
-                <p className="text-xs text-muted-foreground">
-                  Laat de bot zelfstandig antwoorden tijdens bezoekersgesprekken.
-                </p>
-              </div>
-              <Switch checked={autoMessagesEnabled} onCheckedChange={setAutoMessagesEnabled} />
-            </div>
-
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div>
-                <Label>AI antwoorden</Label>
-                <p className="text-xs text-muted-foreground">
-                  Gebruik training/context om slimmere antwoorden terug te sturen.
-                </p>
-              </div>
-              <Switch checked={aiResponsesEnabled} onCheckedChange={setAiResponsesEnabled} />
-            </div>
-
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div>
-                <Label>Naam opvragen vóór start chat</Label>
-                <p className="text-xs text-muted-foreground">
-                  Vraag eerst de naam van de bezoeker vóór het eerste bericht.
-                </p>
-              </div>
-              <Switch checked={askNameBeforeChat} onCheckedChange={setAskNameBeforeChat} />
-            </div>
-
-            {/* Company name */}
-            <div className="space-y-2">
-              <Label htmlFor="companyName">Bedrijfsnaam</Label>
-              <Input
-                id="companyName"
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-                placeholder="bv. Mijn Bedrijf"
-              />
-              <p className="text-xs text-muted-foreground">
-                Wordt getoond in de widget header
-              </p>
-            </div>
-
-            {/* Welcome message */}
-            <div className="space-y-2">
-              <Label htmlFor="welcomeMessage">Welkomstbericht</Label>
-              <Textarea
-                id="welcomeMessage"
-                value={welcomeMessage}
-                onChange={(e) => setWelcomeMessage(e.target.value)}
-                rows={2}
-                placeholder="Hallo! Hoe kan ik u helpen?"
-              />
-            </div>
-
-            {/* Offline message */}
-            <div className="space-y-2">
-              <Label htmlFor="offlineMessage">Offline bericht</Label>
-              <Textarea
-                id="offlineMessage"
-                value={offlineMessage}
-                onChange={(e) => setOfflineMessage(e.target.value)}
-                rows={2}
-                placeholder="We zijn momenteel offline..."
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="trainingNotes">Bot training / context</Label>
-              <Textarea
-                id="trainingNotes"
-                value={trainingNotes}
-                onChange={(e) => setTrainingNotes(e.target.value)}
-                rows={4}
-                placeholder="Welke diensten bied je aan, welke antwoorden moeten altijd terugkomen, welke tone of voice verwacht je?"
-              />
-              <p className="text-xs text-muted-foreground">
-                Beschrijf kort wat jullie doen, welke klanten jullie helpen en welke antwoorden de bot moet prioriteren.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="knowledgePages">Belangrijke pagina's / bronnen</Label>
-              <Textarea
-                id="knowledgePages"
-                value={knowledgePages}
-                onChange={(e) => setKnowledgePages(e.target.value)}
-                rows={3}
-                placeholder="Bijv. /diensten, /prijzen, /faq of volledige URLs (1 per lijn)"
-              />
-              <p className="text-xs text-muted-foreground">
-                Deze pagina's worden als kenniscontext gebruikt bij AI-antwoorden.
-              </p>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="responseStyle">Antwoordstijl</Label>
+                <Label>Positie op pagina</Label>
+                <div className="flex flex-wrap gap-3">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="radio"
+                      name="position"
+                      value="bottom-right"
+                      checked={position === "bottom-right"}
+                      onChange={() => setPosition("bottom-right")}
+                      className="accent-primary"
+                    />
+                    <span className="text-sm">Rechts onder</span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="radio"
+                      name="position"
+                      value="bottom-left"
+                      checked={position === "bottom-left"}
+                      onChange={() => setPosition("bottom-left")}
+                      className="accent-primary"
+                    />
+                    <span className="text-sm">Links onder</span>
+                  </label>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="autoOpenDelay">Auto-open vertraging (seconden)</Label>
                 <Input
-                  id="responseStyle"
-                  value={responseStyle}
-                  onChange={(e) => setResponseStyle(e.target.value)}
-                  placeholder="Professioneel, kort en duidelijk"
+                  id="autoOpenDelay"
+                  type="number"
+                  min="0"
+                  max="120"
+                  value={autoOpenDelay}
+                  onChange={(e) => setAutoOpenDelay(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">0 = niet automatisch openen.</p>
+              </div>
+            </CollapsibleSection>
+
+            <CollapsibleSection
+              id="messages"
+              title="Berichten"
+              description="Bedrijfsnaam, welkomst- en offlinebericht."
+              icon={MessageSquare}
+              open={openSections.messages}
+              onToggle={toggleSection}
+            >
+              <div className="space-y-2">
+                <Label htmlFor="companyName">Bedrijfsnaam</Label>
+                <Input
+                  id="companyName"
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  placeholder="bv. Mijn Bedrijf"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="botLanguage">Standaardtaal</Label>
-                <Input
-                  id="botLanguage"
-                  value={botLanguage}
-                  onChange={(e) => setBotLanguage(e.target.value)}
-                  placeholder="Nederlands"
+                <Label htmlFor="welcomeMessage">Welkomstbericht</Label>
+                <Textarea
+                  id="welcomeMessage"
+                  value={welcomeMessage}
+                  onChange={(e) => setWelcomeMessage(e.target.value)}
+                  rows={2}
+                  placeholder="Hallo! Hoe kan ik u helpen?"
                 />
               </div>
-            </div>
-
-            <Separator />
-
-            {/* Primary color */}
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <Palette className="h-4 w-4" />
-                Hoofdkleur
-              </Label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="color"
-                  value={safePrimaryColor}
-                  onChange={(e) => setPrimaryColor(e.target.value)}
-                  className="h-10 w-14 cursor-pointer rounded border border-input"
-                />
-                <Input
-                  value={primaryColor}
-                  onChange={(e) => setPrimaryColor(e.target.value)}
-                  className="w-32 font-mono text-sm"
-                  placeholder="#f9ae5a"
+              <div className="space-y-2">
+                <Label htmlFor="offlineMessage">Offline bericht</Label>
+                <Textarea
+                  id="offlineMessage"
+                  value={offlineMessage}
+                  onChange={(e) => setOfflineMessage(e.target.value)}
+                  rows={2}
+                  placeholder="We zijn momenteel offline..."
                 />
               </div>
-            </div>
+            </CollapsibleSection>
 
-            {/* Position */}
-            <div className="space-y-2">
-              <Label>Positie</Label>
-              <div className="flex gap-3">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="position"
-                    value="bottom-right"
-                    checked={position === "bottom-right"}
-                    onChange={() => setPosition("bottom-right")}
-                    className="accent-primary"
+            <CollapsibleSection
+              id="ai"
+              title="AI & training"
+              description="Context, bronnen en antwoordstijl voor de bot."
+              icon={Bot}
+              open={openSections.ai}
+              onToggle={toggleSection}
+            >
+              <div className="space-y-2">
+                <Label htmlFor="trainingNotes">Bot training / context</Label>
+                <Textarea
+                  id="trainingNotes"
+                  value={trainingNotes}
+                  onChange={(e) => setTrainingNotes(e.target.value)}
+                  rows={4}
+                  placeholder="Welke diensten bied je aan, welke tone of voice verwacht je?"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="knowledgePages">Belangrijke pagina&apos;s / bronnen</Label>
+                <Textarea
+                  id="knowledgePages"
+                  value={knowledgePages}
+                  onChange={(e) => setKnowledgePages(e.target.value)}
+                  rows={3}
+                  placeholder="Bijv. /diensten, /prijzen (1 per lijn)"
+                />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="responseStyle">Antwoordstijl</Label>
+                  <Input
+                    id="responseStyle"
+                    value={responseStyle}
+                    onChange={(e) => setResponseStyle(e.target.value)}
+                    placeholder="Professioneel, kort en duidelijk"
                   />
-                  <span className="text-sm">Rechts onder</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="position"
-                    value="bottom-left"
-                    checked={position === "bottom-left"}
-                    onChange={() => setPosition("bottom-left")}
-                    className="accent-primary"
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="botLanguage">Standaardtaal</Label>
+                  <Input
+                    id="botLanguage"
+                    value={botLanguage}
+                    onChange={(e) => setBotLanguage(e.target.value)}
+                    placeholder="Nederlands"
                   />
-                  <span className="text-sm">Links onder</span>
-                </label>
+                </div>
               </div>
-            </div>
+            </CollapsibleSection>
 
-            {/* Auto-open delay */}
-            <div className="space-y-2">
-              <Label htmlFor="autoOpenDelay">Auto-open vertraging (seconden)</Label>
-              <Input
-                id="autoOpenDelay"
-                type="number"
-                min="0"
-                max="120"
-                value={autoOpenDelay}
-                onChange={(e) => setAutoOpenDelay(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                0 = niet automatisch openen
-              </p>
-            </div>
-
-            {/* Avatar URL */}
-            <div className="space-y-2">
-              <Label htmlFor="avatarUrl">Bot avatar URL</Label>
-              <Input
-                id="avatarUrl"
-                value={avatarUrl}
-                onChange={(e) => setAvatarUrl(e.target.value)}
-                placeholder="https://voorbeeld.be/avatar.png"
-              />
-            </div>
-
-            <Button onClick={handleSave} disabled={batchUpdate.isPending} className="w-full">
-              {batchUpdate.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="mr-2 h-4 w-4" />
-              )}
-              Instellingen Opslaan
-            </Button>
+            <CollapsibleSection
+              id="appearance"
+              title="Uiterlijk"
+              description="Kleur en avatar van de chatbubble."
+              icon={Paintbrush}
+              open={openSections.appearance}
+              onToggle={toggleSection}
+            >
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <Palette className="h-4 w-4" />
+                  Hoofdkleur
+                </Label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={safePrimaryColor}
+                    onChange={(e) => setPrimaryColor(e.target.value)}
+                    className="h-10 w-14 cursor-pointer rounded border border-input"
+                  />
+                  <Input
+                    value={primaryColor}
+                    onChange={(e) => setPrimaryColor(e.target.value)}
+                    className="w-32 font-mono text-sm"
+                    placeholder="#f9ae5a"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="avatarUrl">Bot avatar URL</Label>
+                <Input
+                  id="avatarUrl"
+                  value={avatarUrl}
+                  onChange={(e) => setAvatarUrl(e.target.value)}
+                  placeholder="https://voorbeeld.be/avatar.png"
+                />
+              </div>
+            </CollapsibleSection>
           </CardContent>
         </Card>
 
-        <div className="space-y-5">
+        <div className="space-y-4 lg:sticky lg:top-6">
           {/* Voorbeeld */}
           <Card>
             <CardHeader>
@@ -562,13 +635,27 @@ export default function ChatbotSettingsPage() {
                     </div>
                   )}
 
-                  {/* Bubble button */}
+                  {/* Bubble button — matches embed widget.js launcher */}
                   <button
+                    type="button"
                     onClick={() => setPreviewOpen(!previewOpen)}
-                    className="flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105"
-                    style={{ backgroundColor: safePrimaryColor }}
+                    aria-label="Open chatbot"
+                    aria-expanded={previewOpen}
+                    className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full border-0 text-lg font-bold text-white transition-transform hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                    style={{
+                      backgroundColor: safePrimaryColor,
+                      boxShadow: "0 16px 42px rgba(15, 23, 42, 0.28)",
+                    }}
                   >
-                    <MessageSquare className="h-6 w-6 text-white" />
+                    {avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt={companyName || "Chatbot"}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      (companyName || "D").charAt(0).toUpperCase()
+                    )}
                   </button>
                 </div>
 
@@ -585,78 +672,84 @@ export default function ChatbotSettingsPage() {
             </CardContent>
           </Card>
 
-          {/* Embed Code */}
           <Card>
-            <CardHeader>
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Code2 className="h-4 w-4" />
-                Embed Code
-              </CardTitle>
-              <CardDescription>
-                Gebruik het script voor een zwevende widget. Als de site scripts blokkeert of de widget niet toont,
-                gebruik dan de iframe-versie hieronder.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="relative">
-                <pre className="rounded-lg bg-muted p-4 text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all">
-                  {embedCode}
-                </pre>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="absolute top-2 right-2"
-                  onClick={() => handleCopy(embedCode, "script")}
-                >
-                  {copiedMode === "script" ? (
-                    <>
-                      <Check className="mr-1 h-3 w-3" />
-                      Gekopieerd
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="mr-1 h-3 w-3" />
-                      Kopieer
-                    </>
-                  )}
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                De widget wordt automatisch geladen wanneer de pagina wordt
-                geopend. Pas de instellingen hierboven aan om het gedrag te
-                wijzigen.
-              </p>
-
-              <div className="relative">
-                <pre className="rounded-lg bg-muted p-4 text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all">
-                  {iframeCode}
-                </pre>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="absolute top-2 right-2"
-                  onClick={() => handleCopy(iframeCode, "iframe")}
-                >
-                  {copiedMode === "iframe" ? (
-                    <>
-                      <Check className="mr-1 h-3 w-3" />
-                      Gekopieerd
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="mr-1 h-3 w-3" />
-                      Kopieer iframe
-                    </>
-                  )}
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                De iframe-variant is het veiligst als een externe website strikte script- of CSP-regels gebruikt.
-              </p>
+            <CardContent className="p-3">
+              <CollapsibleSection
+                id="embed"
+                title="Embed-code"
+                description="Script of iframe voor op de klantwebsite."
+                icon={Code2}
+                open={openSections.embed}
+                onToggle={toggleSection}
+              >
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-foreground">Script (aanbevolen)</p>
+                    <div className="relative">
+                      <pre className="overflow-x-auto rounded-lg bg-muted p-4 text-xs font-mono whitespace-pre-wrap break-all">
+                        {embedCode}
+                      </pre>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="absolute right-2 top-2"
+                        onClick={() => handleCopy(embedCode, "script")}
+                      >
+                        {copiedMode === "script" ? (
+                          <>
+                            <Check className="mr-1 h-3 w-3" />
+                            Gekopieerd
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="mr-1 h-3 w-3" />
+                            Kopieer
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-foreground">Iframe (bij strikte CSP)</p>
+                    <div className="relative">
+                      <pre className="overflow-x-auto rounded-lg bg-muted p-4 text-xs font-mono whitespace-pre-wrap break-all">
+                        {iframeCode}
+                      </pre>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="absolute right-2 top-2"
+                        onClick={() => handleCopy(iframeCode, "iframe")}
+                      >
+                        {copiedMode === "iframe" ? (
+                          <>
+                            <Check className="mr-1 h-3 w-3" />
+                            Gekopieerd
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="mr-1 h-3 w-3" />
+                            Kopieer iframe
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </CollapsibleSection>
             </CardContent>
           </Card>
         </div>
       </div>
+
+      <Button onClick={handleSave} disabled={batchUpdate.isPending} className="shadow-sm">
+        {batchUpdate.isPending ? (
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        ) : (
+          <Save className="mr-2 h-4 w-4" />
+        )}
+        {batchUpdate.isPending ? "Opslaan..." : "Instellingen opslaan"}
+      </Button>
     </div>
   );
 }

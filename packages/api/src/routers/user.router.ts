@@ -3,6 +3,7 @@ import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
 import { ensureUserWorkspace } from "../lib/user-workspace";
+import { sendBrandedEmail } from "../lib/email-sender";
 import {
   assertWorkspaceMember,
   countWorkspaceOwners,
@@ -12,12 +13,20 @@ import {
 } from "../lib/workspace";
 import { passwordPolicySchema } from "../lib/password-policy";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
-import { loadUserSettingRows } from "../lib/user-settings";
+import { invalidateUserSettingsCache, loadUserSettingRows } from "../lib/user-settings";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(password, salt, 64).toString("hex");
   return `${salt}:${hash}`;
+}
+
+function appUrl() {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.NEXTAUTH_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
+  ).replace(/\/$/, "");
 }
 
 export function verifyPassword(password: string, storedHash: string): boolean {
@@ -215,32 +224,93 @@ export const userRouter = router({
       });
     }),
 
+  updateUserDetails: ownerProcedure
+    .input(
+      z.object({
+        userId: z.string(),
+        name: z.string().trim().min(1).max(120),
+        email: z.string().email(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      const normalizedEmail = input.email.trim().toLowerCase();
+      await assertWorkspaceMember(ctx.db, workspaceId, input.userId);
+
+      const existing = await ctx.db.user.findUnique({
+        where: { email: normalizedEmail },
+        select: { id: true },
+      });
+      if (existing && existing.id !== input.userId) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Er bestaat al een gebruiker met dit e-mailadres.",
+        });
+      }
+
+      return ctx.db.user.update({
+        where: { id: input.userId },
+        data: {
+          name: input.name.trim(),
+          email: normalizedEmail,
+        },
+      });
+    }),
+
   createUser: ownerProcedure
     .input(
       z.object({
         name: z.string().min(1),
         email: z.string().email(),
         password: passwordPolicySchema,
-        role: z.enum(["ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER", "VIEWER"]),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const existing = await ctx.db.user.findUnique({ where: { email: input.email } });
+      const email = input.email.trim().toLowerCase();
+      const existing = await ctx.db.user.findUnique({ where: { email } });
       if (existing) {
         throw new TRPCError({ code: "CONFLICT", message: "Er bestaat al een gebruiker met dit e-mailadres." });
       }
+      const existingRequest = await ctx.db.registrationRequest.findFirst({
+        where: {
+          email,
+          status: {
+            in: ["PENDING_EMAIL_VERIFICATION", "PENDING_APPROVAL"],
+          },
+        },
+        select: { id: true },
+      });
+      if (existingRequest) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Voor dit e-mailadres bestaat al een open uitnodiging.",
+        });
+      }
 
-      const workspaceOwnerId = ctx.user.workspaceId ?? ctx.user.id;
-      const user = await ctx.db.user.create({
+      const token = randomBytes(32).toString("hex");
+      await ctx.db.registrationRequest.create({
         data: {
           name: input.name,
-          email: input.email,
+          email,
           passwordHash: hashPassword(input.password),
-          role: input.role,
-          workspaceOwnerId,
+          requestedRole: "MEMBER",
+          status: "PENDING_EMAIL_VERIFICATION",
+          emailVerificationToken: token,
         },
       });
-      return user;
+
+      const verifyUrl = `${appUrl()}/register/verify?token=${token}`;
+      await sendBrandedEmail(ctx.db, {
+        toEmail: email,
+        subject: "Bevestig je team-uitnodiging voor Digitify Lead Finder",
+        body:
+          `Hallo ${input.name},\n\n` +
+          `Je bent uitgenodigd voor een team workspace in Digitify Lead Finder.\n` +
+          `Bevestig je e-mailadres via deze link:\n${verifyUrl}\n\n` +
+          `Na bevestiging kan je workspace-owner je account afronden als teamlid.\n\nDigitify`,
+      });
+
+      return { success: true };
     }),
 
   deleteUser: ownerProcedure
@@ -302,6 +372,7 @@ export const userRouter = router({
         update: { value },
         create: { key, value },
       });
+      invalidateUserSettingsCache(input.userId);
       return { success: true, disabled: next };
     }),
 

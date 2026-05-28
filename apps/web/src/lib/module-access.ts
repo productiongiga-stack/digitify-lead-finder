@@ -14,7 +14,7 @@ export const ROUTE_MODULE_RULES: Array<{ prefix: string; moduleId: string }> = [
   { prefix: "/domains", moduleId: "domains" },
   { prefix: "/reviews", moduleId: "reviews" },
   { prefix: "/chatbot", moduleId: "chatbot" },
-  { prefix: "/audit", moduleId: "audit" },
+  { prefix: "/audit", moduleId: "reports" },
 ];
 
 export function resolveModuleIdForPath(pathname: string): string | null {

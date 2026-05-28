@@ -157,6 +157,17 @@ function DnsCheckResult({
   );
 }
 
+function TabStatusDot({ configured }: { configured: boolean }) {
+  if (configured) return null;
+  return (
+    <span
+      className="settings-integrations-tab-dot"
+      title="Nog niet volledig geconfigureerd"
+      aria-label="Nog niet volledig geconfigureerd"
+    />
+  );
+}
+
 export default function IntegrationsSettingsPage() {
   const { data: settings, isLoading, error, refetch } = trpc.settings.getAll.useQuery(undefined, {
     retry: 1,
@@ -262,6 +273,10 @@ export default function IntegrationsSettingsPage() {
     || imapTls !== initialState.imapTls
     || Boolean(imapPass.trim());
   const anyDirty = googleDirty || aiDirty || smtpDirty || imapDirty;
+  const aiConfigured = anthropicConfigured || openaiConfigured || Boolean(anthropicKey.trim() || openaiKey.trim());
+  const googleOAuthConfigured = Boolean(
+    googleOAuthClientId.trim() && (googleOAuthClientSecret.trim() || googleOAuthSecretConfigured),
+  );
 
   function extractDomainFromEmail(value: string) {
     const candidate = value.trim().toLowerCase();
@@ -404,39 +419,28 @@ export default function IntegrationsSettingsPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-4">
-        <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Mail verzenden</p>
-            <p className="mt-2 text-sm font-medium">{smtpConfigured ? "SMTP lijkt ingevuld en klaar voor tests." : "SMTP is nog niet volledig geconfigureerd."}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Inbox</p>
-            <p className="mt-2 text-sm font-medium">{imapConfigured ? "IMAP is ingevuld zodat de inbox mails kan ophalen." : "IMAP ontbreekt nog of is onvolledig."}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-violet-200 bg-violet-50/80 shadow-sm dark:border-violet-900/40 dark:bg-violet-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">AI providers</p>
-            <p className="mt-2 text-sm font-medium">{anthropicConfigured || openaiConfigured ? "Minstens één AI-provider is ingesteld." : "Nog geen AI-provider geconfigureerd."}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Wijzigingen</p>
-            <p className="mt-2 text-sm font-medium">{anyDirty ? "Er zijn niet-opgeslagen aanpassingen." : "Alles is opgeslagen."}</p>
-          </CardContent>
-        </Card>
-      </div>
-
       <Tabs defaultValue="providers" className="space-y-4">
-        <TabsList className="grid h-10 w-full grid-cols-4 rounded-full bg-muted/60 p-1">
-          <TabsTrigger value="providers">API & AI</TabsTrigger>
-          <TabsTrigger value="calendar">Google OAuth</TabsTrigger>
-          <TabsTrigger value="mail">SMTP & DNS</TabsTrigger>
-          <TabsTrigger value="inbox">Inbox (IMAP)</TabsTrigger>
+        <TabsList className="settings-integrations-tabs">
+          <TabsTrigger value="providers" className="settings-integrations-tab">
+            <Bot className="settings-integrations-tab-icon" aria-hidden />
+            <span className="settings-integrations-tab-label">API &amp; AI</span>
+            <TabStatusDot configured={aiConfigured} />
+          </TabsTrigger>
+          <TabsTrigger value="calendar" className="settings-integrations-tab">
+            <CalendarDays className="settings-integrations-tab-icon" aria-hidden />
+            <span className="settings-integrations-tab-label">Google OAuth</span>
+            <TabStatusDot configured={googleOAuthConfigured} />
+          </TabsTrigger>
+          <TabsTrigger value="mail" className="settings-integrations-tab">
+            <Mail className="settings-integrations-tab-icon" aria-hidden />
+            <span className="settings-integrations-tab-label">SMTP &amp; DNS</span>
+            <TabStatusDot configured={smtpConfigured} />
+          </TabsTrigger>
+          <TabsTrigger value="inbox" className="settings-integrations-tab">
+            <Inbox className="settings-integrations-tab-icon" aria-hidden />
+            <span className="settings-integrations-tab-label">Inbox (IMAP)</span>
+            <TabStatusDot configured={imapConfigured} />
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="providers" className="space-y-4">
@@ -514,35 +518,35 @@ export default function IntegrationsSettingsPage() {
 
         {/* AI API keys */}
         <Card>
-          <CardHeader>
+          <CardHeader className="space-y-3">
+            <div className="flex justify-end">
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/settings/ai">
+                  <Settings2 className="mr-1.5 h-3.5 w-3.5" />
+                  AI Instellingen
+                </Link>
+              </Button>
+            </div>
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/10">
                 <Bot className="h-5 w-5 text-purple-500" />
               </div>
-              <div>
+              <div className="min-w-0 flex-1">
                 <CardTitle className="text-base">AI API Keys</CardTitle>
                 <CardDescription className="text-xs">
-                  Sleutels voor AI-connectie. Provider/model stel je in bij AI Assistent.
+                  Sleutels voor AI-connectie. Provider en model stel je in via AI Instellingen.
                 </CardDescription>
               </div>
               {anthropicConfigured || openaiConfigured || Boolean(anthropicKey.trim()) || Boolean(openaiKey.trim()) ? (
-                <Badge variant="success" className="ml-auto"><CheckCircle className="mr-1 h-3 w-3" /> Actief</Badge>
+                <Badge variant="success" className="shrink-0"><CheckCircle className="mr-1 h-3 w-3" /> Actief</Badge>
               ) : (
-                <Badge variant="secondary" className="ml-auto"><XCircle className="mr-1 h-3 w-3" /> Niet geconfigureerd</Badge>
+                <Badge variant="secondary" className="shrink-0"><XCircle className="mr-1 h-3 w-3" /> Niet geconfigureerd</Badge>
               )}
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2 rounded-md border bg-muted/30 p-3">
-              <div className="flex items-center justify-between">
-                <Label>Anthropic API Key</Label>
-                <Button variant="ghost" size="sm" asChild>
-                  <Link href="/settings/ai">
-                    <Settings2 className="mr-1 h-3.5 w-3.5" />
-                    AI Instellingen
-                  </Link>
-                </Button>
-              </div>
+              <Label>Anthropic API Key</Label>
               <div className="relative">
                 <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input

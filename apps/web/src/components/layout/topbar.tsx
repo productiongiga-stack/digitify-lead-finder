@@ -28,7 +28,7 @@ export function Topbar() {
   const pathname = usePathname();
   const { toggleOpenClaw, toggleMobileSidebar } = useUIStore();
   const { branding } = useBranding();
-  const { data: topbarStats } = trpc.contact.getTopbarStats.useQuery(undefined, {
+  const { data: attentionSummary } = trpc.dashboard.getAttentionSummary.useQuery(undefined, {
     staleTime: 60_000,
     refetchInterval: 60_000,
     refetchOnWindowFocus: false,
@@ -47,7 +47,7 @@ export function Topbar() {
     .toUpperCase() || displayEmail.slice(0, 1).toUpperCase() || "U";
 
   const pageTitle = resolvePageTitle(pathname, branding.companyName);
-  const followUpCount = topbarStats?.followUpCount ?? 0;
+  const attentionCount = attentionSummary?.totalCount ?? 0;
   const role = (session?.user as { role?: string } | undefined)?.role;
   const canOpen = (href: string) => canAccessSettingsPath(role, href);
 
@@ -68,10 +68,10 @@ export function Topbar() {
       </div>
 
       <div className="flex items-center gap-2">
-        {followUpCount > 0 ? (
-          <Link href="/contacts" className="hidden md:block">
+        {attentionCount > 0 ? (
+          <Link href="/notifications" className="hidden md:block">
             <Badge variant="warning" className="h-8 px-3">
-              {followUpCount} reminders
+              {attentionCount} melding{attentionCount !== 1 ? "en" : ""}
             </Badge>
           </Link>
         ) : null}
@@ -137,15 +137,15 @@ export function Topbar() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Button asChild variant="ghost" size="icon" className="relative h-9 w-9 rounded-xl" aria-label="Goedkeuringswachtrij">
-          <Link href="/contacts/approval">
+        <Button asChild variant="ghost" size="icon" className="relative h-9 w-9 rounded-xl" aria-label="Meldingen">
+          <Link href="/notifications">
             <Bell className="h-4 w-4" />
-            {(topbarStats?.pendingDrafts ?? 0) > 0 ? (
+            {attentionCount > 0 ? (
               <Badge
                 variant="destructive"
                 className="absolute -right-1.5 -top-1.5 h-5 min-w-5 justify-center rounded-full px-1 text-[10px]"
               >
-                {topbarStats?.pendingDrafts}
+                {attentionCount > 99 ? "99+" : attentionCount}
               </Badge>
             ) : null}
           </Link>

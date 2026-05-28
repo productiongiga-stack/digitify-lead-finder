@@ -11,7 +11,7 @@ import {
 import {
   Globe2, Plus, Shield, ShieldAlert, ShieldOff, ShieldQuestion,
   ExternalLink, Search, Loader2, Trash2,
-  Pencil, ChevronRight,
+  Pencil, ChevronRight, Users, Clock, Activity,
 } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
@@ -262,31 +262,47 @@ export default function DomainsPage() {
         </div>
       </div>
 
-      <Card className="overflow-hidden border-border/60 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-xl">
-        <CardContent className="p-5">
-          <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr_0.8fr]">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/50">Website monitor</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-tight">Rustige cockpit, diepe analyse op detailniveau.</h2>
-              <p className="mt-2 max-w-2xl text-sm text-white/65">
-                De hoofdpagina toont alleen wat je meteen wil weten: hoeveel bezoekers er zijn en of de website online is.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/8 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-white/45">Bezoekers</p>
-              <p className="mt-2 text-3xl font-semibold">{isLoading ? "-" : totalVisitors}</p>
-              <p className="mt-1 text-xs text-white/50">Unieke bezoekers uit geplaatste trackers</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/8 p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-white/45">Online</p>
-              <p className="mt-2 text-3xl font-semibold">{isLoading ? "-" : onlineDomains}</p>
-              <p className="mt-1 text-xs text-white/50">
-                {offlineDomains > 0 ? `${offlineDomains} website${offlineDomains !== 1 ? "s" : ""} met issue` : "Geen bekende outages"}
-              </p>
+      <div className="crm-stats-grid sm:grid-cols-3">
+        {[
+          {
+            label: "Bezoekers",
+            hint: "Uniek via trackers",
+            value: totalVisitors,
+            icon: Users,
+            iconClass: "bg-sky-500/10 text-sky-700 ring-sky-500/20 dark:text-sky-400",
+          },
+          {
+            label: "Online",
+            hint: `van ${domains.length} domein${domains.length === 1 ? "" : "en"}`,
+            value: onlineDomains,
+            icon: Activity,
+            iconClass: "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-400",
+          },
+          {
+            label: "Issues",
+            hint: offlineDomains > 0 ? "Offline of foutstatus" : "Geen bekende outages",
+            value: offlineDomains,
+            icon: ShieldAlert,
+            iconClass:
+              offlineDomains > 0
+                ? "bg-red-500/10 text-red-700 ring-red-500/20 dark:text-red-400"
+                : "bg-muted/60 text-muted-foreground ring-border/60",
+          },
+        ].map((stat) => (
+          <div key={stat.label} className="crm-stat-card">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="crm-stat-card-label">{stat.label}</p>
+                <p className="crm-stat-card-value">{isLoading ? "—" : stat.value}</p>
+                <p className="crm-stat-card-hint">{stat.hint}</p>
+              </div>
+              <div className={`crm-stat-card-icon ${stat.iconClass}`}>
+                <stat.icon className="h-5 w-5" />
+              </div>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        ))}
+      </div>
 
       {/* Domain Cards */}
       {isLoading ? (
@@ -319,90 +335,121 @@ export default function DomainsPage() {
             const SslIcon = sslInfo.icon;
             const isAnalyzing = analyzeMutation.isPending && expandedAnalysis === domain.domainName;
 
+            const websiteLabel = known ? (online ? "Online" : "Offline") : "Onbekend";
+            const websiteHint = statusCode ? `HTTP ${statusCode}` : "Nog niet gecheckt";
+
             return (
-              <Card key={domain.id} className="group overflow-hidden border-border/60 bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <Link href={`/domains/${domain.id}`} className="block truncate text-base font-semibold tracking-tight hover:text-primary">
-                        {domain.domainName}
-                      </Link>
-                      <p className="mt-1 truncate text-xs text-muted-foreground">
-                        {domain.lead?.companyName || domain.registrar || "Geen lead gekoppeld"}
-                      </p>
-                    </div>
-                    <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <div className="rounded-2xl border bg-muted/20 p-3">
-                      <div className="flex items-center gap-2">
-                        <span className={`h-2.5 w-2.5 rounded-full ${known ? (online ? "bg-emerald-500" : "bg-red-500") : "bg-slate-300"}`} />
-                        <p className="text-xs font-medium text-muted-foreground">Website</p>
+              <Card key={domain.id} className="domain-card group">
+                <CardContent className="p-0">
+                  <div className="p-4 pb-3">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/10">
+                        <Globe2 className="h-5 w-5 text-primary" />
                       </div>
-                      <p className="mt-2 text-lg font-semibold">
-                        {known ? (online ? "Online" : "Offline") : "Onbekend"}
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {statusCode ? `HTTP ${statusCode}` : "Nog niet gecheckt"}
-                      </p>
-                    </div>
-                    <div className="rounded-2xl border bg-muted/20 p-3">
-                      <p className="text-xs font-medium text-muted-foreground">Bezoekers</p>
-                      <p className="mt-2 text-lg font-semibold">{visitors}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">{pageviews} pageviews</p>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border bg-background/80 p-3">
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground">Laatste bezoek</p>
-                      <p className="truncate text-sm font-medium">{lastSeen ? formatDate(lastSeen) : "Nog geen data"}</p>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <SslIcon className={`h-4 w-4 ${sslInfo.color}`} />
-                      <span className="text-xs text-muted-foreground">{sslInfo.label}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <Link
+                            href={`/domains/${domain.id}`}
+                            className="truncate text-base font-semibold tracking-tight transition-colors hover:text-primary"
+                          >
+                            {domain.domainName}
+                          </Link>
+                          <Badge variant={statusInfo.variant} className="shrink-0">
+                            {statusInfo.label}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-muted-foreground">
+                          {domain.lead?.companyName || domain.registrar || "Geen lead gekoppeld"}
+                        </p>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="mt-4 flex flex-wrap items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs"
-                      disabled={isAnalyzing}
-                      onClick={() => handleAnalyze(domain.domainName)}
-                    >
-                      {isAnalyzing ? (
-                        <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                      ) : (
-                        <Search className="mr-1.5 h-3 w-3" />
-                      )}
-                      Check live
-                    </Button>
-                    <Button asChild size="sm" className="h-8 text-xs">
-                      <Link href={`/domains/${domain.id}`}>
-                      Open details
-                      <ChevronRight className="ml-1 h-3.5 w-3.5" />
-                      </Link>
-                    </Button>
-                    <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setEditDomain(domain)}>
-                      <Pencil className="mr-1.5 h-3 w-3" />
-                      Bewerk
-                    </Button>
-                    <Button asChild variant="ghost" size="sm" className="h-8 text-xs">
-                      <a href={`https://${domain.domainName}`} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="mr-1.5 h-3 w-3" />
+                  <div className="domain-metrics-row">
+                    <div className="domain-metric">
+                      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        <span
+                          className={`h-2 w-2 rounded-full ${known ? (online ? "bg-emerald-500" : "bg-red-500") : "bg-muted-foreground/40"}`}
+                        />
                         Website
-                      </a>
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 text-xs text-destructive hover:text-destructive"
-                      onClick={() => setDeleteId(domain.id)}
-                    >
-                      <Trash2 className="h-3 w-3" />
+                      </div>
+                      <p className="mt-1.5 text-lg font-semibold tabular-nums leading-none">{websiteLabel}</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">{websiteHint}</p>
+                    </div>
+                    <div className="domain-metric">
+                      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        <Users className="h-3.5 w-3.5" />
+                        Bezoekers
+                      </div>
+                      <p className="mt-1.5 text-lg font-semibold tabular-nums leading-none">{visitors}</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">{pageviews} pageviews</p>
+                    </div>
+                  </div>
+
+                  <div className="domain-status-bar">
+                    <div className="flex min-w-0 flex-1 items-center gap-1.5 text-muted-foreground">
+                      <Clock className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">
+                        {lastSeen ? `Laatste bezoek ${formatDate(lastSeen)}` : "Nog geen bezoekdata"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 font-medium">
+                      <SslIcon className={`h-3.5 w-3.5 ${sslInfo.color}`} />
+                      <span className="text-muted-foreground">SSL {sslInfo.label}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 p-4 pt-3">
+
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        disabled={isAnalyzing}
+                        onClick={() => handleAnalyze(domain.domainName)}
+                        aria-label="Live check"
+                      >
+                        {isAnalyzing ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Search className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => setEditDomain(domain)}
+                        aria-label="Bewerken"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button asChild variant="ghost" size="icon" className="h-8 w-8">
+                        <a
+                          href={`https://${domain.domainName}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="Website openen"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => setDeleteId(domain.id)}
+                        aria-label="Verwijderen"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <Button asChild size="sm" className="shrink-0">
+                      <Link href={`/domains/${domain.id}`}>
+                        Details
+                        <ChevronRight className="ml-1 h-4 w-4" />
+                      </Link>
                     </Button>
                   </div>
                 </CardContent>

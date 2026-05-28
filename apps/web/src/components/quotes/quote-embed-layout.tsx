@@ -1,3 +1,7 @@
+"use client";
+
+import { useState } from "react";
+import { Pencil } from "lucide-react";
 import { isImageIcon, formatCurrency } from "@/lib/quote-configurator-utils";
 
 type StudioViewport = "desktop" | "tablet" | "mobile";
@@ -8,6 +12,7 @@ type StudioActionPayload = Record<string, unknown>;
 
 export type QuoteCartSummaryItem = {
   cartKey: string;
+  serviceId: string;
   source: "product" | "option" | "slider";
   name: string;
   quantity: number;
@@ -15,6 +20,14 @@ export type QuoteCartSummaryItem = {
   total: number;
   packageLabel: string;
   isConfirmed?: boolean;
+  isConfigurable?: boolean;
+  isCustomLine?: boolean;
+};
+
+export type QuoteCartItemUpdate = {
+  customName?: string;
+  unitPrice?: number;
+  quantity?: number;
 };
 
 export function ConfiguratorIcon({ value, label }: { value: string; label: string }) {
@@ -268,6 +281,7 @@ export function QuoteSummaryAside({
   isEditingQuote,
   selectedCategory,
   selectedProductName,
+  selectedProductId,
   subtotal,
   discount,
   vatRate,
@@ -278,6 +292,8 @@ export function QuoteSummaryAside({
   darkColor,
   onRemoveFromCart,
   onAdjustQuantity,
+  onEditCartItem,
+  onUpdateCartItem,
 }: {
   cartItems: QuoteCartSummaryItem[];
   isPreviewRoute: boolean;
@@ -285,6 +301,7 @@ export function QuoteSummaryAside({
   isEditingQuote: boolean;
   selectedCategory: string;
   selectedProductName: string;
+  selectedProductId?: string;
   subtotal: number;
   discount: number;
   vatRate: number;
@@ -295,7 +312,32 @@ export function QuoteSummaryAside({
   darkColor: string;
   onRemoveFromCart: (cartKey: string) => void;
   onAdjustQuantity: (cartKey: string, delta: number) => void;
+  onEditCartItem?: (cartKey: string) => void;
+  onUpdateCartItem?: (cartKey: string, update: QuoteCartItemUpdate) => void;
 }) {
+  const [inlineEditKey, setInlineEditKey] = useState<string | null>(null);
+  const [inlineDraft, setInlineDraft] = useState<QuoteCartItemUpdate>({});
+
+  function startInlineEdit(item: QuoteCartSummaryItem) {
+    setInlineEditKey(item.cartKey);
+    setInlineDraft({
+      customName: item.name,
+      unitPrice: item.unitPrice,
+      quantity: item.quantity,
+    });
+  }
+
+  function saveInlineEdit(cartKey: string) {
+    if (!onUpdateCartItem) return;
+    onUpdateCartItem(cartKey, inlineDraft);
+    setInlineEditKey(null);
+    setInlineDraft({});
+  }
+
+  function cancelInlineEdit() {
+    setInlineEditKey(null);
+    setInlineDraft({});
+  }
   return (
     <aside className="min-h-0 overflow-y-auto bg-[#f4f1e8] px-3 py-3 sm:px-4">
       <div className="rounded-[14px] border border-black/10 bg-white shadow-sm">
@@ -311,49 +353,166 @@ export function QuoteSummaryAside({
               Nog geen items geselecteerd.
             </div>
           ) : (
-            cartItems.map((item) => (
-              <div key={item.cartKey} className="rounded-lg border bg-white px-2 py-1.5">
-                <div className="grid grid-cols-[1fr_auto] gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-semibold">{item.name}</p>
-                    <p className="truncate text-[11px] text-[#7b818c]">
-                      {item.packageLabel} · {item.quantity}x
-                      {item.source === "product" && !isPreviewRoute && !item.isConfirmed
-                        ? " · niet bevestigd"
-                        : ""}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <button
-                      type="button"
-                      onClick={() => onRemoveFromCart(item.cartKey)}
-                      className="text-[11px] text-[#8a909b] hover:text-[#272a30]"
-                    >
-                      ✕
-                    </button>
-                    <p className="mt-0.5 text-xs font-semibold" style={{ color: "#c9811b" }}>
-                      {formatCurrency(item.total)}
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-1 flex items-center justify-between gap-2">
-                  <span className="truncate text-[11px] text-[#7b818c]">
-                    {item.quantity > 1 ? `${formatCurrency(item.unitPrice)} / stuk` : formatCurrency(item.unitPrice)}
-                  </span>
-                  {item.source === "product" || isEditingQuote ? (
-                    <div className="flex items-center overflow-hidden rounded-md border">
-                      <button type="button" onClick={() => onAdjustQuantity(item.cartKey, -1)} className="h-5 w-6 text-xs">
-                        -
-                      </button>
-                      <span className="min-w-6 border-x px-1 text-center text-[11px]">{item.quantity}</span>
-                      <button type="button" onClick={() => onAdjustQuantity(item.cartKey, 1)} className="h-5 w-6 text-xs">
-                        +
-                      </button>
+            cartItems.map((item) => {
+              const isActive =
+                item.source === "product"
+                  ? selectedProductId === item.cartKey
+                  : selectedProductId === item.serviceId;
+              const isInlineEditing = inlineEditKey === item.cartKey;
+              const canAdjustQuantity =
+                item.source === "product" || item.isCustomLine || isEditingQuote || isInlineEditing;
+
+              return (
+                <div
+                  key={item.cartKey}
+                  className={`rounded-lg border bg-white px-2 py-1.5 transition-colors ${
+                    isActive ? "border-[#c9811b]/60 bg-[#fffaf2] ring-1 ring-[#c9811b]/25" : ""
+                  } ${isInlineEditing ? "border-[#2563eb]/40 bg-[#f8fbff]" : ""}`}
+                >
+                  {isInlineEditing ? (
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        value={inlineDraft.customName ?? item.name}
+                        onChange={(event) =>
+                          setInlineDraft((current) => ({ ...current, customName: event.target.value }))
+                        }
+                        className="w-full rounded-md border border-[#d8dbe2] px-2 py-1 text-xs"
+                        placeholder="Omschrijving"
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="space-y-0.5">
+                          <span className="text-[10px] uppercase tracking-wide text-[#7b818c]">Prijs</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={inlineDraft.unitPrice ?? item.unitPrice}
+                            onChange={(event) =>
+                              setInlineDraft((current) => ({
+                                ...current,
+                                unitPrice: Math.max(0, Number(event.target.value) || 0),
+                              }))
+                            }
+                            className="w-full rounded-md border border-[#d8dbe2] px-2 py-1 text-xs"
+                          />
+                        </label>
+                        <label className="space-y-0.5">
+                          <span className="text-[10px] uppercase tracking-wide text-[#7b818c]">Aantal</span>
+                          <input
+                            type="number"
+                            min={1}
+                            step="1"
+                            value={inlineDraft.quantity ?? item.quantity}
+                            onChange={(event) =>
+                              setInlineDraft((current) => ({
+                                ...current,
+                                quantity: Math.max(1, Number(event.target.value) || 1),
+                              }))
+                            }
+                            className="w-full rounded-md border border-[#d8dbe2] px-2 py-1 text-xs"
+                          />
+                        </label>
+                      </div>
+                      <div className="flex justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={cancelInlineEdit}
+                          className="rounded-md border px-2 py-0.5 text-[11px] text-[#616671]"
+                        >
+                          Annuleren
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => saveInlineEdit(item.cartKey)}
+                          className="rounded-md px-2 py-0.5 text-[11px] font-semibold text-[#15171c]"
+                          style={{ backgroundColor: accentColor }}
+                        >
+                          Opslaan
+                        </button>
+                      </div>
                     </div>
-                  ) : null}
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-[1fr_auto] gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-semibold">{item.name}</p>
+                          <p className="truncate text-[11px] text-[#7b818c]">
+                            {item.packageLabel} · {item.quantity}x
+                            {item.source === "product" && !isPreviewRoute && !item.isConfirmed
+                              ? " · niet bevestigd"
+                              : ""}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <button
+                            type="button"
+                            onClick={() => onRemoveFromCart(item.cartKey)}
+                            className="text-[11px] text-[#8a909b] hover:text-[#272a30]"
+                            aria-label="Item verwijderen"
+                          >
+                            ✕
+                          </button>
+                          <p className="mt-0.5 text-xs font-semibold" style={{ color: "#c9811b" }}>
+                            {formatCurrency(item.total)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <span className="truncate text-[11px] text-[#7b818c]">
+                          {item.quantity > 1
+                            ? `${formatCurrency(item.unitPrice)} / stuk`
+                            : formatCurrency(item.unitPrice)}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {item.isConfigurable && onEditCartItem ? (
+                            <button
+                              type="button"
+                              onClick={() => onEditCartItem(item.cartKey)}
+                              className="inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0.5 text-[10px] font-medium text-[#3c4149] hover:bg-[#f4f1e8]"
+                              title="Pakket en opties aanpassen"
+                            >
+                              <Pencil className="h-3 w-3" />
+                              Bewerken
+                            </button>
+                          ) : null}
+                          {item.isCustomLine && onUpdateCartItem ? (
+                            <button
+                              type="button"
+                              onClick={() => startInlineEdit(item)}
+                              className="inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0.5 text-[10px] font-medium text-[#3c4149] hover:bg-[#f4f1e8]"
+                              title="Regel aanpassen"
+                            >
+                              <Pencil className="h-3 w-3" />
+                              Bewerken
+                            </button>
+                          ) : null}
+                          {canAdjustQuantity ? (
+                            <div className="flex items-center overflow-hidden rounded-md border">
+                              <button
+                                type="button"
+                                onClick={() => onAdjustQuantity(item.cartKey, -1)}
+                                className="h-5 w-6 text-xs"
+                              >
+                                -
+                              </button>
+                              <span className="min-w-6 border-x px-1 text-center text-[11px]">{item.quantity}</span>
+                              <button
+                                type="button"
+                                onClick={() => onAdjustQuantity(item.cartKey, 1)}
+                                className="h-5 w-6 text-xs"
+                              >
+                                +
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
         <div className="flex items-center justify-between border-t px-3 py-2 text-xs font-semibold">

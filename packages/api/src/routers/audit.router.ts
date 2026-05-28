@@ -5,17 +5,13 @@ import { protectedProcedure, router } from "../trpc";
 import { assertLeadAccess } from "../lib/tenant";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
+import { buildWebsiteAuditPayload } from "../lib/website-audit";
 
 function normalizeUrl(raw: string) {
   const trimmed = raw.trim();
   if (!trimmed) return "";
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
   return `https://${trimmed}`;
-}
-
-function scoreRange(value: number, max: number) {
-  if (!Number.isFinite(value) || max <= 0) return 0;
-  return Math.max(0, Math.min(100, Math.round((value / max) * 100)));
 }
 
 async function lookupGoogleReviews(apiKey: string, placeId: string) {
@@ -94,83 +90,12 @@ export const auditRouter = router({
         }
       }
 
-      const socialCount = Object.values(analysis.socialLinks).filter(Boolean).length;
-      const speedScore =
-        analysis.loadTimeMs <= 1200 ? 100 :
-        analysis.loadTimeMs <= 2000 ? 85 :
-        analysis.loadTimeMs <= 3000 ? 65 :
-        analysis.loadTimeMs <= 4500 ? 40 : 20;
-      const seoSignals = [
-        analysis.hasMetaTitle,
-        analysis.hasMetaDescription,
-        analysis.hasH1,
-        analysis.hasStructuredData,
-      ].filter(Boolean).length;
-      const seoScore = scoreRange(seoSignals, 4);
-      const socialScore = scoreRange(socialCount, 4);
-      const contactSignals = [
-        analysis.contactInfo.emails.length > 0,
-        analysis.contactInfo.phones.length > 0,
-        analysis.hasCTA,
-      ].filter(Boolean).length;
-      const contactScore = scoreRange(contactSignals, 3);
-      const reviewScore =
-        reviews.rating == null
-          ? 35
-          : Math.max(
-              0,
-              Math.min(
-                100,
-                Math.round(((reviews.rating / 5) * 70) + Math.min(30, (reviews.reviewCount || 0) * 1.5)),
-              ),
-            );
-      const overall = Math.round((speedScore * 0.25) + (seoScore * 0.25) + (socialScore * 0.15) + (reviewScore * 0.2) + (contactScore * 0.15));
-
-      const suggestions: string[] = [];
-      if (analysis.loadTimeMs > 2500) suggestions.push("Verlaag de laadtijd met gecomprimeerde assets en caching.");
-      if (!analysis.hasMetaTitle) suggestions.push("Voeg een duidelijke meta title toe per kernpagina.");
-      if (!analysis.hasMetaDescription) suggestions.push("Schrijf unieke meta descriptions met CTA en zoekwoorden.");
-      if (!analysis.hasStructuredData) suggestions.push("Implementeer schema.org structured data voor betere SEO-snippets.");
-      if (socialCount < 2) suggestions.push("Versterk social presence met minstens 2 actieve sociale profielen.");
-      if ((reviews.reviewCount || 0) < 15) suggestions.push("Start een reviewflow om meer Google reviews te verzamelen.");
-      if (analysis.contactInfo.emails.length === 0 || analysis.contactInfo.phones.length === 0) {
-        suggestions.push("Maak contactgegevens direct zichtbaar in header/footer.");
-      }
-      if (!analysis.hasCTA) suggestions.push("Voeg een primaire CTA toe boven de vouw (offerte/afspraak/contact).");
-
-      const payload = {
-        url: analysis.url,
-        checkedAt: new Date().toISOString(),
-        leadId: lead?.id || null,
-        leadName: lead?.companyName || null,
-        metrics: {
-          speedScore,
-          seoScore,
-          socialScore,
-          reviewScore,
-          contactScore,
-          overall,
-        },
-        checks: {
-          statusCode: analysis.statusCode,
-          ssl: analysis.hasSSL,
-          mobileFriendly: analysis.isMobileFriendly,
-          loadTimeMs: analysis.loadTimeMs,
-          seo: {
-            hasMetaTitle: analysis.hasMetaTitle,
-            hasMetaDescription: analysis.hasMetaDescription,
-            hasH1: analysis.hasH1,
-            hasStructuredData: analysis.hasStructuredData,
-          },
-          social: analysis.socialLinks,
-          reviews,
-          contact: analysis.contactInfo,
-          hasCTA: analysis.hasCTA,
-        },
-        technologies: analysis.technologies,
-        suggestions,
-        errors: analysis.errors,
-      };
+      const payload = buildWebsiteAuditPayload(analysis, {
+        leadId: lead?.id ?? null,
+        leadName: lead?.companyName ?? null,
+        reviews,
+      });
+      const overall = payload.metrics.overall;
 
       const report = await ctx.db.report.create({
         data: {

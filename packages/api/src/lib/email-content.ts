@@ -12,7 +12,7 @@ function stripTag(body: string, key: string) {
 }
 
 function stripAllMetadataTags(body: string) {
-  return ["CTA_TEXT", "CTA_URL", "LAYOUT", "TYPE", "DESCRIPTION"]
+  return ["CTA_TEXT", "CTA_URL", "LAYOUT", "TYPE", "DESCRIPTION", "BODY_FORMAT"]
     .reduce((acc, key) => stripTag(acc, key), body)
     .trim();
 }
@@ -22,6 +22,8 @@ export function extractEmailTemplateMetadata(body: string) {
   const ctaUrl = matchTag(body, "CTA_URL");
   const rawLayout = matchTag(body, "LAYOUT").toLowerCase();
   const layout = EMAIL_LAYOUTS.includes(rawLayout as EmailLayout) ? (rawLayout as EmailLayout) : undefined;
+  const rawBodyFormat = matchTag(body, "BODY_FORMAT").toUpperCase();
+  const bodyFormat = rawBodyFormat === "HTML" ? "HTML" : rawBodyFormat === "TEXT" ? "TEXT" : undefined;
   const cleanBody = stripAllMetadataTags(body);
 
   return {
@@ -31,5 +33,6 @@ export function extractEmailTemplateMetadata(body: string) {
     layout,
     type: matchTag(body, "TYPE").toUpperCase() || undefined,
     description: matchTag(body, "DESCRIPTION") || undefined,
+    bodyFormat,
   };
 }

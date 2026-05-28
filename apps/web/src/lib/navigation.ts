@@ -6,7 +6,6 @@ import {
   Target,
   SendHorizonal,
   Inbox,
-  FileText,
   Settings,
   Calendar,
   Globe2,
@@ -66,7 +65,7 @@ export const LEADS_WORKFLOW_ITEMS: QuickNavItem[] = [
   { href: "/contacts/inbox", label: "Inbox", icon: Inbox, moduleId: "contacts" },
   { href: "/quotes", label: "Offertes", icon: Receipt, moduleId: "quotes" },
   { href: "/invoices", label: "Facturen", icon: Banknote, moduleId: "invoices" },
-  { href: "/reports", label: "Rapporten", icon: FileText, moduleId: "reports" },
+  { href: "/reports", label: "Website auditor", icon: ScanSearch, moduleId: "reports" },
   { href: "/crm", label: "CRM", icon: Building2, moduleId: "crm" },
   { href: "/tasks", label: "Taken", icon: CheckSquare, moduleId: "tasks" },
   { href: "/templates", label: "E-mailtemplates", icon: Library, moduleId: "templates" },
@@ -82,7 +81,6 @@ export const TOOL_NAV_ITEMS: NavItem[] = [
   { href: "/domains", label: "Domeinen", icon: Globe2, moduleId: "domains" },
   { href: "/reviews", label: "Reviews", icon: Star, moduleId: "reviews" },
   { href: "/chatbot", label: "Chatbot", icon: MessageSquare, moduleId: "chatbot" },
-  { href: "/audit", label: "Website Audit", icon: ScanSearch, moduleId: "audit" },
 ];
 
 // All toggleable modules available for owner management
@@ -92,14 +90,13 @@ export const ALL_MODULES = [
   { id: "contacts", label: "Outbound / Contacten" },
   { id: "quotes", label: "Offertes" },
   { id: "invoices", label: "Facturen" },
-  { id: "reports", label: "Rapporten" },
+  { id: "reports", label: "Website auditor" },
   { id: "crm", label: "CRM" },
   { id: "tasks", label: "Taken" },
   { id: "templates", label: "E-mailtemplates" },
   { id: "domains", label: "Domeinen" },
   { id: "reviews", label: "Reviews" },
   { id: "chatbot", label: "Chatbot" },
-  { id: "audit", label: "Website Audit" },
 ] as const;
 
 export const BOTTOM_NAV_ITEMS: NavItem[] = [
@@ -142,6 +139,7 @@ const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
   { path: "/leads", title: "Leads" },
   { path: "/campaigns/new", title: "Nieuwe Campagne" },
   { path: "/campaigns", title: "Campagnes" },
+  { path: "/notifications", title: "Meldingen" },
   { path: "/contacts/inbox", title: "Inbox" },
   { path: "/contacts/compose", title: "Outbound Opstellen" },
   { path: "/contacts/approval", title: "Goedkeuringswachtrij" },
@@ -154,7 +152,7 @@ const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
   { path: "/crm", title: "CRM" },
   { path: "/tasks", title: "Taken" },
   { path: "/templates", title: "E-mailtemplates" },
-  { path: "/audit", title: "Website Audit" },
+  { path: "/audit", title: "Website auditor" },
   { path: "/bookings", title: "Boekingen" },
   { path: "/domains", title: "Domeinen" },
   { path: "/reviews", title: "Reviews" },

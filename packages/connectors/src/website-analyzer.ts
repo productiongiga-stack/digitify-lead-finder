@@ -68,6 +68,108 @@ function detectTechnologies(html: string): string[] {
   return techs;
 }
 
+const FETCH_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (compatible; DigitifyWebsiteAuditor/1.0)",
+  Accept: "text/html,application/xhtml+xml",
+  "Accept-Language": "nl,en;q=0.9",
+};
+
+function extractInternalUrls(html: string, baseUrl: URL, max = 12): string[] {
+  const hrefRegex = /href=["']([^"'#]+)["']/gi;
+  const found = new Set<string>();
+  let match: RegExpExecArray | null;
+  while ((match = hrefRegex.exec(html)) !== null) {
+    const raw = match[1]?.trim();
+    if (!raw || raw.startsWith("mailto:") || raw.startsWith("tel:") || raw.startsWith("javascript:")) {
+      continue;
+    }
+    try {
+      const resolved = new URL(raw, baseUrl);
+      if (resolved.protocol !== "http:" && resolved.protocol !== "https:") continue;
+      if (resolved.hostname !== baseUrl.hostname) continue;
+      if (/\.(pdf|zip|png|jpe?g|gif|webp|svg|ico|css|js|woff2?)$/i.test(resolved.pathname)) continue;
+      resolved.hash = "";
+      found.add(resolved.toString());
+    } catch {
+      // ignore invalid URLs
+    }
+  }
+  return [...found].slice(0, max);
+}
+
+function countUxSignals(html: string) {
+  const linkMatches = html.match(/<a\b[^>]*href=/gi) || [];
+  const buttonMatches =
+    html.match(/<button\b/gi) ||
+    [];
+  const inputButtons = html.match(/<input[^>]*type=["'](button|submit)["']/gi) || [];
+  const roleButtons = html.match(/role=["']button["']/gi) || [];
+  const formMatches = html.match(/<form\b/gi) || [];
+  const imgTags = [...html.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]);
+  const imagesMissingAlt = imgTags.filter((tag) => !/\balt=["'][^"']+["']/i.test(tag)).length;
+
+  return {
+    linkCount: linkMatches.length,
+    buttonCount: buttonMatches.length + inputButtons.length + roleButtons.length,
+    formCount: formMatches.length,
+    imagesTotal: imgTags.length,
+    imagesMissingAlt,
+  };
+}
+
+async function probePage(url: string): Promise<{
+  url: string;
+  statusCode: number;
+  ok: boolean;
+  error?: string;
+}> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      signal: controller.signal,
+      headers: FETCH_HEADERS,
+      redirect: "follow",
+    });
+    clearTimeout(timeout);
+    return {
+      url,
+      statusCode: response.status,
+      ok: response.status >= 200 && response.status < 400,
+    };
+  } catch (error: unknown) {
+    clearTimeout(timeout);
+    const message = error instanceof Error ? error.message : "Onbekende fout";
+    return { url, statusCode: 0, ok: false, error: message };
+  }
+}
+
+async function probeInternalPages(homeUrl: string, html: string) {
+  let base: URL;
+  try {
+    base = new URL(homeUrl);
+  } catch {
+    return { pageProbes: [] as { url: string; statusCode: number; ok: boolean; error?: string }[], pagesChecked: 0, pagesBroken: 0, internalLinkCount: 0 };
+  }
+
+  const internalUrls = extractInternalUrls(html, base, 10);
+  const toCheck = [base.toString(), ...internalUrls.filter((u) => u !== base.toString())].slice(0, 8);
+  const pageProbes: { url: string; statusCode: number; ok: boolean; error?: string }[] = [];
+
+  for (const pageUrl of toCheck) {
+    pageProbes.push(await probePage(pageUrl));
+  }
+
+  const pagesBroken = pageProbes.filter((p) => !p.ok).length;
+  return {
+    pageProbes,
+    pagesChecked: pageProbes.length,
+    pagesBroken,
+    internalLinkCount: internalUrls.length,
+  };
+}
+
 function hasCTA(html: string): boolean {
   // Check for actual <form> elements first (most reliable CTA indicator)
   if (/<form[^>]*>/i.test(html)) return true;
@@ -102,11 +204,7 @@ export async function analyzeWebsite(url: string): Promise<WebsiteAnalysis> {
     try {
       const response = await fetch(url, {
         signal: controller.signal,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (compatible; LeadAnalyzerBot/1.0)",
-          "Accept": "text/html,application/xhtml+xml",
-          "Accept-Language": "nl,en;q=0.9",
-        },
+        headers: FETCH_HEADERS,
         redirect: "follow",
       });
 
@@ -135,7 +233,7 @@ export async function analyzeWebsite(url: string): Promise<WebsiteAnalysis> {
         try {
           const httpUrl = url.replace("https://", "http://");
           const fallbackResp = await fetch(httpUrl, {
-            headers: { "User-Agent": "Mozilla/5.0 (compatible; LeadAnalyzerBot/1.0)" },
+            headers: FETCH_HEADERS,
             redirect: "follow",
           });
           html = await fallbackResp.text();
@@ -187,6 +285,17 @@ export async function analyzeWebsite(url: string): Promise<WebsiteAnalysis> {
     htmlLower.includes("hotjar") ||
     htmlLower.includes("analytics");
 
+  const uxSignals = countUxSignals(html);
+  const pageProbeResult =
+    html.length > 0 && statusCode > 0
+      ? await probeInternalPages(url, html)
+      : {
+          pageProbes: [] as { url: string; statusCode: number; ok: boolean; error?: string }[],
+          pagesChecked: 0,
+          pagesBroken: 0,
+          internalLinkCount: 0,
+        };
+
   return {
     url,
     statusCode,
@@ -210,6 +319,13 @@ export async function analyzeWebsite(url: string): Promise<WebsiteAnalysis> {
     contactInfo: {
       emails: extractEmails(html),
       phones: extractPhones(html),
+    },
+    uxAudit: {
+      ...uxSignals,
+      internalLinkCount: pageProbeResult.internalLinkCount,
+      pageProbes: pageProbeResult.pageProbes,
+      pagesChecked: pageProbeResult.pagesChecked,
+      pagesBroken: pageProbeResult.pagesBroken,
     },
     errors,
   };

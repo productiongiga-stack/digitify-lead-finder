@@ -1,9 +1,12 @@
 import { z } from "zod";
-import { createHmac } from "node:crypto";
 import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
-import { sendBrandedEmail } from "../lib/email-sender";
+import {
+  appendQuoteIdMarker,
+  buildQuoteOutboundEmailBody,
+  syncQuoteOutboundDrafts,
+} from "../lib/quote-outbound-email";
 import { ensureLeadLink } from "../lib/lead-link";
 import { assertLeadAccess } from "../lib/tenant";
 
@@ -12,37 +15,6 @@ function formatCurrency(amount: number) {
     style: "currency",
     currency: "EUR",
   }).format(amount);
-}
-
-function getAppUrl() {
-  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
-  if (process.env.NEXTAUTH_URL) return process.env.NEXTAUTH_URL.replace(/\/$/, "");
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL.replace(/\/$/, "")}`;
-  return "http://localhost:3000";
-}
-
-function getQuotePdfTokenSecret() {
-  const secret = process.env.QUOTE_PDF_TOKEN_SECRET || process.env.NEXTAUTH_SECRET;
-  if (!secret) throw new Error("QUOTE_PDF_TOKEN_SECRET or NEXTAUTH_SECRET must be set");
-  return secret;
-}
-
-function stripHtml(text: string): string {
-  return text.replace(/<[^>]*>/g, "").trim();
-}
-
-function createQuotePdfToken(quoteId: string, validUntil?: Date | string | null) {
-  const requestedExpiry = validUntil ? new Date(validUntil).getTime() : NaN;
-  const fallbackExpiry = Date.now() + 1000 * 60 * 60 * 24 * 90;
-  const expiresAt =
-    Number.isFinite(requestedExpiry) && requestedExpiry > Date.now()
-      ? requestedExpiry
-      : fallbackExpiry;
-  const payload = `${quoteId}.${expiresAt}`;
-  const signature = createHmac("sha256", getQuotePdfTokenSecret())
-    .update(payload)
-    .digest("base64url");
-  return `${expiresAt}.${signature}`;
 }
 
 type QuoteForEmail = {
@@ -162,8 +134,9 @@ function buildQuoteEmailPreflight(quote: QuoteForEmail, leadResolution: QuoteLea
   const blockingIssues = checks.filter((check) => check.blocking && !check.ok);
   const warnings: string[] = [];
   if (leadResolution.mode === "will_create") {
-    warnings.push("Bij verzenden wordt automatisch een nieuwe lead aangemaakt.");
+    warnings.push("Bij indienen wordt automatisch een nieuwe lead aangemaakt.");
   }
+  warnings.push("Offertes worden niet automatisch verstuurd. Indienen gaat naar Outbound ter goedkeuring.");
 
   return {
     canSend: blockingIssues.length === 0,
@@ -501,6 +474,8 @@ export const quoteRouter = router({
         },
       });
 
+      await syncQuoteOutboundDrafts(ctx.db, quote.id, ctx.user.workspaceId!);
+
       return quote;
     }),
 
@@ -624,111 +599,35 @@ export const quoteRouter = router({
         });
       }
 
-      const pdfToken = createQuotePdfToken(quote.id, quote.validUntil);
-      const quoteUrl = `${getAppUrl()}/api/public/quotes/${quote.id}/pdf?token=${encodeURIComponent(pdfToken)}&download=0`;
-      const quoteDownloadUrl = `${getAppUrl()}/api/public/quotes/${quote.id}/pdf?token=${encodeURIComponent(pdfToken)}&download=1`;
-      const summaryLines = quote.items.slice(0, 5).map(
-        (item) => `- ${item.name}: ${item.category || "dienst"} · ${formatCurrency(item.quantity * item.unitPrice)}`
-      );
-      const validUntilLabel = quote.validUntil
-        ? new Date(quote.validUntil).toLocaleDateString("nl-BE")
-        : "30 dagen na verzending";
-      const attachmentName = `Offerte-${quote.quoteNumber}.pdf`;
-      const body = [
-        `Beste ${quote.clientName},`,
-        ``,
-        `Hierbij vindt u uw persoonlijke offerte op maat.`,
-        ``,
-        `Bijlage toegevoegd: ${attachmentName}`,
-        `Offertenummer: ${quote.quoteNumber}`,
-        `Totaalprijs: ${formatCurrency(quote.total)}`,
-        `Geldig tot: ${validUntilLabel}`,
-        ``,
-        `Samenvatting van de voorgestelde diensten:`,
-        ...summaryLines,
-        ``,
-        quote.notes
-          ? `Opmerkingen: ${stripHtml(quote.notes)}`
-          : "Klik op de knop hieronder om de volledige offerte te bekijken of te printen.",
-      ]
-        .filter(Boolean)
-        .join("\n");
-      const composedBody = `${body}\n\n[[CTA_TEXT=Bekijk offerte]]\n[[CTA_URL=${quoteUrl}]]`;
+      const existingDraft = await ctx.db.emailDraft.findFirst({
+        where: {
+          type: "QUOTE",
+          status: { in: ["PENDING_APPROVAL", "APPROVED"] },
+          lead: { createdById: ctx.user.workspaceId! },
+          body: { contains: `[[QUOTE_ID=${quote.id}]]` },
+        },
+        select: { id: true, status: true },
+      });
+      if (existingDraft) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message:
+            existingDraft.status === "APPROVED"
+              ? "Deze offerte is al goedgekeurd in Outbound. Verzend de mail via Outbound Center."
+              : "Deze offerte staat al in de goedkeuringswachtrij van Outbound.",
+        });
+      }
+
+      const { body: composedBody, attachmentName } = buildQuoteOutboundEmailBody(quote);
       const emailDraft = await ctx.db.emailDraft.create({
         data: {
           leadId: linkedLead.id,
           authorId: ctx.user.id,
           toEmail: quote.clientEmail,
           subject: `Offerte ${quote.quoteNumber} voor ${quote.clientCompany || quote.clientName}`,
-          body: composedBody,
-          status: "SENDING",
+          body: appendQuoteIdMarker(composedBody, quote.id),
+          status: "PENDING_APPROVAL",
           type: "QUOTE",
-        },
-      });
-
-      let result: Awaited<ReturnType<typeof sendBrandedEmail>>;
-      try {
-        result = await sendBrandedEmail(ctx.db, {
-          toEmail: quote.clientEmail,
-          subject: emailDraft.subject,
-          body: composedBody,
-          recipientCompany: quote.clientCompany || quote.clientName,
-          leadId: linkedLead.id,
-          layout: "proposal",
-          userId: ctx.user.id,
-          trackingDraftId: emailDraft.id,
-          placeholderContext: {
-            quoteNumber: quote.quoteNumber,
-            offerTitle: `Offerte ${quote.quoteNumber}`,
-            offerPrice: formatCurrency(quote.total),
-          },
-          attachments: [
-            {
-              filename: attachmentName,
-              path: quoteDownloadUrl,
-              contentType: "application/pdf",
-            },
-          ],
-        });
-      } catch (error) {
-        await ctx.db.emailDraft.update({
-          where: { id: emailDraft.id },
-          data: {
-            status: "FAILED",
-            rejectionNote: error instanceof Error ? error.message : "Offerte e-mail verzenden mislukt",
-          },
-        });
-        throw error;
-      }
-
-      if (!result.success) {
-        await ctx.db.emailDraft.update({
-          where: { id: emailDraft.id },
-          data: {
-            status: "FAILED",
-            rejectionNote: result.error || "Offerte e-mail verzenden mislukt",
-          },
-        });
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: result.error || "Offerte e-mail verzenden mislukt",
-        });
-      }
-      await ctx.db.emailDraft.update({
-        where: { id: emailDraft.id },
-        data: {
-          status: "SENT",
-          sentAt: new Date(),
-          messageId: result.messageId || null,
-          rejectionNote: null,
-        },
-      });
-
-      const updated = await ctx.db.quote.update({
-        where: { id: input.id },
-        data: {
-          status: quote.status === "DRAFT" ? "SENT" : quote.status,
-          sentAt: quote.sentAt || new Date(),
         },
       });
 
@@ -736,13 +635,22 @@ export const quoteRouter = router({
         data: {
           leadId: linkedLead.id,
           userId: ctx.user.id,
-          type: "QUOTE_SENT",
-          title: `Offerte ${quote.quoteNumber} per e-mail verstuurd naar ${quote.clientEmail}`,
-          metadata: { quoteId: quote.id, messageId: result.messageId },
+          type: "EMAIL_DRAFTED",
+          title: `Offerte ${quote.quoteNumber} ingediend ter goedkeuring`,
+          metadata: {
+            quoteId: quote.id,
+            draftId: emailDraft.id,
+            attachmentName,
+            source: "quote.submit_outbound",
+          },
         },
       });
 
-      return updated;
+      return {
+        quote,
+        draftId: emailDraft.id,
+        queued: true as const,
+      };
     }),
 
   addNote: protectedProcedure

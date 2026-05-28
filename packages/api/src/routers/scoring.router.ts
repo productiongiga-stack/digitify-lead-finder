@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc";
 import { computeScore, type ScoringWeightConfig, type LeadData, type EnrichmentPayload } from "@digitify/scoring";
 import { analyzeWebsite } from "@digitify/connectors";
 import { assertLeadAccess } from "../lib/tenant";
 import { loadMergedScoringWeights } from "../lib/scoring-weights";
+import { buildWebsiteAuditPayload, websiteAnalysisToEnrichment } from "../lib/website-audit";
 
 export const scoringRouter = router({
   /**
@@ -275,119 +277,99 @@ export const scoringRouter = router({
         where: { id: input.leadId, createdById: ctx.user.workspaceId! },
       });
 
-      if (!lead.website) {
-        // No website — store empty enrichment and score based on that
-        await ctx.db.enrichmentData.upsert({
-          where: { leadId_source: { leadId: input.leadId, source: "website_analyzer" } },
-          create: {
-            leadId: input.leadId,
-            source: "website_analyzer",
-            data: { website_analysis: null },
-          },
-          update: {
-            data: { website_analysis: null },
-            fetchedAt: new Date(),
-          },
-        });
-      } else {
-        // Analyze website
-        const analysis = await analyzeWebsite(lead.website);
-
-        // Update lead with discovered info
-        const updates: Record<string, unknown> = {};
-        if (!lead.email && analysis.contactInfo.emails.length > 0) {
-          updates.email = analysis.contactInfo.emails[0];
-        }
-        if (!lead.phone && analysis.contactInfo.phones.length > 0) {
-          updates.phone = analysis.contactInfo.phones[0];
-        }
-        if (!lead.facebookUrl && analysis.socialLinks.facebook) {
-          updates.facebookUrl = analysis.socialLinks.facebook;
-        }
-        if (!lead.instagramUrl && analysis.socialLinks.instagram) {
-          updates.instagramUrl = analysis.socialLinks.instagram;
-        }
-        if (!lead.linkedinUrl && analysis.socialLinks.linkedin) {
-          updates.linkedinUrl = analysis.socialLinks.linkedin;
-        }
-        if (!lead.twitterUrl && analysis.socialLinks.twitter) {
-          updates.twitterUrl = analysis.socialLinks.twitter;
-        }
-        if (!lead.youtubeUrl && analysis.socialLinks.youtube) {
-          updates.youtubeUrl = analysis.socialLinks.youtube;
-        }
-        if (!lead.tiktokUrl && analysis.socialLinks.tiktok) {
-          updates.tiktokUrl = analysis.socialLinks.tiktok;
-        }
-
-        if (Object.keys(updates).length > 0) {
-          await ctx.db.lead.update({ where: { id: input.leadId }, data: updates as any });
-        }
-
-        // Store enrichment data
-        await ctx.db.enrichmentData.upsert({
-          where: { leadId_source: { leadId: input.leadId, source: "website_analyzer" } },
-          create: {
-            leadId: input.leadId,
-            source: "website_analyzer",
-            data: {
-              website_analysis: {
-                hasSSL: analysis.hasSSL,
-                isMobileFriendly: analysis.isMobileFriendly,
-                loadTimeMs: analysis.loadTimeMs,
-                hasMetaTitle: analysis.hasMetaTitle,
-                hasMetaDescription: analysis.hasMetaDescription,
-                hasH1: analysis.hasH1,
-                hasStructuredData: analysis.hasStructuredData,
-                hasFavicon: analysis.hasFavicon,
-                hasAnalytics: analysis.hasAnalytics,
-                hasCTA: analysis.hasCTA,
-                contentLength: analysis.contentLength,
-                lastModified: analysis.lastModified,
-                technologies: analysis.technologies,
-              },
-            },
-          },
-          update: {
-            data: {
-              website_analysis: {
-                hasSSL: analysis.hasSSL,
-                isMobileFriendly: analysis.isMobileFriendly,
-                loadTimeMs: analysis.loadTimeMs,
-                hasMetaTitle: analysis.hasMetaTitle,
-                hasMetaDescription: analysis.hasMetaDescription,
-                hasH1: analysis.hasH1,
-                hasStructuredData: analysis.hasStructuredData,
-                hasFavicon: analysis.hasFavicon,
-                hasAnalytics: analysis.hasAnalytics,
-                hasCTA: analysis.hasCTA,
-                contentLength: analysis.contentLength,
-                lastModified: analysis.lastModified,
-                technologies: analysis.technologies,
-              },
-            },
-            fetchedAt: new Date(),
-          },
-        });
-
-        await ctx.db.activity.create({
-          data: {
-            leadId: input.leadId,
-            userId: ctx.user.id,
-            type: "LEAD_ENRICHED",
-            title: `Website geanalyseerd: ${analysis.technologies.length} technologieën gedetecteerd`,
-            metadata: {
-              url: analysis.url,
-              statusCode: analysis.statusCode,
-              hasSSL: analysis.hasSSL,
-              loadTimeMs: analysis.loadTimeMs,
-              technologies: analysis.technologies,
-              discoveredEmails: analysis.contactInfo.emails,
-              discoveredPhones: analysis.contactInfo.phones,
-            },
-          },
+      const website = lead.website?.trim();
+      if (!website) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Deze lead heeft geen website-URL. Voeg eerst een website toe om te analyseren.",
         });
       }
+
+      const analysis = await analyzeWebsite(website);
+      const enrichmentSnapshot = websiteAnalysisToEnrichment(analysis);
+
+      const updates: Record<string, unknown> = {};
+      if (!lead.email && analysis.contactInfo.emails.length > 0) {
+        updates.email = analysis.contactInfo.emails[0];
+      }
+      if (!lead.phone && analysis.contactInfo.phones.length > 0) {
+        updates.phone = analysis.contactInfo.phones[0];
+      }
+      if (!lead.facebookUrl && analysis.socialLinks.facebook) {
+        updates.facebookUrl = analysis.socialLinks.facebook;
+      }
+      if (!lead.instagramUrl && analysis.socialLinks.instagram) {
+        updates.instagramUrl = analysis.socialLinks.instagram;
+      }
+      if (!lead.linkedinUrl && analysis.socialLinks.linkedin) {
+        updates.linkedinUrl = analysis.socialLinks.linkedin;
+      }
+      if (!lead.twitterUrl && analysis.socialLinks.twitter) {
+        updates.twitterUrl = analysis.socialLinks.twitter;
+      }
+      if (!lead.youtubeUrl && analysis.socialLinks.youtube) {
+        updates.youtubeUrl = analysis.socialLinks.youtube;
+      }
+      if (!lead.tiktokUrl && analysis.socialLinks.tiktok) {
+        updates.tiktokUrl = analysis.socialLinks.tiktok;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await ctx.db.lead.update({ where: { id: input.leadId }, data: updates as any });
+      }
+
+      await ctx.db.enrichmentData.upsert({
+        where: { leadId_source: { leadId: input.leadId, source: "website_analyzer" } },
+        create: {
+          leadId: input.leadId,
+          source: "website_analyzer",
+          data: { website_analysis: enrichmentSnapshot },
+        },
+        update: {
+          data: { website_analysis: enrichmentSnapshot },
+          fetchedAt: new Date(),
+        },
+      });
+
+      const auditPayload = buildWebsiteAuditPayload(analysis, {
+        leadId: lead.id,
+        leadName: lead.companyName,
+        reviews: {
+          rating: lead.gmbRating ? Number(lead.gmbRating) : null,
+          reviewCount: lead.gmbReviewCount,
+          source: lead.gmbRating != null || lead.gmbReviewCount != null ? "lead" : "none",
+        },
+      });
+
+      const auditReport = await ctx.db.report.create({
+        data: {
+          title: `Website audit: ${lead.companyName}`,
+          type: "website_audit",
+          leadId: lead.id,
+          generatedById: ctx.user.workspaceId!,
+          data: auditPayload,
+        },
+      });
+
+      await ctx.db.activity.create({
+        data: {
+          leadId: input.leadId,
+          userId: ctx.user.id,
+          type: "LEAD_ENRICHED",
+          title: `Website geanalyseerd voor ${lead.companyName}`,
+          metadata: {
+            url: analysis.url,
+            statusCode: analysis.statusCode,
+            hasSSL: analysis.hasSSL,
+            loadTimeMs: analysis.loadTimeMs,
+            technologies: analysis.technologies,
+            pagesChecked: analysis.uxAudit.pagesChecked,
+            pagesBroken: analysis.uxAudit.pagesBroken,
+            reportId: auditReport.id,
+            auditOverall: auditPayload.metrics.overall,
+          },
+        },
+      });
 
       // Now compute the score with the fresh enrichment data
       // Re-fetch lead with enrichment
@@ -470,9 +452,26 @@ export const scoringRouter = router({
         });
       }
 
+      await ctx.db.activity.create({
+        data: {
+          leadId: input.leadId,
+          userId: ctx.user.id,
+          type: "LEAD_SCORED",
+          title: `Score berekend: ${result.overallScore}/100 (${result.priority})`,
+          metadata: {
+            painPoints: result.painPoints,
+            suggestedServices: result.suggestedServices,
+            bestNextAction: result.bestNextAction,
+            reportId: auditReport.id,
+          },
+        },
+      });
+
       return {
         enrichment: enrichmentRaw,
         scoring: result,
+        reportId: auditReport.id,
+        auditOverall: auditPayload.metrics.overall,
       };
     }),
 

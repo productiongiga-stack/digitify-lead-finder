@@ -2,9 +2,8 @@ import { randomBytes, scryptSync } from "crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { Prisma } from "@digitify/db";
-import { router, adminProcedure, protectedProcedure, publicProcedure } from "../trpc";
+import { router, ownerProcedure, protectedProcedure, publicProcedure } from "../trpc";
 import { sendBrandedEmail } from "../lib/email-sender";
-import { canApproveRole } from "../lib/permissions";
 import { ensureUserWorkspace } from "../lib/user-workspace";
 import { passwordPolicySchema } from "../lib/password-policy";
 import { notifyWorkspaceAdmins } from "../lib/workspace-members";
@@ -107,7 +106,7 @@ export const registrationRouter = router({
       return { success: true, status: updated.status };
     }),
 
-  listRequests: adminProcedure.query(({ ctx }) =>
+  listRequests: ownerProcedure.query(({ ctx }) =>
     ctx.db.registrationRequest.findMany({
       orderBy: { createdAt: "desc" },
       take: 50,
@@ -124,15 +123,9 @@ export const registrationRouter = router({
     })
   ),
 
-  approve: adminProcedure
-    .input(z.object({ requestId: z.string(), role: z.enum(["ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER", "VIEWER"]).default("MEMBER") }))
+  approve: ownerProcedure
+    .input(z.object({ requestId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      if (!canApproveRole(ctx.user.role, input.role)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Admins kunnen registratieaanvragen alleen als member, trial, tester of viewer goedkeuren.",
-        });
-      }
       const request = await ctx.db.registrationRequest.findUnique({ where: { id: input.requestId } });
       if (!request || request.status !== "PENDING_APPROVAL") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Deze aanvraag kan niet worden goedgekeurd." });
@@ -144,12 +137,12 @@ export const registrationRouter = router({
           name: request.name,
           email: request.email,
           passwordHash: request.passwordHash,
-          role: input.role,
+          role: "MEMBER",
           emailVerified: request.emailVerifiedAt || new Date(),
           workspaceOwnerId: workspaceId,
         },
       });
-      await ensureUserWorkspace(ctx.db, workspaceId, user.name);
+      await ensureUserWorkspace(ctx.db, workspaceId, ctx.user.name);
 
       await ctx.db.registrationRequest.update({
         where: { id: request.id },
@@ -165,7 +158,7 @@ export const registrationRouter = router({
       return user;
     }),
 
-  reject: adminProcedure
+  reject: ownerProcedure
     .input(z.object({ requestId: z.string(), reason: z.string().max(800).optional() }))
     .mutation(async ({ ctx, input }) => {
       const request = await ctx.db.registrationRequest.update({

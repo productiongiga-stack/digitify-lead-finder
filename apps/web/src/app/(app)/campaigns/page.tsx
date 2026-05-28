@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
@@ -42,7 +42,8 @@ import {
   PlayCircle,
   CheckCircle2,
   ArrowRight,
-  PauseCircle,
+  LayoutGrid,
+  Info,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
@@ -50,6 +51,9 @@ export default function CampaignsPage() {
   const router = useRouter();
   const utils = trpc.useUtils();
   const { data: campaigns, isLoading } = trpc.campaign.list.useQuery();
+  const { data: topbarStats } = trpc.contact.getTopbarStats.useQuery(undefined, {
+    staleTime: 60_000,
+  });
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
 
@@ -78,13 +82,34 @@ export default function CampaignsPage() {
   const completedCampaigns =
     campaigns?.filter((c: NonNullable<typeof campaigns>[number]) => c.status === "COMPLETED")
       .length ?? 0;
-  const pausedCampaigns =
-    campaigns?.filter((c: NonNullable<typeof campaigns>[number]) => c.status === "PAUSED")
-      .length ?? 0;
-  const topPriorityCampaign =
-    campaigns?.find((c) => c.status === "ACTIVE") ??
-    campaigns?.find((c) => c.status === "DRAFT") ??
-    campaigns?.[0];
+  const insights = useMemo(() => {
+    const list = campaigns ?? [];
+    const byLeads = (items: typeof list) =>
+      [...items].sort((a, b) => b._count.campaignLeads - a._count.campaignLeads);
+
+    const active = byLeads(list.filter((c) => c.status === "ACTIVE"));
+    const draft = byLeads(list.filter((c) => c.status === "DRAFT"));
+    const paused = byLeads(list.filter((c) => c.status === "PAUSED"));
+    const completed = list.filter((c) => c.status === "COMPLETED");
+
+    const totalLeads = list.reduce((sum, c) => sum + c._count.campaignLeads, 0);
+    const totalTemplates = list.reduce((sum, c) => sum + c._count.templates, 0);
+    const leadsInActive = active.reduce((sum, c) => sum + c._count.campaignLeads, 0);
+
+    const focus =
+      active[0] ?? draft[0] ?? paused[0] ?? null;
+
+    return {
+      active,
+      draft,
+      paused,
+      completed,
+      totalLeads,
+      totalTemplates,
+      leadsInActive,
+      focus,
+    };
+  }, [campaigns]);
 
   const stats: StatItem[] = [
     { label: "Totaal", value: isLoading ? "—" : totalCampaigns, icon: <Target /> },
@@ -116,9 +141,15 @@ export default function CampaignsPage() {
       </div>
 
       <Tabs defaultValue="overview" className="space-y-3">
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="info">Info</TabsTrigger>
+        <TabsList className="page-view-tabs">
+          <TabsTrigger value="overview" className="page-view-tabs-trigger">
+            <LayoutGrid className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+            Overzicht
+          </TabsTrigger>
+          <TabsTrigger value="info" className="page-view-tabs-trigger">
+            <Info className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+            Info
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-3">
@@ -301,58 +332,188 @@ export default function CampaignsPage() {
         <TabsContent value="info" className="space-y-3">
           <div className="grid gap-3 xl:grid-cols-3">
             <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-              <CardContent className="p-3">
+              <CardContent className="p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Volgende focus
                 </p>
-                <p className="mt-1.5 text-sm font-medium">
-                  {activeCampaigns > 0
-                    ? `${activeCampaigns} actieve campagne${activeCampaigns !== 1 ? "s" : ""} vragen opvolging.`
-                    : draftCampaigns > 0
-                      ? `${draftCampaigns} conceptcampagne${draftCampaigns !== 1 ? "s" : ""} kunnen geactiveerd worden.`
-                      : "Geen open acties. Tijd voor een nieuwe campagne."}
-                </p>
-                <Button asChild size="sm" variant="outline" className="mt-2.5">
+                {isLoading ? (
+                  <div className="mt-3 space-y-2">
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-3 w-full" />
+                  </div>
+                ) : insights.focus ? (
+                  <>
+                    <p className="mt-2 text-base font-semibold leading-tight">{insights.focus.name}</p>
+                    <p className="mt-1.5 text-sm text-muted-foreground">
+                      {CAMPAIGN_STATUS_LABELS[insights.focus.status] || insights.focus.status}
+                      {" · "}
+                      {insights.focus._count.campaignLeads} leads
+                      {" · "}
+                      {insights.focus._count.templates} template
+                      {insights.focus._count.templates !== 1 ? "s" : ""}
+                      {insights.focus.niche ? ` · ${insights.focus.niche}` : ""}
+                    </p>
+                    {insights.active.length > 0 ? (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {insights.active.length} actief
+                        {insights.active.length > 1
+                          ? ` · ${insights.leadsInActive} leads in actieve campagnes`
+                          : null}
+                        {insights.draft.length > 0
+                          ? ` · ${insights.draft.length} concept${insights.draft.length !== 1 ? "en" : ""}`
+                          : null}
+                      </p>
+                    ) : insights.draft.length > 0 ? (
+                      <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
+                        Geen actieve campagne — activeer een concept om outreach te starten.
+                      </p>
+                    ) : insights.paused.length > 0 ? (
+                      <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
+                        Alleen gepauzeerde campagnes — hervat om verder te gaan.
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="mt-2 text-sm font-medium">
+                    Nog geen campagnes. Start met een niche en regio om leads te structureren.
+                  </p>
+                )}
+                <Button asChild size="sm" variant="outline" className="mt-3">
                   <Link
                     href={
-                      topPriorityCampaign
-                        ? `/campaigns/${topPriorityCampaign.id}`
+                      insights.focus
+                        ? `/campaigns/${insights.focus.id}`
                         : "/campaigns/new"
                     }
                   >
-                    {topPriorityCampaign ? "Open aanbevolen campagne" : "Nieuwe campagne"}
+                    {insights.focus ? "Open campagne" : "Nieuwe campagne"}
                   </Link>
                 </Button>
               </CardContent>
             </Card>
+
             <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-              <CardContent className="p-3">
+              <CardContent className="p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  Wachtrij
+                  Wachtrij &amp; portfolio
                 </p>
-                <p className="mt-1.5 text-sm font-medium">
-                  {pausedCampaigns > 0
-                    ? `${pausedCampaigns} gepauzeerde campagne${pausedCampaigns !== 1 ? "s" : ""}.`
-                    : "Er staan geen gepauzeerde campagnes klaar."}
-                </p>
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  <PauseCircle className="mr-1 inline h-3 w-3" />
-                  Snelle werkqueue om campagnes momentum te geven.
-                </p>
+                {isLoading ? (
+                  <div className="mt-3 space-y-2">
+                    <Skeleton className="h-3 w-full" />
+                    <Skeleton className="h-3 w-5/6" />
+                  </div>
+                ) : (
+                  <div className="mt-2 space-y-3 text-sm">
+                    {insights.paused.length > 0 ? (
+                      <div>
+                        <p className="font-medium">
+                          {insights.paused.length} gepauzeerd
+                        </p>
+                        <ul className="mt-1.5 space-y-1 text-xs text-muted-foreground">
+                          {insights.paused.slice(0, 4).map((campaign) => (
+                            <li key={campaign.id}>
+                              <Link
+                                href={`/campaigns/${campaign.id}`}
+                                className="font-medium text-foreground hover:text-primary"
+                              >
+                                {campaign.name}
+                              </Link>
+                              {" · "}
+                              {campaign._count.campaignLeads} leads
+                            </li>
+                          ))}
+                          {insights.paused.length > 4 ? (
+                            <li>+{insights.paused.length - 4} meer</li>
+                          ) : null}
+                        </ul>
+                      </div>
+                    ) : insights.draft.length > 0 ? (
+                      <div>
+                        <p className="font-medium">
+                          {insights.draft.length} concept
+                          {insights.draft.length !== 1 ? "en" : ""} zonder activatie
+                        </p>
+                        <ul className="mt-1.5 space-y-1 text-xs text-muted-foreground">
+                          {insights.draft.slice(0, 3).map((campaign) => (
+                            <li key={campaign.id}>
+                              <Link
+                                href={`/campaigns/${campaign.id}`}
+                                className="font-medium text-foreground hover:text-primary"
+                              >
+                                {campaign.name}
+                              </Link>
+                              {" · "}
+                              {campaign._count.campaignLeads} leads klaar
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : (
+                      <p className="font-medium text-muted-foreground">
+                        Geen gepauzeerde of concept-campagnes in de wachtrij.
+                      </p>
+                    )}
+
+                    <div className="rounded-lg border border-amber-200/60 bg-background/50 px-2.5 py-2 text-xs dark:border-amber-900/40">
+                      <p>
+                        <span className="font-medium text-foreground">{insights.totalLeads}</span> leads
+                        {" · "}
+                        <span className="font-medium text-foreground">{insights.totalTemplates}</span> gekoppelde
+                        templates
+                        {insights.completed.length > 0
+                          ? ` · ${insights.completed.length} afgerond`
+                          : null}
+                      </p>
+                      {(topbarStats?.pendingDrafts ?? 0) > 0 ? (
+                        <p className="mt-1 text-amber-900 dark:text-amber-100">
+                          {topbarStats?.pendingDrafts} outbound-mail
+                          {(topbarStats?.pendingDrafts ?? 0) !== 1 ? "s" : ""} wacht op goedkeuring
+                        </p>
+                      ) : null}
+                      {(topbarStats?.followUpCount ?? 0) > 0 ? (
+                        <p className="mt-1 text-muted-foreground">
+                          {topbarStats?.followUpCount} lead
+                          {(topbarStats?.followUpCount ?? 0) !== 1 ? "s" : ""} met aanbevolen follow-up
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
+
             <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-              <CardContent className="p-3">
+              <CardContent className="p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Gerelateerde acties
                 </p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <Button asChild size="sm" variant="outline">
-                    <Link href="/contacts/approval">Goedkeuringen</Link>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Vanuit campagnes naar outbound, templates en goedkeuring.
+                </p>
+                <div className="mt-3 flex flex-col gap-2">
+                  <Button asChild size="sm" variant="outline" className="justify-between">
+                    <Link href="/contacts/approval" className="flex w-full items-center justify-between">
+                      <span>Goedkeuringen</span>
+                      {(topbarStats?.pendingDrafts ?? 0) > 0 ? (
+                        <Badge variant="warning" className="ml-2 shrink-0">
+                          {topbarStats?.pendingDrafts}
+                        </Badge>
+                      ) : null}
+                    </Link>
                   </Button>
-                  <Button asChild size="sm" variant="ghost">
+                  <Button asChild size="sm" variant="outline" className="justify-start">
                     <Link href="/contacts">Outbound center</Link>
                   </Button>
+                  <Button asChild size="sm" variant="ghost" className="justify-start">
+                    <Link href="/templates">E-mailtemplates</Link>
+                  </Button>
+                  {insights.focus && insights.focus._count.campaignLeads > 0 ? (
+                    <Button asChild size="sm" variant="ghost" className="justify-start">
+                      <Link href={`/contacts/compose?campaignId=${insights.focus.id}`}>
+                        E-mail opstellen
+                      </Link>
+                    </Button>
+                  ) : null}
                 </div>
               </CardContent>
             </Card>

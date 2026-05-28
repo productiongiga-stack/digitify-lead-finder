@@ -29,6 +29,22 @@ export interface WebsiteAnalysis {
     emails: string[];
     phones: string[];
   };
+  uxAudit: {
+    linkCount: number;
+    internalLinkCount: number;
+    buttonCount: number;
+    formCount: number;
+    imagesTotal: number;
+    imagesMissingAlt: number;
+    pageProbes: {
+      url: string;
+      statusCode: number;
+      ok: boolean;
+      error?: string;
+    }[];
+    pagesChecked: number;
+    pagesBroken: number;
+  };
   errors: string[];
 }
 

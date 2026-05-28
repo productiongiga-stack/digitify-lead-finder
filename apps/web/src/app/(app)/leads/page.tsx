@@ -59,6 +59,8 @@ import {
   Sparkles,
   ListChecks,
   MousePointerClick,
+  LayoutGrid,
+  Info,
 } from "lucide-react";
 import { cn, formatScore, formatDate, safeExternalUrl } from "@/lib/utils";
 import { LEADS_WORKFLOW_ITEMS } from "@/lib/navigation";
@@ -579,9 +581,15 @@ export default function LeadsPage() {
       </div>
 
       <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="grid h-10 w-full max-w-xs grid-cols-2 rounded-full bg-muted/60 p-1">
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="info">Info</TabsTrigger>
+        <TabsList className="page-view-tabs">
+          <TabsTrigger value="overview" className="page-view-tabs-trigger">
+            <LayoutGrid className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+            Overzicht
+          </TabsTrigger>
+          <TabsTrigger value="info" className="page-view-tabs-trigger">
+            <Info className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+            Info
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">

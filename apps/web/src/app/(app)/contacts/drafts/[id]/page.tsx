@@ -44,20 +44,30 @@ import {
   AlertTriangle,
   Eye,
   Sparkles,
+  Receipt,
 } from "lucide-react";
 import { formatDate, formatRelativeTime } from "@/lib/utils";
+import {
+  extractQuoteIdFromDraftBody,
+  getQuoteConfiguratorUrl,
+} from "@/lib/quote-outbound";
 import { EmailPreview } from "@/components/email/preview";
+import { OutboundDraftTimeline } from "@/components/outbound/outbound-draft-timeline";
+import {
+  OutboundDraftStatusBanner,
+  getOutboundFailureAction,
+} from "@/components/outbound/outbound-draft-status-banner";
+import { applyEmailTemplateSelection } from "@/lib/apply-email-template";
+import { TemplatePicker } from "@/components/templates/template-picker";
 import { extractEmailTemplateMetadata, injectEmailTemplateMetadata, type EmailLayout } from "@/lib/email-content";
 import {
   OUTBOUND_STATUS_LABELS,
   OUTBOUND_STATUS_VARIANTS,
-  OUTBOUND_TIMELINE_STEPS,
   SEND_OUTBOUND_TOOLTIP,
   canSendOutboundDraft,
+  canEditOutboundDraft,
   getApprovedNotSentBanner,
-  getOutboundNextActionHint,
   getOutboundStatusLabel,
-  getOutboundTimelineStatus,
   getSendButtonLabel,
 } from "@/lib/contact-status";
 
@@ -74,6 +84,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const { data: brandingSettings } = trpc.settings.getAll.useQuery(undefined, {
     staleTime: 60_000,
   });
+  const { data: templateData } = trpc.template.list.useQuery({ forOutbound: true });
+  const templates = templateData?.templates ?? [];
   const brandCompanyName = brandingSettings?.["branding.company_name"]
     ? String(brandingSettings["branding.company_name"])
     : "";
@@ -83,9 +95,6 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const brandHeaderSlogan = brandingSettings?.["email.header_slogan"]
     ? String(brandingSettings["email.header_slogan"])
     : "";
-  const followupDays = brandingSettings?.["email.followup_days"]
-    ? Math.max(1, Number.parseInt(String(brandingSettings["email.followup_days"]), 10) || 3)
-    : 3;
 
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -94,6 +103,10 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [rejectNote, setRejectNote] = useState("");
   const [rejectOpen, setRejectOpen] = useState(false);
   const [emailLayout, setEmailLayout] = useState<EmailLayout>("modern");
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [ctaText, setCtaText] = useState("");
+  const [ctaUrl, setCtaUrl] = useState("");
+  const [bodyFormat, setBodyFormat] = useState<"TEXT" | "HTML">("TEXT");
   const [rewriteStyle, setRewriteStyle] = useState("Korter");
   const [rewriteResult, setRewriteResult] = useState<{ subject: string; body: string } | null>(null);
 
@@ -104,6 +117,10 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     setBody(parsed.cleanBody);
     setToEmail(draft.toEmail);
     setEmailLayout(parsed.layout || "proposal");
+    setCtaText(parsed.ctaText);
+    setCtaUrl(parsed.ctaUrl);
+    setBodyFormat(parsed.bodyFormat === "HTML" ? "HTML" : "TEXT");
+    setSelectedTemplateId(draft.templateId || "");
     setInitialized(true);
   }, [draft, initialized]);
 
@@ -171,16 +188,36 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     );
   }
 
-  const isEditable = draft.status === "DRAFT" || draft.status === "REJECTED";
-  const draftBodyForSave = injectEmailTemplateMetadata(body, { layout: emailLayout });
-  const hasChanges = subject !== draft.subject || draftBodyForSave !== draft.body || toEmail !== draft.toEmail;
+  const isEditable = canEditOutboundDraft(draft.status);
+  const draftBodyForSave = injectEmailTemplateMetadata(body, {
+    layout: emailLayout,
+    ctaText,
+    ctaUrl,
+    bodyFormat,
+  });
+  const selectedTemplateForSave =
+    selectedTemplateId && selectedTemplateId !== "none" ? selectedTemplateId : null;
+  const hasChanges =
+    subject !== draft.subject ||
+    draftBodyForSave !== draft.body ||
+    toEmail !== draft.toEmail ||
+    selectedTemplateForSave !== (draft.templateId || null);
   const draftId = draft.id;
-  const { activeIndex, rejected } = getOutboundTimelineStatus(draft.status);
-  const recommendedFollowUpDate = draft.sentAt
-    ? new Date(new Date(draft.sentAt).getTime() + followupDays * 24 * 60 * 60 * 1000)
-    : null;
-  const followUpDue =
-    recommendedFollowUpDate ? recommendedFollowUpDate.getTime() <= Date.now() : false;
+
+  function handleTemplateSelect(templateId: string) {
+    if (!isEditable) return;
+    setSelectedTemplateId(templateId);
+    if (templateId === "none") return;
+    const template = templates.find((item) => item.id === templateId);
+    if (!template) return;
+    const applied = applyEmailTemplateSelection(template);
+    setSubject(applied.subject);
+    setBody(applied.body);
+    setBodyFormat(applied.bodyFormat);
+    setCtaText(applied.ctaText);
+    setCtaUrl(applied.ctaUrl);
+    setEmailLayout(applied.layout);
+  }
 
   function handleSave() {
     updateDraft.mutate({
@@ -188,20 +225,24 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       subject,
       body: draftBodyForSave,
       toEmail,
+      templateId: selectedTemplateForSave,
     });
   }
 
   function handleSubmit() {
-    // Save first if there are changes, then submit
+    const payload = {
+      id: draftId,
+      subject,
+      body: draftBodyForSave,
+      toEmail,
+      templateId: selectedTemplateForSave,
+    };
     if (hasChanges) {
-      updateDraft.mutate(
-        { id: draftId, subject, body: draftBodyForSave, toEmail },
-        {
-          onSuccess: () => {
-            submitForApproval.mutate({ id: draftId });
-          },
-        }
-      );
+      updateDraft.mutate(payload, {
+        onSuccess: () => {
+          submitForApproval.mutate({ id: draftId });
+        },
+      });
     } else {
       submitForApproval.mutate({ id: draftId });
     }
@@ -210,6 +251,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   function handleReject() {
     reject.mutate({ id: draftId, note: rejectNote || undefined });
   }
+
+  const linkedQuoteId =
+    draft?.type === "QUOTE" ? extractQuoteIdFromDraftBody(draft.body) : null;
 
   return (
     <div className="space-y-5">
@@ -232,6 +276,14 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {linkedQuoteId ? (
+            <Button asChild variant="outline">
+              <Link href={getQuoteConfiguratorUrl(linkedQuoteId, `/contacts/drafts/${draftId}`)}>
+                <Receipt className="mr-2 h-4 w-4" />
+                Offerte in configurator
+              </Link>
+            </Button>
+          ) : null}
           {isEditable && (
             <>
               <Button
@@ -330,170 +382,52 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
-      {/* Status Timeline */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            {OUTBOUND_TIMELINE_STEPS.map((step, index) => {
-              const StepIcon = step.icon;
-              const isActive = index <= activeIndex;
-              const isCurrent = index === activeIndex;
-              const isRejectedStep = index === 2 && rejected;
-
-              return (
-                <div key={step.key} className="flex flex-1 items-center">
-                  <div className="flex flex-col items-center gap-1.5">
-                    <div
-                      className={`flex h-9 w-9 items-center justify-center rounded-full border-2 transition-colors ${
-                        isRejectedStep
-                          ? "border-destructive bg-destructive/10 text-destructive"
-                          : isCurrent
-                            ? "border-primary bg-primary text-primary-foreground"
-                            : isActive
-                              ? "border-primary bg-primary/10 text-primary"
-                              : "border-muted-foreground/30 text-muted-foreground/30"
-                      }`}
-                    >
-                      {isRejectedStep ? (
-                        <XCircle className="h-4 w-4" />
-                      ) : (
-                        <StepIcon className="h-4 w-4" />
-                      )}
-                    </div>
-                    <span
-                      className={`text-xs font-medium ${
-                        isRejectedStep
-                          ? "text-destructive"
-                          : isActive
-                            ? "text-foreground"
-                            : "text-muted-foreground/50"
-                      }`}
-                    >
-                      {isRejectedStep ? "Afgekeurd" : step.label}
-                    </span>
-                    {/* Timestamp under the step */}
-                    {index === 0 && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {formatDate(draft.createdAt)}
-                      </span>
-                    )}
-                    {index === 2 && draft.approvedAt && !rejected && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {formatDate(draft.approvedAt)}
-                      </span>
-                    )}
-                    {index === 2 && draft.rejectedAt && rejected && (
-                      <span className="text-[10px] text-destructive/70">
-                        {formatDate(draft.rejectedAt)}
-                      </span>
-                    )}
-                    {index === 3 && draft.sentAt && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {formatDate(draft.sentAt)}
-                      </span>
-                    )}
-                  </div>
-                  {index < OUTBOUND_TIMELINE_STEPS.length - 1 && (
-                    <div
-                      className={`mx-2 h-0.5 flex-1 rounded-full ${
-                        index < activeIndex
-                          ? isRejectedStep || (index === 1 && rejected)
-                            ? "bg-destructive/40"
-                            : "bg-primary/40"
-                          : "bg-muted-foreground/20"
-                      }`}
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-3 xl:grid-cols-3">
-        <Card className="border-emerald-200 bg-emerald-50/80 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Volgende actie</p>
-            <p className="mt-2 text-sm font-medium">{getOutboundNextActionHint(draft.status)}</p>
+      {linkedQuoteId ? (
+        <Card className="border-amber-200/70 bg-amber-50/50 dark:border-amber-900/40 dark:bg-amber-950/20">
+          <CardContent className="p-4 text-sm text-muted-foreground">
+            Dit is een offerte-mail. Pas regels, prijzen en klantgegevens aan via de configurator —
+            de outbound-mail wordt automatisch bijgewerkt.
           </CardContent>
         </Card>
-        <Card className="border-amber-200 bg-amber-50/80 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Reminder</p>
-            <p className="mt-2 text-sm font-medium">
-              {recommendedFollowUpDate
-                ? `Aanbevolen opvolging op ${recommendedFollowUpDate.toLocaleDateString("nl-BE", { day: "numeric", month: "short", year: "numeric" })}`
-                : `Standaard follow-up interval is ${followupDays} dagen na verzending.`}
-            </p>
-            {draft.status === "SENT" ? (
-              <p className={`mt-1 text-xs ${followUpDue ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>
-                {followUpDue
-                  ? "Deze follow-up is nu aan de beurt."
-                  : "Zodra dit moment bereikt is, verschijnt deze lead ook in de follow-up queue."}
-              </p>
-            ) : null}
-          </CardContent>
-        </Card>
-        <Card className="border-blue-200 bg-blue-50/80 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Gerelateerd</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button asChild size="sm" variant="outline">
-                <Link href={`/contacts/compose?leadId=${draft.lead.id}`}>Nieuwe mail voor lead</Link>
-              </Button>
-              <Button asChild size="sm" variant="ghost">
-                <Link href="/contacts">Outbound center</Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      ) : null}
 
-      {/* Rejection note */}
+      <OutboundDraftTimeline
+        status={draft.status}
+        createdAt={draft.createdAt}
+        approvedAt={draft.approvedAt}
+        rejectedAt={draft.rejectedAt}
+        sentAt={draft.sentAt}
+      />
+
       {draft.status === "REJECTED" && draft.rejectionNote && (
-        <Card className="border-destructive/50 bg-destructive/5">
-          <CardContent className="flex items-start gap-3 p-4">
-            <XCircle className="mt-0.5 h-5 w-5 text-destructive" />
-            <div>
-              <p className="text-sm font-medium text-destructive">{getOutboundStatusLabel("REJECTED")}</p>
-              <p className="mt-1 text-sm text-muted-foreground">{draft.rejectionNote}</p>
-            </div>
-          </CardContent>
-        </Card>
+        <OutboundDraftStatusBanner
+          variant="error"
+          title={getOutboundStatusLabel("REJECTED")}
+          detail={draft.rejectionNote}
+        />
       )}
 
       {(draft.status === "FAILED" || draft.status === "BOUNCED") && (
-        <Card className="border-amber-300/70 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
-          <CardContent className="flex items-start gap-3 p-4">
-            <AlertTriangle className="mt-0.5 h-5 w-5 text-amber-600" />
-            <div>
-              <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
-                Verzending mislukt
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {draft.rejectionNote || "Controleer SMTP, DKIM/SPF en ontvangeradres. Daarna kan je opnieuw verzenden."}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <OutboundDraftStatusBanner
+          variant="warning"
+          title="Verzending mislukt"
+          detail={
+            draft.rejectionNote ||
+            "Controleer SMTP, DKIM/SPF en ontvangeradres. Daarna kan je opnieuw verzenden."
+          }
+          action={getOutboundFailureAction(
+            draft.rejectionNote ||
+              "Controleer SMTP, DKIM/SPF en ontvangeradres. Daarna kan je opnieuw verzenden.",
+          )}
+        />
       )}
 
-      {/* Approval info */}
       {draft.status === "APPROVED" && draft.approvedAt && (
-        <Card className="border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30">
-          <CardContent className="flex items-start gap-3 p-4">
-            <CheckCircle className="mt-0.5 h-5 w-5 text-emerald-600" />
-            <div>
-              <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-                {getApprovedNotSentBanner().title}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {getApprovedNotSentBanner().detail(formatDate(draft.approvedAt))}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <OutboundDraftStatusBanner
+          variant="success"
+          title={getApprovedNotSentBanner().title}
+          detail={getApprovedNotSentBanner().detail(formatDate(draft.approvedAt))}
+        />
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -532,6 +466,16 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
               <CardTitle className="text-sm">E-mail inhoud</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              {draft.status === "APPROVED" ? (
+                <p className="rounded-lg border border-amber-200/80 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+                  Na opslaan gaat deze mail terug naar concept en moet opnieuw goedgekeurd worden voordat je kunt verzenden.
+                </p>
+              ) : null}
+              {draft.status === "PENDING_APPROVAL" ? (
+                <p className="rounded-lg border border-blue-200/80 bg-blue-50/70 px-3 py-2 text-xs text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-100">
+                  Wijzigingen worden opgeslagen terwijl de mail in de goedkeuringswachtrij blijft staan.
+                </p>
+              ) : null}
               <div className="space-y-2">
                 <Label>Aan</Label>
                 <Input
@@ -661,19 +605,23 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>Layout</Label>
-                <Select value={emailLayout} onValueChange={(v) => setEmailLayout(v as typeof emailLayout)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="modern">Modern (standaard)</SelectItem>
-                    <SelectItem value="minimal">Minimalistisch</SelectItem>
-                    <SelectItem value="business">Zakelijk</SelectItem>
-                    <SelectItem value="proposal">Voorstel</SelectItem>
-                    <SelectItem value="followup">Follow-up</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center justify-between gap-2">
+                  <Label>E-mailtemplate</Label>
+                  <Link href="/templates" className="text-xs text-primary hover:underline">
+                    Beheren
+                  </Link>
+                </div>
+                <TemplatePicker
+                  value={selectedTemplateId || "none"}
+                  onValueChange={handleTemplateSelect}
+                  templates={templates}
+                  emptyLabel="Geen template"
+                  placeholder="Kies een template..."
+                  disabled={!isEditable}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Past onderwerp, inhoud en layout toe op dit outbound-concept. Sla op om wijzigingen te bewaren.
+                </p>
               </div>
               <EmailPreview
                 subject={subject}
@@ -684,6 +632,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
                 headerSlogan={brandHeaderSlogan}
                 recipientCompany={draft.lead.companyName}
                 layout={emailLayout}
+                bodyFormat={bodyFormat}
+                ctaText={ctaText}
+                ctaUrl={ctaUrl}
               />
             </CardContent>
           </Card>

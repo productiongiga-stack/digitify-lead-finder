@@ -88,7 +88,7 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="essentials" className="space-y-5">
-            <TabsList className="settings-domain-tabs">
+            <TabsList className="settings-domain-tabs settings-domain-tabs-cols-3">
               {domainTabs.map((tab) => (
                 <TabsTrigger key={tab.value} value={tab.value} className="settings-domain-tab">
                   <tab.icon className="settings-domain-tab-icon" aria-hidden />

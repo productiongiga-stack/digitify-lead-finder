@@ -45,7 +45,7 @@ export const OUTBOUND_STATUS_OPTIONS = [
   { value: "BOUNCED", label: OUTBOUND_STATUS_LABELS.BOUNCED },
 ] as const;
 
-/** KPI cards on Outbound Center — same labels as badges */
+/** KPI cards on Outbound Center */
 export const OUTBOUND_STAT_CARD_STATUSES = [
   "DRAFT",
   "PENDING_APPROVAL",
@@ -55,6 +55,14 @@ export const OUTBOUND_STAT_CARD_STATUSES = [
 ] as const;
 
 export type OutboundStatCardStatus = (typeof OUTBOUND_STAT_CARD_STATUSES)[number];
+
+export const OUTBOUND_STAT_CARD_LABELS: Record<OutboundStatCardStatus, string> = {
+  DRAFT: "Concept",
+  PENDING_APPROVAL: "Goedkeuring",
+  APPROVED: "Klaar om te verzenden",
+  SENT: "Verzonden",
+  FAILED: "Mislukt",
+};
 
 export function getOutboundStatusLabel(status: string) {
   return OUTBOUND_STATUS_LABELS[status] ?? status;
@@ -144,4 +152,16 @@ export function getOutboundTimelineStatus(draftStatus: string): { activeIndex: n
 
 export function canSendOutboundDraft(status: string) {
   return status === "APPROVED" || status === "FAILED";
+}
+
+export const EDITABLE_OUTBOUND_STATUSES = [
+  "DRAFT",
+  "REJECTED",
+  "PENDING_APPROVAL",
+  "APPROVED",
+  "FAILED",
+] as const;
+
+export function canEditOutboundDraft(status: string) {
+  return (EDITABLE_OUTBOUND_STATUSES as readonly string[]).includes(status);
 }

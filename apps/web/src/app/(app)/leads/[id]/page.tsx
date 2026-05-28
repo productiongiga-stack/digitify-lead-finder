@@ -28,6 +28,7 @@ import {
   LEAD_STATUS_OPTIONS,
 } from "@/lib/lead-status";
 import { useUIStore } from "@/stores/ui-store";
+import { useToast } from "@/components/feedback/toast-provider";
 
 /* ---------- helpers ---------- */
 
@@ -136,15 +137,32 @@ export default function LeadDetailPage() {
   const { data: allTags } = trpc.tag.list.useQuery();
   const { data: pipelineStages } = trpc.pipeline.getStages.useQuery();
   const [noteText, setNoteText] = useState("");
+  const [lastAuditReportId, setLastAuditReportId] = useState<string | null>(null);
   const utils = trpc.useUtils();
   const { setOpenClawOpen } = useUIStore();
+  const { showToast } = useToast();
 
   /* mutations */
   const addNote = trpc.lead.addNote.useMutation({
     onSuccess: () => { setNoteText(""); utils.lead.getById.invalidate({ id: leadId }); },
   });
   const enrichLead = trpc.scoring.enrichLead.useMutation({
-    onSuccess: () => utils.lead.getById.invalidate({ id: leadId }),
+    onSuccess: async (data) => {
+      if (data.reportId) setLastAuditReportId(data.reportId);
+      await utils.lead.getById.invalidate({ id: leadId });
+      showToast({
+        title: "Website geanalyseerd",
+        description: `Opportunity score: ${data.scoring.overallScore}/100 (${data.scoring.priority})`,
+        variant: "success",
+      });
+    },
+    onError: (error) => {
+      showToast({
+        title: "Analyse mislukt",
+        description: error.message,
+        variant: "error",
+      });
+    },
   });
   const computeScore = trpc.scoring.computeForLead.useMutation({
     onSuccess: () => utils.lead.getById.invalidate({ id: leadId }),
@@ -232,6 +250,14 @@ export default function LeadDetailPage() {
     hasCTA?: boolean; contentLength?: number; lastModified?: string | null;
     contactFormFound?: boolean;
     technologies?: string[];
+    statusCode?: number;
+    uxAudit?: {
+      pagesChecked?: number;
+      pagesBroken?: number;
+      buttonCount?: number;
+      formCount?: number;
+      linkCount?: number;
+    };
   };
   type EnrichmentRow = { data?: { website_analysis?: WebsiteAnalysis }; fetchedAt?: string | Date };
   type OpenClawSuggestion = { id?: string; type: string; title?: string; content?: string; metadata?: Record<string, unknown>; [k: string]: unknown };
@@ -336,10 +362,11 @@ export default function LeadDetailPage() {
               <Button
                 variant="outline" size="sm"
                 onClick={() => enrichLead.mutate({ leadId: id })}
-                disabled={enrichLead.isPending}
+                disabled={enrichLead.isPending || !lead.website?.trim()}
+                title={!lead.website?.trim() ? "Voeg eerst een website toe" : undefined}
               >
                 {enrichLead.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Search className="mr-1.5 h-3.5 w-3.5" />}
-                {enrichLead.isPending ? "Analyseren..." : "Enrich & Score"}
+                {enrichLead.isPending ? "Analyseren..." : "Website & score"}
               </Button>
               <Button
                 variant="outline" size="sm"
@@ -480,11 +507,56 @@ export default function LeadDetailPage() {
                 {scoreFactors.length === 0 ? (
                   <div className="py-8 text-center">
                     <Zap className="mx-auto mb-3 h-8 w-8 text-muted-foreground/50" />
-                    <p className="text-sm text-muted-foreground mb-3">Nog geen score berekend</p>
-                    <Button size="sm" onClick={() => enrichLead.mutate({ leadId: id })} disabled={enrichLead.isPending}>
-                      {enrichLead.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Zap className="mr-1.5 h-3.5 w-3.5" />}
-                      Website analyseren & scoren
-                    </Button>
+                    <p className="text-sm text-muted-foreground mb-1">
+                      {hasEnrichment ? "Score moet opnieuw worden berekend" : "Nog geen score berekend"}
+                    </p>
+                    <p className="mx-auto mb-4 max-w-sm text-xs text-muted-foreground">
+                      {lead.website?.trim()
+                        ? "We scannen de website (pagina's, knoppen, SEO) en berekenen automatisch de opportunity score."
+                        : "Voeg eerst een website-URL toe om een analyse en score te kunnen uitvoeren."}
+                    </p>
+                    {lead.website?.trim() ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <Button
+                          size="sm"
+                          onClick={() => enrichLead.mutate({ leadId: id })}
+                          disabled={enrichLead.isPending}
+                        >
+                          {enrichLead.isPending ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Zap className="mr-1.5 h-3.5 w-3.5" />
+                          )}
+                          {enrichLead.isPending ? "Website scannen…" : "Website analyseren & scoren"}
+                        </Button>
+                        {enrichLead.isPending ? (
+                          <p className="text-xs text-muted-foreground">Dit kan tot een minuut duren.</p>
+                        ) : null}
+                        {lastAuditReportId ? (
+                          <Button asChild size="sm" variant="outline">
+                            <Link href={`/reports/${lastAuditReportId}`}>Bekijk auditrapport</Link>
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={`/leads/${id}/edit`}>
+                          <Edit className="mr-1.5 h-3.5 w-3.5" />
+                          Website toevoegen
+                        </Link>
+                      </Button>
+                    )}
+                    {hasEnrichment && lead.website?.trim() ? (
+                      <Button
+                        className="mt-3"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => computeScore.mutate({ leadId: id })}
+                        disabled={computeScore.isPending}
+                      >
+                        Alleen score herberekenen
+                      </Button>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="space-y-5">
@@ -622,6 +694,21 @@ export default function LeadDetailPage() {
                     <AuditItem label="Analytics geïnstalleerd" value={wa.hasAnalytics} />
                     <AuditItem label="Favicon aanwezig" value={wa.hasFavicon} />
                   </div>
+
+                  {wa.uxAudit && (wa.uxAudit.pagesChecked ?? 0) > 0 ? (
+                    <>
+                      <Separator className="my-4" />
+                      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        Pagina&apos;s & interactie
+                      </h4>
+                      <p className="text-sm text-muted-foreground">
+                        {wa.uxAudit.pagesChecked} pagina&apos;s gecontroleerd ·{" "}
+                        {wa.uxAudit.pagesBroken ?? 0} probleem
+                        {(wa.uxAudit.pagesBroken ?? 0) === 1 ? "" : "en"} ·{" "}
+                        {wa.uxAudit.buttonCount ?? 0} knoppen · {wa.uxAudit.formCount ?? 0} formulieren
+                      </p>
+                    </>
+                  ) : null}
 
                   <Separator className="my-4" />
 

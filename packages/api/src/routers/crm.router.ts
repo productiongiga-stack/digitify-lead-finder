@@ -2,14 +2,11 @@ import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { assertLeadAccess } from "../lib/tenant";
 
-const crmSegmentSchema = z.enum(["ALL", "CUSTOMERS", "PROSPECTS"]);
+const crmSegmentSchema = z.enum(["CUSTOMERS"]);
 
-const customerRelationshipFilter = {
-  OR: [
-    { status: "WON" as const },
-    { quotes: { some: { status: "ACCEPTED" as const } } },
-    { bookings: { some: { status: { in: ["SCHEDULED", "CONFIRMED", "COMPLETED"] } } } },
-  ],
+/** Only leads explicitly marked as customers (WON), e.g. via CRM or lead profile. */
+const crmCustomerFilter = {
+  status: "WON" as const,
 };
 
 export const crmRouter = router({
@@ -18,7 +15,7 @@ export const crmRouter = router({
       z
         .object({
           search: z.string().optional(),
-          segment: crmSegmentSchema.default("ALL"),
+          segment: crmSegmentSchema.default("CUSTOMERS"),
           page: z.number().min(1).default(1),
           pageSize: z.number().min(1).max(50).default(20),
         })
@@ -38,13 +35,14 @@ export const crmRouter = router({
         ];
       }
 
-      if (input.segment === "CUSTOMERS") {
-        where.AND = [customerRelationshipFilter];
-      } else if (input.segment === "PROSPECTS") {
-        where.AND = [{ NOT: customerRelationshipFilter }];
-      }
+      where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), crmCustomerFilter];
 
-      const [items, total, totalCustomers, totalProspects] = await Promise.all([
+      const customerWhere = {
+        createdById: ctx.user.workspaceId!,
+        ...crmCustomerFilter,
+      };
+
+      const [items, total, totalCustomers, withQuotes, withOutbound, crossModuleLinked] = await Promise.all([
         ctx.db.lead.findMany({
           where: where as any,
           orderBy: [{ updatedAt: "desc" }],
@@ -125,16 +123,28 @@ export const crmRouter = router({
           },
         }),
         ctx.db.lead.count({ where: where as any }),
+        ctx.db.lead.count({ where: customerWhere }),
         ctx.db.lead.count({
           where: {
-            createdById: ctx.user.workspaceId!,
-            AND: [customerRelationshipFilter],
+            ...customerWhere,
+            quotes: { some: { createdById: ctx.user.workspaceId! } },
           },
         }),
         ctx.db.lead.count({
           where: {
-            createdById: ctx.user.workspaceId!,
-            AND: [{ NOT: customerRelationshipFilter }],
+            ...customerWhere,
+            emailDrafts: { some: {} },
+          },
+        }),
+        ctx.db.lead.count({
+          where: {
+            ...customerWhere,
+            OR: [
+              { quotes: { some: { createdById: ctx.user.workspaceId! } } },
+              { emailDrafts: { some: {} } },
+              { campaignLeads: { some: {} } },
+              { reports: { some: {} } },
+            ],
           },
         }),
       ]);
@@ -192,8 +202,7 @@ export const crmRouter = router({
           openCount: 0,
           openValue: 0,
         };
-        const hasCustomerSignals =
-          lead.status === "WON" || quoteStats.acceptedCount > 0 || lead.bookings.length > 0;
+        const hasCustomerSignals = lead.status === "WON";
         const latestQuote = lead.quotes[0] ?? null;
         const latestDraft = lead.emailDrafts[0] ?? null;
         const latestReport = lead.reports[0] ?? null;
@@ -232,7 +241,9 @@ export const crmRouter = router({
         totalPages: Math.ceil(total / input.pageSize),
         summary: {
           totalCustomers,
-          totalProspects,
+          withQuotes,
+          withOutbound,
+          crossModuleLinked,
         },
       };
     }),

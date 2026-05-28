@@ -54,7 +54,6 @@ export async function GET(request: Request) {
     "email",
     "profile",
     "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/calendar.readonly",
   ].join(" "));
   url.searchParams.set("state", state);
   url.searchParams.set("nonce", nonce);
