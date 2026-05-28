@@ -12,7 +12,7 @@
     "db:migrate-workspace-settings": "pnpm --filter @digitify/db db:migrate-workspace-settings",
     "db:migrate-legacy-templates": "pnpm --filter @digitify/db db:migrate-legacy-templates",
     "db:push": "turbo db:push",
-    "db:seed": "turbo db:seed",
+    "db:seed": "pnpm --filter @digitify/db db:seed",
     "db:studio": "pnpm --filter @digitify/db studio",
     "clean": "turbo clean",
     "test": "turbo test && pnpm --filter @digitify/web test",
