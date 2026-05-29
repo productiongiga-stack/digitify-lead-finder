@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { type PrismaClient } from "@digitify/db";
 import { userSettingKey } from "./user-settings";
+import { workspaceSettingKey } from "./workspace-settings";
 
 export const PUBLIC_TENANT_SETTING_KEY = "chatbot.public_tenant_token";
 const TOKEN_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -25,12 +26,29 @@ function parseSettingString(value: unknown) {
   return "";
 }
 
+/** @deprecated Use extractTenantOwnerIdFromSettingKey */
 export function extractUserIdFromScopedSettingKey(key: string, settingKey = PUBLIC_TENANT_SETTING_KEY) {
-  const prefix = "user:";
+  return extractTenantOwnerIdFromSettingKey(key, settingKey);
+}
+
+/** Workspace owner id from user: or workspace: scoped setting keys. */
+export function extractTenantOwnerIdFromSettingKey(key: string, settingKey = PUBLIC_TENANT_SETTING_KEY) {
   const suffix = `:${settingKey}`;
-  if (!key.startsWith(prefix) || !key.endsWith(suffix)) return null;
-  const userId = key.slice(prefix.length, key.length - suffix.length).trim();
-  return userId || null;
+  if (!key.endsWith(suffix)) return null;
+
+  const userPrefix = "user:";
+  if (key.startsWith(userPrefix)) {
+    const userId = key.slice(userPrefix.length, key.length - suffix.length).trim();
+    return userId || null;
+  }
+
+  const workspacePrefix = "workspace:";
+  if (key.startsWith(workspacePrefix)) {
+    const workspaceId = key.slice(workspacePrefix.length, key.length - suffix.length).trim();
+    return workspaceId || null;
+  }
+
+  return null;
 }
 
 export function normalizePublicTenantToken(rawTenant: string | null | undefined) {
@@ -40,29 +58,47 @@ export function normalizePublicTenantToken(rawTenant: string | null | undefined)
   return token;
 }
 
+function tenantSettingKeys(workspaceOwnerId: string) {
+  return [
+    userSettingKey(workspaceOwnerId, PUBLIC_TENANT_SETTING_KEY),
+    workspaceSettingKey(workspaceOwnerId, PUBLIC_TENANT_SETTING_KEY),
+  ];
+}
+
+async function syncTenantTokenKeys(db: PrismaClient, workspaceOwnerId: string, token: string) {
+  await Promise.all(
+    tenantSettingKeys(workspaceOwnerId).map((key) =>
+      db.setting.upsert({
+        where: { key },
+        create: { key, value: token },
+        update: { value: token },
+      }),
+    ),
+  );
+}
+
 export async function ensurePublicTenantToken(db: PrismaClient, userId: string) {
   const cached = tokenCache.get(userId);
   if (cached && Date.now() - cached.cachedAt < TOKEN_CACHE_TTL_MS) {
     return cached.token;
   }
 
-  const scopedKey = userSettingKey(userId, PUBLIC_TENANT_SETTING_KEY);
-  const existing = await db.setting.findUnique({
-    where: { key: scopedKey },
-    select: { value: true },
+  const rows = await db.setting.findMany({
+    where: { key: { in: tenantSettingKeys(userId) } },
+    select: { key: true, value: true },
   });
-  const currentToken = parseSettingString(existing?.value);
-  if (normalizePublicTenantToken(currentToken)) {
-    tokenCache.set(userId, { token: currentToken, cachedAt: Date.now() });
-    return currentToken;
+
+  for (const row of rows) {
+    const currentToken = normalizePublicTenantToken(parseSettingString(row.value));
+    if (currentToken) {
+      await syncTenantTokenKeys(db, userId, currentToken);
+      tokenCache.set(userId, { token: currentToken, cachedAt: Date.now() });
+      return currentToken;
+    }
   }
 
   const token = randomBytes(24).toString("base64url");
-  await db.setting.upsert({
-    where: { key: scopedKey },
-    create: { key: scopedKey, value: token },
-    update: { value: token },
-  });
+  await syncTenantTokenKeys(db, userId, token);
   tokenCache.set(userId, { token, cachedAt: Date.now() });
   return token;
 }
@@ -74,16 +110,24 @@ export async function resolveUserIdFromPublicTenantToken(
   const token = normalizePublicTenantToken(rawTenant);
   if (!token) return null;
 
-  const row = await db.setting.findFirst({
-    where: {
-      key: { endsWith: `:${PUBLIC_TENANT_SETTING_KEY}` },
-      value: token as any,
-    },
-    select: { key: true },
-  });
-  if (!row) return null;
+  try {
+    const rows = await db.setting.findMany({
+      where: {
+        key: { endsWith: `:${PUBLIC_TENANT_SETTING_KEY}` },
+      },
+      select: { key: true, value: true },
+    });
 
-  return extractUserIdFromScopedSettingKey(row.key);
+    for (const row of rows) {
+      if (parseSettingString(row.value) !== token) continue;
+      const ownerId = extractTenantOwnerIdFromSettingKey(row.key);
+      if (ownerId) return ownerId;
+    }
+    return null;
+  } catch (error) {
+    console.error("[public-tenant] resolveUserIdFromPublicTenantToken failed", error);
+    return null;
+  }
 }
 
 export async function resolveDefaultPublicTenantUserId(db: PrismaClient) {

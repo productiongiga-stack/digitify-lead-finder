@@ -115,10 +115,25 @@ export async function POST(request: Request) {
     const body = await request.json();
     _phase = "tenant";
     const ip = getClientIp(request);
-    const tenantUserId = await resolvePublicTenantUserId(prisma, String(body.tenant || ""));
+    let tenantUserId: string | null = null;
+    try {
+      tenantUserId = await resolvePublicTenantUserId(prisma, String(body.tenant || ""));
+    } catch (error) {
+      log.api.error("Public booking tenant lookup failed", { route: "/api/public/bookings", ip }, error);
+      return NextResponse.json(
+        { error: "Boeking opslaan mislukt. Tenant kon niet worden gevalideerd." },
+        { status: 500 },
+      );
+    }
     if (!tenantUserId) {
       log.security.warn("Public booking rejected: invalid tenant token", { ip });
-      return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
+      return NextResponse.json(
+        {
+          error:
+            "Ongeldige of verlopen boekingslink. Vernieuw de embed-code onder Instellingen → Boekingen.",
+        },
+        { status: 400 },
+      );
     }
 
     _phase = "rate-limit";
