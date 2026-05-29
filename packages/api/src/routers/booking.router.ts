@@ -15,7 +15,7 @@ import {
   buildIcsAttachment,
   createPublicToken,
   DEFAULT_BOOKING_TIMEZONE,
-  applyWorkspaceEmbedSettingsToDefaultEventType,
+  applyWorkspaceEmbedSettingsToEventType,
   ensureDefaultBookingEventType,
   getStoredGoogleEventId,
   hashPublicToken,
@@ -906,10 +906,10 @@ export const bookingRouter = router({
     }),
 
   syncEmbedFromSettings: protectedProcedure.mutation(async ({ ctx }) => {
-    const eventTypeId = await applyWorkspaceEmbedSettingsToDefaultEventType(
-      ctx.db,
-      ctx.user.workspaceId!,
-    );
+      const eventTypeId = await applyWorkspaceEmbedSettingsToEventType(
+        ctx.db,
+        ctx.user.workspaceId!,
+      );
     return { success: Boolean(eventTypeId) };
   }),
 

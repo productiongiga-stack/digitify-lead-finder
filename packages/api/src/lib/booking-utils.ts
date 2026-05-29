@@ -171,6 +171,29 @@ export async function syncHostTimezoneForWorkspace(
   return { timezone: tz };
 }
 
+function coerceSettingBoolean(value: unknown, fallback: boolean) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "off"].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
+function pickTimeField(
+  value: Record<string, unknown>,
+  keys: string[],
+  fallback: string,
+) {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+  return fallback;
+}
+
 function parseWeeklyHoursFromSettings(
   raw: unknown,
   fallbackStart: string,
@@ -191,37 +214,54 @@ function parseWeeklyHoursFromSettings(
     });
   }
 
-  if (!raw) return rules;
-  let parsed: Record<string, { enabled?: boolean; start?: string; end?: string }> | null = null;
-  if (typeof raw === "string") {
+  let parsed: Record<string, unknown> | null = null;
+  if (typeof raw === "string" && raw.trim()) {
     try {
-      parsed = JSON.parse(raw) as Record<string, { enabled?: boolean; start?: string; end?: string }>;
+      const value = JSON.parse(raw) as unknown;
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        parsed = value as Record<string, unknown>;
+      }
     } catch {
       parsed = null;
     }
-  } else if (typeof raw === "object" && raw !== null) {
-    parsed = raw as Record<string, { enabled?: boolean; start?: string; end?: string }>;
+  } else if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    parsed = raw as Record<string, unknown>;
   }
-  if (!parsed) return rules;
 
-  for (const [key, value] of Object.entries(parsed)) {
-    const weekday = Number(key);
-    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) continue;
-    const base = rules[weekday];
-    rules[weekday] = {
-      weekday,
-      enabled: value.enabled ?? base.enabled,
-      startTime: value.start?.trim() || base.startTime,
-      endTime: value.end?.trim() || base.endTime,
-    };
+  if (parsed) {
+    for (let weekday = 0; weekday <= 6; weekday += 1) {
+      const dayValue = parsed[String(weekday)] ?? parsed[weekday];
+      if (!dayValue || typeof dayValue !== "object" || Array.isArray(dayValue)) continue;
+      const dayMap = dayValue as Record<string, unknown>;
+      const base = rules[weekday];
+      let startTime = pickTimeField(dayMap, ["start", "startTime"], base.startTime);
+      let endTime = pickTimeField(dayMap, ["end", "endTime"], base.endTime);
+      if (timeToMinutes(startTime) >= timeToMinutes(endTime)) {
+        [startTime, endTime] = [base.startTime, base.endTime];
+      }
+      rules[weekday] = {
+        weekday,
+        enabled: coerceSettingBoolean(dayMap.enabled, base.enabled),
+        startTime,
+        endTime,
+      };
+    }
   }
+
+  if (!rules.some((rule) => rule.enabled)) {
+    for (const weekday of fallbackDays.length ? fallbackDays : [1, 2, 3, 4, 5]) {
+      rules[weekday].enabled = true;
+    }
+  }
+
   return rules;
 }
 
-/** Push embed settings (color, hours, timezone) into the default booking event type for public embeds. */
-export async function applyWorkspaceEmbedSettingsToDefaultEventType(
+/** Push embed settings (color, hours, timezone) into a booking event type for public embeds. */
+export async function applyWorkspaceEmbedSettingsToEventType(
   db: PrismaClient,
   workspaceId: string,
+  eventTypeId?: string,
 ) {
   const settingsRows = await loadWorkspaceSettingRows(db, { workspaceId, memberId: workspaceId }, [
     "bookings.embed_meeting_name",
@@ -238,14 +278,25 @@ export async function applyWorkspaceEmbedSettingsToDefaultEventType(
   ]);
   const settings = settingsRowsToMap(settingsRows);
 
-  let eventType = await db.bookingEventType.findFirst({
-    where: { createdById: workspaceId, isDefault: true },
-    select: { id: true },
-  });
-  if (!eventType) {
+  let target =
+    eventTypeId
+      ? await db.bookingEventType.findFirst({
+          where: { id: eventTypeId, createdById: workspaceId },
+          select: { id: true },
+        })
+      : null;
+
+  if (!target) {
+    target = await db.bookingEventType.findFirst({
+      where: { createdById: workspaceId, isDefault: true },
+      select: { id: true },
+    });
+  }
+
+  if (!target) {
     const ensured = await ensureDefaultBookingEventType(db, workspaceId);
     if (!ensured) return null;
-    eventType = { id: ensured.id };
+    target = { id: ensured.id };
   }
 
   const fallbackStart = getSettingString(settings, "bookings.availability_start_time", "09:00");
@@ -257,31 +308,40 @@ export async function applyWorkspaceEmbedSettingsToDefaultEventType(
     getSettingString(settings, "bookings.available_days", "1,2,3,4,5"),
   );
 
-  await db.bookingEventType.update({
-    where: { id: eventType.id },
-    data: {
-      name: getSettingString(settings, "bookings.embed_meeting_name", "Kennismaking"),
-      description: getSettingString(settings, "bookings.embed_description", "Vraag eenvoudig een afspraak aan."),
-      color: getSettingString(settings, "bookings.embed_color", "#f9ae5a"),
-      duration: Number(getSettingString(settings, "bookings.embed_duration", "60")) || 60,
-      slotMinutes: Number(getSettingString(settings, "bookings.slot_minutes", "30")) || 30,
-      location: getSettingString(settings, "bookings.embed_location_label", "Google Meet"),
-      timezone: getSettingString(settings, "bookings.google_calendar_timezone", DEFAULT_BOOKING_TIMEZONE),
-    },
-  });
+  await db.$transaction([
+    db.bookingEventType.update({
+      where: { id: target.id },
+      data: {
+        name: getSettingString(settings, "bookings.embed_meeting_name", "Kennismaking"),
+        description: getSettingString(settings, "bookings.embed_description", "Vraag eenvoudig een afspraak aan."),
+        color: getSettingString(settings, "bookings.embed_color", "#f9ae5a"),
+        duration: Number(getSettingString(settings, "bookings.embed_duration", "60")) || 60,
+        slotMinutes: Number(getSettingString(settings, "bookings.slot_minutes", "30")) || 30,
+        location: getSettingString(settings, "bookings.embed_location_label", "Google Meet"),
+        timezone: getSettingString(settings, "bookings.google_calendar_timezone", DEFAULT_BOOKING_TIMEZONE),
+      },
+    }),
+    db.bookingAvailabilityRule.deleteMany({ where: { eventTypeId: target.id } }),
+    db.bookingAvailabilityRule.createMany({
+      data: availabilityRules.map((rule) => ({
+        eventTypeId: target.id,
+        weekday: rule.weekday,
+        enabled: rule.enabled,
+        startTime: rule.startTime,
+        endTime: rule.endTime,
+      })),
+    }),
+  ]);
 
-  await db.bookingAvailabilityRule.deleteMany({ where: { eventTypeId: eventType.id } });
-  await db.bookingAvailabilityRule.createMany({
-    data: availabilityRules.map((rule) => ({
-      eventTypeId: eventType.id,
-      weekday: rule.weekday,
-      enabled: rule.enabled,
-      startTime: rule.startTime,
-      endTime: rule.endTime,
-    })),
-  });
+  return target.id;
+}
 
-  return eventType.id;
+/** @deprecated Use applyWorkspaceEmbedSettingsToEventType */
+export async function applyWorkspaceEmbedSettingsToDefaultEventType(
+  db: PrismaClient,
+  workspaceId: string,
+) {
+  return applyWorkspaceEmbedSettingsToEventType(db, workspaceId);
 }
 
 export function addDays(date: Date, days: number) {
@@ -365,13 +425,7 @@ export async function ensureDefaultBookingEventType(db: PrismaClient, workspaceI
     where: { createdById: workspaceId, isDefault: true },
     include: { availabilityRules: true, questions: { orderBy: { sortOrder: "asc" } } },
   });
-  if (existing) {
-    await applyWorkspaceEmbedSettingsToDefaultEventType(db, workspaceId).catch(() => null);
-    return db.bookingEventType.findFirst({
-      where: { id: existing.id },
-      include: { availabilityRules: true, questions: { orderBy: { sortOrder: "asc" } } },
-    });
-  }
+  if (existing) return existing;
 
   const settingsRows = await loadWorkspaceSettingRows(db, { workspaceId, memberId: workspaceId }, [
     "bookings.embed_meeting_name",

@@ -7,7 +7,7 @@ import {
   addDays,
   addMinutes,
   DEFAULT_BOOKING_TIMEZONE,
-  applyWorkspaceEmbedSettingsToDefaultEventType,
+  applyWorkspaceEmbedSettingsToEventType,
   ensureDefaultBookingEventType,
   formatDateKey,
   getWeekdayInZone,
@@ -31,18 +31,28 @@ export async function GET(request: Request) {
   const tenantUserId = await resolvePublicTenantUserId(prisma, url.searchParams.get("tenant") || "");
   if (!tenantUserId) return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
 
-  await applyWorkspaceEmbedSettingsToDefaultEventType(prisma, tenantUserId).catch(() => null);
-
   const slug = url.searchParams.get("eventType")?.trim() || "";
   const from = url.searchParams.get("from") || formatDateKey(new Date());
   const to = url.searchParams.get("to") || from;
-  const eventType = slug
+  let eventType = slug
     ? await prisma.bookingEventType.findFirst({
         where: { createdById: tenantUserId, slug, isActive: true },
         include: { availabilityRules: true },
       })
     : await ensureDefaultBookingEventType(prisma, tenantUserId);
   if (!eventType) return NextResponse.json({ error: "Bookingtype niet gevonden." }, { status: 404 });
+
+  const needsRuleSync =
+    eventType.availabilityRules.length === 0 ||
+    !eventType.availabilityRules.some((rule) => rule.enabled);
+  if (needsRuleSync) {
+    await applyWorkspaceEmbedSettingsToEventType(prisma, tenantUserId, eventType.id);
+    eventType =
+      (await prisma.bookingEventType.findFirst({
+        where: { id: eventType.id, createdById: tenantUserId },
+        include: { availabilityRules: true },
+      })) ?? eventType;
+  }
 
   const hostIds = Array.isArray(eventType.hostUserIds)
     ? eventType.hostUserIds.map((item) => String(item)).filter(Boolean)
