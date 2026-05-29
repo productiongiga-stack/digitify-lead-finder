@@ -7,6 +7,9 @@ cd "$root/packages/db"
 
 # Migrations must use a direct (non-pooler) connection — Supabase pooler rejects DDL.
 migrate_url="${DIRECT_URL:-${POSTGRES_URL_NON_POOLING:-}}"
+if [[ "$migrate_url" == *"pooler"* ]]; then
+  migrate_url=""
+fi
 
 # Vercel + Supabase: build direct URL from host/user/password when only pooler URLs are set.
 if [[ -z "$migrate_url" && -n "${POSTGRES_HOST:-}" && -n "${POSTGRES_USER:-}" && -n "${POSTGRES_PASSWORD:-}" ]]; then

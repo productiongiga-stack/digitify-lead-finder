@@ -53,15 +53,19 @@ Login (seed): `admin@digitify.local` / `DigitifyDev2026!` (after `pnpm db:seed` 
 ## Database on deploy
 
 1. Link **Neon** (or Postgres) via Vercel Marketplace.
-2. Run once against the production DB (shell with non-empty `DATABASE_URL` / `POSTGRES_URL_NON_POOLING`):
+2. On **Supabase**, set **`DIRECT_URL`** (or `POSTGRES_URL_NON_POOLING`) to the **direct** connection string (`db.*.supabase.co:5432`), not the pooler (`*.pooler.supabase.com`). The app can keep a pooled `DATABASE_URL`.
+3. After each release with new `packages/db/prisma/migrations/*`, apply migrations from your machine:
 
 ```bash
+set -a && source .env.production.local && set +a   # must include DIRECT_URL (direct host)
 pnpm db:generate
 pnpm db:resolve-init    # if init migration is marked failed but schema exists
 pnpm db:migrate
 pnpm db:migrate-workspace-settings
 pnpm db:seed            # optional dev/staging only
 ```
+
+If a column is missing in production (e.g. `bodyFormat`), run the matching file under `packages/db/prisma/manual/` in the **Supabase SQL Editor**, then `pnpm db:migrate` so Prisma marks the migration as applied.
 
 Do **not** run seed on production unless intentional.
 

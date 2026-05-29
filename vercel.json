@@ -3,7 +3,7 @@
   "framework": "nextjs",
   "regions": ["fra1"],
   "installCommand": "pnpm install",
-  "buildCommand": "pnpm --filter @digitify/db db:generate && bash scripts/prisma-migrate-deploy.sh && pnpm --filter @digitify/web build",
+  "buildCommand": "pnpm --filter @digitify/db db:generate && pnpm --filter @digitify/web build",
   "outputDirectory": "apps/web/.next",
   "crons": [
     {
