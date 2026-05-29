@@ -65,7 +65,20 @@ pnpm db:migrate-workspace-settings
 pnpm db:seed            # optional dev/staging only
 ```
 
-If a column is missing in production (e.g. `bodyFormat`), run the matching file under `packages/db/prisma/manual/` in the **Supabase SQL Editor**, then `pnpm db:migrate` so Prisma marks the migration as applied.
+If production shows missing tables/columns (e.g. `workspace_tasks`, `bodyFormat`):
+
+1. **Supabase → SQL Editor** → run the full script  
+   `packages/db/prisma/manual/production-catch-up.sql` (safe to re-run).
+2. Locally with production env (direct URL, not pooler):
+
+```bash
+vercel env pull .env.production.local --environment=production
+set -a && source .env.production.local && set +a
+# Set DIRECT_URL to Supabase "Session mode" / direct host (db.*.supabase.co:5432)
+bash scripts/mark-pending-migrations-applied.sh
+```
+
+Or run `pnpm db:migrate` when `DATABASE_URL` / `DIRECT_URL` point at the direct connection.
 
 Do **not** run seed on production unless intentional.
 
