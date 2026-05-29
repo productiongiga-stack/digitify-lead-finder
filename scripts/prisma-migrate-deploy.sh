@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Resolve Vercel/Supabase env aliases before `prisma migrate deploy`.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root/packages/db"
+
+if [[ -z "${DATABASE_URL:-}" ]]; then
+  export DATABASE_URL="${POSTGRES_PRISMA_URL:-${POSTGRES_URL:-}}"
+fi
+if [[ -z "${DIRECT_URL:-}" ]]; then
+  export DIRECT_URL="${POSTGRES_URL_NON_POOLING:-}"
+fi
+
+if [[ -z "${DATABASE_URL:-}" ]]; then
+  echo "ERROR: Set DATABASE_URL or POSTGRES_PRISMA_URL for migrations." >&2
+  exit 1
+fi
+
+echo "==> prisma migrate deploy"
+pnpm exec prisma migrate deploy

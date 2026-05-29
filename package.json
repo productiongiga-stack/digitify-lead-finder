@@ -7,7 +7,7 @@
     "lint": "turbo lint",
     "typecheck": "pnpm --filter @digitify/web exec tsc --noEmit",
     "db:generate": "turbo db:generate",
-    "db:migrate": "pnpm --filter @digitify/db db:migrate",
+    "db:migrate": "bash scripts/prisma-migrate-deploy.sh",
     "db:migrate-metadata": "pnpm --filter @digitify/db db:migrate-metadata",
     "db:migrate-workspace-settings": "pnpm --filter @digitify/db db:migrate-workspace-settings",
     "db:migrate-legacy-templates": "pnpm --filter @digitify/db db:migrate-legacy-templates",
