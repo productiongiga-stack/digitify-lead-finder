@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { sendBrandedEmail } from "@digitify/api/src/lib/email-sender";
 import { log } from "@digitify/api/src/lib/logger";
-import { isGoogleSlotAvailable, listGoogleBusyWindows } from "@digitify/api/src/lib/google-calendar";
+import { isGoogleSlotAvailable, listGoogleBusyWindows, loadGoogleCalendarSyncConfig } from "@digitify/api/src/lib/google-calendar";
 import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-schema-compat";
 import {
@@ -222,11 +222,19 @@ export async function POST(request: Request) {
     if (!Number.isFinite(duration) || duration < 5 || duration > 480) {
       return NextResponse.json({ error: "Ongeldige afspraakduur (5-480 minuten)." }, { status: 400 });
     }
-    const slotTimeZone = eventType.timezone || timezone || DEFAULT_BOOKING_TIMEZONE;
+    const hostIdsEarly = Array.isArray(eventType.hostUserIds)
+      ? eventType.hostUserIds.map((item) => String(item)).filter(Boolean)
+      : [tenantUserId];
+    const hostUserIdEarly = hostIdsEarly[0] || tenantUserId;
+    const googleConfig = await loadGoogleCalendarSyncConfig(prisma, hostUserIdEarly).catch(() => null);
+    const slotTimeZone =
+      eventType.timezone?.trim() || googleConfig?.timezone || timezone || DEFAULT_BOOKING_TIMEZONE;
     const bookingDate =
-      localDate && localTime
-        ? zonedDateTimeToUtc(localDate, localTime, slotTimeZone)
-        : new Date(date);
+      /^\d{4}-\d{2}-\d{2}T/.test(date)
+        ? new Date(date)
+        : localDate && localTime
+          ? zonedDateTimeToUtc(localDate, localTime, slotTimeZone)
+          : new Date(date);
     if (Number.isNaN(bookingDate.getTime())) {
       return NextResponse.json({ error: "Ongeldige datum." }, { status: 400 });
     }

@@ -1,5 +1,11 @@
 const DEFAULT_TIMEZONE = "Europe/Brussels";
 
+function readZonedPart(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes) {
+  const raw = parts.find((part) => part.type === type)?.value || "0";
+  if (type === "hour" && raw === "24") return 0;
+  return Number(raw);
+}
+
 /** Wall-clock date+time in `timeZone` → UTC instant (matches server booking-utils). */
 export function zonedDateTimeToUtc(dateKey: string, time: string, timeZone = DEFAULT_TIMEZONE) {
   const [year, month, day] = dateKey.split("-").map((part) => Number(part));
@@ -19,10 +25,16 @@ export function zonedDateTimeToUtc(dateKey: string, time: string, timeZone = DEF
     hour12: false,
   });
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     const parts = formatter.formatToParts(new Date(utcMs));
-    const read = (type: string) => Number(parts.find((part) => part.type === type)?.value || 0);
-    const gotMs = Date.UTC(read("year"), read("month") - 1, read("day"), read("hour"), read("minute"), 0);
+    const gotMs = Date.UTC(
+      readZonedPart(parts, "year"),
+      readZonedPart(parts, "month") - 1,
+      readZonedPart(parts, "day"),
+      readZonedPart(parts, "hour"),
+      readZonedPart(parts, "minute"),
+      0,
+    );
     const targetMs = Date.UTC(year, month - 1, day, hour, minute, 0);
     const delta = targetMs - gotMs;
     if (delta === 0) break;
@@ -30,6 +42,18 @@ export function zonedDateTimeToUtc(dateKey: string, time: string, timeZone = DEF
   }
 
   return new Date(utcMs);
+}
+
+export function formatTimeInZone(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const hour = String(readZonedPart(parts, "hour")).padStart(2, "0");
+  const minute = String(readZonedPart(parts, "minute")).padStart(2, "0");
+  return `${hour}:${minute}`;
 }
 
 export function toBookingIso(dateKey: string, time: string, timeZone: string) {

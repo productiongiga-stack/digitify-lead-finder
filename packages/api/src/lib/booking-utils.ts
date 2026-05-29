@@ -10,7 +10,11 @@ export const DEFAULT_MINIMUM_NOTICE_HOURS = 4;
 export const DEFAULT_MAXIMUM_HORIZON_DAYS = 60;
 
 export type AvailabilitySlot = {
+  /** Wall-clock time in host/business timezone (HH:mm). */
   time: string;
+  /** Same instant formatted for visitor display timezone. */
+  displayTime?: string;
+  displayDate?: string;
   start: string;
   end: string;
   available: boolean;
@@ -54,6 +58,12 @@ export function toLocalIso(dateKey: string, time: string, timeZone = DEFAULT_BOO
   return zonedDateTimeToUtc(dateKey, time, timeZone).toISOString();
 }
 
+function readZonedPart(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes) {
+  const raw = parts.find((part) => part.type === type)?.value || "0";
+  if (type === "hour" && raw === "24") return 0;
+  return Number(raw);
+}
+
 /** Wall-clock date+time in `timeZone` → UTC instant (for booking slots & Google sync). */
 export function zonedDateTimeToUtc(dateKey: string, time: string, timeZone: string) {
   const [year, month, day] = dateKey.split("-").map((part) => Number(part));
@@ -73,10 +83,16 @@ export function zonedDateTimeToUtc(dateKey: string, time: string, timeZone: stri
     hour12: false,
   });
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     const parts = formatter.formatToParts(new Date(utcMs));
-    const read = (type: string) => Number(parts.find((part) => part.type === type)?.value || 0);
-    const gotMs = Date.UTC(read("year"), read("month") - 1, read("day"), read("hour"), read("minute"), 0);
+    const gotMs = Date.UTC(
+      readZonedPart(parts, "year"),
+      readZonedPart(parts, "month") - 1,
+      readZonedPart(parts, "day"),
+      readZonedPart(parts, "hour"),
+      readZonedPart(parts, "minute"),
+      0,
+    );
     const targetMs = Date.UTC(year, month - 1, day, hour, minute, 0);
     const delta = targetMs - gotMs;
     if (delta === 0) break;
@@ -84,6 +100,35 @@ export function zonedDateTimeToUtc(dateKey: string, time: string, timeZone: stri
   }
 
   return new Date(utcMs);
+}
+
+export function formatTimeInZone(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const hour = String(readZonedPart(parts, "hour")).padStart(2, "0");
+  const minute = String(readZonedPart(parts, "minute")).padStart(2, "0");
+  return `${hour}:${minute}`;
+}
+
+export function formatDateKeyInZone(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const year = readZonedPart(parts, "year");
+  const month = String(readZonedPart(parts, "month")).padStart(2, "0");
+  const day = String(readZonedPart(parts, "day")).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function addDays(date: Date, days: number) {
+  return new Date(date.getTime() + days * 24 * 60 * 60_000);
 }
 
 export function overlapsBusyWindow(

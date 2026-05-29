@@ -4,10 +4,13 @@ import { listGoogleBusyWindows } from "@digitify/api/src/lib/google-calendar";
 import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-schema-compat";
 import {
+  addDays,
   addMinutes,
   DEFAULT_BOOKING_TIMEZONE,
   ensureDefaultBookingEventType,
   formatDateKey,
+  formatDateKeyInZone,
+  formatTimeInZone,
   hasBookingOverlap,
   minutesToTime,
   overlapsBusyWindow,
@@ -22,29 +25,6 @@ function dayBoundsUtc(dateKey: string, timeZone: string) {
   return { start, end };
 }
 
-function slotBlockedByGoogle(
-  slotStart: Date,
-  slotEnd: Date,
-  dateKey: string,
-  timeZone: string,
-  windows: Array<{ start: Date; end: Date; allDay: boolean }>,
-) {
-  const dayStart = zonedDateTimeToUtc(dateKey, "00:00", timeZone);
-  const dayEnd = addMinutes(zonedDateTimeToUtc(dateKey, "23:59", timeZone), 1);
-  for (const window of windows) {
-    if (window.allDay && overlap(dayStart, dayEnd, window.start, window.end)) return true;
-  }
-  return overlapsBusyWindow(
-    slotStart,
-    slotEnd,
-    windows.filter((window) => !window.allDay),
-  );
-}
-
-function overlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
-  return aStart < bEnd && bStart < aEnd;
-}
-
 export async function GET(request: Request) {
   await ensureTenantSchemaCompatibility(prisma).catch(() => null);
   const url = new URL(request.url);
@@ -54,7 +34,7 @@ export async function GET(request: Request) {
   const slug = url.searchParams.get("eventType")?.trim() || "";
   const from = url.searchParams.get("from") || formatDateKey(new Date());
   const to = url.searchParams.get("to") || from;
-  const timezone = url.searchParams.get("timezone") || DEFAULT_BOOKING_TIMEZONE;
+  const displayTimeZone = url.searchParams.get("displayTimezone") || url.searchParams.get("timezone") || DEFAULT_BOOKING_TIMEZONE;
   const eventType = slug
     ? await prisma.bookingEventType.findFirst({
         where: { createdById: tenantUserId, slug, isActive: true },
@@ -63,7 +43,6 @@ export async function GET(request: Request) {
     : await ensureDefaultBookingEventType(prisma, tenantUserId);
   if (!eventType) return NextResponse.json({ error: "Bookingtype niet gevonden." }, { status: 404 });
 
-  const slotTimeZone = eventType.timezone || timezone || DEFAULT_BOOKING_TIMEZONE;
   const hostIds = Array.isArray(eventType.hostUserIds)
     ? eventType.hostUserIds.map((item) => String(item)).filter(Boolean)
     : [tenantUserId];
@@ -76,75 +55,105 @@ export async function GET(request: Request) {
   const earliest = new Date(now.getTime() + Math.max(0, eventType.minimumNoticeHours || 0) * 60 * 60_000);
   const latest = new Date(now.getTime() + Math.max(1, eventType.maximumHorizonDays || 60) * 24 * 60 * 60_000);
 
-  const rangeStart = dayBoundsUtc(from, slotTimeZone).start;
-  const rangeEnd = dayBoundsUtc(to, slotTimeZone).end;
+  const preliminaryHostTz = eventType.timezone?.trim() || DEFAULT_BOOKING_TIMEZONE;
+  const rangeStart = dayBoundsUtc(from, preliminaryHostTz);
+  const rangeEnd = dayBoundsUtc(to, preliminaryHostTz);
   let googleWindows: Array<{ start: Date; end: Date; allDay: boolean }> = [];
   let googleEnabled = false;
+  let googleTimeZone = DEFAULT_BOOKING_TIMEZONE;
   try {
     const google = await listGoogleBusyWindows(prisma, {
-      timeMin: rangeStart,
-      timeMax: rangeEnd,
+      timeMin: addDays(rangeStart.start, -1),
+      timeMax: addDays(rangeEnd.end, 1),
       userId: hostUserId,
     });
     googleEnabled = google.enabled;
     googleWindows = google.windows;
+    googleTimeZone = google.timeZone || DEFAULT_BOOKING_TIMEZONE;
   } catch {
     googleEnabled = false;
     googleWindows = [];
   }
 
+  const hostTimeZone = eventType.timezone?.trim() || googleTimeZone || DEFAULT_BOOKING_TIMEZONE;
+  const weekdayMap: Record<string, number> = {
+    Sunday: 0,
+    Monday: 1,
+    Tuesday: 2,
+    Wednesday: 3,
+    Thursday: 4,
+    Friday: 5,
+    Saturday: 6,
+  };
+
   for (const cursor = new Date(startDate); cursor <= endDate && days.length < 90; cursor.setDate(cursor.getDate() + 1)) {
     const dateKey = formatDateKey(cursor);
-    const rule = rules.get(cursor.getDay());
+    const hostNoon = zonedDateTimeToUtc(dateKey, "12:00", hostTimeZone);
+    const weekdayName =
+      new Intl.DateTimeFormat("en-US", { timeZone: hostTimeZone, weekday: "long" }).formatToParts(hostNoon).find((part) => part.type === "weekday")
+        ?.value || "";
+    const rule = rules.get(weekdayMap[weekdayName] ?? cursor.getDay());
     if (!rule?.enabled) {
       days.push({ date: dateKey, available: false, slots: [] });
       continue;
     }
     const slots = [];
     const startMinutes = timeToMinutes(rule.startTime, 9 * 60);
-      const endMinutes = timeToMinutes(rule.endTime, 17 * 60);
-      const interval = Math.max(5, eventType.slotMinutes || 30);
-      for (let minutes = startMinutes; minutes + eventType.duration <= endMinutes; minutes += interval) {
-        const time = minutesToTime(minutes);
-        const start = zonedDateTimeToUtc(dateKey, time, slotTimeZone);
-        const end = addMinutes(start, eventType.duration);
-        if (start < earliest || start > latest) continue;
+    const endMinutes = timeToMinutes(rule.endTime, 17 * 60);
+    const interval = Math.max(5, eventType.slotMinutes || 30);
+    for (let minutes = startMinutes; minutes + eventType.duration <= endMinutes; minutes += interval) {
+      const time = minutesToTime(minutes);
+      const start = zonedDateTimeToUtc(dateKey, time, hostTimeZone);
+      const end = addMinutes(start, eventType.duration);
+      if (start < earliest || start > latest) continue;
 
-        const localOverlap = await hasBookingOverlap(prisma, {
-          ownerUserId: tenantUserId,
-          hostUserId,
-          start: addMinutes(start, -(eventType.bufferBefore || 0)),
-          end: addMinutes(end, eventType.bufferAfter || 0),
-        });
-        let available = !localOverlap;
-        if (available && googleEnabled) {
-          available = !slotBlockedByGoogle(
-            addMinutes(start, -(eventType.bufferBefore || 0)),
-            addMinutes(end, eventType.bufferAfter || 0),
-            dateKey,
-            slotTimeZone,
-            googleWindows,
-          );
-        }
-        if (!available) continue;
-        slots.push({
-          time,
-          start: start.toISOString(),
-          end: end.toISOString(),
-          available: true,
-          hostUserId,
-        });
-      }
+      const bufferedStart = addMinutes(start, -(eventType.bufferBefore || 0));
+      const bufferedEnd = addMinutes(end, eventType.bufferAfter || 0);
+
+      const localOverlap = await hasBookingOverlap(prisma, {
+        ownerUserId: tenantUserId,
+        hostUserId,
+        start: bufferedStart,
+        end: bufferedEnd,
+      });
+      if (localOverlap) continue;
+      if (googleEnabled && overlapsBusyWindow(bufferedStart, bufferedEnd, googleWindows)) continue;
+
+      const displayDate = formatDateKeyInZone(start, displayTimeZone);
+      const displayTime = formatTimeInZone(start, displayTimeZone);
+      slots.push({
+        time,
+        displayTime,
+        displayDate,
+        start: start.toISOString(),
+        end: end.toISOString(),
+        available: true,
+        hostUserId,
+      });
+    }
     days.push({ date: dateKey, available: slots.length > 0, slots });
   }
 
   await prisma.bookingAnalyticsEvent.create({
-    data: { createdById: tenantUserId, eventTypeId: eventType.id, type: "availability_view", metadata: { from, to, timezone: slotTimeZone, googleEnabled } },
+    data: {
+      createdById: tenantUserId,
+      eventTypeId: eventType.id,
+      type: "availability_view",
+      metadata: { from, to, hostTimeZone, displayTimeZone, googleEnabled },
+    },
   }).catch(() => null);
 
   return NextResponse.json({
-    eventType: { id: eventType.id, slug: eventType.slug, duration: eventType.duration, slotMinutes: eventType.slotMinutes, timezone: slotTimeZone },
-    timezone: slotTimeZone,
+    eventType: {
+      id: eventType.id,
+      slug: eventType.slug,
+      duration: eventType.duration,
+      slotMinutes: eventType.slotMinutes,
+      timezone: hostTimeZone,
+    },
+    hostTimeZone,
+    displayTimeZone,
+    timezone: hostTimeZone,
     googleCalendarSynced: googleEnabled,
     days,
   });

@@ -14,7 +14,7 @@ import {
   Video,
   X,
 } from "lucide-react";
-import { toBookingIso } from "@/lib/booking-timezone";
+import { formatTimeInZone, toBookingIso } from "@/lib/booking-timezone";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,7 +42,16 @@ type PublicEventType = {
   requireConsent: boolean;
   questions: PublicQuestion[];
 };
-type AvailabilitySlot = { time: string; start: string; end: string; available: boolean; hostUserId: string | null };
+type AvailabilitySlot = {
+  time: string;
+  displayTime?: string;
+  displayDate?: string;
+  start: string;
+  end: string;
+  available: boolean;
+  hostUserId: string | null;
+};
+type DisplaySlot = { key: string; label: string; start: string; hostTime: string; displayDate?: string };
 type SuggestedSlot = { date: string; time: string; start: string };
 type BookingStep = null | "time" | "form" | "confirm";
 type DateStatus = "available" | "partial" | "full" | "none";
@@ -255,6 +264,8 @@ function BookingEmbedContent() {
   const [resultModal, setResultModal] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
   const [availabilityMonthKey, setAvailabilityMonthKey] = useState<string | null>(null);
+  const [hostTimeZone, setHostTimeZone] = useState(timezone);
+  const [selectedSlotStart, setSelectedSlotStart] = useState("");
   const [suggestedSlots, setSuggestedSlots] = useState<SuggestedSlot[]>([]);
 
   const effectiveDuration = eventType?.duration || duration;
@@ -263,20 +274,40 @@ function BookingEmbedContent() {
   const effectiveMeetingName = eventType?.name || meetingName;
   const effectiveDescription = eventType?.description || description;
   const effectiveLocation = eventType?.location || meetingLocation;
-  const slotTimeZone = eventType?.timezone || timezone;
+  const slotTimeZone = hostTimeZone || eventType?.timezone || timezone;
+  const showHostTimeHint = slotTimeZone !== visitorTimezone;
 
-  const selectedSlots = useMemo(() => {
+  const selectedSlots = useMemo((): DisplaySlot[] => {
+    const mapSlot = (slot: AvailabilitySlot): DisplaySlot => {
+      const start = slot.start;
+      const label =
+        slot.displayTime ||
+        formatTimeInZone(new Date(start), visitorTimezone);
+      const displayDate = slot.displayDate;
+      return {
+        key: start,
+        label,
+        start,
+        hostTime: slot.time,
+        displayDate,
+      };
+    };
     if (tenant) {
       const remoteData = availability[selectedDate];
       if (!remoteData) return [];
-      return remoteData.map((slot) => slot.time);
+      return remoteData.map(mapSlot);
     }
     const remoteData = availability[selectedDate];
     if (remoteData !== undefined) {
-      return remoteData.map((slot) => slot.time);
+      return remoteData.map(mapSlot);
     }
-    return buildSlotsForDate(selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes);
-  }, [tenant, availability, selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes]);
+    return buildSlotsForDate(selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes).map((time) => ({
+      key: toBookingIso(selectedDate, time, slotTimeZone),
+      label: time,
+      start: toBookingIso(selectedDate, time, slotTimeZone),
+      hostTime: time,
+    }));
+  }, [tenant, availability, selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes, visitorTimezone, slotTimeZone]);
 
   // ── Effects ────────────────────────────────────────────────────────────────
 
@@ -305,7 +336,7 @@ function BookingEmbedContent() {
     if (eventType?.slug || eventTypeSlug) url.searchParams.set("eventType", eventType?.slug || eventTypeSlug);
     url.searchParams.set("from", formatDateKey(currentMonth));
     url.searchParams.set("to", formatDateKey(toDate));
-    url.searchParams.set("timezone", visitorTimezone);
+    url.searchParams.set("displayTimezone", visitorTimezone);
     const monthKey = formatDateKey(currentMonth);
     setLoadingAvailability(true);
     setAvailabilityMonthKey(null);
@@ -313,6 +344,8 @@ function BookingEmbedContent() {
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         if (data?.days) {
+          if (data.hostTimeZone) setHostTimeZone(data.hostTimeZone);
+          else if (data.timezone) setHostTimeZone(data.timezone);
           setAvailability((prev) => ({
             ...prev,
             ...Object.fromEntries(data.days.map((day: { date: string; slots: AvailabilitySlot[] }) => [day.date, day.slots])),
@@ -326,9 +359,18 @@ function BookingEmbedContent() {
 
   // Auto-select first available slot when date changes
   useEffect(() => {
-    if (!selectedSlots.length) { setSelectedTime(""); return; }
-    if (!selectedSlots.includes(selectedTime)) setSelectedTime(selectedSlots[0] || "");
-  }, [selectedSlots, selectedTime]);
+    if (!selectedSlots.length) {
+      setSelectedTime("");
+      setSelectedSlotStart("");
+      return;
+    }
+    const active = selectedSlots.find((slot) => slot.key === selectedSlotStart || slot.hostTime === selectedTime);
+    if (!active) {
+      const first = selectedSlots[0];
+      setSelectedTime(first.hostTime);
+      setSelectedSlotStart(first.start);
+    }
+  }, [selectedSlots, selectedTime, selectedSlotStart]);
 
   // ── Date status classification ─────────────────────────────────────────────
 
@@ -369,7 +411,7 @@ function BookingEmbedContent() {
         body: JSON.stringify({
           clientName,
           clientEmail,
-          date: toBookingIso(selectedDate, selectedTime, slotTimeZone),
+          date: selectedSlotStart || toBookingIso(selectedDate, selectedTime, slotTimeZone),
           localDate: selectedDate,
           localTime: selectedTime,
           duration: effectiveDuration,
@@ -409,7 +451,8 @@ function BookingEmbedContent() {
       if (data.suggestedSlots?.length) {
         setSuggestedSlots(data.suggestedSlots as SuggestedSlot[]);
         const first = data.suggestedSlots[0] as SuggestedSlot;
-        if (first?.date && first?.time) {
+        if (first?.start) {
+          setSelectedSlotStart(first.start);
           setSelectedDate(first.date);
           setSelectedTime(first.time);
           setCurrentMonth(getMonthStart(parseDateKey(first.date)));
@@ -424,7 +467,7 @@ function BookingEmbedContent() {
         if (eventType?.slug || eventTypeSlug) refreshUrl.searchParams.set("eventType", eventType?.slug || eventTypeSlug);
         refreshUrl.searchParams.set("from", formatDateKey(currentMonth));
         refreshUrl.searchParams.set("to", formatDateKey(toDate));
-        refreshUrl.searchParams.set("timezone", slotTimeZone);
+        refreshUrl.searchParams.set("displayTimezone", visitorTimezone);
         fetch(refreshUrl)
           .then((response) => (response.ok ? response.json() : null))
           .then((payload) => {
@@ -536,9 +579,39 @@ function BookingEmbedContent() {
                 <Video className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
                 <span>{effectiveLocation}</span>
               </div>
-              <div className="flex items-center gap-2.5">
-                <Globe2 className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
-                <span className="truncate" title={visitorTimezone}>{visitorTimezone}</span>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2.5">
+                  <Globe2 className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
+                  <select
+                    value={visitorTimezone}
+                    onChange={(event) => setVisitorTimezone(event.target.value)}
+                    className={`max-w-full truncate rounded-lg border bg-transparent px-2 py-1 text-xs ${tc.input}`}
+                    aria-label="Tijdzone voor weergave"
+                  >
+                    {[
+                      "Europe/Brussels",
+                      "Europe/Amsterdam",
+                      "Europe/Paris",
+                      "Europe/London",
+                      "America/New_York",
+                      "America/Los_Angeles",
+                      "Asia/Dubai",
+                      "Asia/Singapore",
+                    ].map((zone) => (
+                      <option key={zone} value={zone}>
+                        {zone.replace("_", " ")}
+                      </option>
+                    ))}
+                    {!["Europe/Brussels", "Europe/Amsterdam", "Europe/Paris", "Europe/London", "America/New_York", "America/Los_Angeles", "Asia/Dubai", "Asia/Singapore"].includes(visitorTimezone) ? (
+                      <option value={visitorTimezone}>{visitorTimezone}</option>
+                    ) : null}
+                  </select>
+                </div>
+                {showHostTimeHint ? (
+                  <p className={`text-[11px] leading-snug ${tc.muted}`}>
+                    Agenda van host: {slotTimeZone.replace("_", " ")}. Google-blokken worden in die zone gecontroleerd.
+                  </p>
+                ) : null}
               </div>
             </div>
 
@@ -725,12 +798,16 @@ function BookingEmbedContent() {
               {selectedSlots.length ? (
                 <div className="grid grid-cols-3 gap-2">
                   {selectedSlots.map((slot) => {
-                    const active = selectedTime === slot;
+                    const active = selectedSlotStart === slot.start;
                     return (
                       <button
-                        key={slot}
+                        key={slot.key}
                         type="button"
-                        onClick={() => setSelectedTime(slot)}
+                        onClick={() => {
+                          setSelectedSlotStart(slot.start);
+                          setSelectedTime(slot.hostTime);
+                          if (slot.displayDate) setSelectedDate(slot.displayDate);
+                        }}
                         className={`flex h-10 items-center justify-center rounded-[12px] border text-sm font-semibold transition ${
                           active ? "border-transparent" : tc.slot
                         }`}
@@ -740,7 +817,7 @@ function BookingEmbedContent() {
                           boxShadow: active ? `0 4px 12px ${effectiveColor}55` : undefined,
                         }}
                       >
-                        {formatTimeDisplay(slot, timeMode)}
+                        {formatTimeDisplay(slot.label, timeMode)}
                       </button>
                     );
                   })}
@@ -765,7 +842,7 @@ function BookingEmbedContent() {
               </button>
               <button
                 type="button"
-                disabled={!selectedTime}
+                disabled={!selectedSlotStart && !selectedTime}
                 onClick={() => { setStatus(null); setActiveStep("form"); }}
                 className="flex h-10 flex-1 items-center justify-center rounded-full text-sm font-semibold transition disabled:opacity-40"
                 style={{ backgroundColor: effectiveColor, color: "#1e1e1e" }}
@@ -993,6 +1070,7 @@ function BookingEmbedContent() {
                         key={slot.start}
                         type="button"
                         onClick={() => {
+                          setSelectedSlotStart(slot.start);
                           setSelectedDate(slot.date);
                           setSelectedTime(slot.time);
                           setCurrentMonth(getMonthStart(parseDateKey(slot.date)));

@@ -205,23 +205,20 @@ async function getAccessToken(config: GoogleCalendarSyncConfig) {
   return data.access_token;
 }
 
-async function googleCalendarRequest<T>(
+async function googleCalendarApiRequest<T>(
   config: GoogleCalendarSyncConfig,
   path: string,
-  init?: RequestInit
+  init?: RequestInit,
 ): Promise<T> {
   const token = await getAccessToken(config);
-  const response = await fetch(
-    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}${path}`,
-    {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        ...(init?.headers || {}),
-      },
-    }
-  );
+  const response = await fetch(`https://www.googleapis.com/calendar/v3${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+  });
 
   if (!response.ok) {
     const body = await response.text();
@@ -229,6 +226,18 @@ async function googleCalendarRequest<T>(
   }
 
   return (await response.json()) as T;
+}
+
+async function googleCalendarRequest<T>(
+  config: GoogleCalendarSyncConfig,
+  path: string,
+  init?: RequestInit
+): Promise<T> {
+  return googleCalendarApiRequest<T>(
+    config,
+    `/calendars/${encodeURIComponent(config.calendarId)}${path}`,
+    init,
+  );
 }
 
 export function extractGoogleEventId(notes: string | null | undefined) {
@@ -365,25 +374,56 @@ export async function listGoogleBusyWindows(
   db: SettingsDb,
   options: { timeMin: Date; timeMax: Date; userId?: string; ignoreEventId?: string | null },
 ) {
-  const listed = await listGoogleCalendarEvents(db, {
-    timeMin: options.timeMin,
-    timeMax: options.timeMax,
-    userId: options.userId,
-  });
-  if (!listed.enabled) {
-    return { enabled: false as const, windows: [] as GoogleBusyWindow[] };
+  const config = await loadGoogleCalendarSyncConfig(db, options.userId);
+  if (!config.enabled || !config.calendarId || !hasGoogleAuth(config)) {
+    return { enabled: false as const, windows: [] as GoogleBusyWindow[], timeZone: config.timezone };
   }
 
-  const windows: GoogleBusyWindow[] = listed.events
-    .filter((event) => !options.ignoreEventId || event.id !== options.ignoreEventId)
-    .map((event) => ({
-      start: new Date(event.start),
-      end: new Date(event.end),
-      allDay: event.allDay,
-      eventId: event.id,
-    }));
+  try {
+    const payload = await googleCalendarApiRequest<{
+      calendars?: Record<string, { busy?: Array<{ start?: string; end?: string }> }>;
+    }>(config, "/freeBusy", {
+      method: "POST",
+      body: JSON.stringify({
+        timeMin: toIso(options.timeMin),
+        timeMax: toIso(options.timeMax),
+        timeZone: config.timezone,
+        items: [{ id: config.calendarId }],
+      }),
+    });
 
-  return { enabled: true as const, windows };
+    const busy = payload.calendars?.[config.calendarId]?.busy || [];
+    const windows: GoogleBusyWindow[] = busy
+      .filter((block) => block.start && block.end)
+      .map((block) => ({
+        start: new Date(block.start!),
+        end: new Date(block.end!),
+        allDay: false,
+      }));
+
+    return { enabled: true as const, windows, timeZone: config.timezone };
+  } catch {
+    const listed = await listGoogleCalendarEvents(db, {
+      timeMin: new Date(options.timeMin.getTime() - 7 * 24 * 60 * 60_000),
+      timeMax: options.timeMax,
+      userId: options.userId,
+    });
+    if (!listed.enabled) {
+      return { enabled: false as const, windows: [] as GoogleBusyWindow[], timeZone: config.timezone };
+    }
+
+    const windows: GoogleBusyWindow[] = listed.events
+      .filter((event) => !options.ignoreEventId || event.id !== options.ignoreEventId)
+      .map((event) => ({
+        start: new Date(event.start),
+        end: new Date(event.end),
+        allDay: event.allDay,
+        eventId: event.id,
+      }))
+      .filter((window) => overlap(window.start, window.end, options.timeMin, options.timeMax));
+
+    return { enabled: true as const, windows, timeZone: config.timezone };
+  }
 }
 
 export async function isGoogleSlotAvailable(
@@ -395,14 +435,9 @@ export async function isGoogleSlotAvailable(
     return { enabled: false, available: true as const };
   }
 
-  const dayStart = new Date(options.start);
-  dayStart.setUTCHours(0, 0, 0, 0);
-  const dayEnd = new Date(options.end);
-  dayEnd.setUTCHours(23, 59, 59, 999);
-
   const { windows } = await listGoogleBusyWindows(db, {
-    timeMin: dayStart,
-    timeMax: dayEnd,
+    timeMin: new Date(options.start.getTime() - 24 * 60 * 60_000),
+    timeMax: new Date(options.end.getTime() + 24 * 60 * 60_000),
     userId: options.userId,
     ignoreEventId: options.ignoreEventId,
   });
