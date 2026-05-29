@@ -52,7 +52,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL("/settings/bookings?google=invalid-state", request.url));
   }
 
-  const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(prisma as any);
+  const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(prisma as any, { userId });
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(new URL("/settings/bookings?google=missing-config", request.url));
   }
@@ -125,10 +125,21 @@ export async function GET(request: Request) {
         ? String(revealSettingValue("bookings.google_oauth_refresh_token", currentRefreshRow.value) || "")
         : "");
 
+    const existingTimezoneRow = await prisma.setting.findUnique({
+      where: { key: resolveSettingDbKey(scope, "bookings.google_calendar_timezone") },
+      select: { value: true },
+    });
+    const existingTimezone =
+      typeof existingTimezoneRow?.value === "string" ? existingTimezoneRow.value.trim() : "";
+    const calendarTimezone = primaryCalendar?.timeZone?.trim() || "Europe/Brussels";
+
     const updates: Array<{ key: string; value: string }> = [
       { key: "bookings.google_sync_enabled", value: "true" },
       { key: "bookings.google_calendar_id", value: primaryCalendar?.id || "primary" },
-      { key: "bookings.google_calendar_timezone", value: primaryCalendar?.timeZone || "Europe/Brussels" },
+      {
+        key: "bookings.google_calendar_timezone",
+        value: existingTimezone || calendarTimezone,
+      },
       { key: "bookings.google_oauth_access_token", value: tokenData.access_token },
       { key: "bookings.google_oauth_refresh_token", value: refreshToken },
       { key: "bookings.google_oauth_account_email", value: profile.email?.trim() || "" },

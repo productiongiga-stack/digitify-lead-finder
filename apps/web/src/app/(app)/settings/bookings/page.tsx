@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -52,6 +53,7 @@ import {
 import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/components/feedback/toast-provider";
 import { getAppUrl } from "@/lib/config";
+import { hasRole } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
 type DayKey = "0" | "1" | "2" | "3" | "4" | "5" | "6";
@@ -551,6 +553,9 @@ function BookingSetupChecklist({
 
 export default function BookingSettingsPage() {
   const searchParams = useSearchParams();
+  const { data: session } = useSession();
+  const role = (session?.user as { role?: string } | undefined)?.role;
+  const isWorkspaceOwner = hasRole(role, ["OWNER"]);
   const { data: settings, isLoading, error, refetch } = trpc.settings.getAll.useQuery(undefined, {
     retry: 1,
     refetchOnWindowFocus: false,
@@ -558,6 +563,8 @@ export default function BookingSettingsPage() {
   const utils = trpc.useUtils();
   const { showToast } = useToast();
 
+  const syncHostTimezone = trpc.booking.syncHostTimezone.useMutation();
+  const syncEmbedFromSettings = trpc.booking.syncEmbedFromSettings.useMutation();
   const batchUpdate = trpc.settings.batchUpdate.useMutation({
     onSuccess: () => {
       utils.settings.getAll.invalidate();
@@ -621,12 +628,14 @@ export default function BookingSettingsPage() {
       },
       missing_config: {
         title: "Google OAuth mist configuratie",
-        description: "Voeg GOOGLE_CLIENT_ID en GOOGLE_CLIENT_SECRET toe aan Vercel production env.",
+        description:
+          "Vul Client ID en Secret in via Instellingen → Integraties → Google OAuth, of zet GOOGLE_CLIENT_ID en GOOGLE_CLIENT_SECRET in Vercel (Production). Controleer ook de redirect URL in Google Cloud Console.",
         variant: "error",
       },
       "missing-config": {
         title: "Google OAuth mist configuratie",
-        description: "Voeg GOOGLE_CLIENT_ID en GOOGLE_CLIENT_SECRET toe aan Vercel production env.",
+        description:
+          "Vul Client ID en Secret in via Instellingen → Integraties → Google OAuth, of zet GOOGLE_CLIENT_ID en GOOGLE_CLIENT_SECRET in Vercel (Production). Controleer ook de redirect URL in Google Cloud Console.",
         variant: "error",
       },
       invalid_state: {
@@ -948,7 +957,9 @@ export default function BookingSettingsPage() {
       { key: "bookings.google_sync_enabled", value: String(googleSyncEnabled) },
       { key: "bookings.google_service_account_email", value: googleServiceAccountEmail.trim() },
       { key: "bookings.google_service_account_private_key", value: googleServicePrivateKey },
-      { key: "bookings.google_calendar_timezone", value: googleTimezone.trim() || "Europe/Brussels" },
+      ...(isWorkspaceOwner
+        ? [{ key: "bookings.google_calendar_timezone", value: googleTimezone.trim() || "Europe/Brussels" }]
+        : []),
       { key: "bookings.default_approval_mode", value: approvalMode },
       { key: "bookings.webhook_url", value: webhookUrlTrimmed },
       { key: "bookings.webhook_secret", value: webhookSecret },
@@ -960,6 +971,10 @@ export default function BookingSettingsPage() {
     batchUpdate.mutate(entries, {
       onSuccess: () => {
         setSnapshot(currentSnapshot);
+        syncEmbedFromSettings.mutate();
+        if (isWorkspaceOwner) {
+          syncHostTimezone.mutate({ timezone: googleTimezone.trim() || "Europe/Brussels" });
+        }
       },
     });
   }
@@ -1511,12 +1526,19 @@ export default function BookingSettingsPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Timezone</Label>
+                    <Label>Tijdzone (alleen workspace-eigenaar)</Label>
                     <Input
                       value={googleTimezone}
                       onChange={(event) => setGoogleTimezone(event.target.value)}
                       placeholder="Europe/Brussels"
+                      disabled={!isWorkspaceOwner}
                     />
+                    <p className="text-xs text-muted-foreground">
+                      Bepaalt beschikbare slots, Google Agenda-sync en wat bezoekers in de embed zien.
+                      {isWorkspaceOwner
+                        ? " Gebruik bijvoorbeeld Europe/Amsterdam of Europe/Brussels."
+                        : " Alleen de workspace-eigenaar kan dit veld wijzigen."}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center justify-between rounded-xl border px-3 py-2">

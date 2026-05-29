@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, ownerProcedure } from "../trpc";
 import { type PrismaClient } from "@digitify/db";
 import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
 import { assertLeadAccess } from "../lib/tenant";
@@ -15,12 +15,14 @@ import {
   buildIcsAttachment,
   createPublicToken,
   DEFAULT_BOOKING_TIMEZONE,
+  applyWorkspaceEmbedSettingsToDefaultEventType,
   ensureDefaultBookingEventType,
   getStoredGoogleEventId,
   hashPublicToken,
   hasBookingOverlap,
   normalizeSlug,
   removeLegacyGoogleEventId,
+  syncHostTimezoneForWorkspace,
 } from "../lib/booking-utils";
 import { fireBookingWebhook } from "../lib/booking-webhooks";
 
@@ -895,6 +897,20 @@ export const bookingRouter = router({
       },
     });
     return items.length ? items : [defaults];
+  }),
+
+  syncHostTimezone: ownerProcedure
+    .input(z.object({ timezone: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      return syncHostTimezoneForWorkspace(ctx.db, ctx.user.workspaceId!, input.timezone);
+    }),
+
+  syncEmbedFromSettings: protectedProcedure.mutation(async ({ ctx }) => {
+    const eventTypeId = await applyWorkspaceEmbedSettingsToDefaultEventType(
+      ctx.db,
+      ctx.user.workspaceId!,
+    );
+    return { success: Boolean(eventTypeId) };
   }),
 
   upsertEventType: protectedProcedure

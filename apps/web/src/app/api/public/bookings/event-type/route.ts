@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { ensureDefaultBookingEventType } from "@digitify/api/src/lib/booking-utils";
+import {
+  applyWorkspaceEmbedSettingsToDefaultEventType,
+  ensureDefaultBookingEventType,
+} from "@digitify/api/src/lib/booking-utils";
 import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-schema-compat";
 
@@ -9,6 +12,8 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const tenantUserId = await resolvePublicTenantUserId(prisma, url.searchParams.get("tenant") || "");
   if (!tenantUserId) return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
+
+  await applyWorkspaceEmbedSettingsToDefaultEventType(prisma, tenantUserId).catch(() => null);
 
   const slug = url.searchParams.get("eventType")?.trim() || "";
   const eventType = slug

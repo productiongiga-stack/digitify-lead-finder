@@ -33,7 +33,11 @@ export async function GET(request: Request) {
     return NextResponse.redirect(loginUrl);
   }
 
-  const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(prisma as any);
+  const userId = (user as { id?: string }).id;
+  const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(
+    prisma as any,
+    userId ? { userId } : undefined,
+  );
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(new URL("/settings/bookings?google=missing-config", request.url));
   }

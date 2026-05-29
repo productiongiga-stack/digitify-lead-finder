@@ -14,7 +14,7 @@ import {
   Video,
   X,
 } from "lucide-react";
-import { formatTimeInZone, toBookingIso } from "@/lib/booking-timezone";
+import { formatTimezoneLabel, toBookingIso } from "@/lib/booking-timezone";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,14 +44,17 @@ type PublicEventType = {
 };
 type AvailabilitySlot = {
   time: string;
-  displayTime?: string;
-  displayDate?: string;
   start: string;
   end: string;
   available: boolean;
   hostUserId: string | null;
 };
-type DisplaySlot = { key: string; label: string; start: string; hostTime: string; displayDate?: string };
+type AvailabilityDayPayload = {
+  date: string;
+  status?: DateStatus;
+  slots: AvailabilitySlot[];
+};
+type DisplaySlot = { key: string; label: string; start: string; hostTime: string };
 type SuggestedSlot = { date: string; time: string; start: string };
 type BookingStep = null | "time" | "form" | "confirm";
 type DateStatus = "available" | "partial" | "full" | "none";
@@ -209,7 +212,7 @@ function createMonthGrid(month: Date) {
 
 function BookingEmbedContent() {
   const params = useSearchParams();
-  const color = params.get("color") || "#f5b04c";
+  const color = params.get("color") || "#f9ae5a";
   const theme = params.get("theme") === "dark" ? "dark" : "light";
   const title = params.get("title") || "Plan een afspraak";
   const description = params.get("description") || "Kies een moment dat past. We bevestigen uw afspraak meteen.";
@@ -256,9 +259,9 @@ function BookingEmbedContent() {
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [timeMode, setTimeMode] = useState<TimeMode>(defaultTimeMode);
-  const [visitorTimezone, setVisitorTimezone] = useState(timezone);
   const [eventType, setEventType] = useState<PublicEventType | null>(null);
   const [availability, setAvailability] = useState<Record<string, AvailabilitySlot[]>>({});
+  const [dayStatuses, setDayStatuses] = useState<Record<string, DateStatus>>({});
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [resultModal, setResultModal] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -275,23 +278,14 @@ function BookingEmbedContent() {
   const effectiveDescription = eventType?.description || description;
   const effectiveLocation = eventType?.location || meetingLocation;
   const slotTimeZone = hostTimeZone || eventType?.timezone || timezone;
-  const showHostTimeHint = slotTimeZone !== visitorTimezone;
 
   const selectedSlots = useMemo((): DisplaySlot[] => {
-    const mapSlot = (slot: AvailabilitySlot): DisplaySlot => {
-      const start = slot.start;
-      const label =
-        slot.displayTime ||
-        formatTimeInZone(new Date(start), visitorTimezone);
-      const displayDate = slot.displayDate;
-      return {
-        key: start,
-        label,
-        start,
-        hostTime: slot.time,
-        displayDate,
-      };
-    };
+    const mapSlot = (slot: AvailabilitySlot): DisplaySlot => ({
+      key: slot.start,
+      label: slot.time,
+      start: slot.start,
+      hostTime: slot.time,
+    });
     if (tenant) {
       const remoteData = availability[selectedDate];
       if (!remoteData) return [];
@@ -307,14 +301,9 @@ function BookingEmbedContent() {
       start: toBookingIso(selectedDate, time, slotTimeZone),
       hostTime: time,
     }));
-  }, [tenant, availability, selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes, visitorTimezone, slotTimeZone]);
+  }, [tenant, availability, selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes, slotTimeZone]);
 
   // ── Effects ────────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (detected) setVisitorTimezone(detected);
-  }, []);
 
   useEffect(() => {
     if (!tenant) return;
@@ -336,10 +325,8 @@ function BookingEmbedContent() {
     if (eventType?.slug || eventTypeSlug) url.searchParams.set("eventType", eventType?.slug || eventTypeSlug);
     url.searchParams.set("from", formatDateKey(currentMonth));
     url.searchParams.set("to", formatDateKey(toDate));
-    url.searchParams.set("displayTimezone", visitorTimezone);
     const monthKey = formatDateKey(currentMonth);
     setLoadingAvailability(true);
-    setAvailabilityMonthKey(null);
     fetch(url)
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
@@ -348,14 +335,25 @@ function BookingEmbedContent() {
           else if (data.timezone) setHostTimeZone(data.timezone);
           setAvailability((prev) => ({
             ...prev,
-            ...Object.fromEntries(data.days.map((day: { date: string; slots: AvailabilitySlot[] }) => [day.date, day.slots])),
+            ...Object.fromEntries(
+              data.days.map((day: AvailabilityDayPayload) => [day.date, day.slots]),
+            ),
+          }));
+          setDayStatuses((prev) => ({
+            ...prev,
+            ...Object.fromEntries(
+              data.days.map((day: AvailabilityDayPayload) => [
+                day.date,
+                day.status || (day.slots.length > 0 ? "available" : "full"),
+              ]),
+            ),
           }));
           setAvailabilityMonthKey(monthKey);
         }
       })
       .catch(() => null)
       .finally(() => setLoadingAvailability(false));
-  }, [tenant, eventType?.slug, eventTypeSlug, currentMonth, visitorTimezone]);
+  }, [tenant, eventType?.slug, eventTypeSlug, currentMonth]);
 
   // Auto-select first available slot when date changes
   useEffect(() => {
@@ -380,13 +378,11 @@ function BookingEmbedContent() {
     if (tenant) {
       if (loadingAvailability && availabilityMonthKey !== dateMonthKey) return "none";
       if (availabilityMonthKey !== dateMonthKey) return "none";
+      const status = dayStatuses[dateKey];
+      if (status) return status;
       const remoteData = availability[dateKey];
       if (remoteData === undefined) return "none";
-      if (remoteData.length === 0) {
-        const schedule = weeklyHours[parseDateKey(dateKey).getDay()];
-        return schedule?.enabled ? "full" : "none";
-      }
-      return "available";
+      return remoteData.length > 0 ? "available" : "full";
     }
     const remoteData = availability[dateKey];
     if (remoteData !== undefined) {
@@ -418,7 +414,7 @@ function BookingEmbedContent() {
           notes,
           service: serviceName || undefined,
           eventType: eventType?.slug || eventTypeSlug || undefined,
-          timezone: visitorTimezone,
+          timezone: slotTimeZone,
           answers: Object.entries(questionAnswers).map(([questionId, value]) => ({ questionId, value })),
           consentAccepted,
           website,
@@ -467,14 +463,24 @@ function BookingEmbedContent() {
         if (eventType?.slug || eventTypeSlug) refreshUrl.searchParams.set("eventType", eventType?.slug || eventTypeSlug);
         refreshUrl.searchParams.set("from", formatDateKey(currentMonth));
         refreshUrl.searchParams.set("to", formatDateKey(toDate));
-        refreshUrl.searchParams.set("displayTimezone", visitorTimezone);
         fetch(refreshUrl)
           .then((response) => (response.ok ? response.json() : null))
           .then((payload) => {
             if (!payload?.days) return;
             setAvailability((prev) => ({
               ...prev,
-              ...Object.fromEntries(payload.days.map((day: { date: string; slots: AvailabilitySlot[] }) => [day.date, day.slots])),
+              ...Object.fromEntries(
+                payload.days.map((day: AvailabilityDayPayload) => [day.date, day.slots]),
+              ),
+            }));
+            setDayStatuses((prev) => ({
+              ...prev,
+              ...Object.fromEntries(
+                payload.days.map((day: AvailabilityDayPayload) => [
+                  day.date,
+                  day.status || (day.slots.length > 0 ? "available" : "full"),
+                ]),
+              ),
             }));
           })
           .catch(() => null);
@@ -579,40 +585,17 @@ function BookingEmbedContent() {
                 <Video className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
                 <span>{effectiveLocation}</span>
               </div>
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2.5">
-                  <Globe2 className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
-                  <select
-                    value={visitorTimezone}
-                    onChange={(event) => setVisitorTimezone(event.target.value)}
-                    className={`max-w-full truncate rounded-lg border bg-transparent px-2 py-1 text-xs ${tc.input}`}
-                    aria-label="Tijdzone voor weergave"
-                  >
-                    {[
-                      "Europe/Brussels",
-                      "Europe/Amsterdam",
-                      "Europe/Paris",
-                      "Europe/London",
-                      "America/New_York",
-                      "America/Los_Angeles",
-                      "Asia/Dubai",
-                      "Asia/Singapore",
-                    ].map((zone) => (
-                      <option key={zone} value={zone}>
-                        {zone.replace("_", " ")}
-                      </option>
-                    ))}
-                    {!["Europe/Brussels", "Europe/Amsterdam", "Europe/Paris", "Europe/London", "America/New_York", "America/Los_Angeles", "Asia/Dubai", "Asia/Singapore"].includes(visitorTimezone) ? (
-                      <option value={visitorTimezone}>{visitorTimezone}</option>
-                    ) : null}
-                  </select>
-                </div>
-                {showHostTimeHint ? (
-                  <p className={`text-[11px] leading-snug ${tc.muted}`}>
-                    Agenda van host: {slotTimeZone.replace("_", " ")}. Google-blokken worden in die zone gecontroleerd.
-                  </p>
-                ) : null}
+              <div className="flex items-center gap-2.5">
+                <Globe2 className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
+                <span className="text-sm">
+                  {formatTimezoneLabel(slotTimeZone)}
+                  <span className={`ml-1 text-xs ${tc.muted}`}>({slotTimeZone})</span>
+                </span>
               </div>
+              <p className={`text-[11px] leading-snug ${tc.muted}`}>
+                Agenda van host: {slotTimeZone}. Google-blokken worden in die zone gecontroleerd. Bezet in Google Agenda of
+                handmatig ingepland wordt verborgen.
+              </p>
             </div>
 
             {/* Legend */}
@@ -806,7 +789,6 @@ function BookingEmbedContent() {
                         onClick={() => {
                           setSelectedSlotStart(slot.start);
                           setSelectedTime(slot.hostTime);
-                          if (slot.displayDate) setSelectedDate(slot.displayDate);
                         }}
                         className={`flex h-10 items-center justify-center rounded-[12px] border text-sm font-semibold transition ${
                           active ? "border-transparent" : tc.slot
@@ -916,10 +898,9 @@ function BookingEmbedContent() {
                   />
                 </div>
 
-                {/* Tijdzone (read-only) */}
                 <div className={`flex h-10 items-center gap-2.5 rounded-2xl border px-4 text-sm ${dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-slate-50"}`}>
                   <Globe2 className={`h-3.5 w-3.5 shrink-0 ${tc.muted}`} />
-                  <span className={`truncate text-sm ${tc.muted}`}>{visitorTimezone}</span>
+                  <span className={`truncate text-sm ${tc.muted}`}>{formatTimezoneLabel(slotTimeZone)}</span>
                 </div>
 
                 {/* Custom questions */}

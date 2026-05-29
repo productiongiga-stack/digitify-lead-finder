@@ -127,6 +127,163 @@ export function formatDateKeyInZone(date: Date, timeZone: string) {
   return `${year}-${month}-${day}`;
 }
 
+const WEEKDAY_NAME_TO_INDEX: Record<string, number> = {
+  Sunday: 0,
+  Monday: 1,
+  Tuesday: 2,
+  Wednesday: 3,
+  Thursday: 4,
+  Friday: 5,
+  Saturday: 6,
+};
+
+/** Weekday (0=Sun) for a calendar date in the business timezone. */
+export function getWeekdayInZone(dateKey: string, timeZone: string) {
+  const noon = zonedDateTimeToUtc(dateKey, "12:00", timeZone);
+  const weekdayName =
+    new Intl.DateTimeFormat("en-US", { timeZone, weekday: "long" })
+      .formatToParts(noon)
+      .find((part) => part.type === "weekday")?.value || "";
+  return WEEKDAY_NAME_TO_INDEX[weekdayName] ?? parseDateKey(dateKey).getDay();
+}
+
+export function formatTimezoneLabel(timeZone: string, locale = "nl-BE") {
+  try {
+    const label = new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: "long" })
+      .formatToParts(new Date())
+      .find((part) => part.type === "timeZoneName")?.value;
+    return label || timeZone.replace(/_/g, " ");
+  } catch {
+    return timeZone.replace(/_/g, " ");
+  }
+}
+
+export async function syncHostTimezoneForWorkspace(
+  db: PrismaClient,
+  workspaceId: string,
+  timezone: string,
+) {
+  const tz = timezone.trim() || DEFAULT_BOOKING_TIMEZONE;
+  await db.bookingEventType.updateMany({
+    where: { createdById: workspaceId },
+    data: { timezone: tz },
+  });
+  return { timezone: tz };
+}
+
+function parseWeeklyHoursFromSettings(
+  raw: unknown,
+  fallbackStart: string,
+  fallbackEnd: string,
+  fallbackDaysCsv: string,
+) {
+  const fallbackDays = fallbackDaysCsv
+    .split(",")
+    .map((day) => Number(day.trim()))
+    .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6);
+  const rules: Array<{ weekday: number; enabled: boolean; startTime: string; endTime: string }> = [];
+  for (let weekday = 0; weekday <= 6; weekday += 1) {
+    rules.push({
+      weekday,
+      enabled: fallbackDays.includes(weekday),
+      startTime: fallbackStart,
+      endTime: fallbackEnd,
+    });
+  }
+
+  if (!raw) return rules;
+  let parsed: Record<string, { enabled?: boolean; start?: string; end?: string }> | null = null;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw) as Record<string, { enabled?: boolean; start?: string; end?: string }>;
+    } catch {
+      parsed = null;
+    }
+  } else if (typeof raw === "object" && raw !== null) {
+    parsed = raw as Record<string, { enabled?: boolean; start?: string; end?: string }>;
+  }
+  if (!parsed) return rules;
+
+  for (const [key, value] of Object.entries(parsed)) {
+    const weekday = Number(key);
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) continue;
+    const base = rules[weekday];
+    rules[weekday] = {
+      weekday,
+      enabled: value.enabled ?? base.enabled,
+      startTime: value.start?.trim() || base.startTime,
+      endTime: value.end?.trim() || base.endTime,
+    };
+  }
+  return rules;
+}
+
+/** Push embed settings (color, hours, timezone) into the default booking event type for public embeds. */
+export async function applyWorkspaceEmbedSettingsToDefaultEventType(
+  db: PrismaClient,
+  workspaceId: string,
+) {
+  const settingsRows = await loadWorkspaceSettingRows(db, { workspaceId, memberId: workspaceId }, [
+    "bookings.embed_meeting_name",
+    "bookings.embed_description",
+    "bookings.embed_color",
+    "bookings.embed_duration",
+    "bookings.slot_minutes",
+    "bookings.embed_location_label",
+    "bookings.google_calendar_timezone",
+    "bookings.weekly_hours",
+    "bookings.availability_start_time",
+    "bookings.availability_end_time",
+    "bookings.available_days",
+  ]);
+  const settings = settingsRowsToMap(settingsRows);
+
+  let eventType = await db.bookingEventType.findFirst({
+    where: { createdById: workspaceId, isDefault: true },
+    select: { id: true },
+  });
+  if (!eventType) {
+    const ensured = await ensureDefaultBookingEventType(db, workspaceId);
+    if (!ensured) return null;
+    eventType = { id: ensured.id };
+  }
+
+  const fallbackStart = getSettingString(settings, "bookings.availability_start_time", "09:00");
+  const fallbackEnd = getSettingString(settings, "bookings.availability_end_time", "17:00");
+  const availabilityRules = parseWeeklyHoursFromSettings(
+    settings["bookings.weekly_hours"],
+    fallbackStart,
+    fallbackEnd,
+    getSettingString(settings, "bookings.available_days", "1,2,3,4,5"),
+  );
+
+  await db.bookingEventType.update({
+    where: { id: eventType.id },
+    data: {
+      name: getSettingString(settings, "bookings.embed_meeting_name", "Kennismaking"),
+      description: getSettingString(settings, "bookings.embed_description", "Vraag eenvoudig een afspraak aan."),
+      color: getSettingString(settings, "bookings.embed_color", "#f9ae5a"),
+      duration: Number(getSettingString(settings, "bookings.embed_duration", "60")) || 60,
+      slotMinutes: Number(getSettingString(settings, "bookings.slot_minutes", "30")) || 30,
+      location: getSettingString(settings, "bookings.embed_location_label", "Google Meet"),
+      timezone: getSettingString(settings, "bookings.google_calendar_timezone", DEFAULT_BOOKING_TIMEZONE),
+    },
+  });
+
+  await db.bookingAvailabilityRule.deleteMany({ where: { eventTypeId: eventType.id } });
+  await db.bookingAvailabilityRule.createMany({
+    data: availabilityRules.map((rule) => ({
+      eventTypeId: eventType.id,
+      weekday: rule.weekday,
+      enabled: rule.enabled,
+      startTime: rule.startTime,
+      endTime: rule.endTime,
+    })),
+  });
+
+  return eventType.id;
+}
+
 export function addDays(date: Date, days: number) {
   return new Date(date.getTime() + days * 24 * 60 * 60_000);
 }
@@ -208,7 +365,13 @@ export async function ensureDefaultBookingEventType(db: PrismaClient, workspaceI
     where: { createdById: workspaceId, isDefault: true },
     include: { availabilityRules: true, questions: { orderBy: { sortOrder: "asc" } } },
   });
-  if (existing) return existing;
+  if (existing) {
+    await applyWorkspaceEmbedSettingsToDefaultEventType(db, workspaceId).catch(() => null);
+    return db.bookingEventType.findFirst({
+      where: { id: existing.id },
+      include: { availabilityRules: true, questions: { orderBy: { sortOrder: "asc" } } },
+    });
+  }
 
   const settingsRows = await loadWorkspaceSettingRows(db, { workspaceId, memberId: workspaceId }, [
     "bookings.embed_meeting_name",
