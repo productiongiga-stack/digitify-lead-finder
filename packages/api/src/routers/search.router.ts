@@ -5,7 +5,9 @@ import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { enforceRateLimit } from "../lib/rate-limit";
 import { log } from "../lib/logger";
 import { migrateLegacyWorkspaceSavedSearches } from "../lib/migrate-workspace-saved-searches";
+import { isMissingSchemaError } from "../lib/prisma-schema";
 import { serializeSavedSearch } from "../lib/saved-search-serializer";
+import { ensureTenantSchemaCompatibility } from "../lib/tenant-schema-compat";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 
 const searchStringSchema = z
@@ -282,13 +284,24 @@ export const searchRouter = router({
 
   listSavedSearches: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);
-    await migrateLegacyWorkspaceSavedSearches(ctx.db, scope);
-    const rows = await ctx.db.workspaceSavedSearch.findMany({
-      where: { createdById: scope.workspaceId },
-      orderBy: { updatedAt: "desc" },
-      take: 100,
-    });
-    return rows.map(serializeSavedSearch);
+    await ensureTenantSchemaCompatibility(ctx.db).catch(() => null);
+    try {
+      await migrateLegacyWorkspaceSavedSearches(ctx.db, scope);
+      const rows = await ctx.db.workspaceSavedSearch.findMany({
+        where: { createdById: scope.workspaceId },
+        orderBy: { updatedAt: "desc" },
+        take: 100,
+      });
+      return rows.map(serializeSavedSearch);
+    } catch (error) {
+      if (isMissingSchemaError(error)) {
+        log.api.warn("listSavedSearches: workspace_saved_searches missing, returning []", {
+          workspaceId: scope.workspaceId,
+        });
+        return [];
+      }
+      throw error;
+    }
   }),
 
   saveSearch: protectedProcedure

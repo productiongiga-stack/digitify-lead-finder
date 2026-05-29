@@ -160,6 +160,27 @@ const TENANT_SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS "email_drafts_approverId_idx" ON "email_drafts"("approverId")`,
   `CREATE INDEX IF NOT EXISTS "email_drafts_type_idx" ON "email_drafts"("type")`,
   `CREATE INDEX IF NOT EXISTS "chat_sessions_assignedToId_updatedAt_idx" ON "chat_sessions"("assignedToId", "updatedAt" DESC)`,
+
+  `CREATE TABLE IF NOT EXISTS "workspace_saved_searches" (
+    "id" TEXT NOT NULL,
+    "createdById" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "query" TEXT NOT NULL DEFAULT '',
+    "city" TEXT NOT NULL DEFAULT '',
+    "country" TEXT NOT NULL DEFAULT 'België',
+    "niche" TEXT NOT NULL DEFAULT '',
+    "pageSize" INTEGER NOT NULL DEFAULT 20,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "workspace_saved_searches_pkey" PRIMARY KEY ("id")
+  )`,
+  `CREATE INDEX IF NOT EXISTS "workspace_saved_searches_createdById_updatedAt_idx" ON "workspace_saved_searches"("createdById", "updatedAt")`,
+  `DO $$ BEGIN
+    ALTER TABLE "workspace_saved_searches" ADD CONSTRAINT "workspace_saved_searches_createdById_fkey"
+      FOREIGN KEY ("createdById") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+  `DO $$ BEGIN CREATE TYPE "EmailTemplateBodyFormat" AS ENUM ('TEXT', 'HTML'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+  `ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "bodyFormat" "EmailTemplateBodyFormat" NOT NULL DEFAULT 'TEXT'`,
 ];
 
 export async function ensureTenantSchemaCompatibility(db: PrismaClient) {

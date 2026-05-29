@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@digitify/db";
+import { isMissingSchemaError } from "./prisma-schema";
 import { readWorkspaceJsonSetting } from "./user-json-setting";
 import type { WorkspaceScope } from "./workspace-settings";
 
@@ -20,9 +21,15 @@ export async function migrateLegacyWorkspaceSavedSearches(
   db: PrismaClient,
   scope: WorkspaceScope,
 ): Promise<{ imported: number }> {
-  const existing = await db.workspaceSavedSearch.count({
-    where: { createdById: scope.workspaceId },
-  });
+  let existing = 0;
+  try {
+    existing = await db.workspaceSavedSearch.count({
+      where: { createdById: scope.workspaceId },
+    });
+  } catch (error) {
+    if (isMissingSchemaError(error)) return { imported: 0 };
+    throw error;
+  }
   if (existing > 0) return { imported: 0 };
 
   const raw = await readWorkspaceJsonSetting<unknown[]>(db, scope, LEGACY_KEY, []);
@@ -50,6 +57,11 @@ export async function migrateLegacyWorkspaceSavedSearches(
 
   if (rows.length === 0) return { imported: 0 };
 
-  await db.workspaceSavedSearch.createMany({ data: rows, skipDuplicates: true });
-  return { imported: rows.length };
+  try {
+    await db.workspaceSavedSearch.createMany({ data: rows, skipDuplicates: true });
+    return { imported: rows.length };
+  } catch (error) {
+    if (isMissingSchemaError(error)) return { imported: 0 };
+    throw error;
+  }
 }

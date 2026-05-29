@@ -484,15 +484,22 @@ export default function LeadSearchPage() {
         </TabsList>
 
       <TabsContent value="overview" className="space-y-4">
-      {(campaignsQuery.isError || popularSearchesQuery.isError || savedSearchesQuery.isError) && (
+      {(campaignsQuery.isError || popularSearchesQuery.isError) && (
         <QueryErrorState
           onRetry={() => {
             void campaignsQuery.refetch();
             void popularSearchesQuery.refetch();
-            void savedSearchesQuery.refetch();
           }}
         />
       )}
+      {savedSearchesQuery.isError ? (
+        <QueryErrorState
+          variant="inline"
+          title="Opgeslagen zoekopdrachten tijdelijk niet beschikbaar"
+          message="De zoekpagina werkt nog. Vernieuw de pagina of neem contact op als dit blijft."
+          onRetry={() => void savedSearchesQuery.refetch()}
+        />
+      ) : null}
       {apiKeyMissing ? (
         <OutboundDraftStatusBanner
           variant="warning"
