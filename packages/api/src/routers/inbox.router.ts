@@ -266,7 +266,7 @@ async function sendInboxMessage(params: {
     subject: string;
     body: string;
     type: "quote" | "lead_contact" | "reply" | "follow_up" | "general" | "booking_confirmation";
-    leadId: string;
+    leadId?: string;
     inReplyTo?: string;
     references?: string;
   };
@@ -290,17 +290,29 @@ async function sendInboxMessage(params: {
 
   const fromEmail = emailSettings.fromEmail || smtpConfig.user;
   const fromName = emailSettings.fromName || emailSettings.companyName || smtpConfig.user;
-  const linkedLead = await ensureLeadLink({
-    db: params.db,
-    userId: params.userId,
-    leadId: params.input.leadId,
-    email: params.input.to,
-    source: "inbox_send",
-  });
-  if (!linkedLead || linkedLead.id !== params.input.leadId) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Verzenden vereist een geldige lead-koppeling.",
+  const requestedLeadId = params.input.leadId?.trim();
+  let linkedLead = null as Awaited<ReturnType<typeof ensureLeadLink>>;
+
+  if (requestedLeadId) {
+    linkedLead = await ensureLeadLink({
+      db: params.db,
+      userId: params.userId,
+      leadId: requestedLeadId,
+      email: params.input.to,
+      source: params.input.type === "reply" ? "inbox_reply" : "inbox_send",
+    });
+    if (!linkedLead || linkedLead.id !== requestedLeadId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Gekozen lead kon niet worden gekoppeld.",
+      });
+    }
+  } else if (params.input.type === "reply") {
+    linkedLead = await ensureLeadLink({
+      db: params.db,
+      userId: params.userId,
+      email: params.input.to,
+      source: "inbox_reply",
     });
   }
 
@@ -344,7 +356,7 @@ async function sendInboxMessage(params: {
         .join("\n\n");
   const draft = await params.db.emailDraft.create({
     data: {
-      leadId: linkedLead.id,
+      leadId: linkedLead?.id ?? null,
       authorId: params.userId,
       toEmail: params.input.to,
       subject,
@@ -436,7 +448,7 @@ async function sendInboxMessage(params: {
   } catch (error) {
     log.email.warn("IMAP append to Sent failed", {
       userId: params.userId,
-      leadId: linkedLead.id,
+      leadId: linkedLead?.id ?? null,
       messageId: info.messageId,
     }, error);
   }
@@ -635,7 +647,7 @@ export const inboxRouter = router({
         subject: z.string().min(1),
         body: z.string().min(1),
         type: z.enum(["quote", "lead_contact", "reply", "follow_up", "general", "booking_confirmation"]).default("general"),
-        leadId: z.string().min(1),
+        leadId: z.string().optional(),
         inReplyTo: z.string().optional(),
         references: z.string().optional(),
       }),
@@ -645,7 +657,10 @@ export const inboxRouter = router({
         db: ctx.db,
         userId: ctx.user.id,
         workspaceScope: workspaceScopeFromUser(ctx.user),
-        input,
+        input: {
+          ...input,
+          leadId: input.leadId?.trim() || undefined,
+        },
       }),
     ),
 
@@ -666,19 +681,6 @@ export const inboxRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const replySubject = input.subject.startsWith("Re:") ? input.subject : `Re: ${input.subject}`;
-      const linkedLead = await ensureLeadLink({
-        db: ctx.db,
-        userId: ctx.user.id,
-        leadId: input.leadId,
-        email: input.to,
-        source: "inbox_reply",
-      });
-      if (!linkedLead) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Geen lead-koppeling gevonden voor dit antwoord.",
-        });
-      }
       return sendInboxMessage({
         db: ctx.db,
         userId: ctx.user.id,
@@ -688,7 +690,7 @@ export const inboxRouter = router({
           subject: replySubject,
           body: input.body,
           type: "reply",
-          leadId: linkedLead.id,
+          leadId: input.leadId?.trim() || undefined,
           inReplyTo: input.inReplyTo || input.messageId,
           references: [input.inReplyTo, input.messageId].filter(Boolean).join(" "),
         },

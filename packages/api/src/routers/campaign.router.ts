@@ -99,6 +99,11 @@ async function runScheduledSequence(params: {
   const errors: string[] = [];
 
   for (const draft of dueDrafts) {
+    if (!draft.lead) {
+      failed += 1;
+      errors.push(`Concept ${draft.id}: geen gekoppelde lead`);
+      continue;
+    }
     const leadResponded =
       statusMeansResponded(draft.lead.status) ||
       draft.lead.emailDrafts.some((item) => item.repliedAt !== null);
@@ -227,7 +232,7 @@ export async function runAllDueDripsWorker(
   const byWorkspaceSequence = new Map<string, WorkspaceSequence>();
 
   for (const row of dueDraftRows) {
-    if (!row.sequenceId || !row.sequence?.name) continue;
+    if (!row.sequenceId || !row.sequence?.name || !row.lead) continue;
     const meta = parseSequenceMeta(row.sequence.name);
     if (!meta.campaignId) continue;
     const workspaceId = row.lead.createdById;

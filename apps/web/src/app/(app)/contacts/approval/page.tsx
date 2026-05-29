@@ -125,10 +125,10 @@ export default function ApprovalPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <Link
-                          href={`/leads/${draft.lead.id}`}
+                          href={draft.lead ? `/leads/${draft.lead.id}` : "#"}
                           className="text-sm font-semibold hover:text-primary"
                         >
-                          {draft.lead.companyName}
+                          {draft.lead?.companyName ?? draft.toEmail}
                         </Link>
                         <Badge variant={OUTBOUND_STATUS_VARIANTS.PENDING_APPROVAL}>
                           {OUTBOUND_STATUS_LABELS.PENDING_APPROVAL}
@@ -194,7 +194,7 @@ export default function ApprovalPage() {
                             primaryColor={brandPrimaryColor}
                             fromName={draft.author.name || brandCompanyName}
                             headerSlogan={brandHeaderSlogan}
-                            recipientCompany={draft.lead.companyName}
+                            recipientCompany={draft.lead?.companyName ?? draft.toEmail}
                             layout={parsedDraft.layout}
                           />
                         </DialogContent>

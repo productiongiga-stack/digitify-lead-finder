@@ -417,10 +417,10 @@ export const contactRouter = router({
           ) || 3;
 
         const result =
-          draft.type === "QUOTE"
+          draft.type === "QUOTE" && draft.leadId
             ? await sendApprovedQuoteDraft(
                 ctx.db,
-                draft,
+                { ...draft, leadId: draft.leadId },
                 ctx.user.id,
                 ctx.user.workspaceId!,
               )
@@ -429,7 +429,7 @@ export const contactRouter = router({
                 subject: draft.subject,
                 body: draft.body,
                 recipientCompany: draft.lead?.companyName ?? draft.toEmail,
-                leadId: draft.leadId,
+                leadId: draft.leadId ?? undefined,
                 userId: ctx.user.id,
                 trackingDraftId: draft.id,
               });

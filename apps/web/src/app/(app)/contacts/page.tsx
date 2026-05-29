@@ -425,7 +425,9 @@ export default function ContactsPage() {
             id: draft.id,
             status: draft.status,
             subject: draft.subject,
-            lead: { id: draft.lead.id, companyName: draft.lead.companyName },
+            lead: draft.lead
+              ? { id: draft.lead.id, companyName: draft.lead.companyName }
+              : { id: "", companyName: draft.toEmail },
           }))}
           followUpDays={followUpQueue?.followupDays}
           followUpItems={followUpItems}
@@ -453,9 +455,13 @@ export default function ContactsPage() {
                       className="mt-0.5"
                     />
                     <div className="min-w-0">
-                    <Link href={`/leads/${draft.lead.id}`} className="text-sm font-semibold hover:text-primary">
-                      {draft.lead.companyName}
-                    </Link>
+                    {draft.lead ? (
+                      <Link href={`/leads/${draft.lead.id}`} className="text-sm font-semibold hover:text-primary">
+                        {draft.lead.companyName}
+                      </Link>
+                    ) : (
+                      <span className="text-sm font-semibold text-muted-foreground">{draft.toEmail}</span>
+                    )}
                     <Link href={`/contacts/drafts/${draft.id}`} className="mt-1 block truncate text-xs text-muted-foreground hover:text-primary">
                       {draft.subject}
                     </Link>
@@ -569,9 +575,13 @@ export default function ContactsPage() {
                     />
                   </TableCell>
                   <TableCell>
-                    <Link href={`/leads/${draft.lead.id}`} className="font-medium hover:text-primary">
-                      {draft.lead.companyName}
-                    </Link>
+                    {draft.lead ? (
+                      <Link href={`/leads/${draft.lead.id}`} className="font-medium hover:text-primary">
+                        {draft.lead.companyName}
+                      </Link>
+                    ) : (
+                      <span className="text-muted-foreground">{draft.toEmail}</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Link href={`/contacts/drafts/${draft.id}`} className="text-sm font-medium hover:text-primary hover:underline">
@@ -613,7 +623,7 @@ export default function ContactsPage() {
                             primaryColor={brandPrimaryColor}
                             fromName={draft.author.name || brandCompanyName}
                             headerSlogan={brandHeaderSlogan}
-                            recipientCompany={draft.lead.companyName}
+                            recipientCompany={draft.lead?.companyName ?? draft.toEmail}
                             layout={extractEmailTemplateMetadata(draft.body).layout}
                           />
                         </DialogContent>

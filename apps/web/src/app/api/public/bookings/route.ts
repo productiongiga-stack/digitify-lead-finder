@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { sendBrandedEmail } from "@digitify/api/src/lib/email-sender";
 import { log } from "@digitify/api/src/lib/logger";
-import { isGoogleSlotAvailable } from "@digitify/api/src/lib/google-calendar";
+import { isGoogleSlotAvailable, listGoogleBusyWindows } from "@digitify/api/src/lib/google-calendar";
 import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-schema-compat";
 import {
@@ -15,7 +15,9 @@ import {
   hashPublicToken,
   hasBookingOverlap,
   minutesToTime,
+  overlapsBusyWindow,
   timeToMinutes,
+  zonedDateTimeToUtc,
 } from "@digitify/api/src/lib/booking-utils";
 import { fireBookingWebhook } from "@digitify/api/src/lib/booking-webhooks";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
@@ -61,13 +63,40 @@ async function findNextAvailableSlots(
     eventType: { duration: number; slotMinutes: number; bufferBefore: number; bufferAfter: number };
     rules: Map<number, DaySchedule>;
     fromDate: Date;
+    slotTimeZone: string;
     limit?: number;
   }
 ): Promise<SuggestedSlot[]> {
-  const { tenantUserId, hostUserId, eventType, rules, fromDate, limit = 3 } = input;
+  const { tenantUserId, hostUserId, eventType, rules, fromDate, slotTimeZone, limit = 3 } = input;
   const suggestions: SuggestedSlot[] = [];
   const interval = Math.max(5, eventType.slotMinutes || 30);
-  const requestedMinutes = fromDate.getHours() * 60 + fromDate.getMinutes();
+  const fromDateKey = formatDateKey(fromDate);
+  const zonedTimeParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: slotTimeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(fromDate);
+  const requestedMinutes = timeToMinutes(
+    `${zonedTimeParts.find((part) => part.type === "hour")?.value || "00"}:${zonedTimeParts.find((part) => part.type === "minute")?.value || "00"}`,
+    0,
+  );
+
+  const rangeStart = zonedDateTimeToUtc(fromDateKey, "00:00", slotTimeZone);
+  const rangeEndCursor = new Date(fromDate);
+  rangeEndCursor.setDate(rangeEndCursor.getDate() + 7);
+  const rangeEnd = addMinutes(zonedDateTimeToUtc(formatDateKey(rangeEndCursor), "23:59", slotTimeZone), 1);
+  let googleWindows: Array<{ start: Date; end: Date; allDay: boolean }> = [];
+  try {
+    const google = await listGoogleBusyWindows(db, {
+      timeMin: rangeStart,
+      timeMax: rangeEnd,
+      userId: hostUserId,
+    });
+    if (google.enabled) googleWindows = google.windows;
+  } catch {
+    googleWindows = [];
+  }
 
   for (let dayOffset = 0; dayOffset < 7 && suggestions.length < limit; dayOffset += 1) {
     const candidateDay = new Date(fromDate);
@@ -78,7 +107,6 @@ async function findNextAvailableSlots(
 
     const startMinutes = timeToMinutes(rule.start, 9 * 60);
     const endMinutes = timeToMinutes(rule.end, 17 * 60);
-    // On the same day, start from the next slot after the requested time
     const slotStart = dayOffset === 0
       ? Math.ceil((requestedMinutes + interval) / interval) * interval
       : startMinutes;
@@ -89,18 +117,21 @@ async function findNextAvailableSlots(
       minutes += interval
     ) {
       const slotTime = minutesToTime(minutes);
-      const slotDatetime = new Date(`${dateKey}T${slotTime}:00`);
+      const slotDatetime = zonedDateTimeToUtc(dateKey, slotTime, slotTimeZone);
       const slotEnd = addMinutes(slotDatetime, eventType.duration);
+      const bufferedStart = addMinutes(slotDatetime, -(eventType.bufferBefore || 0));
+      const bufferedEnd = addMinutes(slotEnd, eventType.bufferAfter || 0);
 
       const overlap = await hasBookingOverlap(db, {
         ownerUserId: tenantUserId,
         hostUserId,
-        start: addMinutes(slotDatetime, -(eventType.bufferBefore || 0)),
-        end: addMinutes(slotEnd, eventType.bufferAfter || 0),
+        start: bufferedStart,
+        end: bufferedEnd,
       });
-      if (!overlap) {
-        suggestions.push({ date: dateKey, time: slotTime, start: slotDatetime.toISOString() });
-      }
+      if (overlap) continue;
+      if (googleWindows.length > 0 && overlapsBusyWindow(bufferedStart, bufferedEnd, googleWindows)) continue;
+
+      suggestions.push({ date: dateKey, time: slotTime, start: slotDatetime.toISOString() });
     }
   }
   return suggestions;
@@ -191,7 +222,11 @@ export async function POST(request: Request) {
     if (!Number.isFinite(duration) || duration < 5 || duration > 480) {
       return NextResponse.json({ error: "Ongeldige afspraakduur (5-480 minuten)." }, { status: 400 });
     }
-    const bookingDate = new Date(date);
+    const slotTimeZone = eventType.timezone || timezone || DEFAULT_BOOKING_TIMEZONE;
+    const bookingDate =
+      localDate && localTime
+        ? zonedDateTimeToUtc(localDate, localTime, slotTimeZone)
+        : new Date(date);
     if (Number.isNaN(bookingDate.getTime())) {
       return NextResponse.json({ error: "Ongeldige datum." }, { status: 400 });
     }
@@ -238,6 +273,7 @@ export async function POST(request: Request) {
         eventType: { duration, slotMinutes: eventType.slotMinutes, bufferBefore: eventType.bufferBefore, bufferAfter: eventType.bufferAfter },
         rules,
         fromDate: bookingDate,
+        slotTimeZone,
       });
       return NextResponse.json(
         { error: "Dit tijdslot is net al ingenomen. Kies een ander moment.", suggestedSlots },
@@ -259,6 +295,7 @@ export async function POST(request: Request) {
         eventType: { duration, slotMinutes: eventType.slotMinutes, bufferBefore: eventType.bufferBefore, bufferAfter: eventType.bufferAfter },
         rules,
         fromDate: bookingDate,
+        slotTimeZone,
       });
       return NextResponse.json(
         { error: "Dit tijdslot is al bezet in de gekoppelde Google agenda.", suggestedSlots },

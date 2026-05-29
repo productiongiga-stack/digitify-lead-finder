@@ -359,6 +359,33 @@ function hasGoogleAuth(config: GoogleCalendarSyncConfig) {
   );
 }
 
+export type GoogleBusyWindow = { start: Date; end: Date; allDay: boolean; eventId?: string };
+
+export async function listGoogleBusyWindows(
+  db: SettingsDb,
+  options: { timeMin: Date; timeMax: Date; userId?: string; ignoreEventId?: string | null },
+) {
+  const listed = await listGoogleCalendarEvents(db, {
+    timeMin: options.timeMin,
+    timeMax: options.timeMax,
+    userId: options.userId,
+  });
+  if (!listed.enabled) {
+    return { enabled: false as const, windows: [] as GoogleBusyWindow[] };
+  }
+
+  const windows: GoogleBusyWindow[] = listed.events
+    .filter((event) => !options.ignoreEventId || event.id !== options.ignoreEventId)
+    .map((event) => ({
+      start: new Date(event.start),
+      end: new Date(event.end),
+      allDay: event.allDay,
+      eventId: event.id,
+    }));
+
+  return { enabled: true as const, windows };
+}
+
 export async function isGoogleSlotAvailable(
   db: SettingsDb,
   options: { start: Date; end: Date; ignoreEventId?: string | null; userId?: string }
@@ -368,30 +395,19 @@ export async function isGoogleSlotAvailable(
     return { enabled: false, available: true as const };
   }
 
-  const params = new URLSearchParams({
-    timeMin: toIso(options.start),
-    timeMax: toIso(options.end),
-    singleEvents: "true",
-    orderBy: "startTime",
-    maxResults: "50",
+  const dayStart = new Date(options.start);
+  dayStart.setUTCHours(0, 0, 0, 0);
+  const dayEnd = new Date(options.end);
+  dayEnd.setUTCHours(23, 59, 59, 999);
+
+  const { windows } = await listGoogleBusyWindows(db, {
+    timeMin: dayStart,
+    timeMax: dayEnd,
+    userId: options.userId,
+    ignoreEventId: options.ignoreEventId,
   });
 
-  const payload = await googleCalendarRequest<{ items?: GoogleEventItem[] }>(
-    config,
-    `/events?${params.toString()}`,
-    { method: "GET" }
-  );
-
-  const items = payload.items || [];
-  const hasOverlap = items.some((item) => {
-    if (!item || item.status === "cancelled") return false;
-    if (options.ignoreEventId && item.id === options.ignoreEventId) return false;
-    const start = eventDateToDate(item.start);
-    const end = eventDateToDate(item.end);
-    if (!start || !end) return false;
-    return overlap(options.start, options.end, start, end);
-  });
-
+  const hasOverlap = windows.some((window) => overlap(options.start, options.end, window.start, window.end));
   return { enabled: true, available: !hasOverlap };
 }
 

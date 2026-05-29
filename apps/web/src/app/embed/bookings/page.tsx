@@ -14,6 +14,7 @@ import {
   Video,
   X,
 } from "lucide-react";
+import { toBookingIso } from "@/lib/booking-timezone";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -152,9 +153,6 @@ function formatTimeDisplay(time: string, mode: TimeMode) {
   return `${normalized}:${String(minutes).padStart(2, "0")} ${suffix}`;
 }
 
-function toIsoDateTime(date: string, time: string) {
-  return new Date(`${date}T${time}`).toISOString();
-}
 
 function buildSlotsForDate(dateValue: string, weeklyHours: WeeklyHours, duration: number, slotMinutes: number) {
   if (!dateValue) return [];
@@ -256,6 +254,7 @@ function BookingEmbedContent() {
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [resultModal, setResultModal] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [loadingAvailability, setLoadingAvailability] = useState(false);
+  const [availabilityMonthKey, setAvailabilityMonthKey] = useState<string | null>(null);
   const [suggestedSlots, setSuggestedSlots] = useState<SuggestedSlot[]>([]);
 
   const effectiveDuration = eventType?.duration || duration;
@@ -264,15 +263,20 @@ function BookingEmbedContent() {
   const effectiveMeetingName = eventType?.name || meetingName;
   const effectiveDescription = eventType?.description || description;
   const effectiveLocation = eventType?.location || meetingLocation;
+  const slotTimeZone = eventType?.timezone || timezone;
 
-  // Available time slots for the selected date (API-first, then local fallback)
   const selectedSlots = useMemo(() => {
+    if (tenant) {
+      const remoteData = availability[selectedDate];
+      if (!remoteData) return [];
+      return remoteData.map((slot) => slot.time);
+    }
     const remoteData = availability[selectedDate];
     if (remoteData !== undefined) {
-      return remoteData.filter((slot) => slot.available).map((slot) => slot.time);
+      return remoteData.map((slot) => slot.time);
     }
     return buildSlotsForDate(selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes);
-  }, [availability, selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes]);
+  }, [tenant, availability, selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes]);
 
   // ── Effects ────────────────────────────────────────────────────────────────
 
@@ -302,7 +306,9 @@ function BookingEmbedContent() {
     url.searchParams.set("from", formatDateKey(currentMonth));
     url.searchParams.set("to", formatDateKey(toDate));
     url.searchParams.set("timezone", visitorTimezone);
+    const monthKey = formatDateKey(currentMonth);
     setLoadingAvailability(true);
+    setAvailabilityMonthKey(null);
     fetch(url)
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
@@ -311,6 +317,7 @@ function BookingEmbedContent() {
             ...prev,
             ...Object.fromEntries(data.days.map((day: { date: string; slots: AvailabilitySlot[] }) => [day.date, day.slots])),
           }));
+          setAvailabilityMonthKey(monthKey);
         }
       })
       .catch(() => null)
@@ -327,16 +334,23 @@ function BookingEmbedContent() {
 
   function getDateStatus(dateKey: string): DateStatus {
     if (dateKey < todayKey) return "none";
-    const remoteData = availability[dateKey];
-    if (remoteData !== undefined) {
-      const total = remoteData.length;
-      const free = remoteData.filter((s) => s.available).length;
-      if (total === 0) return "none";
-      if (free === 0) return "full";
-      if (free < total) return "partial";
+    const dateMonthKey = formatDateKey(getMonthStart(parseDateKey(dateKey)));
+    if (tenant) {
+      if (loadingAvailability && availabilityMonthKey !== dateMonthKey) return "none";
+      if (availabilityMonthKey !== dateMonthKey) return "none";
+      const remoteData = availability[dateKey];
+      if (remoteData === undefined) return "none";
+      if (remoteData.length === 0) {
+        const schedule = weeklyHours[parseDateKey(dateKey).getDay()];
+        return schedule?.enabled ? "full" : "none";
+      }
       return "available";
     }
-    // No API data yet — use weeklyHours optimistically
+    const remoteData = availability[dateKey];
+    if (remoteData !== undefined) {
+      if (remoteData.length === 0) return "full";
+      return "available";
+    }
     const localSlots = buildSlotsForDate(dateKey, weeklyHours, effectiveDuration, effectiveSlotMinutes);
     return localSlots.length > 0 ? "available" : "none";
   }
@@ -355,7 +369,7 @@ function BookingEmbedContent() {
         body: JSON.stringify({
           clientName,
           clientEmail,
-          date: toIsoDateTime(selectedDate, selectedTime),
+          date: toBookingIso(selectedDate, selectedTime, slotTimeZone),
           localDate: selectedDate,
           localTime: selectedTime,
           duration: effectiveDuration,
@@ -392,8 +406,36 @@ function BookingEmbedContent() {
         setStatus({ type: "error", message: data.error || "Te veel aanvragen. Wacht even en probeer opnieuw." });
         return;
       }
-      if (data.suggestedSlots?.length) setSuggestedSlots(data.suggestedSlots as SuggestedSlot[]);
+      if (data.suggestedSlots?.length) {
+        setSuggestedSlots(data.suggestedSlots as SuggestedSlot[]);
+        const first = data.suggestedSlots[0] as SuggestedSlot;
+        if (first?.date && first?.time) {
+          setSelectedDate(first.date);
+          setSelectedTime(first.time);
+          setCurrentMonth(getMonthStart(parseDateKey(first.date)));
+        }
+      }
       setStatus({ type: "error", message: data.error || "Boeking aanvragen mislukt." });
+      if (tenant) {
+        const toDate = addMonths(currentMonth, 1);
+        toDate.setDate(0);
+        const refreshUrl = new URL("/api/public/bookings/availability", window.location.origin);
+        refreshUrl.searchParams.set("tenant", tenant);
+        if (eventType?.slug || eventTypeSlug) refreshUrl.searchParams.set("eventType", eventType?.slug || eventTypeSlug);
+        refreshUrl.searchParams.set("from", formatDateKey(currentMonth));
+        refreshUrl.searchParams.set("to", formatDateKey(toDate));
+        refreshUrl.searchParams.set("timezone", slotTimeZone);
+        fetch(refreshUrl)
+          .then((response) => (response.ok ? response.json() : null))
+          .then((payload) => {
+            if (!payload?.days) return;
+            setAvailability((prev) => ({
+              ...prev,
+              ...Object.fromEntries(payload.days.map((day: { date: string; slots: AvailabilitySlot[] }) => [day.date, day.slots])),
+            }));
+          })
+          .catch(() => null);
+      }
     } catch {
       setLoading(false);
       setStatus({ type: "error", message: "Verbindingsfout. Controleer uw internetverbinding en probeer opnieuw." });

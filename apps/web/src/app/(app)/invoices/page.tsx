@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import {
@@ -71,7 +72,13 @@ export default function InvoicesPage() {
   const billableQuotesQuery = trpc.invoice.listBillableQuotes.useQuery();
 
   const updateStatus = trpc.invoice.updateStatus.useMutation({
-    onSuccess: () => utils.invoice.list.invalidate(),
+    onSuccess: () => {
+      utils.invoice.list.invalidate();
+      showToast({ title: "Factuurstatus bijgewerkt" });
+    },
+    onError: (error) => {
+      showToast({ title: "Status wijzigen mislukt", description: error.message, variant: "error" });
+    },
   });
   const sendReminder = trpc.invoice.sendReminder.useMutation({
     onSuccess: () => utils.invoice.list.invalidate(),
@@ -106,6 +113,8 @@ export default function InvoicesPage() {
   );
 
   const billableQuotes = billableQuotesQuery.data ?? [];
+  const quoteSelectDisabled =
+    billableQuotesQuery.isLoading || (!billableQuotesQuery.isLoading && billableQuotes.length === 0);
 
   const statItems = useMemo<StatItem[]>(
     () => [
@@ -156,49 +165,45 @@ export default function InvoicesPage() {
           <CardTitle className="text-sm">Nieuwe factuur uit geaccepteerde offerte</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px] lg:items-end">
-            <div className="min-w-0 space-y-2">
-              <Select value={quoteId} onValueChange={setQuoteId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecteer geaccepteerde offerte" />
-                </SelectTrigger>
-                <SelectContent>
-                  {billableQuotesQuery.isLoading ? (
-                    <SelectItem value="__loading" disabled>
-                      Offertes laden...
-                    </SelectItem>
-                  ) : billableQuotes.length === 0 ? (
-                    <SelectItem value="__none" disabled>
-                      Geen geaccepteerde offertes om te factureren
-                    </SelectItem>
-                  ) : (
-                    billableQuotes.map((quote) => (
-                      <SelectItem key={quote.id} value={quote.id}>
-                        {quote.quoteNumber} • {quote.clientCompany || quote.clientName} •{" "}
-                        {formatCurrency(quote.total)}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-              {!quoteId ? (
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  Alleen <span className="font-medium text-foreground">geaccepteerde</span> offertes zonder
-                  bestaande factuur verschijnen hier. Controleer de regels en maak de factuur aan.
-                </p>
-              ) : null}
-            </div>
-            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as any)}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
+          <div className="min-w-0 space-y-2">
+            <Select
+              value={quoteId || undefined}
+              onValueChange={setQuoteId}
+              disabled={quoteSelectDisabled}
+            >
+              <SelectTrigger>
+                <SelectValue
+                  placeholder={
+                    billableQuotesQuery.isLoading
+                      ? "Offertes laden..."
+                      : billableQuotes.length === 0
+                        ? "Geen geaccepteerde offertes beschikbaar"
+                        : "Selecteer geaccepteerde offerte"
+                  }
+                />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">Alle statussen</SelectItem>
-                {(Object.keys(STATUS_LABEL) as InvoiceStatus[]).map((status) => (
-                  <SelectItem key={status} value={status}>{STATUS_LABEL[status]}</SelectItem>
+              <SelectContent className="z-[200]">
+                {billableQuotes.map((quote) => (
+                  <SelectItem key={quote.id} value={quote.id}>
+                    {quote.quoteNumber} — {quote.clientCompany || quote.clientName} —{" "}
+                    {formatCurrency(quote.total)}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {billableQuotesQuery.error ? (
+              <p className="text-sm text-destructive">{billableQuotesQuery.error.message}</p>
+            ) : !quoteId ? (
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Alleen <span className="font-medium text-foreground">geaccepteerde</span> offertes zonder
+                bestaande factuur verschijnen hier. Zet een offerte op{" "}
+                <span className="font-medium text-foreground">Goedgekeurd</span> via{" "}
+                <Link href="/quotes" className="font-medium text-primary underline-offset-4 hover:underline">
+                  Offertes
+                </Link>
+                , voeg minstens één regel toe en selecteer die hierboven.
+              </p>
+            ) : null}
           </div>
 
           {quoteId ? (
@@ -215,6 +220,28 @@ export default function InvoicesPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as InvoiceStatus | "ALL")}>
+          <SelectTrigger className="h-9 w-full min-w-[200px] max-w-[240px]">
+            <SelectValue placeholder="Filter op status" />
+          </SelectTrigger>
+          <SelectContent className="z-[200]">
+            <SelectItem value="ALL">Alle statussen</SelectItem>
+            {(Object.keys(STATUS_LABEL) as InvoiceStatus[]).map((status) => (
+              <SelectItem key={status} value={status}>
+                {STATUS_LABEL[status]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {!list.isLoading ? (
+          <p className="text-sm text-muted-foreground">
+            {items.length} {items.length === 1 ? "factuur" : "facturen"}
+            {statusFilter !== "ALL" ? ` · ${STATUS_LABEL[statusFilter]}` : ""}
+          </p>
+        ) : null}
+      </div>
 
       {list.isLoading ? (
         <Card><CardContent className="p-5 text-sm text-muted-foreground">Facturen laden...</CardContent></Card>
@@ -240,7 +267,7 @@ export default function InvoicesPage() {
 
             return (
               <Card key={invoice.id} className="invoice-row">
-                <CardContent className="p-0">
+                <CardContent className="overflow-hidden rounded-[inherit] p-0">
                   <div className="flex flex-wrap items-start justify-between gap-3 p-4 pb-3">
                     <div className="flex min-w-0 items-start gap-3">
                       <div className="invoice-row-icon">
@@ -293,6 +320,7 @@ export default function InvoicesPage() {
                     <Select
                       value={invoice.status}
                       onValueChange={(value) => {
+                        if (value === invoice.status) return;
                         if (!MANUAL_STATUS_OPTIONS.includes(value as ManualInvoiceStatus)) return;
                         updateStatus.mutate({ id: invoice.id, status: value as ManualInvoiceStatus });
                       }}
@@ -300,7 +328,7 @@ export default function InvoicesPage() {
                       <SelectTrigger className="h-9 w-full min-w-[170px] max-w-[220px] rounded-xl bg-background/80">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="z-[200]">
                         {statusOptions.map((item) => (
                           <SelectItem key={item.value} value={item.value} disabled={item.disabled}>
                             {STATUS_LABEL[item.value]}

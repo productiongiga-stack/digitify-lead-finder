@@ -17,6 +17,7 @@ const TENANT_SCHEMA_STATEMENTS = [
   `ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "createdById" TEXT`,
   `ALTER TABLE "service_catalog" ADD COLUMN IF NOT EXISTS "createdById" TEXT`,
   `ALTER TABLE "email_drafts" ADD COLUMN IF NOT EXISTS "type" "EmailType" NOT NULL DEFAULT 'LEAD_CONTACT'`,
+  `ALTER TABLE "email_drafts" ALTER COLUMN "leadId" DROP NOT NULL`,
   `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "workspaceOwnerId" TEXT`,
   `CREATE INDEX IF NOT EXISTS "users_workspaceOwnerId_idx" ON "users"("workspaceOwnerId")`,
   `ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "timezone" TEXT DEFAULT 'Europe/Brussels'`,

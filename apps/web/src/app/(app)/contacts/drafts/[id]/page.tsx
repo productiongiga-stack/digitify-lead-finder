@@ -272,7 +272,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground">
-            {draft.lead.companyName} &mdash; {draft.toEmail}
+            {draft.lead?.companyName ?? "Geen lead"} &mdash; {draft.toEmail}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -441,17 +441,21 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             <CardContent className="space-y-2">
               <div className="flex items-center gap-2 text-sm">
                 <Building2 className="h-4 w-4 text-muted-foreground" />
-                <Link href={`/leads/${draft.lead.id}`} className="font-medium hover:text-primary">
-                  {draft.lead.companyName}
-                </Link>
+                {draft.lead ? (
+                  <Link href={`/leads/${draft.lead.id}`} className="font-medium hover:text-primary">
+                    {draft.lead.companyName}
+                  </Link>
+                ) : (
+                  <span className="text-muted-foreground">Geen gekoppelde lead</span>
+                )}
               </div>
-              {draft.lead.email && (
+              {draft.lead?.email && (
                 <div className="flex items-center gap-2 text-sm">
                   <Mail className="h-4 w-4 text-muted-foreground" />
                   <span>{draft.lead.email}</span>
                 </div>
               )}
-              {draft.lead.city && (
+              {draft.lead?.city && (
                 <div className="flex items-center gap-2 text-sm">
                   <MapPin className="h-4 w-4 text-muted-foreground" />
                   <span>{draft.lead.city}</span>
@@ -630,7 +634,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
                 primaryColor={brandPrimaryColor}
                 fromName={draft.author.name || brandCompanyName}
                 headerSlogan={brandHeaderSlogan}
-                recipientCompany={draft.lead.companyName}
+                recipientCompany={draft.lead?.companyName ?? draft.toEmail}
                 layout={emailLayout}
                 bodyFormat={bodyFormat}
                 ctaText={ctaText}

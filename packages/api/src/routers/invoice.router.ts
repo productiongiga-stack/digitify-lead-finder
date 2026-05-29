@@ -5,7 +5,14 @@ import { migrateLegacyWorkspaceInvoices } from "../lib/migrate-workspace-invoice
 import { nextInvoiceNumber, serializeInvoice } from "../lib/invoice-serializer";
 import { buildInvoiceOutboundBody } from "../lib/invoice-outbound";
 import { sendBrandedEmail } from "../lib/email-sender";
-import { workspaceScopeFromUser } from "../lib/workspace-settings";
+import { workspaceScopeFromUser, type WorkspaceScope } from "../lib/workspace-settings";
+
+/** Quotes may use workspace id or legacy owner user id as createdById. */
+function workspaceQuoteWhere(scope: WorkspaceScope) {
+  return {
+    OR: [{ createdById: scope.workspaceId }, { createdById: scope.memberId }],
+  };
+}
 
 const invoiceInclude = { items: { orderBy: { sortOrder: "asc" as const } } };
 
@@ -88,7 +95,7 @@ export const invoiceRouter = router({
 
     return ctx.db.quote.findMany({
       where: {
-        createdById: scope.workspaceId,
+        ...workspaceQuoteWhere(scope),
         status: "ACCEPTED",
         items: { some: {} },
         ...(invoicedQuoteIds.length > 0 ? { id: { notIn: invoicedQuoteIds } } : {}),
@@ -132,10 +139,16 @@ export const invoiceRouter = router({
       await migrateLegacyWorkspaceInvoices(ctx.db, scope);
 
       const quote = await ctx.db.quote.findFirst({
-        where: { id: input.quoteId, createdById: scope.workspaceId },
+        where: { id: input.quoteId, ...workspaceQuoteWhere(scope) },
         include: { items: { orderBy: { sortOrder: "asc" } } },
       });
       if (!quote) throw new TRPCError({ code: "NOT_FOUND", message: "Offerte niet gevonden." });
+      if (quote.status !== "ACCEPTED") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Alleen geaccepteerde offertes kunnen worden gefactureerd.",
+        });
+      }
       if (quote.items.length === 0) {
         throw new TRPCError({
           code: "BAD_REQUEST",

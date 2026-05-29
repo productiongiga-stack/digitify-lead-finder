@@ -317,6 +317,9 @@ export const openclawRouter = router({
         where: { id: input.draftId, lead: { createdById: ctx.user.workspaceId! } },
         include: { lead: { select: { companyName: true, city: true, industry: true } } },
       });
+      if (!draft.lead) {
+        return { rewritten: null, error: "Dit concept heeft geen gekoppelde lead." };
+      }
 
       const prompt = `Herschrijf deze e-mail in een "${input.style}" stijl.
 
@@ -361,6 +364,82 @@ ONDERWERP: [nieuwe onderwerpregel]
       return {
         rewritten: {
           subject: normalizeAiPlaceholderSyntax(subjectMatch?.[1]?.trim() || draft.subject),
+          body: normalizeAiPlaceholderSyntax(bodyMatch?.[1]?.trim() || response),
+        },
+        error: null,
+      };
+    }),
+
+  rewriteInboxMessage: protectedProcedure
+    .input(
+      z.object({
+        purpose: z.enum(["reply", "follow_up", "compose"]),
+        style: z.string(),
+        subject: z.string().optional(),
+        body: z.string().optional(),
+        incomingSubject: z.string().optional(),
+        incomingBody: z.string().optional(),
+        recipientEmail: z.string().optional(),
+        recipientName: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { client } = await getClient(ctx.db, ctx.user.workspaceId!);
+      if (!client) {
+        return { rewritten: null, error: "API key niet geconfigureerd. Ga naar Instellingen → Integraties." };
+      }
+
+      const businessContext = (await loadBusinessContext(ctx.db, ctx.user.workspaceId!)).businessContext;
+      const incomingSnippet = (input.incomingBody || "").trim().slice(0, 4000);
+      const currentBody = (input.body || "").trim();
+      const purposeLabel =
+        input.purpose === "reply"
+          ? "antwoord op een inkomende e-mail"
+          : input.purpose === "follow_up"
+            ? "opvolgmail na een eerder contact"
+            : "nieuw outbound bericht";
+
+      const prompt = `Schrijf of herschrijf een professionele Nederlandse e-mail (${purposeLabel}) in een "${input.style}" stijl.
+
+${input.recipientName || input.recipientEmail ? `Ontvanger: ${input.recipientName || input.recipientEmail}${input.recipientEmail ? ` <${input.recipientEmail}>` : ""}` : ""}
+${input.incomingSubject ? `Inkomend onderwerp: ${input.incomingSubject}` : ""}
+${incomingSnippet ? `Inkomende tekst:\n${incomingSnippet}` : ""}
+${input.subject ? `Huidig onderwerp: ${input.subject}` : ""}
+${currentBody ? `Huidige concepttekst:\n${currentBody}` : "Er is nog geen concepttekst — schrijf een volledig nieuw bericht."}
+
+BELANGRIJK:
+- Schrijf in het Nederlands (België), klaar om te verzenden
+- Behoud bestaande {{...}} placeholders exact
+- Gebruik voor afzender alleen: {{senderName}}, {{senderTitle}}, {{senderCompany}}, {{senderEmail}}, {{senderPhone}}
+- Geen markdown, alleen platte tekst in de body
+- Geef je antwoord in dit formaat:
+ONDERWERP: [onderwerpregel]
+---
+[e-mail body]
+---`;
+
+      const response = await client.chat([{ role: "user", content: prompt }], {
+        businessContext,
+        leadData: {
+          companyName: input.recipientName || input.recipientEmail || "Ontvanger",
+          website: null,
+          city: null,
+          industry: null,
+          overallScore: null,
+          scorePriority: null,
+          gmbRating: null,
+          gmbReviewCount: null,
+        },
+      });
+
+      const subjectMatch = response.match(/ONDERWERP:\s*(.+)/);
+      const bodyMatch = response.match(/---\n([\s\S]*?)\n---/);
+
+      return {
+        rewritten: {
+          subject: normalizeAiPlaceholderSyntax(
+            subjectMatch?.[1]?.trim() || input.subject || input.incomingSubject || "Bericht",
+          ),
           body: normalizeAiPlaceholderSyntax(bodyMatch?.[1]?.trim() || response),
         },
         error: null,

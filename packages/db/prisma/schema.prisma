@@ -495,7 +495,7 @@ model EmailTemplate {
 
 model EmailDraft {
   id           String      @id @default(cuid())
-  leadId       String
+  leadId       String?
   templateId   String?
   authorId     String
   approverId   String?
@@ -524,7 +524,7 @@ model EmailDraft {
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
-  lead     Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead     Lead?          @relation(fields: [leadId], references: [id], onDelete: SetNull)
   template EmailTemplate? @relation(fields: [templateId], references: [id])
   author   User           @relation("DraftAuthor", fields: [authorId], references: [id])
   approver User?          @relation("DraftApprover", fields: [approverId], references: [id])

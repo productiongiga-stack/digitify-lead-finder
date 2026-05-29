@@ -286,3 +286,6 @@ END $$;
 
 ALTER TABLE "email_templates"
   ADD COLUMN IF NOT EXISTS "bodyFormat" "EmailTemplateBodyFormat" NOT NULL DEFAULT 'TEXT';
+
+-- 20260528120000_email_draft_optional_lead
+ALTER TABLE "email_drafts" ALTER COLUMN "leadId" DROP NOT NULL;

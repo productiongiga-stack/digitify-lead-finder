@@ -34,6 +34,8 @@ import {
   ExternalLink,
   Plus,
   PencilLine,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { findUnknownMailVariables } from "@/lib/mail-variables";
@@ -55,6 +57,20 @@ type MailType = (typeof MAIL_TYPES)[number]["value"];
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
+
+function stripHtmlForAi(html: string) {
+  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+const INBOX_AI_STYLES = [
+  "Korter",
+  "Professioneler",
+  "Warmer",
+  "Directer",
+  "Overtuigender",
+  "Meer sales-gericht",
+  "Vriendelijker",
+] as const;
 
 function buildTemplate(type: MailType) {
   switch (type) {
@@ -104,6 +120,14 @@ export default function InboxPage() {
   const [composeLayout, setComposeLayout] = useState<EmailLayout>("modern");
   const [composeCtaText, setComposeCtaText] = useState("");
   const [composeCtaUrl, setComposeCtaUrl] = useState("");
+  const [inboxAiStyle, setInboxAiStyle] = useState<string>("Professioneler");
+  const [followUpContext, setFollowUpContext] = useState<{
+    subject: string;
+    from: string;
+    fromAddress: string;
+    text?: string | null;
+    html?: string | null;
+  } | null>(null);
 
   const utils = trpc.useUtils();
 
@@ -160,6 +184,12 @@ export default function InboxPage() {
       setComposeStatus("replied");
       utils.inbox.list.invalidate();
     },
+    onError: (err) => {
+      setComposeStatus("failed");
+      setComposeError(err.message);
+    },
+  });
+  const rewriteInboxMessage = trpc.openclaw.rewriteInboxMessage.useMutation({
     onError: (err) => {
       setComposeStatus("failed");
       setComposeError(err.message);
@@ -287,11 +317,6 @@ export default function InboxPage() {
   }
 
   function handleSendComposed() {
-    if (!composeLeadId) {
-      setComposeStatus("failed");
-      setComposeError("Koppel eerst een lead voor je verzendt.");
-      return;
-    }
     if (!composeReady) {
       setComposeStatus("failed");
       if (!composeEmailValid) {
@@ -314,8 +339,77 @@ export default function InboxPage() {
         ctaUrl: composeCtaUrl,
       }),
       type: composeType,
-      leadId: composeLeadId,
+      ...(composeLeadId ? { leadId: composeLeadId } : {}),
     });
+  }
+
+  function incomingBodyForAi(context: {
+    text?: string | null;
+    html?: string | null;
+  }) {
+    if (context.text?.trim()) return context.text.trim();
+    if (context.html?.trim()) return stripHtmlForAi(context.html);
+    return "";
+  }
+
+  function handleAiReply() {
+    if (!message) return;
+    setComposeError("");
+    rewriteInboxMessage.mutate(
+      {
+        purpose: "reply",
+        style: inboxAiStyle,
+        body: replyBody.trim() || undefined,
+        subject: message.subject.startsWith("Re:") ? message.subject : `Re: ${message.subject}`,
+        incomingSubject: message.subject,
+        incomingBody: incomingBodyForAi(message),
+        recipientEmail: message.fromAddress,
+        recipientName: extractName(message.from),
+      },
+      {
+        onSuccess: (data) => {
+          if (data.error) {
+            setComposeError(data.error);
+            return;
+          }
+          if (data.rewritten?.body) setReplyBody(data.rewritten.body);
+        },
+      },
+    );
+  }
+
+  function handleAiCompose() {
+    const incoming = followUpContext ?? (message ? {
+      subject: message.subject,
+      from: message.from,
+      fromAddress: message.fromAddress,
+      text: message.text,
+      html: message.html,
+    } : null);
+    setComposeError("");
+    rewriteInboxMessage.mutate(
+      {
+        purpose: composeType === "follow_up" ? "follow_up" : "compose",
+        style: inboxAiStyle,
+        subject: composeSubject.trim() || undefined,
+        body: composeBody.trim() || undefined,
+        incomingSubject: incoming?.subject,
+        incomingBody: incoming ? incomingBodyForAi(incoming) : undefined,
+        recipientEmail: composeTo.trim() || incoming?.fromAddress,
+        recipientName: incoming ? extractName(incoming.from) : undefined,
+      },
+      {
+        onSuccess: (data) => {
+          if (data.error) {
+            setComposeError(data.error);
+            return;
+          }
+          if (data.rewritten?.subject) setComposeSubject(data.rewritten.subject);
+          if (data.rewritten?.body) setComposeBody(data.rewritten.body);
+          setComposeStatus("draft");
+        },
+      },
+    );
   }
 
   function formatDate(iso: string) {
@@ -354,7 +448,6 @@ export default function InboxPage() {
   );
   const composeEmailValid = isValidEmail(composeTo);
   const composeReady =
-    Boolean(composeLeadId) &&
     composeEmailValid &&
     Boolean(composeSubject.trim()) &&
     Boolean(composeBody.trim()) &&
@@ -364,6 +457,13 @@ export default function InboxPage() {
 
   function openComposerWithFollowUp() {
     if (!message) return;
+    setFollowUpContext({
+      subject: message.subject,
+      from: message.from,
+      fromAddress: message.fromAddress,
+      text: message.text,
+      html: message.html,
+    });
     setComposerOpen(true);
     setSelectedUid(null);
     setComposeType("follow_up");
@@ -641,7 +741,7 @@ export default function InboxPage() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label>Lead koppeling (verplicht)</Label>
+                        <Label>Lead koppeling (optioneel)</Label>
                         <Input
                           value={composeLeadSearch}
                           onChange={(event) => {
@@ -668,7 +768,7 @@ export default function InboxPage() {
                           </div>
                         ) : (
                           <p className="mt-1 text-[11px] text-muted-foreground">
-                            Selecteer eerst een lead. Verzenden zonder lead-koppeling is geblokkeerd.
+                            Koppel optioneel een lead voor CRM-tracking en placeholders.
                           </p>
                         )}
                         {composeLeadsQuery.data?.items && composeLeadsQuery.data.items.length > 0 ? (
@@ -720,7 +820,44 @@ export default function InboxPage() {
                       />
                     </div>
                   </div>
-                  <div className="flex-1 p-3">
+                  <div className="flex-1 space-y-2 p-3">
+                    <div className="rounded-md border bg-muted/30 p-2.5 space-y-2">
+                      <div className="flex items-center gap-2 text-xs font-medium">
+                        <Sparkles className="h-3.5 w-3.5 text-purple-500" />
+                        AI-assistent
+                      </div>
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div className="min-w-[140px] flex-1 space-y-1">
+                          <Label className="text-[11px]">Stijl</Label>
+                          <Select value={inboxAiStyle} onValueChange={setInboxAiStyle}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {INBOX_AI_STYLES.map((style) => (
+                                <SelectItem key={style} value={style}>
+                                  {style}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={rewriteInboxMessage.isPending}
+                          onClick={handleAiCompose}
+                        >
+                          {rewriteInboxMessage.isPending ? (
+                            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Sparkles className="mr-2 h-3.5 w-3.5" />
+                          )}
+                          {composeBody.trim() ? "Herschrijf met AI" : "Genereer met AI"}
+                        </Button>
+                      </div>
+                    </div>
                     <Label>Bericht</Label>
                     <Textarea
                       value={composeBody}
@@ -870,6 +1007,43 @@ export default function InboxPage() {
                     <div className="space-y-3">
                       <div className="text-sm text-muted-foreground">
                         Antwoord aan: <span className="font-medium text-foreground">{message.fromAddress}</span>
+                      </div>
+                      <div className="rounded-md border bg-muted/30 p-2.5 space-y-2">
+                        <div className="flex items-center gap-2 text-xs font-medium">
+                          <Sparkles className="h-3.5 w-3.5 text-purple-500" />
+                          AI-antwoord
+                        </div>
+                        <div className="flex flex-wrap items-end gap-2">
+                          <div className="min-w-[140px] flex-1 space-y-1">
+                            <Label className="text-[11px]">Stijl</Label>
+                            <Select value={inboxAiStyle} onValueChange={setInboxAiStyle}>
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {INBOX_AI_STYLES.map((style) => (
+                                  <SelectItem key={style} value={style}>
+                                    {style}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={rewriteInboxMessage.isPending}
+                            onClick={handleAiReply}
+                          >
+                            {rewriteInboxMessage.isPending ? (
+                              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Sparkles className="mr-2 h-3.5 w-3.5" />
+                            )}
+                            {replyBody.trim() ? "Herschrijf met AI" : "Genereer met AI"}
+                          </Button>
+                        </div>
                       </div>
                       <Textarea
                         value={replyBody}
