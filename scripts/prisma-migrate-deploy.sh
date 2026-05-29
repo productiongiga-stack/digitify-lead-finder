@@ -5,15 +5,22 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root/packages/db"
 
-if [[ -z "${DATABASE_URL:-}" ]]; then
-  export DATABASE_URL="${POSTGRES_PRISMA_URL:-${POSTGRES_URL:-}}"
-fi
-if [[ -z "${DIRECT_URL:-}" ]]; then
-  export DIRECT_URL="${POSTGRES_URL_NON_POOLING:-}"
+# Migrations must use a direct (non-pooler) connection — Supabase pooler rejects DDL.
+migrate_url="${DIRECT_URL:-${POSTGRES_URL_NON_POOLING:-}}"
+if [[ -n "$migrate_url" ]]; then
+  export DATABASE_URL="$migrate_url"
+  export DIRECT_URL="$migrate_url"
+else
+  if [[ -z "${DATABASE_URL:-}" ]]; then
+    export DATABASE_URL="${POSTGRES_PRISMA_URL:-${POSTGRES_URL:-}}"
+  fi
+  if [[ -z "${DIRECT_URL:-}" ]]; then
+    export DIRECT_URL="${POSTGRES_URL_NON_POOLING:-}"
+  fi
 fi
 
 if [[ -z "${DATABASE_URL:-}" ]]; then
-  echo "ERROR: Set DATABASE_URL or POSTGRES_PRISMA_URL for migrations." >&2
+  echo "ERROR: Set DIRECT_URL, POSTGRES_URL_NON_POOLING, or DATABASE_URL for migrations." >&2
   exit 1
 fi
 
