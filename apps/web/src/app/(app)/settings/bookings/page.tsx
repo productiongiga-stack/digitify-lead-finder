@@ -52,6 +52,7 @@ import {
 } from "@digitify/ui";
 import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/components/feedback/toast-provider";
+import { getBookingTimezoneOptions, resolveBookingTimezoneSelectValue } from "@/lib/booking-timezone";
 import { getAppUrl } from "@/lib/config";
 import { hasRole } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
@@ -616,6 +617,15 @@ export default function BookingSettingsPage() {
   const [webhookEvents, setWebhookEvents] = useState<WebhookEventKey[]>([]);
   const [reminders24hEnabled, setReminders24hEnabled] = useState(true);
   const [reminders1hEnabled, setReminders1hEnabled] = useState(true);
+
+  const bookingTimezoneOptions = useMemo(() => {
+    const options = getBookingTimezoneOptions();
+    const current = googleTimezone.trim();
+    if (current && !options.some((option) => option.value === current)) {
+      return [{ value: current, label: `${current} (huidige waarde)` }, ...options];
+    }
+    return options;
+  }, [googleTimezone]);
 
   useEffect(() => {
     const googleStatus = searchParams.get("google");
@@ -1527,17 +1537,25 @@ export default function BookingSettingsPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>Tijdzone (alleen workspace-eigenaar)</Label>
-                    <Input
-                      value={googleTimezone}
-                      onChange={(event) => setGoogleTimezone(event.target.value)}
-                      placeholder="Europe/Brussels"
+                    <Select
+                      value={resolveBookingTimezoneSelectValue(googleTimezone)}
+                      onValueChange={setGoogleTimezone}
                       disabled={!isWorkspaceOwner}
-                    />
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Kies tijdzone" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {bookingTimezoneOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <p className="text-xs text-muted-foreground">
                       Bepaalt beschikbare slots, Google Agenda-sync en wat bezoekers in de embed zien.
-                      {isWorkspaceOwner
-                        ? " Gebruik bijvoorbeeld Europe/Amsterdam of Europe/Brussels."
-                        : " Alleen de workspace-eigenaar kan dit veld wijzigen."}
+                      {!isWorkspaceOwner ? " Alleen de workspace-eigenaar kan dit veld wijzigen." : null}
                     </p>
                   </div>
                 </div>

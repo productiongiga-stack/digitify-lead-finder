@@ -59,3 +59,64 @@ export function formatTimeInZone(date: Date, timeZone: string) {
 export function toBookingIso(dateKey: string, time: string, timeZone: string) {
   return zonedDateTimeToUtc(dateKey, time, timeZone).toISOString();
 }
+
+export function formatDateKeyInZone(date: Date, timeZone = DEFAULT_TIMEZONE) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value ?? "1970";
+  const month = parts.find((part) => part.type === "month")?.value ?? "01";
+  const day = parts.find((part) => part.type === "day")?.value ?? "01";
+  return `${year}-${month}-${day}`;
+}
+
+export function formatTimezoneLabel(timeZone: string, locale = "nl-BE") {
+  try {
+    const label = new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: "long" })
+      .formatToParts(new Date())
+      .find((part) => part.type === "timeZoneName")?.value;
+    return label || timeZone.replace(/_/g, " ");
+  } catch {
+    return timeZone.replace(/_/g, " ");
+  }
+}
+
+/** IANA zones offered in booking settings (Benelux + common European). */
+export const BOOKING_TIMEZONE_VALUES = [
+  "Europe/Brussels",
+  "Europe/Amsterdam",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Europe/London",
+  "Europe/Madrid",
+  "Europe/Rome",
+  "Europe/Zurich",
+  "Europe/Stockholm",
+  "Europe/Warsaw",
+  "Europe/Prague",
+  "Europe/Vienna",
+  "Europe/Lisbon",
+  "Europe/Dublin",
+  "UTC",
+] as const;
+
+export type BookingTimezoneValue = (typeof BOOKING_TIMEZONE_VALUES)[number];
+
+export function getBookingTimezoneOptions(locale = "nl-BE") {
+  return BOOKING_TIMEZONE_VALUES.map((value) => ({
+    value,
+    label: `${formatTimezoneLabel(value, locale)} — ${value}`,
+  }));
+}
+
+export function resolveBookingTimezoneSelectValue(
+  stored: string | undefined | null,
+  fallback = DEFAULT_TIMEZONE,
+) {
+  const trimmed = stored?.trim() || fallback;
+  if (BOOKING_TIMEZONE_VALUES.includes(trimmed as BookingTimezoneValue)) return trimmed;
+  return trimmed || fallback;
+}

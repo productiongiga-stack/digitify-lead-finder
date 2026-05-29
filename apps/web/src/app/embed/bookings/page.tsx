@@ -592,10 +592,6 @@ function BookingEmbedContent() {
                   <span className={`ml-1 text-xs ${tc.muted}`}>({slotTimeZone})</span>
                 </span>
               </div>
-              <p className={`text-[11px] leading-snug ${tc.muted}`}>
-                Agenda van host: {slotTimeZone}. Google-blokken worden in die zone gecontroleerd. Bezet in Google Agenda of
-                handmatig ingepland wordt verborgen.
-              </p>
             </div>
 
             {/* Legend */}
