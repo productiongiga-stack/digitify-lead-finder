@@ -109,34 +109,52 @@ function extractMeetLinkFromEvent(event: Pick<GoogleEventItem, "hangoutLink" | "
   return event.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === "video" && entry.uri)?.uri || null;
 }
 
-export async function loadGoogleOAuthClientConfig(db?: SettingsDb) {
+export async function loadGoogleOAuthClientConfig(
+  db?: SettingsDb,
+  options?: { userId?: string },
+) {
   const envClientId = process.env.GOOGLE_CLIENT_ID?.trim() || "";
   const envClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
-  let ownerClientId = "";
-  let ownerClientSecret = "";
+  let settingsClientId = "";
+  let settingsClientSecret = "";
 
-  if (db?.user?.findFirst) {
-    const owner = await db.user.findFirst({
-      where: { role: "OWNER" },
-      orderBy: { createdAt: "asc" },
-      select: { id: true },
-    });
-    if (owner?.id) {
+  if (db) {
+    let workspaceId = "";
+    let memberId = options?.userId?.trim() || "";
+
+    if (memberId && isPrismaSettingsDb(db)) {
+      workspaceId = await resolveWorkspaceOwnerId(db as PrismaClient, memberId);
+    } else if (db.user?.findFirst) {
+      const owner = await db.user.findFirst({
+        where: { role: "OWNER" },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
+      workspaceId = owner?.id || "";
+      memberId = workspaceId;
+    }
+
+    if (workspaceId) {
       const rows = await loadWorkspaceSettingRows(
         db as any,
-        { workspaceId: owner.id, memberId: owner.id },
+        { workspaceId, memberId: memberId || workspaceId },
         ["integrations.google_oauth_client_id", "integrations.google_oauth_client_secret"],
       );
       const settings = settingsRowsToMap(rows);
-      ownerClientId = getSettingString(settings, "integrations.google_oauth_client_id");
-      ownerClientSecret = getSettingString(settings, "integrations.google_oauth_client_secret");
+      settingsClientId = getSettingString(settings, "integrations.google_oauth_client_id");
+      settingsClientSecret = getSettingString(settings, "integrations.google_oauth_client_secret");
     }
   }
 
   return {
-    clientId: ownerClientId || envClientId,
-    clientSecret: ownerClientSecret || envClientSecret,
-    source: ownerClientId && ownerClientSecret ? "settings" : envClientId && envClientSecret ? "env" : "missing",
+    clientId: settingsClientId || envClientId,
+    clientSecret: settingsClientSecret || envClientSecret,
+    source:
+      settingsClientId && settingsClientSecret
+        ? "settings"
+        : envClientId && envClientSecret
+          ? "env"
+          : "missing",
   };
 }
 
@@ -292,7 +310,7 @@ export async function loadGoogleCalendarSyncConfig(db: SettingsDb, userId?: stri
   }
 
   const map = settingsRowsToMap(settingRows);
-  const oauthClient = await loadGoogleOAuthClientConfig(db);
+  const oauthClient = await loadGoogleOAuthClientConfig(db, userId ? { userId } : undefined);
 
   return {
     enabled: getSettingBoolean(map, "bookings.google_sync_enabled", false),

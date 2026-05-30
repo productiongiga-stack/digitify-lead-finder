@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
@@ -23,19 +23,17 @@ import {
   DialogDescription,
 } from "@digitify/ui";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@digitify/ui";
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
+  StatsCards,
+  type StatItem,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from "@digitify/ui";
 import {
   ArrowLeft,
@@ -43,24 +41,34 @@ import {
   Target,
   MapPin,
   Star,
-  Globe,
   Mail,
   Send,
   Pencil,
   Trash2,
   UserPlus,
-  UserMinus,
   Loader2,
   BarChart3,
-  User,
   Search,
   Sparkles,
   PlayCircle,
   PauseCircle,
   CheckCircle2,
+  MessageSquare,
+  TrendingUp,
+  CalendarClock,
 } from "lucide-react";
-import { formatDate, formatScore, getStatusBadgeVariant } from "@/lib/utils";
+import { formatDate, formatScore } from "@/lib/utils";
 import { CAMPAIGN_STATUS_LABELS, getCampaignStatusVariant } from "@/lib/campaign-status";
+import {
+  CampaignLeadsTable,
+  type CampaignLeadRow,
+} from "@/components/campaigns/campaign-leads-table";
+import { CampaignDripSetup } from "@/components/campaigns/campaign-drip-setup";
+import {
+  getAudienceSectionTitle,
+  getCampaignProfileLabel,
+  getDefaultDripModeForProfile,
+} from "@/lib/campaign-profile";
 
 export default function CampaignDetailPage({
   params,
@@ -72,7 +80,172 @@ export default function CampaignDetailPage({
   const utils = trpc.useUtils();
 
   const { data: campaign, isLoading } = trpc.campaign.getById.useQuery({ id });
-  const { data: stats } = trpc.campaign.getStats.useQuery({ id });
+  const { data: stats, isLoading: statsLoading } = trpc.campaign.getStats.useQuery({ id });
+
+  const campaignStatItems = useMemo<StatItem[]>(
+    () => [
+      {
+        label: "Total Leads",
+        value: stats?.totalLeads ?? 0,
+        icon: <Users />,
+        tone: "neutral",
+        hint: "Gekoppeld aan campagne",
+      },
+      {
+        label: "Gem. Score",
+        value: formatScore(stats?.avgScore),
+        icon: <BarChart3 />,
+        tone: "warning",
+        hint: "Gemiddelde leadscore",
+      },
+      {
+        label: "E-mails Draft",
+        value: stats?.emailsDraft ?? 0,
+        icon: <Mail />,
+        tone: "info",
+        hint: "Nog niet verzonden",
+      },
+      {
+        label: "E-mails Verstuurd",
+        value: stats?.emailsSent ?? 0,
+        icon: <Send />,
+        tone: "positive",
+        hint: "Succesvol afgeleverd",
+      },
+      {
+        label: "Goedgekeurd",
+        value: stats?.emailsApproved ?? 0,
+        icon: <PlayCircle />,
+        tone: "info",
+        hint: "Klaar om te verzenden",
+      },
+      {
+        label: "Mislukt",
+        value: stats?.emailsFailed ?? 0,
+        icon: <PauseCircle />,
+        tone: (stats?.emailsFailed ?? 0) > 0 ? "negative" : "neutral",
+        hint: (stats?.emailsFailed ?? 0) > 0 ? "Controleer en herstuur" : "Geen fouten",
+      },
+    ],
+    [stats?.avgScore, stats?.emailsDraft, stats?.emailsFailed, stats?.emailsScheduled, stats?.emailsSent, stats?.totalLeads],
+  );
+
+  const campaignLeadRows = useMemo<CampaignLeadRow[]>(() => {
+    if (!campaign) return [];
+    return campaign.campaignLeads.map((cl) => ({
+      leadId: cl.lead.id,
+      companyName: cl.lead.companyName,
+      email: cl.lead.email,
+      city: cl.lead.city,
+      website: cl.lead.website,
+      overallScore: cl.lead.overallScore,
+      status: cl.lead.status,
+      addedAt: cl.addedAt,
+      tags: cl.lead.tags,
+      emailDrafts: cl.lead.emailDrafts
+        .filter((d) => d.sequenceStep != null)
+        .map((d) => ({
+          id: d.id,
+          sequenceStep: d.sequenceStep as number,
+          status: d.status,
+          subject: d.subject,
+          scheduledFor: d.scheduledFor,
+          sentAt: d.sentAt,
+          openedAt: d.openedAt,
+        })),
+    }));
+  }, [campaign]);
+
+  const campaignKpiItems = useMemo<StatItem[]>(() => {
+    if (!stats) return [];
+
+    const total = stats.totalLeads;
+    const sb = stats.statusBreakdown ?? {};
+    const responded =
+      (sb.RESPONDED ?? 0) + (sb.QUALIFIED ?? 0) + (sb.WON ?? 0) + (sb.PROPOSAL_SENT ?? 0);
+    const stillNew = sb.NEW ?? 0;
+
+    const totalTouchpoints =
+      stats.emailsDraft +
+      stats.emailsScheduled +
+      stats.emailsSent +
+      stats.emailsFailed +
+      (stats.emailsApproved ?? 0);
+    const sendRate =
+      totalTouchpoints > 0 ? Math.round((stats.emailsSent / totalTouchpoints) * 100) : 0;
+
+    const actionQueue = stats.emailsDraft + (stats.emailsApproved ?? 0);
+
+    const leadsWithDraft = campaignLeadRows.filter(
+      (row) => (row.emailDrafts?.length ?? 0) > 0,
+    ).length;
+    const dripCoverage = total > 0 ? Math.round((leadsWithDraft / total) * 100) : 0;
+
+    const idealScore = campaign?.idealScore;
+    const qualifiedLeads =
+      idealScore != null
+        ? campaignLeadRows.filter(
+            (row) => row.overallScore != null && row.overallScore >= idealScore,
+          ).length
+        : 0;
+    const qualityPct = total > 0 && idealScore != null ? Math.round((qualifiedLeads / total) * 100) : 0;
+
+    return [
+      {
+        label: "Verzendvoortgang",
+        value: totalTouchpoints > 0 ? `${sendRate}%` : "—",
+        icon: <TrendingUp />,
+        tone: sendRate >= 40 ? "positive" : totalTouchpoints > 0 ? "info" : "neutral",
+        hint: `${stats.emailsSent} verzonden · ${stats.emailsScheduled} ingepland`,
+      },
+      {
+        label: "Actie nodig",
+        value: actionQueue,
+        icon: <Mail />,
+        tone: actionQueue > 0 ? "warning" : "neutral",
+        hint:
+          actionQueue > 0
+            ? "Concepten of goedkeuring open"
+            : stats.emailsFailed > 0
+              ? `${stats.emailsFailed} mislukt — check queue`
+              : "Geen openstaande drafts",
+      },
+      {
+        label: "Gereageerd",
+        value: responded,
+        icon: <MessageSquare />,
+        tone: responded > 0 ? "positive" : "neutral",
+        hint:
+          total > 0
+            ? `${Math.round((responded / total) * 100)}% van ${total} leads`
+            : "Nog geen reacties",
+      },
+      {
+        label: idealScore != null ? "Score ≥ drempel" : "Leads in drip",
+        value:
+          idealScore != null
+            ? qualityPct > 0
+              ? `${qualityPct}%`
+              : "0%"
+            : total > 0
+              ? `${leadsWithDraft}/${total}`
+              : "—",
+        icon: idealScore != null ? <Star /> : <Users />,
+        tone:
+          idealScore != null
+            ? qualityPct >= 50
+              ? "positive"
+              : "warning"
+            : dripCoverage >= 50
+              ? "positive"
+              : "info",
+        hint:
+          idealScore != null
+            ? `${qualifiedLeads} leads ≥ ${idealScore}${stillNew > 0 ? ` · ${stillNew} nog nieuw` : ""}`
+            : `${dripCoverage}% met minstens één mail in drip`,
+      },
+    ];
+  }, [campaign?.idealScore, campaignLeadRows, stats]);
 
   // Edit mode
   const [editing, setEditing] = useState(false);
@@ -96,6 +269,16 @@ export default function CampaignDetailPage({
   const [leadSearch, setLeadSearch] = useState("");
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const [dripMode, setDripMode] = useState<"lead" | "review">("lead");
+
+  const profileType =
+    (campaign as { profileType?: string } | undefined)?.profileType ?? "LEAD_OUTREACH";
+  const isReviewProfile = profileType === "REVIEW_REQUEST";
+
+  useEffect(() => {
+    if (campaign) {
+      setDripMode(getDefaultDripModeForProfile(profileType));
+    }
+  }, [campaign, profileType]);
 
   const { data: leadsData, isLoading: leadsLoading } =
     trpc.lead.list.useQuery(
@@ -266,6 +449,7 @@ export default function CampaignDetailPage({
         <div className="flex-1">
           <div className="flex items-center gap-3">
             <h1 className="app-page-title">{campaign.name}</h1>
+            <Badge variant="outline">{getCampaignProfileLabel(profileType)}</Badge>
             <Badge variant={getCampaignStatusVariant(campaign.status)}>
               {CAMPAIGN_STATUS_LABELS[campaign.status] || campaign.status}
             </Badge>
@@ -275,6 +459,29 @@ export default function CampaignDetailPage({
               {campaign.description}
             </p>
           )}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {campaign.niche ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground">
+                <Target className="h-3 w-3 shrink-0" />
+                {campaign.niche}
+              </span>
+            ) : null}
+            {campaign.region ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground">
+                <MapPin className="h-3 w-3 shrink-0" />
+                {campaign.region}
+              </span>
+            ) : null}
+            {campaign.idealScore != null ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground">
+                <Star className="h-3 w-3 shrink-0" />
+                Score ≥ {campaign.idealScore}
+              </span>
+            ) : null}
+            <span className="text-xs text-muted-foreground">
+              {campaign.createdBy?.name ?? "Onbekend"} · {formatDate(campaign.createdAt)}
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {!editing && (
@@ -420,168 +627,128 @@ export default function CampaignDetailPage({
         </Card>
       )}
 
-      {/* Stats - using server-side getStats */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-primary/10 p-2">
-                <Users className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{stats?.totalLeads ?? 0}</p>
-                <p className="text-xs text-muted-foreground">Total Leads</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-amber-500/10 p-2">
-                <BarChart3 className="h-5 w-5 text-amber-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{stats?.avgScore ?? 0}</p>
-                <p className="text-xs text-muted-foreground">Gem. Score</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-blue-500/10 p-2">
-                <Mail className="h-5 w-5 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{stats?.emailsDraft ?? 0}</p>
-                <p className="text-xs text-muted-foreground">E-mails Draft</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-emerald-500/10 p-2">
-                <Send className="h-5 w-5 text-emerald-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{stats?.emailsSent ?? 0}</p>
-                <p className="text-xs text-muted-foreground">E-mails Verstuurd</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-violet-500/10 p-2">
-                <PlayCircle className="h-5 w-5 text-violet-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{stats?.emailsScheduled ?? 0}</p>
-                <p className="text-xs text-muted-foreground">Gepland</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-red-500/10 p-2">
-                <PauseCircle className="h-5 w-5 text-red-600" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{stats?.emailsFailed ?? 0}</p>
-                <p className="text-xs text-muted-foreground">Mislukt</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {!editing ? (
+        <Tabs defaultValue="workflow" className="space-y-3">
+          <TabsList className="page-view-tabs">
+            <TabsTrigger value="workflow" className="page-view-tabs-trigger">
+              Campagne
+            </TabsTrigger>
+            <TabsTrigger value="drip" className="page-view-tabs-trigger">
+              <CalendarClock className="mr-1.5 h-4 w-4 shrink-0 opacity-70" aria-hidden />
+              Drip-campagne
+            </TabsTrigger>
+            <TabsTrigger value="stats" className="page-view-tabs-trigger">
+              <BarChart3 className="mr-1.5 h-4 w-4 shrink-0 opacity-70" aria-hidden />
+              Statistieken
+            </TabsTrigger>
+          </TabsList>
 
-      <div className="grid gap-3 xl:grid-cols-3">
-        <Card className="border-emerald-200 bg-emerald-50/80 dark:border-emerald-900/40 dark:bg-emerald-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Volgende stap</p>
-            <p className="mt-2 text-sm font-medium">
-              {campaign.status === "DRAFT"
-                ? "Genereer eerst stap 1 drafts of activeer meteen de volledige drip."
-                : campaign.status === "ACTIVE"
-                  ? "Verwerk geplande stappen en check mislukte of stilgevallen leads."
-                  : campaign.status === "PAUSED"
-                    ? "Deze campagne staat stil. Hervat wanneer de timing weer juist is."
-                    : "Deze campagne is afgerond. Gebruik de resultaten als referentie voor volgende campagnes."}
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-blue-200 bg-blue-50/80 dark:border-blue-900/40 dark:bg-blue-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Drip queue</p>
-            <p className="mt-2 text-sm font-medium">
-              {stats?.emailsScheduled ?? 0} ingepland · {stats?.emailsFailed ?? 0} mislukt · {stats?.emailsSent ?? 0} verzonden
-            </p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Zo zie je in één oogopslag of deze campagne nog verwerking of troubleshooting nodig heeft.
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-amber-200 bg-amber-50/80 dark:border-amber-900/40 dark:bg-amber-950/20">
-          <CardContent className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Aansluitende acties</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button asChild size="sm" variant="outline">
-                <Link href="/contacts">Open outbound center</Link>
-              </Button>
-              <Button asChild size="sm" variant="ghost">
-                <Link href="/contacts/approval">Bekijk approvals</Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          <TabsContent value="stats" className="mt-0 space-y-3">
+            <StatsCards
+              items={campaignStatItems}
+              columns={6}
+              variant="rich"
+              loading={statsLoading}
+              aria-label="Campagne statistieken"
+            />
+            <StatsCards
+              items={campaignKpiItems}
+              columns={4}
+              variant="rich"
+              loading={statsLoading}
+              aria-label="Campagne KPI's"
+            />
+          </TabsContent>
 
-      {/* Action Bar */}
-      <div className="flex flex-wrap gap-2">
-        <Select value={dripMode} onValueChange={(value) => setDripMode(value as "lead" | "review")}>
-          <SelectTrigger className="w-[170px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="lead">Lead drip</SelectItem>
-            <SelectItem value="review">Review drip</SelectItem>
-          </SelectContent>
-        </Select>
+          <TabsContent value="drip" className="mt-0 space-y-3">
+            <CampaignDripSetup
+              campaignId={id}
+              dripMode={dripMode}
+              onDripModeChange={setDripMode}
+              campaignStatus={campaign.status}
+              profileType={profileType}
+              onRunDueDrip={() => runDueDrip.mutate({ campaignId: id, mode: dripMode })}
+              runDueDripPending={runDueDrip.isPending}
+            />
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => generateDrafts.mutate({ campaignId: id, mode: dripMode })}
-          disabled={generateDrafts.isPending}
-        >
-          {generateDrafts.isPending ? (
-            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Sparkles className="mr-2 h-3.5 w-3.5" />
-          )}
-          AI drafts (stap 1)
-        </Button>
+            {activateAll.isSuccess && activateAll.data && (
+              <Card className="border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-800">
+                <CardContent className="space-y-2 p-4 text-sm">
+                  <p className="font-medium text-emerald-800 dark:text-emerald-200">
+                    Profiel actief — {activateAll.data.totalLeads} contacten
+                  </p>
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                    Concepten: stap 1 {activateAll.data.generatedStep1} · stap 2{" "}
+                    {activateAll.data.generatedStep2} · stap 3 {activateAll.data.generatedStep3}
+                    {activateAll.data.skippedResponded > 0
+                      ? ` · ${activateAll.data.skippedResponded} overgeslagen (reeds gereageerd)`
+                      : ""}
+                  </p>
+                  {activateAll.data.errors.length > 0 && (
+                    <ul className="text-xs text-red-600 space-y-1">
+                      {activateAll.data.errors.slice(0, 6).map((err, i) => (
+                        <li key={i}>{err}</li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
+            {runDueDrip.isSuccess && runDueDrip.data && (
+              <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-800">
+                <CardContent className="space-y-1 p-4 text-sm">
+                  <p className="font-medium text-blue-800 dark:text-blue-200">
+                    Goedgekeurde stappen verwerkt
+                  </p>
+                  <p className="text-xs text-blue-700 dark:text-blue-300">
+                    Klaar: {runDueDrip.data.due} · Verzonden: {runDueDrip.data.sent} · Gestopt:{" "}
+                    {runDueDrip.data.stopped} · Fouten: {runDueDrip.data.failed}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
+            {(activateAll.isError || runDueDrip.isError) && (
+              <Card className="border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800">
+                <CardContent className="p-4">
+                  <p className="text-sm text-red-800 dark:text-red-200">
+                    {activateAll.error?.message || runDueDrip.error?.message}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          <TabsContent value="workflow" className="mt-0 space-y-3">
+            {isReviewProfile ? (
+              <Card className="border-amber-200/60 bg-amber-50/50 dark:border-amber-900/40 dark:bg-amber-950/20">
+                <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+                  <p className="text-muted-foreground">
+                    Review-profiel: koppel klanten (leads) hieronder en beheer losse aanvragen in het
+                    review-center.
+                  </p>
+                  <Button asChild variant="outline" size="sm">
+                    <Link href="/reviews">Naar review-center</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : null}
+
+            <div className="flex flex-wrap gap-2">
         {campaign.status === "DRAFT" && (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => activateAll.mutate({ campaignId: id, mode: dripMode })}
-            disabled={activateAll.isPending}
+            onClick={() => generateDrafts.mutate({ campaignId: id, mode: dripMode })}
+            disabled={generateDrafts.isPending}
           >
-            {activateAll.isPending ? (
+            {generateDrafts.isPending ? (
               <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
             ) : (
-              <PlayCircle className="mr-2 h-3.5 w-3.5" />
+              <Sparkles className="mr-2 h-3.5 w-3.5" />
             )}
-            Activeer all (3-step drip)
+            Alleen stap 1 (AI)
           </Button>
         )}
         {campaign.status === "ACTIVE" && (
@@ -604,21 +771,6 @@ export default function CampaignDetailPage({
           >
             <PlayCircle className="mr-2 h-3.5 w-3.5" />
             Hervatten
-          </Button>
-        )}
-        {(campaign.status === "ACTIVE" || campaign.status === "PAUSED") && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => runDueDrip.mutate({ campaignId: id, mode: dripMode })}
-            disabled={runDueDrip.isPending}
-          >
-            {runDueDrip.isPending ? (
-              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Send className="mr-2 h-3.5 w-3.5" />
-            )}
-            Verwerk geplande stappen
           </Button>
         )}
         {(campaign.status === "ACTIVE" || campaign.status === "PAUSED") && (
@@ -653,51 +805,6 @@ export default function CampaignDetailPage({
         </Card>
       )}
 
-      {activateAll.isSuccess && activateAll.data && (
-        <Card className="border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-800">
-          <CardContent className="space-y-2 p-4 text-sm">
-            <p className="font-medium text-emerald-800 dark:text-emerald-200">
-              Drip gestart voor {activateAll.data.totalLeads} leads
-            </p>
-            <p className="text-xs text-emerald-700 dark:text-emerald-300">
-              Stap1 drafts: {activateAll.data.generatedStep1} · Stap2: {activateAll.data.generatedStep2} · Stap3: {activateAll.data.generatedStep3}
-            </p>
-            <p className="text-xs text-emerald-700 dark:text-emerald-300">
-              Stap1 verzonden: {activateAll.data.sentStep1} · skipped door respons: {activateAll.data.skippedResponded}
-            </p>
-            {activateAll.data.errors.length > 0 && (
-              <ul className="text-xs text-red-600 space-y-1">
-                {activateAll.data.errors.slice(0, 6).map((err, i) => (
-                  <li key={i}>{err}</li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {runDueDrip.isSuccess && runDueDrip.data && (
-        <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-800">
-          <CardContent className="space-y-1 p-4 text-sm">
-            <p className="font-medium text-blue-800 dark:text-blue-200">
-              Geplande stappen verwerkt
-            </p>
-            <p className="text-xs text-blue-700 dark:text-blue-300">
-              Due: {runDueDrip.data.due} · Verzonden: {runDueDrip.data.sent} · Gestopt: {runDueDrip.data.stopped} · Fouten: {runDueDrip.data.failed}
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
-      {(activateAll.isError || runDueDrip.isError) && (
-        <Card className="border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800">
-          <CardContent className="p-4">
-            <p className="text-sm text-red-800 dark:text-red-200">
-              {activateAll.error?.message || runDueDrip.error?.message}
-            </p>
-          </CardContent>
-        </Card>
-      )}
       {generateDrafts.isError && (
         <Card className="border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800">
           <CardContent className="p-4">
@@ -708,225 +815,19 @@ export default function CampaignDetailPage({
         </Card>
       )}
 
-      {/* Campaign Info (when not editing) */}
-      {!editing && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <Target className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <p className="text-xs text-muted-foreground">Niche</p>
-                  <p className="text-sm font-medium">
-                    {campaign.niche || "\u2014"}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <MapPin className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <p className="text-xs text-muted-foreground">Regio</p>
-                  <p className="text-sm font-medium">
-                    {campaign.region || "\u2014"}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <Star className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <p className="text-xs text-muted-foreground">Ideale Score</p>
-                  <p className="text-sm font-medium">
-                    {campaign.idealScore ?? "\u2014"}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <User className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <p className="text-xs text-muted-foreground">Aangemaakt door</p>
-                  <p className="text-sm font-medium">
-                    {campaign.createdBy?.name || "\u2014"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatDate(campaign.createdAt)}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Campaign Leads */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-sm">Leads in deze campagne</CardTitle>
-            <Button variant="outline" size="sm" onClick={() => setAddLeadsOpen(true)}>
-              <UserPlus className="mr-2 h-4 w-4" />
-              Leads toevoegen
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {campaign.campaignLeads.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Users className="h-8 w-8 text-muted-foreground/40" />
-              <p className="mt-3 text-sm font-medium text-muted-foreground">Geen leads</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Voeg leads toe aan deze campagne om te beginnen.
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-4"
-                onClick={() => setAddLeadsOpen(true)}
-              >
-                <UserPlus className="mr-2 h-3.5 w-3.5" />
-                Leads Toevoegen
-              </Button>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Bedrijf</TableHead>
-                  <TableHead>Score</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Drip status</TableHead>
-                  <TableHead>Signalen</TableHead>
-                  <TableHead>Toegevoegd</TableHead>
-                  <TableHead className="text-right">Acties</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {campaign.campaignLeads.map((cl: NonNullable<typeof campaign>["campaignLeads"][number]) => {
-                  const leadAny = cl.lead as any;
-                  const draftCount = leadAny.emailDrafts?.length ?? 0;
-                  const latestDraft = leadAny.emailDrafts?.[0];
-                  const step1 = leadAny.emailDrafts?.find((draft: any) => draft.sequenceStep === 1);
-                  const step2 = leadAny.emailDrafts?.find((draft: any) => draft.sequenceStep === 2);
-                  const step3 = leadAny.emailDrafts?.find((draft: any) => draft.sequenceStep === 3);
-                  return (
-                    <TableRow key={cl.lead.id}>
-                      <TableCell>
-                        <Link
-                          href={`/leads/${cl.lead.id}`}
-                          className="font-medium hover:text-primary"
-                        >
-                          {cl.lead.companyName}
-                        </Link>
-                        <div className="mt-1 flex gap-1">
-                          {cl.lead.tags?.map((lt: any) => (
-                            <Badge
-                              key={lt.tag.id}
-                              variant="outline"
-                              className="text-[10px] px-1 py-0"
-                              style={{
-                                borderColor: lt.tag.color,
-                                color: lt.tag.color,
-                              }}
-                            >
-                              {lt.tag.name}
-                            </Badge>
-                          ))}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-lg font-bold">
-                          {formatScore(cl.lead.overallScore)}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={getStatusBadgeVariant(cl.lead.status)}>
-                          {cl.lead.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {draftCount > 0 ? (
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap gap-1">
-                              <Badge variant={step1?.status === "SENT" ? "success" : step1?.status === "FAILED" ? "destructive" : "secondary"} className="text-[10px]">
-                                1: {step1?.status || "n.v.t."}
-                              </Badge>
-                              <Badge variant={step2?.status === "SENT" ? "success" : step2?.status === "FAILED" ? "destructive" : "secondary"} className="text-[10px]">
-                                2: {step2?.status || "n.v.t."}
-                              </Badge>
-                              <Badge variant={step3?.status === "SENT" ? "success" : step3?.status === "FAILED" ? "destructive" : "secondary"} className="text-[10px]">
-                                3: {step3?.status || "n.v.t."}
-                              </Badge>
-                            </div>
-                            {latestDraft ? (
-                              <Link href={`/contacts/drafts/${latestDraft.id}`} className="text-xs text-primary hover:underline">
-                                Bekijk draft
-                              </Link>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">Geen draft</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          {cl.lead.website ? (
-                            <Globe className="h-3.5 w-3.5 text-emerald-500" />
-                          ) : (
-                            <Globe className="h-3.5 w-3.5 text-red-400" />
-                          )}
-                          {cl.lead.email && (
-                            <Mail className="h-3.5 w-3.5 text-emerald-500" />
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatDate(cl.addedAt)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {latestDraft ? (
-                            <Link href={`/contacts/drafts/${latestDraft.id}`}>
-                              <Button variant="ghost" size="sm">
-                                Draft openen
-                              </Button>
-                            </Link>
-                          ) : null}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive hover:text-destructive"
-                            disabled={removeLeads.isPending}
-                            onClick={() =>
-                              removeLeads.mutate({
-                                campaignId: id,
-                                leadIds: [cl.lead.id],
-                              })
-                            }
-                          >
-                            <UserMinus className="mr-1 h-3.5 w-3.5" />
-                            Verwijderen
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      <CampaignLeadsTable
+        leads={campaignLeadRows}
+        audienceTitle={getAudienceSectionTitle(profileType)}
+        addButtonLabel={isReviewProfile ? "Klanten toevoegen" : "Leads toevoegen"}
+        onAddLeads={() => setAddLeadsOpen(true)}
+        onRemoveLead={(leadId) =>
+          removeLeads.mutate({ campaignId: id, leadIds: [leadId] })
+        }
+        removing={removeLeads.isPending}
+      />
+          </TabsContent>
+        </Tabs>
+      ) : null}
 
       {/* Add Leads Dialog */}
       <Dialog open={addLeadsOpen} onOpenChange={setAddLeadsOpen}>

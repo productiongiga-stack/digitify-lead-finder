@@ -13,7 +13,7 @@ const PERSONAL_SETTING_PREFIXES = ["ui.", "display."];
 const ACCOUNT_SETTING_PREFIXES = ["branding.", "company.", "email."];
 const ADMIN_SETTING_PREFIXES = ["bookings.", "reviews.", "quotes.", "chatbot.", ...PERSONAL_SETTING_PREFIXES];
 const MEMBER_SETTING_PREFIXES = ["bookings.", "reviews.", "quotes.", "chatbot.", "pipeline.", "scoring.", ...PERSONAL_SETTING_PREFIXES];
-const OWNER_SETTING_PREFIXES = ["api.", "openclaw."];
+const OWNER_SETTING_PREFIXES = ["api.", "openclaw.", "seo."];
 /** Workspace-wide booking timezone; only the workspace owner may change it. */
 const OWNER_ONLY_SETTING_KEYS = new Set(["bookings.google_calendar_timezone"]);
 

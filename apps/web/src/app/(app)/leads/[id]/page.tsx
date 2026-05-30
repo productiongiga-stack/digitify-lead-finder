@@ -29,6 +29,7 @@ import {
 } from "@/lib/lead-status";
 import { useUIStore } from "@/stores/ui-store";
 import { useToast } from "@/components/feedback/toast-provider";
+import { LeadEmailTimeline } from "@/components/leads/lead-email-timeline";
 
 /* ---------- helpers ---------- */
 
@@ -859,6 +860,8 @@ export default function LeadDetailPage() {
                 </CardContent>
               </Card>
             )}
+
+            <LeadEmailTimeline leadId={id} />
 
             {/* --- Activity Timeline --- */}
             <Card>

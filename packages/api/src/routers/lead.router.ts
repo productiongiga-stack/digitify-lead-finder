@@ -2,6 +2,7 @@ import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { assertLeadAccess, ownedLeadWhere } from "../lib/tenant";
+import { buildLeadEmailTimeline } from "../lib/lead-email-timeline";
 
 const DEMO_LEAD_NAMES = [
   "Bakkerij Van Damme",
@@ -237,6 +238,53 @@ export const leadRouter = router({
 
       if (!lead) throw new TRPCError({ code: "NOT_FOUND", message: "Lead not found" });
       return lead;
+    }),
+
+  getEmailTimeline: protectedProcedure
+    .input(z.object({ leadId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
+
+      const [activities, drafts] = await Promise.all([
+        ctx.db.activity.findMany({
+          where: {
+            leadId: input.leadId,
+            type: {
+              in: [
+                "EMAIL_DRAFTED",
+                "EMAIL_APPROVED",
+                "EMAIL_SENT",
+                "EMAIL_OPENED",
+                "EMAIL_REPLIED",
+                "QUOTE_SENT",
+              ],
+            },
+          },
+          orderBy: { createdAt: "desc" },
+          take: 100,
+          include: { user: { select: { id: true, name: true } } },
+        }),
+        ctx.db.emailDraft.findMany({
+          where: { leadId: input.leadId },
+          orderBy: { createdAt: "desc" },
+          take: 50,
+          select: {
+            id: true,
+            subject: true,
+            toEmail: true,
+            body: true,
+            status: true,
+            sentAt: true,
+            createdAt: true,
+            messageId: true,
+            type: true,
+          },
+        }),
+      ]);
+
+      return {
+        items: buildLeadEmailTimeline({ activities, drafts }),
+      };
     }),
 
   create: protectedProcedure

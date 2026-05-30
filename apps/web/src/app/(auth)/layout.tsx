@@ -1,6 +1,10 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
 import { AuthLogo } from "@/components/auth/auth-logo";
+import { NOINDEX_METADATA } from "@/lib/seo/build-metadata";
+
+export const metadata: Metadata = NOINDEX_METADATA;
 
 const benefits = [
   "Automatisch leads zoeken en scoren",

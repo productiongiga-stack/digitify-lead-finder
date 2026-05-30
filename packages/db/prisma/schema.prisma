@@ -394,11 +394,17 @@ model CustomFieldValue {
   @@map("custom_field_values")
 }
 
-// CAMPAIGNS
+// CAMPAIGNS (automation profiles: lead drip, review requests, …)
+enum CampaignProfileType {
+  LEAD_OUTREACH
+  REVIEW_REQUEST
+}
+
 model Campaign {
   id          String         @id @default(cuid())
   name        String
   description String?
+  profileType CampaignProfileType @default(LEAD_OUTREACH) @map("profile_type")
   niche       String?
   region      String?
   targetAudience String?

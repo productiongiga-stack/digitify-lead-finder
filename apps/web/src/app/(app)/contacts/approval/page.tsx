@@ -53,12 +53,18 @@ export default function ApprovalPage() {
   const [rejectionNote, setRejectionNote] = useState("");
 
   const approve = trpc.contact.approve.useMutation({
-    onSuccess: () => utils.contact.listDrafts.invalidate(),
+    onSuccess: () => {
+      utils.contact.listDrafts.invalidate();
+      utils.contact.getOutboundStats.invalidate();
+      utils.contact.getTopbarStats.invalidate();
+    },
   });
 
   const reject = trpc.contact.reject.useMutation({
     onSuccess: () => {
       utils.contact.listDrafts.invalidate();
+      utils.contact.getOutboundStats.invalidate();
+      utils.contact.getTopbarStats.invalidate();
       setRejectDialogOpen(false);
       setRejectingId(null);
       setRejectionNote("");

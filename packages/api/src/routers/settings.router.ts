@@ -103,6 +103,37 @@ async function tryResolveCname(host: string) {
   }
 }
 
+function detectEmailProviderHint(smtpHost: string) {
+  const host = smtpHost.toLowerCase();
+  if (host.includes("google") || host.includes("gmail")) {
+    return {
+      label: "Google Workspace / Gmail",
+      spfInclude: "include:_spf.google.com",
+      docsUrl: "https://support.google.com/a/answer/33786",
+    };
+  }
+  if (host.includes("outlook") || host.includes("office365") || host.includes("microsoft")) {
+    return {
+      label: "Microsoft 365 / Outlook",
+      spfInclude: "include:spf.protection.outlook.com",
+      docsUrl: "https://learn.microsoft.com/en-us/defender-office-365/email-authentication-spf-configure",
+    };
+  }
+  if (host.includes("mailgun")) {
+    return { label: "Mailgun", spfInclude: "include:mailgun.org", docsUrl: "https://documentation.mailgun.com/docs/mailgun/user-manual/domains/" };
+  }
+  if (host.includes("sendgrid")) {
+    return { label: "SendGrid", spfInclude: "include:sendgrid.net", docsUrl: "https://docs.sendgrid.com/ui/account-and-settings/how-to-set-up-domain-authentication" };
+  }
+  if (host.includes("amazonses") || host.includes("amazonaws")) {
+    return { label: "Amazon SES", spfInclude: "include:amazonses.com", docsUrl: "https://docs.aws.amazon.com/ses/latest/dg/send-email-authentication.html" };
+  }
+  if (host.includes("zoho")) {
+    return { label: "Zoho Mail", spfInclude: "include:zoho.com", docsUrl: "https://www.zoho.com/mail/help/adminconsole/spf-configuration.html" };
+  }
+  return null;
+}
+
 function buildSmtpDnsGuide(input: { smtpHost: string; smtpUser: string; fromEmail: string; replyTo: string }) {
   const senderEmail = input.fromEmail || input.smtpUser || "";
   const senderDomain = getDomainFromEmail(senderEmail);
@@ -110,26 +141,30 @@ function buildSmtpDnsGuide(input: { smtpHost: string; smtpUser: string; fromEmai
   const activeDomain = senderDomain || replyDomain;
   const mailSubdomain = activeDomain ? `mail.${activeDomain}` : "";
   const dmarcTarget = activeDomain ? `_dmarc.${activeDomain}` : "_dmarc.<jouwdomein>";
+  const provider = detectEmailProviderHint(input.smtpHost);
+  const spfInclude = provider?.spfInclude || "include:<provider-spf-include>";
 
   return {
     senderEmail,
     activeDomain,
     mailSubdomain,
     smtpHost: input.smtpHost,
+    providerLabel: provider?.label || null,
+    providerDocsUrl: provider?.docsUrl || null,
     records: [
       {
         type: "SPF",
         host: activeDomain || "<jouwdomein>",
-        value:
-          "v=spf1 include:<provider-spf-include> -all",
-        note:
-          "Gebruik de SPF include van je provider (bijv. _spf.google.com, spf.protection.outlook.com, mailgun.org).",
+        value: `v=spf1 ${spfInclude} -all`,
+        note: provider
+          ? `SPF voor ${provider.label}. Controleer in de provider-console of deze include volledig is.`
+          : "Gebruik de SPF include van je provider (bijv. _spf.google.com, spf.protection.outlook.com).",
       },
       {
         type: "DKIM",
         host: "<selector>._domainkey." + (activeDomain || "<jouwdomein>"),
         value: "<provider-dkim-doel>",
-        note: "Maak alle DKIM-records exact zoals je provider opgeeft.",
+        note: "Kopieer DKIM exact uit je mailprovider. Zonder DKIM dalen inbox-scores snel.",
       },
       {
         type: "DMARC",
@@ -138,15 +173,16 @@ function buildSmtpDnsGuide(input: { smtpHost: string; smtpUser: string; fromEmai
           activeDomain
             ? `v=DMARC1; p=none; rua=mailto:dmarc@${activeDomain}; fo=1`
             : "v=DMARC1; p=none; rua=mailto:dmarc@<jouwdomein>; fo=1",
-        note: "Start met p=none, monitor rapporten, schakel later naar quarantine/reject.",
+        note: "Start met p=none (monitoring). Na 2–4 weken: quarantine, daarna reject.",
       },
     ],
     tips: [
       mailSubdomain
-        ? `Gebruik bij voorkeur een verzend-subdomein zoals ${mailSubdomain} voor betere deliverability en isolatie.`
-        : "Gebruik bij voorkeur een apart verzend-subdomein (bv. mail.jouwdomein.be).",
-      "Zet dezelfde From-domeinidentiteit in SMTP/provider als in de app-instellingen om SPF/DKIM alignment te halen.",
-      "Gebruik een Return-Path/Bounce domein via je provider wanneer beschikbaar.",
+        ? `Verzend bij voorkeur via ${mailSubdomain} — scheidt marketing-mail van je hoofddomein.`
+        : "Gebruik een apart verzend-subdomein (bv. mail.jouwdomein.be).",
+      "From-adres, SMTP-login en DNS-domein moeten hetzelfde merk/domein tonen (alignment).",
+      "Controleer hieronder met «Controleer DNS» of SPF/DKIM/DMARC al live staan.",
+      provider?.docsUrl ? `Provider-documentatie: ${provider.label}.` : "Vraag je hosting/DNS-beheerder om TXT-records toe te voegen.",
     ],
   };
 }
@@ -159,6 +195,14 @@ export const settingsRouter = router({
   clearPerformanceMetrics: ownerProcedure.mutation(async () => {
     clearPerformanceSnapshot();
     return { success: true };
+  }),
+
+  getPublicSeo: publicProcedure.query(async ({ ctx }) => {
+    const { loadMarketingPublicSeoConfig } = await import("../lib/seo-settings");
+    const fallbackCanonical =
+      process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined);
+    return loadMarketingPublicSeoConfig(ctx.db, { fallbackCanonical });
   }),
 
   getPublicMarketingFooter: publicProcedure.query(async ({ ctx }) => {
@@ -355,6 +399,36 @@ export const settingsRouter = router({
       return { success: true };
     }),
 
+  removeSettings: protectedProcedure
+    .input(z.object({ keys: z.array(z.string().min(1)).min(1).max(32) }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromUser(ctx.user);
+      const normalizedKeys = [...new Set(input.keys.map((key) => normalizeSettingKey(key)))];
+
+      for (const key of normalizedKeys) {
+        assertCanManageSettingKey(ctx.user.role, key);
+      }
+
+      const storageKeys = normalizedKeys.map((key) => resolveSettingDbKey(scope, key));
+      const deleted = await ctx.db.setting.deleteMany({
+        where: { key: { in: storageKeys } },
+      });
+
+      await ctx.db.activity
+        .create({
+          data: {
+            userId: ctx.user.id,
+            type: "LEAD_UPDATED",
+            title: `${deleted.count} integratie-instelling(en) verwijderd`,
+            metadata: { keys: normalizedKeys, removed: deleted.count },
+          },
+        })
+        .catch(() => null);
+
+      invalidateWorkspaceSettingsCache(scope);
+      return { success: true, removed: deleted.count, keys: normalizedKeys };
+    }),
+
   getScoringWeights: protectedProcedure.query(async ({ ctx }) => {
     const { loadMergedScoringWeights } = await import("../lib/scoring-weights");
     return loadMergedScoringWeights(ctx.db, ctx.user.workspaceId!);
@@ -462,6 +536,35 @@ export const settingsRouter = router({
       return { success: true, message: "OpenAI API key is geldig." };
     } catch (err: any) {
       throw new TRPCError({ code: "BAD_REQUEST", message: `OpenAI test mislukt: ${err.message}` });
+    }
+  }),
+
+  testDeepseekKey: ownerProcedure.mutation(async ({ ctx }) => {
+    const scope = workspaceScopeFromUser(ctx.user);
+    const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["api.deepseek_key"]);
+    const key = getSettingString(settingsRowsToMap(settings), "api.deepseek_key");
+    if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "DeepSeek API key is niet geconfigureerd." });
+
+    try {
+      const res = await fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model: "deepseek-chat",
+          max_tokens: 8,
+          messages: [{ role: "user", content: "Ping" }],
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+      }
+      return { success: true, message: "DeepSeek API key is geldig." };
+    } catch (err: any) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `DeepSeek test mislukt: ${err.message}` });
     }
   }),
 
@@ -650,16 +753,22 @@ export const settingsRouter = router({
             lookupError: dmarcTxt.errorCode,
           },
         },
+        summary:
+          overall === "healthy"
+            ? "SPF, DKIM en DMARC zijn publiek zichtbaar. Je domein is goed ingesteld voor authenticatie."
+            : overall === "partial"
+              ? `${okCount} van 3 controles OK. Los de ontbrekende records op voor betere inbox-plaatsing.`
+              : "Geen van de drie records gevonden. Voeg SPF, DKIM en DMARC toe vóór bulk verzending.",
         guidance: [
           spfRecord
-            ? "SPF record gevonden."
-            : "Geen SPF record gevonden op je root-domein.",
+            ? `SPF OK — ${spfRecord.length > 72 ? `${spfRecord.slice(0, 72)}…` : spfRecord}`
+            : "SPF ontbreekt op het root-domein. Ontvangers weten niet welke servers namens jou mogen verzenden.",
           dkimHit
-            ? `DKIM gevonden via selector "${dkimHit.selector}".`
-            : "Geen DKIM record gevonden op de geteste selectors.",
+            ? `DKIM OK — selector «${dkimHit.selector}» op ${dkimHit.host}`
+            : `DKIM niet gevonden. Geteste selectors: ${selectors.join(", ")}. Kopieer DKIM exact uit je mailprovider (Stackmail, Google, …).`,
           dmarcRecord
-            ? `DMARC policy: ${dmarcPolicy || "onbekend"}.`
-            : "Geen DMARC record gevonden op _dmarc.",
+            ? `DMARC OK — policy «${dmarcPolicy || "none"}»${dmarcPolicy === "none" ? " (alleen monitoren)" : dmarcPolicy === "quarantine" ? " (twijfelachtige mail in spam)" : ""}`
+            : `DMARC ontbreekt op ${dmarcHost}. Voeg een TXT-record toe om misbruik van je domein te beperken.`,
         ],
       };
     }),

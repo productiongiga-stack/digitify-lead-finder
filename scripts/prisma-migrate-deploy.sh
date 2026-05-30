@@ -7,7 +7,7 @@ cd "$root/packages/db"
 
 # Migrations must use a direct (non-pooler) connection — Supabase pooler rejects DDL.
 migrate_url="${DIRECT_URL:-${POSTGRES_URL_NON_POOLING:-}}"
-if [[ "$migrate_url" == *"pooler"* ]]; then
+if [[ "$migrate_url" == *"pooler"* || "$migrate_url" == *"localhost"* || "$migrate_url" == *"127.0.0.1"* ]]; then
   migrate_url=""
 fi
 

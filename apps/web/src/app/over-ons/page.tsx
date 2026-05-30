@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
 import { MarketingPage } from "@/components/marketing/marketing-page";
+import { MarketingSeoJsonLd } from "@/components/marketing/marketing-seo-json-ld";
+import { generateMarketingMetadata } from "@/lib/seo/generate-marketing-metadata";
 
-export const metadata: Metadata = {
-  title: "Over ons",
-  description: "Digitify Lead Finder is gemaakt door Digitify, een Belgisch digitaal groeiteam.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  return generateMarketingMetadata("about");
+}
 
 export default function AboutPage() {
-  return <MarketingPage page="about" />;
+  return (
+    <>
+      <MarketingSeoJsonLd path="/over-ons" />
+      <MarketingPage page="about" />
+    </>
+  );
 }

@@ -10,6 +10,7 @@ import {
 } from "@digitify/ui";
 import { X, Send, Bot, User, Sparkles, Loader2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { resolveOpenClawPageAssist } from "./page-assist-config";
 
 interface Message {
   role: "user" | "assistant";
@@ -29,11 +30,13 @@ const OPENCLAW_STARTER_PROMPTS = [
 ] as const;
 
 export function OpenClawPanel() {
-  const { openClawOpen, setOpenClawOpen } = useUIStore();
+  const { openClawOpen, setOpenClawOpen, openClawAssistLaunch, clearOpenClawAssistLaunch } = useUIStore();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
+  const pageAssist = resolveOpenClawPageAssist(pathname);
+  const starterPrompts = pageAssist?.starterPrompts ?? OPENCLAW_STARTER_PROMPTS;
 
   // Extract leadId / campaignId from URL
   const leadIdMatch = pathname.match(/\/leads\/([a-zA-Z0-9-]+)$/);
@@ -49,6 +52,12 @@ export function OpenClawPanel() {
     }
   }, [messages]);
 
+  useEffect(() => {
+    if (!openClawAssistLaunch?.seedMessage) return;
+    setInput(openClawAssistLaunch.seedMessage);
+    clearOpenClawAssistLaunch();
+  }, [openClawAssistLaunch, clearOpenClawAssistLaunch]);
+
   if (!openClawOpen) return null;
 
   const handleSend = async () => {
@@ -59,12 +68,18 @@ export function OpenClawPanel() {
     setInput("");
 
     try {
+      const assistBookings =
+        openClawAssistLaunch?.assistBookings ||
+        pageAssist?.assistBookings ||
+        pathname.includes("/settings/bookings");
+
       const result = await chatMutation.mutateAsync({
         messages: newMessages,
         context: {
           currentPage: pathname,
           leadId,
           campaignId,
+          assistBookings,
         },
       });
 
@@ -120,11 +135,12 @@ export function OpenClawPanel() {
       </div>
 
       {/* Context indicator */}
-      {(leadId || campaignId) && (
+      {(leadId || campaignId || pageAssist) && (
         <div className="flex items-center gap-2 border-b bg-muted/50 px-4 py-2">
           <Sparkles className="h-3 w-3 text-primary" />
           <span className="text-xs text-muted-foreground">
-            Context: {leadId ? "Lead detail" : "Campagne detail"}
+            Context:{" "}
+            {leadId ? "Lead detail" : campaignId ? "Campagne detail" : pageAssist?.title ?? "Pagina"}
           </span>
         </div>
       )}
@@ -139,13 +155,15 @@ export function OpenClawPanel() {
             <div>
               <h4 className="font-semibold">Hallo! Ik ben OpenClaw</h4>
               <p className="mt-1 text-sm text-muted-foreground">
-                AI-assistent voor leadanalyse, campagnes en drafts met correcte placeholders.
+                {pageAssist
+                  ? pageAssist.description
+                  : "AI-assistent voor leadanalyse, campagnes en drafts met correcte placeholders."}
               </p>
             </div>
 
             <div className="w-full space-y-2 text-left">
               <p className="text-center text-xs font-medium text-muted-foreground">Probeer bijvoorbeeld:</p>
-              {OPENCLAW_STARTER_PROMPTS.map((suggestion) => (
+              {starterPrompts.map((suggestion) => (
                 <button
                   key={suggestion}
                   type="button"

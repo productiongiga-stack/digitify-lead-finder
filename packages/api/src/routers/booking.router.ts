@@ -913,6 +913,11 @@ export const bookingRouter = router({
     return { success: Boolean(eventTypeId) };
   }),
 
+  getOpenClawAssistContext: protectedProcedure.query(async ({ ctx }) => {
+    const { buildBookingOpenClawAssistContext } = await import("../lib/booking-openclaw-context");
+    return buildBookingOpenClawAssistContext(ctx.db, ctx.user.workspaceId!);
+  }),
+
   upsertEventType: protectedProcedure
     .input(z.object({
       id: z.string().optional(),

@@ -39,12 +39,46 @@ export interface OpenClawContext {
     language: string;
     companyName?: string;
   };
+  bookingsAssist?: {
+    timezone: string;
+    googleSyncEnabled: boolean;
+    googleOAuthConnected: boolean;
+    googleServiceAccountConfigured: boolean;
+    calendarId: string;
+    activeWeekdayLabels: string;
+    durationMinutes: number;
+    slotMinutes: number;
+    minimumNoticeHours: number;
+    maximumHorizonDays: number;
+    publicTenantConfigured: boolean;
+    defaultEventType: {
+      slug: string;
+      name: string;
+      enabledRuleCount: number;
+      rulesSyncedFromSettings: boolean;
+    } | null;
+    nextSevenDays: Array<{
+      date: string;
+      status: string;
+      availableSlots: number;
+      totalSlots: number;
+    }>;
+    googleCalendarProbe: {
+      enabled: boolean;
+      readable: boolean;
+      upcomingEventsNext7Days: number;
+    };
+    checklist: string[];
+  };
 }
+
+export type OpenClawProvider = "anthropic" | "openai" | "deepseek";
 
 export interface OpenClawConfig {
   apiKey: string;
   model?: string;
   maxTokens?: number;
+  provider?: OpenClawProvider;
 }
 
 export interface EmailDraftSuggestion {

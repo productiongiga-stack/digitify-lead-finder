@@ -89,7 +89,7 @@ export function Topbar() {
               <Link href="/leads/search">Leads zoeken</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href="/campaigns">Campagnes</Link>
+              <Link href="/campaigns">Campagneprofielen</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/contacts">Outbound</Link>
@@ -120,7 +120,7 @@ export function Topbar() {
               <Link href="/leads/search">Leads zoeken</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href="/campaigns">Campagnes</Link>
+              <Link href="/campaigns">Campagneprofielen</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/contacts">Outbound</Link>

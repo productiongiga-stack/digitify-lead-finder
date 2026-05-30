@@ -1,5 +1,9 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/session";
+import { NOINDEX_METADATA } from "@/lib/seo/build-metadata";
+
+export const metadata: Metadata = NOINDEX_METADATA;
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { OpenClawPanelWrapper } from "@/components/openclaw/panel-wrapper";

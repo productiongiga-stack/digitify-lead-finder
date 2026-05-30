@@ -85,6 +85,16 @@ const STATUS_DOT: Record<DateStatus, string | null> = {
 
 // ─── Utility functions ────────────────────────────────────────────────────────
 
+function coerceEmbedBoolean(value: unknown, fallback: boolean) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "off"].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
 function parseWeeklyHours(raw: string | null, startTime: string, endTime: string, availableDays: number[]): WeeklyHours {
   const fallback: WeeklyHours = {
     0: { enabled: availableDays.includes(0), start: startTime, end: endTime },
@@ -103,7 +113,7 @@ function parseWeeklyHours(raw: string | null, startTime: string, endTime: string
       const day = Number(key);
       if (Number.isNaN(day) || day < 0 || day > 6) continue;
       next[day] = {
-        enabled: value.enabled ?? next[day].enabled,
+        enabled: coerceEmbedBoolean(value.enabled, next[day].enabled),
         start: value.start || next[day].start,
         end: value.end || next[day].end,
       };
@@ -286,11 +296,6 @@ function BookingEmbedContent() {
       start: slot.start,
       hostTime: slot.time,
     });
-    if (tenant) {
-      const remoteData = availability[selectedDate];
-      if (!remoteData) return [];
-      return remoteData.map(mapSlot);
-    }
     const remoteData = availability[selectedDate];
     if (remoteData !== undefined) {
       return remoteData.map(mapSlot);
@@ -318,13 +323,12 @@ function BookingEmbedContent() {
 
   useEffect(() => {
     if (!tenant) return;
-    const toDate = addMonths(currentMonth, 1);
-    toDate.setDate(0);
+    const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
     const url = new URL("/api/public/bookings/availability", window.location.origin);
     url.searchParams.set("tenant", tenant);
     if (eventType?.slug || eventTypeSlug) url.searchParams.set("eventType", eventType?.slug || eventTypeSlug);
     url.searchParams.set("from", formatDateKey(currentMonth));
-    url.searchParams.set("to", formatDateKey(toDate));
+    url.searchParams.set("to", formatDateKey(monthEnd));
     const monthKey = formatDateKey(currentMonth);
     setLoadingAvailability(true);
     fetch(url)
@@ -333,22 +337,37 @@ function BookingEmbedContent() {
         if (data?.days) {
           if (data.hostTimeZone) setHostTimeZone(data.hostTimeZone);
           else if (data.timezone) setHostTimeZone(data.timezone);
+          const dayEntries = data.days as AvailabilityDayPayload[];
           setAvailability((prev) => ({
             ...prev,
-            ...Object.fromEntries(
-              data.days.map((day: AvailabilityDayPayload) => [day.date, day.slots]),
-            ),
+            ...Object.fromEntries(dayEntries.map((day) => [day.date, day.slots])),
           }));
           setDayStatuses((prev) => ({
             ...prev,
             ...Object.fromEntries(
-              data.days.map((day: AvailabilityDayPayload) => [
+              dayEntries.map((day) => [
                 day.date,
-                day.status || (day.slots.length > 0 ? "available" : "full"),
+                day.status ||
+                  (day.slots.length > 0 ? "available" : (day as { totalSlots?: number }).totalSlots ? "full" : "none"),
               ]),
             ),
           }));
           setAvailabilityMonthKey(monthKey);
+
+          const firstBookable = dayEntries.find(
+            (day) => day.status === "available" || day.status === "partial" || day.slots.length > 0,
+          );
+          if (firstBookable) {
+            setSelectedDate((current) => {
+              const selectedStatus = dayEntries.find((day) => day.date === current);
+              const selectedBookable =
+                selectedStatus &&
+                (selectedStatus.status === "available" ||
+                  selectedStatus.status === "partial" ||
+                  selectedStatus.slots.length > 0);
+              return selectedBookable ? current : firstBookable.date;
+            });
+          }
         }
       })
       .catch(() => null)
@@ -375,22 +394,29 @@ function BookingEmbedContent() {
   function getDateStatus(dateKey: string): DateStatus {
     if (dateKey < todayKey) return "none";
     const dateMonthKey = formatDateKey(getMonthStart(parseDateKey(dateKey)));
-    if (tenant) {
-      if (loadingAvailability && availabilityMonthKey !== dateMonthKey) return "none";
-      if (availabilityMonthKey !== dateMonthKey) return "none";
+    const localSlots = buildSlotsForDate(dateKey, weeklyHours, effectiveDuration, effectiveSlotMinutes);
+    const localStatus: DateStatus = localSlots.length > 0 ? "available" : "none";
+
+    if (tenant && availabilityMonthKey === dateMonthKey) {
       const status = dayStatuses[dateKey];
-      if (status) return status;
+      if (status === "available" || status === "partial" || status === "full") return status;
       const remoteData = availability[dateKey];
-      if (remoteData === undefined) return "none";
-      return remoteData.length > 0 ? "available" : "full";
+      if (remoteData !== undefined) {
+        return remoteData.length > 0 ? "available" : "full";
+      }
+      if (status === "none") return "none";
     }
+
+    if (tenant && loadingAvailability && availabilityMonthKey !== dateMonthKey) {
+      return localStatus;
+    }
+
     const remoteData = availability[dateKey];
     if (remoteData !== undefined) {
-      if (remoteData.length === 0) return "full";
-      return "available";
+      return remoteData.length > 0 ? "available" : "full";
     }
-    const localSlots = buildSlotsForDate(dateKey, weeklyHours, effectiveDuration, effectiveSlotMinutes);
-    return localSlots.length > 0 ? "available" : "none";
+
+    return localStatus;
   }
 
   // ── Submission ─────────────────────────────────────────────────────────────
@@ -456,13 +482,12 @@ function BookingEmbedContent() {
       }
       setStatus({ type: "error", message: data.error || "Boeking aanvragen mislukt." });
       if (tenant) {
-        const toDate = addMonths(currentMonth, 1);
-        toDate.setDate(0);
+        const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
         const refreshUrl = new URL("/api/public/bookings/availability", window.location.origin);
         refreshUrl.searchParams.set("tenant", tenant);
         if (eventType?.slug || eventTypeSlug) refreshUrl.searchParams.set("eventType", eventType?.slug || eventTypeSlug);
         refreshUrl.searchParams.set("from", formatDateKey(currentMonth));
-        refreshUrl.searchParams.set("to", formatDateKey(toDate));
+        refreshUrl.searchParams.set("to", formatDateKey(monthEnd));
         fetch(refreshUrl)
           .then((response) => (response.ok ? response.json() : null))
           .then((payload) => {

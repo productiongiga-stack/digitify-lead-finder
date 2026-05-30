@@ -13,11 +13,21 @@ export class OpenClawClient {
   constructor(config: OpenClawConfig) {
     this.maxTokens = config.maxTokens || 2048;
 
-    // Detect provider from model name
-    const isOpenAI = config.model?.startsWith("gpt-") || config.model?.startsWith("o");
-    this.provider = isOpenAI ? "openai" : "anthropic";
+    const explicit = config.provider;
+    const isDeepseek =
+      explicit === "deepseek" || config.model?.toLowerCase().startsWith("deepseek");
+    const isOpenAI =
+      explicit === "openai" ||
+      (!isDeepseek && (config.model?.startsWith("gpt-") || config.model?.startsWith("o")));
+    this.provider = isOpenAI || isDeepseek ? "openai" : "anthropic";
 
-    if (this.provider === "openai") {
+    if (isDeepseek) {
+      this.openai = new OpenAI({
+        apiKey: config.apiKey,
+        baseURL: "https://api.deepseek.com",
+      });
+      this.model = config.model || "deepseek-chat";
+    } else if (this.provider === "openai") {
       this.openai = new OpenAI({ apiKey: config.apiKey });
       this.model = config.model || "gpt-4o";
     } else {

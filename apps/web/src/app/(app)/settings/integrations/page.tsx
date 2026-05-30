@@ -1,14 +1,90 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { trpc } from "@/lib/trpc/client";
-import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Label, Skeleton, Badge, Switch, Tabs, TabsContent, TabsList, TabsTrigger } from "@digitify/ui";
-import { ArrowLeft, Save, Loader2, Key, Eye, EyeOff, CheckCircle, XCircle, Bot, Globe, Mail, Inbox, Zap, AlertCircle, Settings2, CalendarDays } from "lucide-react";
+import {
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  Input,
+  Label,
+  Skeleton,
+  Badge,
+  Switch,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@digitify/ui";
+import {
+  ArrowLeft,
+  Save,
+  Loader2,
+  Key,
+  Eye,
+  EyeOff,
+  CheckCircle,
+  XCircle,
+  Bot,
+  Globe,
+  Mail,
+  Inbox,
+  Zap,
+  AlertCircle,
+  Settings2,
+  CalendarDays,
+  Copy,
+  Check,
+  Shield,
+  ShieldCheck,
+  KeyRound,
+  Lightbulb,
+  ExternalLink,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
+import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 import { readSettingBoolean, readSettingString } from "@/lib/settings";
 
 const SECRET_MASK = "••••••••";
+
+type AiProviderId = "anthropic" | "openai" | "deepseek";
+
+const AI_PROVIDER_SETTING_KEYS: Record<AiProviderId, string> = {
+  anthropic: "api.anthropic_key",
+  openai: "api.openai_key",
+  deepseek: "api.deepseek_key",
+};
+
+const AI_PROVIDER_OPTIONS: Array<{
+  id: AiProviderId;
+  label: string;
+  description: string;
+  placeholder: string;
+}> = [
+  {
+    id: "anthropic",
+    label: "Anthropic",
+    description: "Claude-modellen (Sonnet, Haiku, Opus)",
+    placeholder: "sk-ant-...",
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    description: "GPT-modellen (4o, 4o mini, 4.1)",
+    placeholder: "sk-...",
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    description: "DeepSeek Chat & Reasoner (OpenAI-compatibel)",
+    placeholder: "sk-...",
+  },
+];
 
 function resolveRecommendedTlsServername(host: string, username: string) {
   const userDomain = username.split("@")[1]?.trim();
@@ -32,125 +108,394 @@ function TestResult({ result, isError }: { result: string | null; isError: boole
   );
 }
 
-function SmtpDnsGuide({
-  guide,
-}: {
-  guide:
-    | {
-        activeDomain?: string;
-        senderEmail?: string;
-        mailSubdomain?: string;
-        records?: Array<{ type: string; host: string; value: string; note: string }>;
-        tips?: string[];
-      }
-    | undefined;
-}) {
-  if (!guide) return null;
+type SmtpDnsGuideData = {
+  activeDomain?: string;
+  senderEmail?: string;
+  mailSubdomain?: string;
+  providerLabel?: string | null;
+  providerDocsUrl?: string | null;
+  records?: Array<{ type: string; host: string; value: string; note: string }>;
+  tips?: string[];
+};
+
+const DNS_RECORD_STYLES: Record<
+  string,
+  { icon: typeof Shield; badge: string; ring: string }
+> = {
+  SPF: {
+    icon: Shield,
+    badge: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
+    ring: "ring-sky-500/20",
+  },
+  DKIM: {
+    icon: KeyRound,
+    badge: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
+    ring: "ring-violet-500/20",
+  },
+  DMARC: {
+    icon: ShieldCheck,
+    badge: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    ring: "ring-emerald-500/20",
+  },
+};
+
+function DnsCopyField({ label, value }: { label: string; value: string }) {
+  const { showToast } = useToast();
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      showToast({ title: "Gekopieerd", description: `${label} staat op je klembord.` });
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      showToast({ title: "Kopiëren mislukt", variant: "error" });
+    }
+  }
+
   return (
-    <div className="rounded-md border bg-muted/30 p-3 text-xs">
-      <p className="font-semibold text-foreground">DNS checklist voor verzenden</p>
-      <p className="mt-1 text-muted-foreground">
-        Domein: <span className="font-medium text-foreground">{guide.activeDomain || "-"}</span> · Afzender:{" "}
-        <span className="font-medium text-foreground">{guide.senderEmail || "-"}</span>
-      </p>
-      {guide.mailSubdomain ? (
-        <p className="mt-1 text-muted-foreground">
-          Aanbevolen verzend-subdomein: <span className="font-medium text-foreground">{guide.mailSubdomain}</span>
-        </p>
-      ) : null}
-      <div className="mt-2 space-y-2">
-        {(guide.records || []).map((record) => (
-          <div key={`${record.type}-${record.host}`} className="rounded border bg-background p-2">
-            <p className="font-medium text-foreground">
-              {record.type} · {record.host}
-            </p>
-            <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">{record.value}</p>
-            <p className="mt-1 text-muted-foreground">{record.note}</p>
-          </div>
-        ))}
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={handleCopy}>
+          {copied ? <Check className="mr-1 h-3 w-3 text-emerald-600" /> : <Copy className="mr-1 h-3 w-3" />}
+          {copied ? "Gekopieerd" : "Kopiëren"}
+        </Button>
       </div>
+      <pre className="overflow-x-auto rounded-lg border bg-muted/40 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground">
+        {value}
+      </pre>
+    </div>
+  );
+}
+
+function SmtpDnsGuide({ guide }: { guide: SmtpDnsGuideData | undefined }) {
+  if (!guide) return null;
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-card via-card to-muted/20 shadow-sm">
+      <div className="border-b border-border/50 bg-muted/20 px-4 py-3.5 sm:px-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Globe className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">DNS checklist voor verzenden</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Voeg deze records toe bij je DNS-beheerder (Cloudflare, Combell, …) na een geslaagde SMTP-test.
+              </p>
+            </div>
+          </div>
+          {guide.providerLabel ? (
+            <Badge variant="secondary" className="shrink-0 text-[11px]">
+              {guide.providerLabel}
+            </Badge>
+          ) : null}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {guide.activeDomain ? (
+            <span className="inline-flex items-center rounded-full border bg-background/80 px-2.5 py-1 text-[11px]">
+              <span className="text-muted-foreground">Domein</span>
+              <span className="ml-1.5 font-medium text-foreground">{guide.activeDomain}</span>
+            </span>
+          ) : null}
+          {guide.senderEmail ? (
+            <span className="inline-flex items-center rounded-full border bg-background/80 px-2.5 py-1 text-[11px]">
+              <span className="text-muted-foreground">Afzender</span>
+              <span className="ml-1.5 font-medium text-foreground">{guide.senderEmail}</span>
+            </span>
+          ) : null}
+          {guide.mailSubdomain ? (
+            <span className="inline-flex items-center rounded-full border border-primary/25 bg-primary/5 px-2.5 py-1 text-[11px]">
+              <span className="text-muted-foreground">Subdomein</span>
+              <span className="ml-1.5 font-medium text-foreground">{guide.mailSubdomain}</span>
+            </span>
+          ) : null}
+        </div>
+        {guide.providerDocsUrl ? (
+          <a
+            href={guide.providerDocsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+          >
+            Open provider-documentatie
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        ) : null}
+      </div>
+
+      <div className="space-y-3 p-4 sm:p-5">
+        {(guide.records || []).map((record, index) => {
+          const style = DNS_RECORD_STYLES[record.type] ?? DNS_RECORD_STYLES.SPF;
+          const Icon = style.icon;
+          return (
+            <div
+              key={`${record.type}-${record.host}`}
+              className={`rounded-xl border bg-background/60 p-4 ring-1 ${style.ring}`}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${style.badge}`}
+                >
+                  {index + 1}
+                </div>
+                <div className="min-w-0 flex-1 space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Icon className="h-4 w-4 text-muted-foreground" />
+                    <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${style.badge}`}>
+                      {record.type}
+                    </span>
+                    <span className="truncate font-mono text-xs text-muted-foreground">{record.host}</span>
+                  </div>
+                  <DnsCopyField label="Recordwaarde (TXT)" value={record.value} />
+                  <p className="text-xs leading-relaxed text-muted-foreground">{record.note}</p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
       {(guide.tips || []).length > 0 ? (
-        <div className="mt-2 space-y-1">
-          {(guide.tips || []).map((tip) => (
-            <p key={tip} className="text-muted-foreground">
-              • {tip}
-            </p>
-          ))}
+        <div className="border-t border-border/50 bg-muted/15 px-4 py-3.5 sm:px-5">
+          <div className="flex gap-2">
+            <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-foreground">Tips voor betere deliverability</p>
+              <ul className="space-y-1 text-xs leading-relaxed text-muted-foreground">
+                {(guide.tips || []).map((tip) => (
+                  <li key={tip} className="flex gap-2">
+                    <span className="text-primary">•</span>
+                    <span>{tip}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>
   );
 }
 
-function getStatusTone(status?: string) {
-  if (status === "ok") return "text-green-700 dark:text-green-400";
-  return "text-destructive";
+type DnsCheckData = {
+  domain: string;
+  overall: "healthy" | "partial" | "risk";
+  summary?: string;
+  checks: {
+    spf: { status: string; host: string; record: string | null };
+    dkim: {
+      status: string;
+      selector: string | null;
+      host: string | null;
+      record: string | null;
+      scanned?: Array<{ selector: string; host: string; hasRecord: boolean }>;
+    };
+    dmarc: { status: string; host: string; record: string | null; policy: string | null };
+  };
+  guidance: string[];
+};
+
+const DNS_CHECK_META: Record<
+  "SPF" | "DKIM" | "DMARC",
+  { icon: typeof Shield; badge: string; ring: string; explain: string; missingHint: string }
+> = {
+  SPF: {
+    icon: Shield,
+    badge: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
+    ring: "ring-sky-500/20",
+    explain: "Welke mailservers namens jouw domein mogen verzenden.",
+    missingHint: "Voeg een TXT-record toe op je root-domein (zie checklist hierboven).",
+  },
+  DKIM: {
+    icon: KeyRound,
+    badge: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
+    ring: "ring-violet-500/20",
+    explain: "Digitale handtekening zodat ontvangers zien dat mail echt van jou komt.",
+    missingHint: "Haal host + waarde op bij Stackmail/Google en publiceer als TXT of CNAME.",
+  },
+  DMARC: {
+    icon: ShieldCheck,
+    badge: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    ring: "ring-emerald-500/20",
+    explain: "Instructie aan ontvangers wat te doen bij mislukte SPF/DKIM (none → quarantine → reject).",
+    missingHint: "TXT op _dmarc.jouwdomein, start met p=none en een rua-mailadres.",
+  },
+};
+
+function DnsStatusPill({ ok }: { ok: boolean }) {
+  return ok ? (
+    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+      <CheckCircle className="h-3 w-3" />
+      OK
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive">
+      <XCircle className="h-3 w-3" />
+      Ontbreekt
+    </span>
+  );
 }
 
-function DnsCheckResult({
-  result,
+function DnsCheckRecordCard({
+  type,
+  ok,
+  host,
+  record,
+  extra,
+  children,
 }: {
-  result:
-    | {
-        domain: string;
-        overall: "healthy" | "partial" | "risk";
-        checks: {
-          spf: { status: string; host: string; record: string | null };
-          dkim: { status: string; selector: string | null; host: string | null; record: string | null };
-          dmarc: { status: string; host: string; record: string | null; policy: string | null };
-        };
-        guidance: string[];
-      }
-    | null
-    | undefined;
+  type: "SPF" | "DKIM" | "DMARC";
+  ok: boolean;
+  host: string;
+  record: string | null;
+  extra?: ReactNode;
+  children?: ReactNode;
 }) {
+  const meta = DNS_CHECK_META[type];
+  const Icon = meta.icon;
+
+  return (
+    <div className={`rounded-xl border bg-background/70 p-4 ring-1 ${ok ? meta.ring : "ring-destructive/25"}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${meta.badge}`}>
+            <Icon className="h-4 w-4" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-foreground">{type}</p>
+            <p className="text-[11px] leading-snug text-muted-foreground">{meta.explain}</p>
+          </div>
+        </div>
+        <DnsStatusPill ok={ok} />
+      </div>
+
+      <div className="mt-3 space-y-2">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">DNS-host</p>
+          <p className="mt-0.5 font-mono text-xs text-foreground">{host || "—"}</p>
+        </div>
+        {record ? (
+          <DnsCopyField label="Gevonden record" value={record} />
+        ) : (
+          <p className="rounded-lg border border-dashed border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-muted-foreground">
+            {meta.missingHint}
+          </p>
+        )}
+        {extra}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function DnsCheckResult({ result }: { result: DnsCheckData | null | undefined }) {
   if (!result) return null;
 
   const overallLabel =
-    result.overall === "healthy"
-      ? "Gezond"
-      : result.overall === "partial"
-        ? "Gedeeltelijk"
-        : "Risico";
+    result.overall === "healthy" ? "Alles OK" : result.overall === "partial" ? "Gedeeltelijk" : "Actie nodig";
   const overallClass =
     result.overall === "healthy"
-      ? "bg-green-500/10 text-green-700 dark:text-green-400"
+      ? "bg-emerald-500/15 text-emerald-800 dark:text-emerald-300"
       : result.overall === "partial"
-        ? "bg-amber-500/10 text-amber-700 dark:text-amber-400"
-        : "bg-destructive/10 text-destructive";
+        ? "bg-amber-500/15 text-amber-800 dark:text-amber-300"
+        : "bg-destructive/15 text-destructive";
+  const okCount = ["spf", "dkim", "dmarc"].filter(
+    (key) => result.checks[key as keyof typeof result.checks].status === "ok",
+  ).length;
+
+  const dmarcPolicyLabel =
+    result.checks.dmarc.policy === "none"
+      ? "Monitoring (geen blokkering)"
+      : result.checks.dmarc.policy === "quarantine"
+        ? "Twijfelachtige mail → spam/quarantaine"
+        : result.checks.dmarc.policy === "reject"
+          ? "Strikte afwijzing bij mislukking"
+          : null;
 
   return (
-    <div className="rounded-md border bg-muted/30 p-3 text-xs">
-      <div className="flex items-center justify-between gap-2">
-        <p className="font-semibold text-foreground">DNS status voor {result.domain}</p>
-        <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${overallClass}`}>
+    <div className="overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-card via-card to-muted/15 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/50 bg-muted/20 px-4 py-3.5">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Live DNS-status · {result.domain}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {result.summary || `${okCount} van 3 records gevonden via publieke DNS.`}
+          </p>
+        </div>
+        <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${overallClass}`}>
           {overallLabel}
         </span>
       </div>
-      <div className="mt-2 grid gap-2 sm:grid-cols-3">
-        <div className="rounded border bg-background p-2">
-          <p className={`font-medium ${getStatusTone(result.checks.spf.status)}`}>SPF</p>
-          <p className="mt-1 font-mono text-[11px] text-muted-foreground">{result.checks.spf.host}</p>
-          {result.checks.spf.record ? <p className="mt-1 text-muted-foreground">{result.checks.spf.record}</p> : null}
-        </div>
-        <div className="rounded border bg-background p-2">
-          <p className={`font-medium ${getStatusTone(result.checks.dkim.status)}`}>DKIM</p>
-          <p className="mt-1 font-mono text-[11px] text-muted-foreground">{result.checks.dkim.host || "-"}</p>
-          {result.checks.dkim.selector ? <p className="mt-1 text-muted-foreground">selector: {result.checks.dkim.selector}</p> : null}
-        </div>
-        <div className="rounded border bg-background p-2">
-          <p className={`font-medium ${getStatusTone(result.checks.dmarc.status)}`}>DMARC</p>
-          <p className="mt-1 font-mono text-[11px] text-muted-foreground">{result.checks.dmarc.host}</p>
-          {result.checks.dmarc.policy ? <p className="mt-1 text-muted-foreground">policy: {result.checks.dmarc.policy}</p> : null}
-        </div>
+
+      <div className="grid gap-3 p-4 lg:grid-cols-1">
+        <DnsCheckRecordCard
+          type="SPF"
+          ok={result.checks.spf.status === "ok"}
+          host={result.checks.spf.host}
+          record={result.checks.spf.record}
+        />
+        <DnsCheckRecordCard
+          type="DKIM"
+          ok={result.checks.dkim.status === "ok"}
+          host={result.checks.dkim.host || `*._domainkey.${result.domain}`}
+          record={result.checks.dkim.record}
+          extra={
+            result.checks.dkim.selector ? (
+              <p className="text-xs text-muted-foreground">
+                Actieve selector: <span className="font-medium text-foreground">{result.checks.dkim.selector}</span>
+              </p>
+            ) : null
+          }
+        >
+          {result.checks.dkim.status !== "ok" && result.checks.dkim.scanned?.length ? (
+            <div className="rounded-lg border bg-muted/30 p-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Geteste selectors
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {result.checks.dkim.scanned.map((row) => (
+                  <li key={row.selector} className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="font-mono text-muted-foreground">{row.selector}</span>
+                    {row.hasRecord ? (
+                      <span className="text-emerald-600">gevonden</span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </DnsCheckRecordCard>
+        <DnsCheckRecordCard
+          type="DMARC"
+          ok={result.checks.dmarc.status === "ok"}
+          host={result.checks.dmarc.host}
+          record={result.checks.dmarc.record}
+          extra={
+            dmarcPolicyLabel ? (
+              <p className="text-xs text-muted-foreground">
+                Huidige policy: <span className="font-medium text-foreground">{dmarcPolicyLabel}</span>
+              </p>
+            ) : null
+          }
+        />
       </div>
+
       {result.guidance.length > 0 ? (
-        <div className="mt-2 space-y-1">
-          {result.guidance.map((item) => (
-            <p key={item} className="text-muted-foreground">
-              • {item}
-            </p>
-          ))}
+        <div className="border-t border-border/50 bg-muted/10 px-4 py-3">
+          <p className="mb-2 text-xs font-semibold text-foreground">Samenvatting</p>
+          <ul className="space-y-1.5">
+            {result.guidance.map((item) => (
+              <li key={item} className="flex gap-2 text-xs leading-relaxed text-muted-foreground">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
     </div>
@@ -188,10 +533,31 @@ export default function IntegrationsSettingsPage() {
       showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
   });
 
+  const removeSettings = trpc.settings.removeSettings.useMutation({
+    onSuccess: (_data, variables) => {
+      utils.settings.getAll.invalidate();
+      showToast({
+        title: "Verwijderd",
+        description: `${variables.keys.length} opgeslagen waarde(n) gewist.`,
+        variant: "success",
+      });
+    },
+    onError: (error) =>
+      showToast({ title: "Verwijderen mislukt", description: error.message, variant: "error" }),
+  });
+
+  const [removeConfirm, setRemoveConfirm] = useState<null | {
+    title: string;
+    description: string;
+    keys: string[];
+    onCleared?: () => void;
+  }>(null);
+
   // Test mutations
   const testGoogle = trpc.settings.testGooglePlaces.useMutation();
   const testAnthropic = trpc.settings.testAnthropicKey.useMutation();
   const testOpenai = trpc.settings.testOpenaiKey.useMutation();
+  const testDeepseek = trpc.settings.testDeepseekKey.useMutation();
   const testSmtp = trpc.settings.testSmtp.useMutation();
   const checkEmailDns = trpc.settings.checkEmailDns.useMutation();
   const testImap = trpc.settings.testImap.useMutation();
@@ -206,12 +572,14 @@ export default function IntegrationsSettingsPage() {
   const [showGoogleOAuthSecret, setShowGoogleOAuthSecret] = useState(false);
 
   // AI
+  const [selectedAiProvider, setSelectedAiProvider] = useState<AiProviderId>("anthropic");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
+  const [deepseekKey, setDeepseekKey] = useState("");
   const [anthropicConfigured, setAnthropicConfigured] = useState(false);
   const [openaiConfigured, setOpenaiConfigured] = useState(false);
-  const [showAnthropicKey, setShowAnthropicKey] = useState(false);
-  const [showOpenaiKey, setShowOpenaiKey] = useState(false);
+  const [deepseekConfigured, setDeepseekConfigured] = useState(false);
+  const [showAiKey, setShowAiKey] = useState(false);
 
   // SMTP
   const [smtpHost, setSmtpHost] = useState("");
@@ -244,6 +612,7 @@ export default function IntegrationsSettingsPage() {
     googleOAuthClientId: readSettingString(settings, "integrations.google_oauth_client_id"),
     anthropicKey: readSettingString(settings, "api.anthropic_key"),
     openaiKey: readSettingString(settings, "api.openai_key"),
+    deepseekKey: readSettingString(settings, "api.deepseek_key"),
     smtpHost: readSettingString(settings, "email.smtp_host"),
     smtpPort: readSettingString(settings, "email.smtp_port", "587"),
     smtpUser: readSettingString(settings, "email.smtp_user"),
@@ -258,7 +627,10 @@ export default function IntegrationsSettingsPage() {
     googlePlacesKey.trim() !== initialState.googlePlacesKey
     || googleOAuthClientId.trim() !== initialState.googleOAuthClientId
     || Boolean(googleOAuthClientSecret.trim());
-  const aiDirty = anthropicKey.trim() !== initialState.anthropicKey || openaiKey.trim() !== initialState.openaiKey;
+  const aiDirty =
+    anthropicKey.trim() !== initialState.anthropicKey
+    || openaiKey.trim() !== initialState.openaiKey
+    || deepseekKey.trim() !== initialState.deepseekKey;
   const smtpDirty =
     smtpHost.trim() !== initialState.smtpHost
     || smtpPort.trim() !== initialState.smtpPort
@@ -273,7 +645,35 @@ export default function IntegrationsSettingsPage() {
     || imapTls !== initialState.imapTls
     || Boolean(imapPass.trim());
   const anyDirty = googleDirty || aiDirty || smtpDirty || imapDirty;
-  const aiConfigured = anthropicConfigured || openaiConfigured || Boolean(anthropicKey.trim() || openaiKey.trim());
+  const aiConfigured =
+    anthropicConfigured
+    || openaiConfigured
+    || deepseekConfigured
+    || Boolean(anthropicKey.trim() || openaiKey.trim() || deepseekKey.trim());
+  const activeAiProvider = AI_PROVIDER_OPTIONS.find((item) => item.id === selectedAiProvider) ?? AI_PROVIDER_OPTIONS[0];
+  const activeAiKey =
+    selectedAiProvider === "openai"
+      ? openaiKey
+      : selectedAiProvider === "deepseek"
+        ? deepseekKey
+        : anthropicKey;
+  const activeAiConfigured =
+    selectedAiProvider === "openai"
+      ? openaiConfigured
+      : selectedAiProvider === "deepseek"
+        ? deepseekConfigured
+        : anthropicConfigured;
+  const setActiveAiKey = (value: string) => {
+    if (selectedAiProvider === "openai") setOpenaiKey(value);
+    else if (selectedAiProvider === "deepseek") setDeepseekKey(value);
+    else setAnthropicKey(value);
+  };
+  const activeAiTest =
+    selectedAiProvider === "openai"
+      ? testOpenai
+      : selectedAiProvider === "deepseek"
+        ? testDeepseek
+        : testAnthropic;
   const googleOAuthConfigured = Boolean(
     googleOAuthClientId.trim() && (googleOAuthClientSecret.trim() || googleOAuthSecretConfigured),
   );
@@ -291,6 +691,8 @@ export default function IntegrationsSettingsPage() {
       const googleOAuthSecretRaw = readSettingString(settings, "integrations.google_oauth_client_secret");
       const anthropicKeyRaw = readSettingString(settings, "api.anthropic_key");
       const openaiKeyRaw = readSettingString(settings, "api.openai_key");
+      const deepseekKeyRaw = readSettingString(settings, "api.deepseek_key");
+      const providerRaw = readSettingString(settings, "api.ai_provider", "anthropic").toLowerCase();
       const smtpPassRaw = readSettingString(settings, "email.smtp_pass");
       const imapPassRaw = readSettingString(settings, "email.imap_pass");
 
@@ -298,12 +700,17 @@ export default function IntegrationsSettingsPage() {
       setGoogleOAuthSecretConfigured(Boolean(googleOAuthSecretRaw));
       setAnthropicConfigured(Boolean(anthropicKeyRaw));
       setOpenaiConfigured(Boolean(openaiKeyRaw));
+      setDeepseekConfigured(Boolean(deepseekKeyRaw));
+      if (providerRaw === "openai" || providerRaw === "deepseek" || providerRaw === "anthropic") {
+        setSelectedAiProvider(providerRaw);
+      }
 
       setGooglePlacesKey(googleKeyRaw === SECRET_MASK ? "" : googleKeyRaw);
       setGoogleOAuthClientId(readSettingString(settings, "integrations.google_oauth_client_id"));
       setGoogleOAuthClientSecret(googleOAuthSecretRaw === SECRET_MASK ? "" : googleOAuthSecretRaw);
       setAnthropicKey(anthropicKeyRaw === SECRET_MASK ? "" : anthropicKeyRaw);
       setOpenaiKey(openaiKeyRaw === SECRET_MASK ? "" : openaiKeyRaw);
+      setDeepseekKey(deepseekKeyRaw === SECRET_MASK ? "" : deepseekKeyRaw);
       setSmtpHost(readSettingString(settings, "email.smtp_host"));
       setSmtpPort(readSettingString(settings, "email.smtp_port", "587"));
       setSmtpUser(readSettingString(settings, "email.smtp_user"));
@@ -332,6 +739,7 @@ export default function IntegrationsSettingsPage() {
       { key: "integrations.google_oauth_client_secret", value: googleOAuthClientSecret },
       { key: "api.anthropic_key", value: anthropicKey.trim() },
       { key: "api.openai_key", value: openaiKey.trim() },
+      { key: "api.deepseek_key", value: deepseekKey.trim() },
       { key: "email.smtp_host", value: smtpHost.trim() },
       { key: "email.smtp_port", value: smtpPort.trim() || "587" },
       { key: "email.smtp_user", value: smtpUser.trim() },
@@ -359,6 +767,7 @@ export default function IntegrationsSettingsPage() {
     batchUpdate.mutate([
       { key: "api.anthropic_key", value: anthropicKey.trim() },
       { key: "api.openai_key", value: openaiKey.trim() },
+      { key: "api.deepseek_key", value: deepseekKey.trim() },
     ]);
   }
 
@@ -382,6 +791,43 @@ export default function IntegrationsSettingsPage() {
       { key: "email.imap_pass", value: imapPass },
       { key: "email.imap_tls", value: String(imapTls) },
     ]);
+  }
+
+  function requestRemoveSetting(config: {
+    title: string;
+    description: string;
+    keys: string[];
+    onCleared?: () => void;
+  }) {
+    setRemoveConfirm(config);
+  }
+
+  function confirmRemoveSettings() {
+    if (!removeConfirm) return;
+    const { keys, onCleared } = removeConfirm;
+    removeSettings.mutate(
+      { keys },
+      {
+        onSuccess: () => {
+          onCleared?.();
+          setRemoveConfirm(null);
+        },
+      },
+    );
+  }
+
+  function clearActiveAiKeyState() {
+    if (selectedAiProvider === "openai") {
+      setOpenaiKey("");
+      setOpenaiConfigured(false);
+    } else if (selectedAiProvider === "deepseek") {
+      setDeepseekKey("");
+      setDeepseekConfigured(false);
+    } else {
+      setAnthropicKey("");
+      setAnthropicConfigured(false);
+    }
+    activeAiTest.reset();
   }
 
   if (isLoading) {
@@ -409,6 +855,17 @@ export default function IntegrationsSettingsPage() {
 
   return (
     <div className="app-page">
+      <ConfirmDialog
+        open={Boolean(removeConfirm)}
+        title={removeConfirm?.title ?? "Verwijderen?"}
+        description={removeConfirm?.description ?? ""}
+        confirmLabel="Verwijderen"
+        loading={removeSettings.isPending}
+        onOpenChange={(open) => {
+          if (!open) setRemoveConfirm(null);
+        }}
+        onConfirm={confirmRemoveSettings}
+      />
       <div className="app-page-header">
         <Link href="/settings">
           <Button variant="ghost" size="icon" className="rounded-xl"><ArrowLeft className="h-4 w-4" /></Button>
@@ -489,7 +946,7 @@ export default function IntegrationsSettingsPage() {
                   </button>
                 </div>
               </div>
-              <div className="flex items-center gap-2 pt-2">
+              <div className="flex flex-wrap items-center gap-2 pt-2">
                 <Button
                   size="sm"
                   onClick={handleSaveGoogle}
@@ -507,6 +964,30 @@ export default function IntegrationsSettingsPage() {
                   {testGoogle.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Zap className="mr-2 h-3 w-3" />}
                   Test Verbinding
                 </Button>
+                {googlePlacesConfigured ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    disabled={removeSettings.isPending}
+                    onClick={() =>
+                      requestRemoveSetting({
+                        title: "Google Places API key verwijderen?",
+                        description: "De opgeslagen key wordt permanent gewist. Zoeken via Google Places werkt daarna niet meer tot je een nieuwe key invult.",
+                        keys: ["api.google_places_key"],
+                        onCleared: () => {
+                          setGooglePlacesKey("");
+                          setGooglePlacesConfigured(false);
+                          testGoogle.reset();
+                        },
+                      })
+                    }
+                  >
+                    <Trash2 className="mr-2 h-3 w-3" />
+                    Key verwijderen
+                  </Button>
+                ) : null}
               </div>
               <TestResult
                 result={testGoogle.data?.message ?? (testGoogle.error?.message || null)}
@@ -537,7 +1018,7 @@ export default function IntegrationsSettingsPage() {
                   Sleutels voor AI-connectie. Provider en model stel je in via AI Instellingen.
                 </CardDescription>
               </div>
-              {anthropicConfigured || openaiConfigured || Boolean(anthropicKey.trim()) || Boolean(openaiKey.trim()) ? (
+              {aiConfigured ? (
                 <Badge variant="success" className="shrink-0"><CheckCircle className="mr-1 h-3 w-3" /> Actief</Badge>
               ) : (
                 <Badge variant="secondary" className="shrink-0"><XCircle className="mr-1 h-3 w-3" /> Niet geconfigureerd</Badge>
@@ -545,76 +1026,115 @@ export default function IntegrationsSettingsPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2 rounded-md border bg-muted/30 p-3">
-              <Label>Anthropic API Key</Label>
-              <div className="relative">
-                <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  type={showAnthropicKey ? "text" : "password"}
-                  value={anthropicKey}
-                  onChange={(e) => setAnthropicKey(e.target.value)}
-                  placeholder={anthropicConfigured ? "Nieuwe key invullen om te vervangen" : "sk-ant-..."}
-                  className="pl-9 pr-10 font-mono text-sm"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowAnthropicKey(!showAnthropicKey)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showAnthropicKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-              <div className="flex items-center gap-2 pt-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={testAnthropic.isPending || (!anthropicConfigured && !anthropicKey.trim())}
-                  onClick={() => { testAnthropic.reset(); testAnthropic.mutate(); }}
-                >
-                  {testAnthropic.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Zap className="mr-2 h-3 w-3" />}
-                  Test Anthropic
-                </Button>
-              </div>
-              <TestResult
-                result={testAnthropic.data?.message ?? (testAnthropic.error?.message || null)}
-                isError={testAnthropic.isError}
-              />
-            </div>
+            <div className="rounded-xl border bg-gradient-to-br from-purple-500/5 via-transparent to-violet-500/5 p-4">
+              <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {AI_PROVIDER_OPTIONS.map((option) => {
+                      const configured =
+                        option.id === "openai"
+                          ? openaiConfigured || Boolean(openaiKey.trim())
+                          : option.id === "deepseek"
+                            ? deepseekConfigured || Boolean(deepseekKey.trim())
+                            : anthropicConfigured || Boolean(anthropicKey.trim());
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedAiProvider(option.id);
+                            setShowAiKey(false);
+                            activeAiTest.reset();
+                          }}
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                            selectedAiProvider === option.id
+                              ? "border-purple-500/40 bg-purple-500/10 text-purple-700 dark:text-purple-300"
+                              : "border-border/60 bg-background/60 text-muted-foreground hover:border-border"
+                          }`}
+                        >
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${configured ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
+                          />
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
 
-            <div className="space-y-2 rounded-md border bg-muted/30 p-3">
-              <Label>OpenAI API Key</Label>
-              <div className="relative">
-                <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  type={showOpenaiKey ? "text" : "password"}
-                  value={openaiKey}
-                  onChange={(e) => setOpenaiKey(e.target.value)}
-                  placeholder={openaiConfigured ? "Nieuwe key invullen om te vervangen" : "sk-..."}
-                  className="pl-9 pr-10 font-mono text-sm"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowOpenaiKey(!showOpenaiKey)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showOpenaiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+                  <div className="space-y-2">
+                    <Label>{activeAiProvider.label} API Key</Label>
+                    <div className="relative">
+                      <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        type={showAiKey ? "text" : "password"}
+                        value={activeAiKey}
+                        onChange={(e) => setActiveAiKey(e.target.value)}
+                        placeholder={
+                          activeAiConfigured
+                            ? "Nieuwe key invullen om te vervangen"
+                            : activeAiProvider.placeholder
+                        }
+                        className="bg-background/80 pl-9 pr-10 font-mono text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAiKey(!showAiKey)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showAiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={activeAiTest.isPending || (!activeAiConfigured && !activeAiKey.trim())}
+                      onClick={() => {
+                        activeAiTest.reset();
+                        activeAiTest.mutate();
+                      }}
+                    >
+                      {activeAiTest.isPending ? (
+                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                      ) : (
+                        <Zap className="mr-2 h-3 w-3" />
+                      )}
+                      Test {activeAiProvider.label}
+                    </Button>
+                    {activeAiConfigured ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive hover:text-destructive"
+                        disabled={removeSettings.isPending}
+                        onClick={() =>
+                          requestRemoveSetting({
+                            title: `${activeAiProvider.label} API key verwijderen?`,
+                            description: `De opgeslagen ${activeAiProvider.label}-key wordt permanent gewist.`,
+                            keys: [AI_PROVIDER_SETTING_KEYS[selectedAiProvider]],
+                            onCleared: clearActiveAiKeyState,
+                          })
+                        }
+                      >
+                        <Trash2 className="mr-2 h-3 w-3" />
+                        Key verwijderen
+                      </Button>
+                    ) : null}
+                    <p className="text-[11px] text-muted-foreground">
+                      Welke provider actief is, stel je in via{" "}
+                      <Link href="/settings/ai" className="font-medium text-primary hover:underline">
+                        AI Instellingen
+                      </Link>
+                      . Alle keys bewaar je hier.
+                    </p>
+                  </div>
+                  <TestResult
+                    result={activeAiTest.data?.message ?? (activeAiTest.error?.message || null)}
+                    isError={activeAiTest.isError}
+                  />
               </div>
-              <div className="flex items-center gap-2 pt-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={testOpenai.isPending || (!openaiConfigured && !openaiKey.trim())}
-                  onClick={() => { testOpenai.reset(); testOpenai.mutate(); }}
-                >
-                  {testOpenai.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Zap className="mr-2 h-3 w-3" />}
-                  Test OpenAI
-                </Button>
-              </div>
-              <TestResult
-                result={testOpenai.data?.message ?? (testOpenai.error?.message || null)}
-                isError={testOpenai.isError}
-              />
             </div>
 
               <div className="flex items-center justify-end">
@@ -680,17 +1200,46 @@ export default function IntegrationsSettingsPage() {
               <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
                 Redirect URL: <span className="font-mono text-foreground">https://leads.digitify.be/api/integrations/google-calendar/callback</span>
               </div>
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <Button variant="outline" size="sm" asChild>
                   <Link href="/settings/bookings#google-agenda">
                     <CalendarDays className="mr-2 h-3.5 w-3.5" />
                     Mijn agenda koppelen
                   </Link>
                 </Button>
-                <Button size="sm" onClick={handleSaveGoogle} disabled={batchUpdate.isPending || !googleDirty}>
-                  {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
-                  Google OAuth opslaan
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {googleOAuthConfigured ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      disabled={removeSettings.isPending}
+                      onClick={() =>
+                        requestRemoveSetting({
+                          title: "Google OAuth-gegevens verwijderen?",
+                          description: "Client ID en secret worden gewist. Agenda-koppelingen werken pas weer na nieuwe credentials.",
+                          keys: [
+                            "integrations.google_oauth_client_id",
+                            "integrations.google_oauth_client_secret",
+                          ],
+                          onCleared: () => {
+                            setGoogleOAuthClientId("");
+                            setGoogleOAuthClientSecret("");
+                            setGoogleOAuthSecretConfigured(false);
+                          },
+                        })
+                      }
+                    >
+                      <Trash2 className="mr-2 h-3 w-3" />
+                      OAuth wissen
+                    </Button>
+                  ) : null}
+                  <Button size="sm" onClick={handleSaveGoogle} disabled={batchUpdate.isPending || !googleDirty}>
+                    {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
+                    Google OAuth opslaan
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -813,7 +1362,7 @@ export default function IntegrationsSettingsPage() {
                 Gebruik een echt adres om levering te verifiëren.
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
                 onClick={handleSaveSmtp}
@@ -834,38 +1383,116 @@ export default function IntegrationsSettingsPage() {
                 {testSmtp.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Mail className="mr-2 h-3 w-3" />}
                 Test E-mail Verzenden
               </Button>
+              {smtpPassConfigured ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  disabled={removeSettings.isPending}
+                  onClick={() =>
+                    requestRemoveSetting({
+                      title: "SMTP-wachtwoord verwijderen?",
+                      description: "Alleen het opgeslagen wachtwoord wordt gewist. Host en gebruiker blijven staan.",
+                      keys: ["email.smtp_pass"],
+                      onCleared: () => {
+                        setSmtpPass("");
+                        setSmtpPassConfigured(false);
+                        testSmtp.reset();
+                      },
+                    })
+                  }
+                >
+                  <Trash2 className="mr-2 h-3 w-3" />
+                  Wachtwoord wissen
+                </Button>
+              ) : null}
+              {smtpConfigured || smtpHost.trim() || smtpUser.trim() ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  disabled={removeSettings.isPending}
+                  onClick={() =>
+                    requestRemoveSetting({
+                      title: "Volledige SMTP-configuratie wissen?",
+                      description: "Host, poort, gebruiker, wachtwoord en TLS-instellingen worden verwijderd. Verzenden valt terug op console-modus.",
+                      keys: [
+                        "email.smtp_host",
+                        "email.smtp_port",
+                        "email.smtp_user",
+                        "email.smtp_pass",
+                        "email.smtp_servername",
+                        "email.smtp_tls_reject_unauthorized",
+                        "email.provider",
+                      ],
+                      onCleared: () => {
+                        setSmtpHost("");
+                        setSmtpPort("587");
+                        setSmtpUser("");
+                        setSmtpPass("");
+                        setSmtpPassConfigured(false);
+                        setSmtpServername("");
+                        setSmtpRejectUnauthorized(true);
+                        testSmtp.reset();
+                      },
+                    })
+                  }
+                >
+                  <Trash2 className="mr-2 h-3 w-3" />
+                  SMTP wissen
+                </Button>
+              ) : null}
             </div>
             <TestResult
               result={testSmtp.data?.message ?? (testSmtp.error?.message || null)}
               isError={testSmtp.isError}
             />
             <SmtpDnsGuide guide={testSmtp.data?.dnsGuide as any} />
-            <div className="space-y-2 rounded-md border bg-muted/30 p-3">
-              <Label>DNS domein check (SPF / DKIM / DMARC)</Label>
-              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                <Input
-                  value={dnsDomain}
-                  onChange={(e) => setDnsDomain(e.target.value)}
-                  placeholder="digitify.be"
+            <div className="overflow-hidden rounded-xl border border-border/60 bg-muted/10">
+              <div className="space-y-3 border-b border-border/50 p-4 sm:p-5">
+                <div>
+                  <Label className="text-sm">Live DNS-controle</Label>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Leest publieke SPF-, DKIM- en DMARC-records. Handig na wijzigingen bij je DNS-provider.
+                  </p>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <Input
+                    value={dnsDomain}
+                    onChange={(e) => setDnsDomain(e.target.value)}
+                    placeholder="digitify.be"
+                    className="bg-background"
+                  />
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="shrink-0"
+                    disabled={checkEmailDns.isPending}
+                    onClick={() => {
+                      checkEmailDns.reset();
+                      checkEmailDns.mutate({ domain: dnsDomain.trim() || undefined });
+                    }}
+                  >
+                    {checkEmailDns.isPending ? (
+                      <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                    ) : (
+                      <Globe className="mr-2 h-3 w-3" />
+                    )}
+                    Controleer DNS
+                  </Button>
+                </div>
+                <TestResult
+                  result={checkEmailDns.error?.message || null}
+                  isError={checkEmailDns.isError}
                 />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={checkEmailDns.isPending}
-                  onClick={() => {
-                    checkEmailDns.reset();
-                    checkEmailDns.mutate({ domain: dnsDomain.trim() || undefined });
-                  }}
-                >
-                  {checkEmailDns.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Globe className="mr-2 h-3 w-3" />}
-                  Controleer DNS
-                </Button>
               </div>
-              <TestResult
-                result={checkEmailDns.error?.message || null}
-                isError={checkEmailDns.isError}
-              />
-              <DnsCheckResult result={checkEmailDns.data as any} />
+              {checkEmailDns.data ? (
+                <div className="p-4 pt-0 sm:p-5 sm:pt-0">
+                  <DnsCheckResult result={checkEmailDns.data as DnsCheckData} />
+                </div>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -949,7 +1576,7 @@ export default function IntegrationsSettingsPage() {
               />
               <Label>TLS / SSL verbinding</Label>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
                 onClick={handleSaveImap}
@@ -967,6 +1594,64 @@ export default function IntegrationsSettingsPage() {
                 {testImap.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Zap className="mr-2 h-3 w-3" />}
                 Test Verbinding
               </Button>
+              {imapPassConfigured ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  disabled={removeSettings.isPending}
+                  onClick={() =>
+                    requestRemoveSetting({
+                      title: "IMAP-wachtwoord verwijderen?",
+                      description: "Alleen het opgeslagen wachtwoord wordt gewist.",
+                      keys: ["email.imap_pass"],
+                      onCleared: () => {
+                        setImapPass("");
+                        setImapPassConfigured(false);
+                        testImap.reset();
+                      },
+                    })
+                  }
+                >
+                  <Trash2 className="mr-2 h-3 w-3" />
+                  Wachtwoord wissen
+                </Button>
+              ) : null}
+              {imapConfigured || imapHost.trim() || imapUser.trim() ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  disabled={removeSettings.isPending}
+                  onClick={() =>
+                    requestRemoveSetting({
+                      title: "Volledige IMAP-configuratie wissen?",
+                      description: "Host, poort, gebruiker en wachtwoord worden verwijderd.",
+                      keys: [
+                        "email.imap_host",
+                        "email.imap_port",
+                        "email.imap_user",
+                        "email.imap_pass",
+                        "email.imap_tls",
+                      ],
+                      onCleared: () => {
+                        setImapHost("");
+                        setImapPort("993");
+                        setImapUser("");
+                        setImapPass("");
+                        setImapPassConfigured(false);
+                        setImapTls(true);
+                        testImap.reset();
+                      },
+                    })
+                  }
+                >
+                  <Trash2 className="mr-2 h-3 w-3" />
+                  IMAP wissen
+                </Button>
+              ) : null}
             </div>
             <TestResult
               result={testImap.data?.message ?? (testImap.error?.message || null)}

@@ -278,14 +278,54 @@ CREATE POLICY workspace_isolation ON "chat_messages"
     )
   );
 
--- 20260523210000_email_template_body_format
+-- email_templates: type, layout, metadata, bodyFormat (legacy DBs may miss several columns)
+DO $$ BEGIN
+  CREATE TYPE "EmailTemplateType" AS ENUM (
+    'OUTREACH', 'FOLLOW_UP', 'PROPOSAL', 'REPORT', 'BOOKING', 'REVIEW', 'REENGAGEMENT', 'CUSTOM'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE "EmailTemplateLayout" AS ENUM ('modern', 'minimal', 'business', 'proposal', 'followup');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 DO $$ BEGIN
   CREATE TYPE "EmailTemplateBodyFormat" AS ENUM ('TEXT', 'HTML');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "type" "EmailTemplateType" NOT NULL DEFAULT 'CUSTOM';
+ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "layout" "EmailTemplateLayout" NOT NULL DEFAULT 'modern';
+ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "description" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "ctaText" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "ctaUrl" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "campaignId" TEXT;
+ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "isGlobal" BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE "email_templates"
   ADD COLUMN IF NOT EXISTS "bodyFormat" "EmailTemplateBodyFormat" NOT NULL DEFAULT 'TEXT';
 
+CREATE INDEX IF NOT EXISTS "email_templates_createdById_type_idx"
+  ON "email_templates"("createdById", "type");
+CREATE INDEX IF NOT EXISTS "email_templates_createdById_layout_idx"
+  ON "email_templates"("createdById", "layout");
+
+DO $$ BEGIN
+  ALTER TABLE "email_templates"
+    ADD CONSTRAINT "email_templates_campaignId_fkey"
+    FOREIGN KEY ("campaignId") REFERENCES "campaigns"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 -- 20260528120000_email_draft_optional_lead
 ALTER TABLE "email_drafts" ALTER COLUMN "leadId" DROP NOT NULL;
+
+-- 20260528140000_campaign_profile_type
+DO $$ BEGIN
+  CREATE TYPE "CampaignProfileType" AS ENUM ('LEAD_OUTREACH', 'REVIEW_REQUEST');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+ALTER TABLE "campaigns"
+  ADD COLUMN IF NOT EXISTS "profile_type" "CampaignProfileType" NOT NULL DEFAULT 'LEAD_OUTREACH';

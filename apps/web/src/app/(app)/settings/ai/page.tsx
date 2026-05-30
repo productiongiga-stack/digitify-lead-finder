@@ -49,6 +49,17 @@ export default function AISettingsPage() {
     }
   }, [settings, loaded]);
 
+  useEffect(() => {
+    if (!loaded) return;
+    if (aiProvider === "openai" && !model.startsWith("gpt-") && !model.startsWith("o")) {
+      setModel("gpt-4o-mini");
+    } else if (aiProvider === "deepseek" && !model.startsWith("deepseek")) {
+      setModel("deepseek-chat");
+    } else if (aiProvider === "anthropic" && (model.startsWith("gpt-") || model.startsWith("deepseek"))) {
+      setModel("claude-sonnet-4-20250514");
+    }
+  }, [aiProvider, loaded, model]);
+
   function handleSave() {
     saveSettings.mutate([
       { key: "api.ai_provider", value: aiProvider },
@@ -98,6 +109,7 @@ export default function AISettingsPage() {
                 <SelectContent>
                   <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
                   <SelectItem value="openai">OpenAI (GPT)</SelectItem>
+                  <SelectItem value="deepseek">DeepSeek</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -113,6 +125,11 @@ export default function AISettingsPage() {
                       <SelectItem value="claude-sonnet-4-20250514">Claude Sonnet 4</SelectItem>
                       <SelectItem value="claude-haiku-4-5-20251001">Claude Haiku 4.5</SelectItem>
                       <SelectItem value="claude-opus-4-6">Claude Opus 4.6</SelectItem>
+                    </>
+                  ) : aiProvider === "deepseek" ? (
+                    <>
+                      <SelectItem value="deepseek-chat">DeepSeek Chat</SelectItem>
+                      <SelectItem value="deepseek-reasoner">DeepSeek Reasoner</SelectItem>
                     </>
                   ) : (
                     <>
@@ -138,7 +155,7 @@ export default function AISettingsPage() {
             <div className="rounded-md border bg-muted/30 p-3 text-xs">
               <p className="font-medium text-foreground">API keys</p>
               <p className="mt-1 text-muted-foreground">
-                Anthropic/OpenAI keys beheer je centraal via Integraties.
+                Anthropic, OpenAI en DeepSeek keys beheer je centraal via Integraties.
               </p>
               <Button variant="outline" size="sm" className="mt-2" asChild>
                 <Link href="/settings/integrations">

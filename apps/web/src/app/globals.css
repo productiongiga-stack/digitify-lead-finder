@@ -93,11 +93,11 @@
   }
 
   .page-view-tabs {
-    @apply grid h-auto w-full max-w-md grid-cols-2 gap-1 rounded-2xl border border-border/60 bg-gradient-to-r from-muted/30 via-card/90 to-muted/30 p-1 shadow-sm backdrop-blur-sm;
+    @apply flex h-auto w-full max-w-full flex-nowrap items-stretch gap-1 overflow-x-auto rounded-2xl border border-border/60 bg-gradient-to-r from-muted/30 via-card/90 to-muted/30 p-1 shadow-sm backdrop-blur-sm;
   }
 
   .page-view-tabs-trigger {
-    @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold tracking-tight text-muted-foreground transition-all duration-200 hover:bg-background/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:ring-1 data-[state=active]:ring-primary/20;
+    @apply inline-flex min-h-9 flex-1 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold tracking-tight text-muted-foreground transition-all duration-200 hover:bg-background/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-md data-[state=active]:ring-1 data-[state=active]:ring-primary/20;
   }
 
   .page-view-tabs-trigger svg {

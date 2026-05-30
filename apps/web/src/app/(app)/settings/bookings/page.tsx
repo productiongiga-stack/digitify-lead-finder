@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
+import { OpenClawPageAssist } from "@/components/openclaw/openclaw-page-assist";
 import { useSession } from "next-auth/react";
 import {
   AlertCircle,
@@ -553,6 +554,7 @@ function BookingSetupChecklist({
 // ─── Main Settings Page ────────────────────────────────────────────────────────
 
 export default function BookingSettingsPage() {
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const { data: session } = useSession();
   const role = (session?.user as { role?: string } | undefined)?.role;
@@ -1051,6 +1053,8 @@ export default function BookingSettingsPage() {
           ) : null}
         </div>
       </div>
+
+      <OpenClawPageAssist pathname={pathname} />
 
       <BookingSetupChecklist
         googleDone={googleChecklistDone}

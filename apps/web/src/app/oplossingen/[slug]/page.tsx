@@ -1,21 +1,31 @@
-"use client";
+import type { Metadata } from "next";
+import { getSolutionModuleBySlug } from "@/components/marketing/marketing-page";
+import { MarketingSeoJsonLd } from "@/components/marketing/marketing-seo-json-ld";
+import { generateSolutionMetadata } from "@/lib/seo/generate-marketing-metadata";
+import { SolutionDetailClient } from "./solution-detail-client";
 
-import { useParams } from "next/navigation";
-import {
-  getSolutionModuleBySlug,
-  SolutionDetailMarketingPage,
-  type SolutionSlug,
-} from "@/components/marketing/marketing-page";
+type PageProps = {
+  params: Promise<{ slug: string }>;
+};
 
-export default function SolutionDetailPage() {
-  const params = useParams<{ slug: string }>();
-  const rawSlug = params?.slug;
-  const slug = Array.isArray(rawSlug) ? rawSlug[0] : rawSlug;
-  const module = slug ? getSolutionModuleBySlug(slug) : undefined;
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { slug } = await params;
+  const module = getSolutionModuleBySlug(slug);
+  const fallback = module
+    ? { title: `${module.label} — ${module.title}`, description: module.description }
+    : {
+        title: "Oplossing — Digitify Lead Finder",
+        description: "Ontdek hoe Digitify Lead Finder jouw commerciële flow versnelt.",
+      };
+  return generateSolutionMetadata(slug, fallback);
+}
 
-  if (!module) {
-    return <SolutionDetailMarketingPage slug="lead-search" />;
-  }
-
-  return <SolutionDetailMarketingPage slug={module.slug as SolutionSlug} />;
+export default async function SolutionDetailPage({ params }: PageProps) {
+  const { slug } = await params;
+  return (
+    <>
+      <MarketingSeoJsonLd path={`/oplossingen/${slug}`} />
+      <SolutionDetailClient slug={slug} />
+    </>
+  );
 }

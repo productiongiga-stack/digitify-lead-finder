@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
 import { MarketingPage } from "@/components/marketing/marketing-page";
+import { MarketingSeoJsonLd } from "@/components/marketing/marketing-seo-json-ld";
+import { generateMarketingMetadata } from "@/lib/seo/generate-marketing-metadata";
 
-export const metadata: Metadata = {
-  title: "Contact",
-  description: "Plan een demo of bespreek hoe Digitify Lead Finder in jouw groeiproces past.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  return generateMarketingMetadata("contact");
+}
 
 export default function ContactPage() {
-  return <MarketingPage page="contact" />;
+  return (
+    <>
+      <MarketingSeoJsonLd path="/contact" />
+      <MarketingPage page="contact" />
+    </>
+  );
 }

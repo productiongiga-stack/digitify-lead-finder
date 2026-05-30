@@ -75,6 +75,28 @@ Belangrijke regels:
 - Tone: ${campaign.toneOfVoice || tone}`;
   }
 
+  if (context.bookingsAssist) {
+    const b = context.bookingsAssist;
+    prompt += `\n\nBoekingswidget & Google Agenda (live diagnose):
+- Tijdzone: ${b.timezone}
+- Actieve weekdagen: ${b.activeWeekdayLabels}
+- Duur / interval: ${b.durationMinutes} min / ${b.slotMinutes} min
+- Min. voorafmelding: ${b.minimumNoticeHours} uur | Horizon: ${b.maximumHorizonDays} dagen
+- Publieke tenant token: ${b.publicTenantConfigured ? "ja" : "nee"}
+- Google sync: ${b.googleSyncEnabled ? "aan" : "uit"} | OAuth: ${b.googleOAuthConnected ? "ja" : "nee"} | Service account: ${b.googleServiceAccountConfigured ? "ja" : "nee"}
+- Calendar ID: ${b.calendarId || "niet ingesteld"}
+- Default event type: ${b.defaultEventType ? `${b.defaultEventType.name} (${b.defaultEventType.slug}), ${b.defaultEventType.enabledRuleCount} actieve regels` : "geen"}
+- Google leesbaar: ${b.googleCalendarProbe.enabled ? "ja" : "nee"} | Komende events (7d): ${b.googleCalendarProbe.upcomingEventsNext7Days}
+- Komende 7 dagen (status): ${b.nextSevenDays.map((d) => `${d.date}=${d.status} (${d.availableSlots}/${d.totalSlots})`).join("; ") || "geen data"}
+${b.checklist.length ? `- Gedetecteerde aandachtspunten: ${b.checklist.join(" | ")}` : "- Geen automatische aandachtspunten gedetecteerd."}
+
+Als expert voor deze boekingsmodule:
+1. Leg uit waarom de embed geen groene/oranje dagen toont (weekuren, horizon, Google busy, tenant token).
+2. Geef concrete stappen in Instellingen → Boekingswidget en Integraties.
+3. Verwijs naar Vercel env vars voor Google OAuth indien connectie faalt.
+4. Stel geen afspraken rechtstreeks in — alleen configuratie-advies.`;
+  }
+
   return prompt;
 }
 

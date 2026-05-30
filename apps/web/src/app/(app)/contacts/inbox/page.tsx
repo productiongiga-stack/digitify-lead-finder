@@ -58,8 +58,12 @@ function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
-function stripHtmlForAi(html: string) {
-  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+function emailPreviewFromMessage(message: { text?: string | null; html?: string | null }) {
+  if (message.text?.trim()) return message.text.trim().slice(0, 280);
+  if (message.html?.trim()) {
+    return message.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 280);
+  }
+  return "";
 }
 
 const INBOX_AI_STYLES = [
@@ -129,6 +133,8 @@ export default function InboxPage() {
     html?: string | null;
   } | null>(null);
 
+  const composeEmailValid = isValidEmail(composeTo);
+
   const utils = trpc.useUtils();
 
   const { data: mailboxes } = trpc.inbox.mailboxes.useQuery(undefined, {
@@ -177,15 +183,45 @@ export default function InboxPage() {
     },
   );
 
+  const { data: linkedFromMessage } = trpc.inbox.resolveLeadByEmail.useQuery(
+    { email: message?.fromAddress || "invalid@example.com" },
+    {
+      enabled: Boolean(message?.fromAddress && isValidEmail(message.fromAddress)),
+      refetchOnWindowFocus: false,
+    },
+  );
+  const { data: linkedFromComposeTo } = trpc.inbox.resolveLeadByEmail.useQuery(
+    { email: composeTo },
+    {
+      enabled: composerOpen && composeEmailValid,
+      refetchOnWindowFocus: false,
+    },
+  );
+  const recordInbound = trpc.inbox.recordInbound.useMutation({
+    onSuccess: () => {
+      if (linkedFromMessage?.id) {
+        utils.lead.getEmailTimeline.invalidate({ leadId: linkedFromMessage.id });
+      }
+    },
+  });
+
   const sendReply = trpc.inbox.reply.useMutation({
     onSuccess: () => {
       setReplyBody("");
       setReplyOpen(false);
       setComposeStatus("replied");
       utils.inbox.list.invalidate();
+      if (linkedFromMessage?.id) {
+        utils.lead.getEmailTimeline.invalidate({ leadId: linkedFromMessage.id });
+      }
     },
     onError: (err) => {
       setComposeStatus("failed");
+      setComposeError(err.message);
+    },
+  });
+  const suggestReply = trpc.inbox.suggestReply.useMutation({
+    onError: (err) => {
       setComposeError(err.message);
     },
   });
@@ -202,6 +238,9 @@ export default function InboxPage() {
       setComposeBody("");
       setComposeSubject("");
       utils.inbox.list.invalidate();
+      if (composeLeadId) {
+        utils.lead.getEmailTimeline.invalidate({ leadId: composeLeadId });
+      }
     },
     onError: (err) => {
       setComposeStatus("failed");
@@ -213,6 +252,31 @@ export default function InboxPage() {
     if (!message?.html) return null;
     return buildInboxHtmlDocument(sanitizeInboxHtml(message.html));
   }, [message?.html]);
+
+  useEffect(() => {
+    if (!message?.fromAddress || !isValidEmail(message.fromAddress)) return;
+    recordInbound.mutate({
+      uid: message.uid,
+      mailbox: selectedMailbox,
+      fromEmail: message.fromAddress,
+      subject: message.subject,
+      messageId: message.messageId || undefined,
+      bodyPreview: emailPreviewFromMessage(message),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opened message
+  }, [message?.uid, message?.messageId, selectedMailbox]);
+
+  useEffect(() => {
+    if (!linkedFromMessage?.id) return;
+    setComposeLeadId(linkedFromMessage.id);
+    setComposeLeadSearch(linkedFromMessage.companyName || "");
+  }, [linkedFromMessage?.id, linkedFromMessage?.companyName]);
+
+  useEffect(() => {
+    if (!composerOpen || !linkedFromComposeTo?.id) return;
+    setComposeLeadId(linkedFromComposeTo.id);
+    setComposeLeadSearch(linkedFromComposeTo.companyName || "");
+  }, [composerOpen, linkedFromComposeTo?.id, linkedFromComposeTo?.companyName]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -281,6 +345,7 @@ export default function InboxPage() {
       messageId: message.messageId,
       inReplyTo: message.inReplyTo || message.messageId,
       body: replyBody,
+      ...(linkedFromMessage?.id || composeLeadId ? { leadId: linkedFromMessage?.id || composeLeadId } : {}),
     });
   }
 
@@ -343,28 +408,15 @@ export default function InboxPage() {
     });
   }
 
-  function incomingBodyForAi(context: {
-    text?: string | null;
-    html?: string | null;
-  }) {
-    if (context.text?.trim()) return context.text.trim();
-    if (context.html?.trim()) return stripHtmlForAi(context.html);
-    return "";
-  }
-
   function handleAiReply() {
-    if (!message) return;
+    if (!message || selectedUid === null) return;
     setComposeError("");
-    rewriteInboxMessage.mutate(
+    suggestReply.mutate(
       {
-        purpose: "reply",
+        uid: message.uid,
+        mailbox: selectedMailbox,
         style: inboxAiStyle,
-        body: replyBody.trim() || undefined,
-        subject: message.subject.startsWith("Re:") ? message.subject : `Re: ${message.subject}`,
-        incomingSubject: message.subject,
-        incomingBody: incomingBodyForAi(message),
-        recipientEmail: message.fromAddress,
-        recipientName: extractName(message.from),
+        draftBody: replyBody.trim() || undefined,
       },
       {
         onSuccess: (data) => {
@@ -394,7 +446,8 @@ export default function InboxPage() {
         subject: composeSubject.trim() || undefined,
         body: composeBody.trim() || undefined,
         incomingSubject: incoming?.subject,
-        incomingBody: incoming ? incomingBodyForAi(incoming) : undefined,
+        incomingBody: incoming?.text?.trim() || undefined,
+        incomingHtml: incoming?.html?.trim() || undefined,
         recipientEmail: composeTo.trim() || incoming?.fromAddress,
         recipientName: incoming ? extractName(incoming.from) : undefined,
       },
@@ -446,7 +499,6 @@ export default function InboxPage() {
   const composeUnknownVariables = Array.from(
     new Set([...findUnknownMailVariables(composeSubject), ...findUnknownMailVariables(composeBody)]),
   );
-  const composeEmailValid = isValidEmail(composeTo);
   const composeReady =
     composeEmailValid &&
     Boolean(composeSubject.trim()) &&
@@ -741,55 +793,59 @@ export default function InboxPage() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label>Lead koppeling (optioneel)</Label>
-                        <Input
-                          value={composeLeadSearch}
-                          onChange={(event) => {
-                            setComposeLeadSearch(event.target.value);
-                            setComposeStatus("draft");
-                            if (!event.target.value) setComposeLeadId("");
-                          }}
-                          placeholder="Zoek lead op naam..."
-                        />
+                        <Label>Lead in CRM</Label>
                         {composeLeadId ? (
-                          <div className="mt-1 flex items-center gap-2">
-                            <Badge variant="outline">Lead gekoppeld</Badge>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 px-2 text-[11px]"
-                              onClick={() => {
-                                setComposeLeadId("");
-                                setComposeLeadSearch("");
-                              }}
+                          <div className="rounded-md border bg-muted/30 px-2.5 py-2 text-xs">
+                            <p className="font-medium text-foreground">
+                              Automatisch gekoppeld:{" "}
+                              {linkedFromComposeTo?.companyName || composeLeadSearch || "Lead"}
+                            </p>
+                            <Link
+                              href={`/leads/${composeLeadId}`}
+                              className="text-primary hover:underline"
                             >
-                              Ontkoppelen
-                            </Button>
+                              Bekijk leadprofiel &amp; mailgeschiedenis
+                            </Link>
                           </div>
+                        ) : composeEmailValid ? (
+                          <p className="text-[11px] text-muted-foreground">
+                            Geen lead met dit e-mailadres — er wordt automatisch een lead aangemaakt bij verzenden.
+                          </p>
                         ) : (
-                          <p className="mt-1 text-[11px] text-muted-foreground">
-                            Koppel optioneel een lead voor CRM-tracking en placeholders.
+                          <p className="text-[11px] text-muted-foreground">
+                            Vul een ontvangeradres in om de lead automatisch te koppelen.
                           </p>
                         )}
-                        {composeLeadsQuery.data?.items && composeLeadsQuery.data.items.length > 0 ? (
-                          <div className="mt-1 max-h-36 overflow-y-auto rounded-md border bg-background">
-                            {composeLeadsQuery.data.items.map((lead) => (
-                              <button
-                                key={lead.id}
-                                type="button"
-                                className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-xs hover:bg-accent"
-                                onClick={() => handleSelectComposeLead(lead)}
-                              >
-                                <span className="truncate font-medium">
-                                  {lead.companyName || lead.website || "Onbekende lead"}
-                                </span>
-                                <span className="ml-2 truncate text-muted-foreground">
-                                  {lead.email || "-"}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        ) : null}
+                        <details className="text-[11px] text-muted-foreground">
+                          <summary className="cursor-pointer text-primary">Handmatig andere lead kiezen</summary>
+                          <Input
+                            className="mt-2 h-8"
+                            value={composeLeadSearch}
+                            onChange={(event) => {
+                              setComposeLeadSearch(event.target.value);
+                              setComposeStatus("draft");
+                              if (!event.target.value) setComposeLeadId("");
+                            }}
+                            placeholder="Zoek lead op naam..."
+                          />
+                          {composeLeadsQuery.data?.items && composeLeadsQuery.data.items.length > 0 ? (
+                            <div className="mt-1 max-h-28 overflow-y-auto rounded-md border bg-background">
+                              {composeLeadsQuery.data.items.map((lead) => (
+                                <button
+                                  key={lead.id}
+                                  type="button"
+                                  className="flex w-full items-center justify-between px-2.5 py-1.5 text-left hover:bg-accent"
+                                  onClick={() => handleSelectComposeLead(lead)}
+                                >
+                                  <span className="truncate font-medium">
+                                    {lead.companyName || lead.website || "Onbekende lead"}
+                                  </span>
+                                  <span className="ml-2 truncate">{lead.email || "-"}</span>
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </details>
                       </div>
                       <div className="space-y-1">
                         <Label>Aan</Label>
@@ -937,6 +993,22 @@ export default function InboxPage() {
                   <div className="text-xs text-muted-foreground">
                     Aan: {message.to}
                   </div>
+                  {linkedFromMessage ? (
+                    <div className="mt-2 rounded-md border border-primary/20 bg-primary/5 px-2.5 py-2 text-xs">
+                      <span className="text-muted-foreground">CRM: </span>
+                      <Link
+                        href={`/leads/${linkedFromMessage.id}`}
+                        className="font-medium text-primary hover:underline"
+                      >
+                        {linkedFromMessage.companyName}
+                      </Link>
+                      <span className="text-muted-foreground"> · mailgeschiedenis op leadprofiel</span>
+                    </div>
+                  ) : isValidEmail(message.fromAddress) ? (
+                    <p className="mt-2 text-[11px] text-muted-foreground">
+                      Geen lead met {message.fromAddress} — wordt bij verzenden automatisch aangemaakt.
+                    </p>
+                  ) : null}
                   <div className="mt-2.5 flex flex-wrap gap-1.5">
                     <Button
                       type="button"
@@ -1033,17 +1105,20 @@ export default function InboxPage() {
                             type="button"
                             variant="outline"
                             size="sm"
-                            disabled={rewriteInboxMessage.isPending}
+                            disabled={suggestReply.isPending || messageLoading}
                             onClick={handleAiReply}
                           >
-                            {rewriteInboxMessage.isPending ? (
+                            {suggestReply.isPending ? (
                               <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
                             ) : (
                               <Sparkles className="mr-2 h-3.5 w-3.5" />
                             )}
-                            {replyBody.trim() ? "Herschrijf met AI" : "Genereer met AI"}
+                            {replyBody.trim() ? "Herschrijf antwoord" : "Antwoord op mail genereren"}
                           </Button>
                         </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          De AI leest de volledige inkomende mail en stelt een inhoudelijk antwoord voor.
+                        </p>
                       </div>
                       <Textarea
                         value={replyBody}

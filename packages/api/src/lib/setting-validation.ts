@@ -9,6 +9,7 @@ const LARGE_STRING_SETTING_KEYS = new Set([
   "email.custom_html",
   "email.custom_html_presets_json",
   "email.default_layout_by_type_json",
+  "seo.solution_pages_json",
 ]);
 const MAX_IMAGE_DATA_URL_LENGTH = 3_000_000;
 const LEGACY_KEY_PATTERN = /^[a-z0-9_]+$/;
@@ -28,6 +29,9 @@ const BOOLEAN_SETTING_KEYS = new Set([
   "bookings.reminders_1h_enabled",
   "email.smtp_tls_reject_unauthorized",
   "email.imap_tls",
+  "seo.robots_index",
+  "seo.robots_follow",
+  "seo.structured_data_enabled",
 ]);
 
 const ENUM_SETTING_KEYS = new Map<string, readonly string[]>([
@@ -35,7 +39,9 @@ const ENUM_SETTING_KEYS = new Map<string, readonly string[]>([
   ["email.default_layout", ["modern", "minimal", "business", "proposal", "followup"]],
   ["email.design_mode", ["preset", "custom"]],
   ["display.typography_mode", ["compact", "normal"]],
-  ["api.ai_provider", ["anthropic", "openai"]],
+  ["api.ai_provider", ["anthropic", "openai", "deepseek"]],
+  ["seo.twitter_card", ["summary", "summary_large_image"]],
+  ["seo.og_locale", ["nl_BE", "nl_NL", "en_US", "fr_BE", "de_DE"]],
 ]);
 
 const NUMBER_SETTING_KEYS = new Map<string, { min: number; max: number; integer?: boolean }>([
@@ -86,7 +92,14 @@ function isLikelyEmailKey(key: string) {
 const WEBHOOK_URL_KEYS = new Set(["bookings.webhook_url"]);
 
 function isLikelyUrlKey(key: string) {
-  return key.endsWith("_url") || key === "branding.logo_url" || key === "branding.favicon_url";
+  return (
+    key.endsWith("_url") ||
+    key === "branding.logo_url" ||
+    key === "branding.favicon_url" ||
+    key === "seo.og_image_url" ||
+    key === "seo.organization_logo_url" ||
+    key === "seo.canonical_base_url"
+  );
 }
 
 function isImageAssetKey(key: string) {

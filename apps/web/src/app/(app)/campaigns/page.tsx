@@ -46,6 +46,10 @@ import {
   Info,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import {
+  CAMPAIGN_PROFILE_OPTIONS,
+  getCampaignProfileLabel,
+} from "@/lib/campaign-profile";
 
 export default function CampaignsPage() {
   const router = useRouter();
@@ -127,14 +131,16 @@ export default function CampaignsPage() {
     <div className="app-page">
       <div className="app-page-header">
         <div className="app-page-heading">
-          <h1 className="app-page-title">Campagnes</h1>
-          <p className="app-page-subtitle">Beheer je lead generation campagnes</p>
+          <h1 className="app-page-title">Campagneprofielen</h1>
+          <p className="app-page-subtitle">
+            Automatiseringen voor leads, review-aanvragen en meer — elk profiel met eigen drip en doelgroep
+          </p>
         </div>
         <div className="app-page-actions">
           <Link href="/campaigns/new">
             <Button size="sm">
               <Plus className="mr-2 h-4 w-4" />
-              Nieuwe Campagne
+              Nieuw profiel
             </Button>
           </Link>
         </div>
@@ -220,7 +226,7 @@ export default function CampaignsPage() {
                       <Link href="/campaigns/new">
                         <Button size="sm">
                           <Plus className="mr-2 h-4 w-4" />
-                          Nieuwe Campagne
+                          Nieuw profiel
                         </Button>
                       </Link>
                     )
@@ -242,7 +248,12 @@ export default function CampaignsPage() {
                           {campaign.name}
                         </CardTitle>
                       </Link>
-                      <div className="flex shrink-0 items-center gap-1">
+                      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                        <Badge variant="outline" className="text-[10px] font-normal">
+                          {getCampaignProfileLabel(
+                            (campaign as { profileType?: string }).profileType,
+                          )}
+                        </Badge>
                         <Badge variant={getCampaignStatusVariant(campaign.status)}>
                           {CAMPAIGN_STATUS_LABELS[campaign.status] || campaign.status}
                         </Badge>
@@ -375,7 +386,7 @@ export default function CampaignsPage() {
                   </>
                 ) : (
                   <p className="mt-2 text-sm font-medium">
-                    Nog geen campagnes. Start met een niche en regio om leads te structureren.
+                    Nog geen profielen. Maak een lead- of review-automatisering aan.
                   </p>
                 )}
                 <Button asChild size="sm" variant="outline" className="mt-3">
@@ -386,7 +397,7 @@ export default function CampaignsPage() {
                         : "/campaigns/new"
                     }
                   >
-                    {insights.focus ? "Open campagne" : "Nieuwe campagne"}
+                    {insights.focus ? "Open profiel" : "Nieuw profiel"}
                   </Link>
                 </Button>
               </CardContent>

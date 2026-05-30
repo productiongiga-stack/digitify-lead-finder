@@ -7,7 +7,63 @@ import { extractInvoiceIdFromDraftBody } from "../lib/invoice-outbound";
 import { getSettingString } from "../lib/settings";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 import { assertLeadAccess } from "../lib/tenant";
+import {
+  buildOutboundSourceModuleWhere,
+  EMAIL_TYPE_VALUES,
+  getOutboundSourceModule,
+  normalizeLegacyScheduledDrafts,
+  OUTBOUND_SOURCE_MODULES,
+  RESCHEDULABLE_OUTBOUND_STATUSES,
+} from "../lib/outbound-draft-meta";
+
+function enrichDraftRow<
+  T extends {
+    sequenceId: string | null;
+    type: string;
+    status: string;
+    scheduledFor: Date | null;
+  },
+>(draft: T) {
+  return {
+    ...draft,
+    sourceModule: getOutboundSourceModule(draft),
+    displayStatus: draft.status === "SCHEDULED" ? "DRAFT" : draft.status,
+  };
+}
+
 export const contactRouter = router({
+  getOutboundStats: protectedProcedure.query(async ({ ctx }) => {
+    const workspaceId = ctx.user.workspaceId!;
+    await normalizeLegacyScheduledDrafts(ctx.db, workspaceId);
+
+    const buckets = await ctx.db.emailDraft.groupBy({
+      by: ["status"],
+      where: { lead: { createdById: workspaceId } },
+      _count: { _all: true },
+    });
+
+    const byStatus = Object.fromEntries(
+      buckets.map((row) => [row.status, row._count._all]),
+    ) as Record<string, number>;
+
+    const draft = (byStatus.DRAFT ?? 0) + (byStatus.SCHEDULED ?? 0);
+    const pending = byStatus.PENDING_APPROVAL ?? 0;
+    const approved = byStatus.APPROVED ?? 0;
+    const sent = byStatus.SENT ?? 0;
+    const failed = byStatus.FAILED ?? 0;
+    const rejected = byStatus.REJECTED ?? 0;
+
+    return {
+      draft,
+      pending,
+      approved,
+      sent,
+      failed,
+      rejected,
+      total: buckets.reduce((sum, row) => sum + row._count._all, 0),
+    };
+  }),
+
   getTopbarStats: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);
     const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["email.followup_days"]);
@@ -48,17 +104,28 @@ export const contactRouter = router({
         status: z.string().optional(),
         leadId: z.string().optional(),
         search: z.string().optional(),
+        type: z.enum(EMAIL_TYPE_VALUES).optional(),
+        sourceModule: z.enum(OUTBOUND_SOURCE_MODULES).optional(),
         page: z.number().min(1).default(1),
         pageSize: z.number().min(1).max(100).default(25),
       })
     )
     .query(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      await normalizeLegacyScheduledDrafts(ctx.db, workspaceId);
+
       const where: Record<string, unknown> = {
-        lead: { createdById: ctx.user.workspaceId! },
+        lead: { createdById: workspaceId },
       };
-      if (input.status) where.status = input.status;
+      if (input.status) {
+        where.status = input.status === "DRAFT" ? { in: ["DRAFT", "SCHEDULED"] } : input.status;
+      }
+      if (input.type) where.type = input.type;
+      if (input.sourceModule) {
+        Object.assign(where, buildOutboundSourceModuleWhere(input.sourceModule));
+      }
       if (input.leadId) {
-        await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
+        await assertLeadAccess(ctx.db, workspaceId, input.leadId);
         where.leadId = input.leadId;
       }
       const search = input.search?.trim();
@@ -66,11 +133,11 @@ export const contactRouter = router({
         where.OR = [
           { subject: { contains: search, mode: "insensitive" } },
           { toEmail: { contains: search, mode: "insensitive" } },
-          { lead: { companyName: { contains: search, mode: "insensitive" }, createdById: ctx.user.workspaceId! } },
+          { lead: { companyName: { contains: search, mode: "insensitive" }, createdById: workspaceId } },
         ];
       }
 
-      const [items, total] = await Promise.all([
+      const [rows, total] = await Promise.all([
         ctx.db.emailDraft.findMany({
           where,
           orderBy: { createdAt: "desc" },
@@ -80,12 +147,120 @@ export const contactRouter = router({
             lead: { select: { id: true, companyName: true } },
             author: { select: { id: true, name: true } },
             approver: { select: { id: true, name: true } },
+            sequence: { select: { id: true, name: true } },
           },
         }),
         ctx.db.emailDraft.count({ where }),
       ]);
 
+      const items = rows.map(enrichDraftRow);
+
       return { items, total, page: input.page, pageSize: input.pageSize, totalPages: Math.ceil(total / input.pageSize) };
+    }),
+
+  listAgenda: protectedProcedure
+    .input(
+      z.object({
+        rangeStart: z.string().datetime(),
+        rangeEnd: z.string().datetime(),
+        type: z.enum(EMAIL_TYPE_VALUES).optional(),
+        sourceModule: z.enum(OUTBOUND_SOURCE_MODULES).optional(),
+        status: z.string().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      await normalizeLegacyScheduledDrafts(ctx.db, workspaceId);
+
+      const rangeStart = new Date(input.rangeStart);
+      const rangeEnd = new Date(input.rangeEnd);
+      if (Number.isNaN(rangeStart.getTime()) || Number.isNaN(rangeEnd.getTime())) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Ongeldige datumperiode." });
+      }
+
+      const where: Record<string, unknown> = {
+        lead: { createdById: workspaceId },
+        scheduledFor: { gte: rangeStart, lte: rangeEnd },
+      };
+      if (input.type) where.type = input.type;
+      if (input.sourceModule) {
+        Object.assign(where, buildOutboundSourceModuleWhere(input.sourceModule));
+      }
+      if (input.status) {
+        where.status = input.status === "DRAFT" ? { in: ["DRAFT", "SCHEDULED"] } : input.status;
+      }
+
+      const rows = await ctx.db.emailDraft.findMany({
+        where,
+        orderBy: { scheduledFor: "asc" },
+        include: {
+          lead: { select: { id: true, companyName: true } },
+          author: { select: { id: true, name: true } },
+          sequence: { select: { id: true, name: true } },
+        },
+      });
+
+      return { items: rows.map(enrichDraftRow) };
+    }),
+
+  updateScheduledFor: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        scheduledFor: z.string().datetime(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      const draft = await ctx.db.emailDraft.findFirst({
+        where: { id: input.id, lead: { createdById: workspaceId } },
+        select: { id: true, status: true, leadId: true, subject: true, authorId: true },
+      });
+      if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "E-mail niet gevonden." });
+      if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang om deze planning aan te passen." });
+      }
+      if (!(RESCHEDULABLE_OUTBOUND_STATUSES as readonly string[]).includes(draft.status)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Alleen concepten of goedgekeurde mails met een gepland tijdstip kunnen worden verplaatst.",
+        });
+      }
+
+      const scheduledFor = new Date(input.scheduledFor);
+      if (Number.isNaN(scheduledFor.getTime())) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Ongeldig tijdstip." });
+      }
+
+      const nextStatus = draft.status === "SCHEDULED" ? "DRAFT" : draft.status;
+
+      const updated = await ctx.db.emailDraft.update({
+        where: { id: draft.id },
+        data: {
+          scheduledFor,
+          status: nextStatus,
+        },
+        include: {
+          lead: { select: { id: true, companyName: true } },
+          sequence: { select: { id: true, name: true } },
+        },
+      });
+
+      if (draft.leadId) {
+        await ctx.db.activity
+          .create({
+            data: {
+              leadId: draft.leadId,
+              userId: ctx.user.id,
+              type: "LEAD_UPDATED",
+              title: `Verzendmoment aangepast: ${draft.subject}`,
+              metadata: { draftId: draft.id, scheduledFor: scheduledFor.toISOString(), source: "contact.updateScheduledFor" },
+            },
+          })
+          .catch(() => null);
+      }
+
+      return enrichDraftRow(updated);
     }),
 
   deleteDraft: protectedProcedure

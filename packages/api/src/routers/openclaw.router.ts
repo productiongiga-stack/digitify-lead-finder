@@ -6,24 +6,16 @@ import { type PrismaClient } from "@digitify/db";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
 import { assertLeadAccess } from "../lib/tenant";
+import { generateInboxAiMessage } from "../lib/inbox-ai-reply";
+import { loadAiProviderConfig } from "../lib/ai-provider-config";
 
 async function getClient(db: PrismaClient, workspaceId: string): Promise<{ client: OpenClawClient | null; model: string }> {
-  const rows = await loadWorkspaceSettingRows(db, { workspaceId, memberId: workspaceId }, [
-    "api.ai_provider",
-    "openclaw.model",
-    "api.anthropic_key",
-    "api.openai_key",
-  ]);
-  const settings = settingsRowsToMap(rows);
-  const provider = getSettingString(settings, "api.ai_provider", "anthropic");
-  const model = getSettingString(settings, "openclaw.model", "claude-sonnet-4-20250514");
-  const apiKey =
-    provider === "openai"
-      ? getSettingString(settings, "api.openai_key", process.env.OPENAI_API_KEY || "")
-      : getSettingString(settings, "api.anthropic_key", process.env.ANTHROPIC_API_KEY || "");
-
-  if (!apiKey.trim()) return { client: null, model };
-  return { client: new OpenClawClient({ apiKey: apiKey.trim(), model }), model };
+  const { provider, model, apiKey } = await loadAiProviderConfig(db, workspaceId);
+  if (!apiKey) return { client: null, model };
+  return {
+    client: new OpenClawClient({ apiKey, model, provider }),
+    model,
+  };
 }
 
 function readSettingValue(value: unknown, fallback = "") {
@@ -103,6 +95,7 @@ export const openclawRouter = router({
           currentPage: z.string().optional(),
           leadId: z.string().optional(),
           campaignId: z.string().optional(),
+          assistBookings: z.boolean().optional(),
         }),
       })
     )
@@ -178,6 +171,17 @@ export const openclawRouter = router({
         language: readSettingValue(localSettingsMap.get("openclaw_language"), "nl"),
         companyName: businessContextData.companyName,
       };
+
+      const wantsBookingsAssist =
+        input.context.assistBookings ||
+        (input.context.currentPage?.includes("/settings/bookings") ?? false);
+      if (wantsBookingsAssist) {
+        const { buildBookingOpenClawAssistContext } = await import("../lib/booking-openclaw-context");
+        openclawContext.bookingsAssist = await buildBookingOpenClawAssistContext(
+          ctx.db,
+          ctx.user.workspaceId!,
+        );
+      }
 
       const response = await client.chat(input.messages, openclawContext);
 
@@ -379,72 +383,24 @@ ONDERWERP: [nieuwe onderwerpregel]
         body: z.string().optional(),
         incomingSubject: z.string().optional(),
         incomingBody: z.string().optional(),
+        incomingHtml: z.string().optional(),
         recipientEmail: z.string().optional(),
         recipientName: z.string().optional(),
       }),
     )
-    .mutation(async ({ ctx, input }) => {
-      const { client } = await getClient(ctx.db, ctx.user.workspaceId!);
-      if (!client) {
-        return { rewritten: null, error: "API key niet geconfigureerd. Ga naar Instellingen → Integraties." };
-      }
-
-      const businessContext = (await loadBusinessContext(ctx.db, ctx.user.workspaceId!)).businessContext;
-      const incomingSnippet = (input.incomingBody || "").trim().slice(0, 4000);
-      const currentBody = (input.body || "").trim();
-      const purposeLabel =
-        input.purpose === "reply"
-          ? "antwoord op een inkomende e-mail"
-          : input.purpose === "follow_up"
-            ? "opvolgmail na een eerder contact"
-            : "nieuw outbound bericht";
-
-      const prompt = `Schrijf of herschrijf een professionele Nederlandse e-mail (${purposeLabel}) in een "${input.style}" stijl.
-
-${input.recipientName || input.recipientEmail ? `Ontvanger: ${input.recipientName || input.recipientEmail}${input.recipientEmail ? ` <${input.recipientEmail}>` : ""}` : ""}
-${input.incomingSubject ? `Inkomend onderwerp: ${input.incomingSubject}` : ""}
-${incomingSnippet ? `Inkomende tekst:\n${incomingSnippet}` : ""}
-${input.subject ? `Huidig onderwerp: ${input.subject}` : ""}
-${currentBody ? `Huidige concepttekst:\n${currentBody}` : "Er is nog geen concepttekst — schrijf een volledig nieuw bericht."}
-
-BELANGRIJK:
-- Schrijf in het Nederlands (België), klaar om te verzenden
-- Behoud bestaande {{...}} placeholders exact
-- Gebruik voor afzender alleen: {{senderName}}, {{senderTitle}}, {{senderCompany}}, {{senderEmail}}, {{senderPhone}}
-- Geen markdown, alleen platte tekst in de body
-- Geef je antwoord in dit formaat:
-ONDERWERP: [onderwerpregel]
----
-[e-mail body]
----`;
-
-      const response = await client.chat([{ role: "user", content: prompt }], {
-        businessContext,
-        leadData: {
-          companyName: input.recipientName || input.recipientEmail || "Ontvanger",
-          website: null,
-          city: null,
-          industry: null,
-          overallScore: null,
-          scorePriority: null,
-          gmbRating: null,
-          gmbReviewCount: null,
-        },
-      });
-
-      const subjectMatch = response.match(/ONDERWERP:\s*(.+)/);
-      const bodyMatch = response.match(/---\n([\s\S]*?)\n---/);
-
-      return {
-        rewritten: {
-          subject: normalizeAiPlaceholderSyntax(
-            subjectMatch?.[1]?.trim() || input.subject || input.incomingSubject || "Bericht",
-          ),
-          body: normalizeAiPlaceholderSyntax(bodyMatch?.[1]?.trim() || response),
-        },
-        error: null,
-      };
-    }),
+    .mutation(async ({ ctx, input }) =>
+      generateInboxAiMessage(ctx.db, ctx.user.workspaceId!, {
+        purpose: input.purpose,
+        style: input.style,
+        subject: input.subject,
+        draftBody: input.body,
+        incomingSubject: input.incomingSubject,
+        incomingBody: input.incomingBody,
+        incomingHtml: input.incomingHtml,
+        recipientEmail: input.recipientEmail,
+        recipientName: input.recipientName,
+      }),
+    ),
 
   analyzeLead: protectedProcedure
     .input(z.object({ leadId: z.string() }))

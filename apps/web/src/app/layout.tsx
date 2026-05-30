@@ -7,6 +7,8 @@ import { DynamicFavicon } from "@/components/layout/dynamic-favicon";
 import { BrandingCssVariables } from "@/components/layout/branding-css-variables";
 import { UiDensityProvider } from "@/components/layout/ui-density-provider";
 import { ToastProvider } from "@/components/feedback/toast-provider";
+import { buildRootMetadata } from "@/lib/seo/build-metadata";
+import { loadPublicSeoConfig } from "@/lib/seo/load-public-seo";
 
 const poppins = Poppins({
   subsets: ["latin"],
@@ -15,15 +17,10 @@ const poppins = Poppins({
   variable: "--font-poppins",
 });
 
-const appName = process.env.NEXT_PUBLIC_APP_NAME || "Lead Finder Suite";
-
-export const metadata: Metadata = {
-  title: {
-    default: appName,
-    template: `%s | ${appName}`,
-  },
-  description: "Slimme lead generation en outreach tool",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const config = await loadPublicSeoConfig();
+  return buildRootMetadata(config);
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

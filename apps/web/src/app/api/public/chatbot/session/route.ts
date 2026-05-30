@@ -18,7 +18,7 @@ type FallbackReply = IntentResult & {
 };
 
 type AiConfig = {
-  provider: "anthropic" | "openai";
+  provider: "anthropic" | "openai" | "deepseek";
   model: string;
   apiKey: string;
   maxTokens: number;
@@ -108,17 +108,20 @@ function parseBooleanValue(raw: string, fallback: boolean) {
 
 function getAiConfig(settings: Array<{ key: string; value: unknown }>): AiConfig | null {
   const providerRaw = getSetting(settings, "api.ai_provider", "anthropic").toLowerCase();
-  const provider: "anthropic" | "openai" = providerRaw === "openai" ? "openai" : "anthropic";
+  const provider: AiConfig["provider"] =
+    providerRaw === "openai" ? "openai" : providerRaw === "deepseek" ? "deepseek" : "anthropic";
   const model = getSetting(
     settings,
     "openclaw.model",
-    provider === "openai" ? "gpt-4o-mini" : "claude-sonnet-4-20250514"
+    provider === "openai" ? "gpt-4o-mini" : provider === "deepseek" ? "deepseek-chat" : "claude-sonnet-4-20250514",
   );
 
   const apiKey =
     provider === "openai"
       ? getSetting(settings, "api.openai_key", process.env.OPENAI_API_KEY || "")
-      : getSetting(settings, "api.anthropic_key", process.env.ANTHROPIC_API_KEY || "");
+      : provider === "deepseek"
+        ? getSetting(settings, "api.deepseek_key", process.env.DEEPSEEK_API_KEY || "")
+        : getSetting(settings, "api.anthropic_key", process.env.ANTHROPIC_API_KEY || "");
 
   if (!apiKey.trim()) return null;
 
@@ -264,7 +267,11 @@ function buildSystemPrompt(input: {
 }
 
 async function callOpenAi(config: AiConfig, systemPrompt: string, messages: Array<{ role: "user" | "assistant"; content: string }>) {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const endpoint =
+    config.provider === "deepseek"
+      ? "https://api.deepseek.com/chat/completions"
+      : "https://api.openai.com/v1/chat/completions";
+  const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
@@ -335,7 +342,7 @@ async function generateAiReply(args: {
 
   conversation.push({ role: "user", content: args.message });
 
-  if (args.config.provider === "openai") {
+  if (args.config.provider === "openai" || args.config.provider === "deepseek") {
     return callOpenAi(args.config, args.systemPrompt, conversation);
   }
   return callAnthropic(args.config, args.systemPrompt, conversation);
@@ -466,6 +473,7 @@ export async function POST(request: Request) {
       "api.ai_provider",
       "api.openai_key",
       "api.anthropic_key",
+      "api.deepseek_key",
       "openclaw.model",
       "openclaw.max_tokens",
       "branding.company_name",

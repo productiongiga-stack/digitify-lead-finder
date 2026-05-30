@@ -6,12 +6,14 @@ import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-sc
 import {
   addDays,
   addMinutes,
-  DEFAULT_BOOKING_TIMEZONE,
   applyWorkspaceEmbedSettingsToEventType,
   ensureDefaultBookingEventType,
+  eventTypeNeedsAvailabilityRuleSync,
   formatDateKey,
+  getBookingAvailabilityBounds,
   getWeekdayInZone,
   hasBookingOverlap,
+  loadEmbedAvailabilityRulesFromSettings,
   minutesToTime,
   overlapsBusyWindow,
   parseDateKey,
@@ -42,9 +44,8 @@ export async function GET(request: Request) {
     : await ensureDefaultBookingEventType(prisma, tenantUserId);
   if (!eventType) return NextResponse.json({ error: "Bookingtype niet gevonden." }, { status: 404 });
 
-  const needsRuleSync =
-    eventType.availabilityRules.length === 0 ||
-    !eventType.availabilityRules.some((rule) => rule.enabled);
+  const settingsRules = await loadEmbedAvailabilityRulesFromSettings(prisma, tenantUserId);
+  const needsRuleSync = eventTypeNeedsAvailabilityRuleSync(eventType.availabilityRules, settingsRules);
   if (needsRuleSync) {
     await applyWorkspaceEmbedSettingsToEventType(prisma, tenantUserId, eventType.id);
     eventType =
@@ -63,15 +64,14 @@ export async function GET(request: Request) {
   const endDate = parseDateKey(to);
   const days = [];
   const now = new Date();
-  const earliest = new Date(now.getTime() + Math.max(0, eventType.minimumNoticeHours || 0) * 60 * 60_000);
-  const latest = new Date(now.getTime() + Math.max(1, eventType.maximumHorizonDays || 60) * 24 * 60 * 60_000);
+  const { earliest, latest } = getBookingAvailabilityBounds(eventType, now);
 
-  const preliminaryHostTz = eventType.timezone?.trim() || DEFAULT_BOOKING_TIMEZONE;
+  const preliminaryHostTz = eventType.timezone?.trim() || "Europe/Brussels";
   const rangeStart = dayBoundsUtc(from, preliminaryHostTz);
   const rangeEnd = dayBoundsUtc(to, preliminaryHostTz);
   let googleWindows: Array<{ start: Date; end: Date; allDay: boolean }> = [];
   let googleEnabled = false;
-  let googleTimeZone = DEFAULT_BOOKING_TIMEZONE;
+  let googleTimeZone = preliminaryHostTz;
   try {
     const google = await listGoogleBusyWindows(prisma, {
       timeMin: addDays(rangeStart.start, -1),
@@ -80,13 +80,13 @@ export async function GET(request: Request) {
     });
     googleEnabled = google.enabled;
     googleWindows = google.windows;
-    googleTimeZone = google.timeZone || DEFAULT_BOOKING_TIMEZONE;
+    googleTimeZone = google.timeZone || preliminaryHostTz;
   } catch {
     googleEnabled = false;
     googleWindows = [];
   }
 
-  const hostTimeZone = eventType.timezone?.trim() || googleTimeZone || DEFAULT_BOOKING_TIMEZONE;
+  const hostTimeZone = eventType.timezone?.trim() || googleTimeZone || preliminaryHostTz;
 
   for (const cursor = new Date(startDate); cursor <= endDate && days.length < 90; cursor.setDate(cursor.getDate() + 1)) {
     const dateKey = formatDateKey(cursor);
@@ -101,10 +101,11 @@ export async function GET(request: Request) {
     const startMinutes = timeToMinutes(rule.startTime, 9 * 60);
     const endMinutes = timeToMinutes(rule.endTime, 17 * 60);
     const interval = Math.max(5, eventType.slotMinutes || 30);
-    for (let minutes = startMinutes; minutes + eventType.duration <= endMinutes; minutes += interval) {
+    const duration = Math.max(5, eventType.duration || 30);
+    for (let minutes = startMinutes; minutes + duration <= endMinutes; minutes += interval) {
       const time = minutesToTime(minutes);
       const start = zonedDateTimeToUtc(dateKey, time, hostTimeZone);
-      const end = addMinutes(start, eventType.duration);
+      const end = addMinutes(start, duration);
       if (start < earliest || start > latest) continue;
 
       totalSlots += 1;
@@ -118,7 +119,9 @@ export async function GET(request: Request) {
         end: bufferedEnd,
       });
       if (localOverlap) continue;
-      if (googleEnabled && overlapsBusyWindow(bufferedStart, bufferedEnd, googleWindows)) continue;
+      if (googleEnabled && overlapsBusyWindow(bufferedStart, bufferedEnd, googleWindows, { hostTimeZone })) {
+        continue;
+      }
 
       slots.push({
         time,
@@ -146,14 +149,16 @@ export async function GET(request: Request) {
     });
   }
 
-  await prisma.bookingAnalyticsEvent.create({
-    data: {
-      createdById: tenantUserId,
-      eventTypeId: eventType.id,
-      type: "availability_view",
-      metadata: { from, to, hostTimeZone, googleEnabled },
-    },
-  }).catch(() => null);
+  await prisma.bookingAnalyticsEvent
+    .create({
+      data: {
+        createdById: tenantUserId,
+        eventTypeId: eventType.id,
+        type: "availability_view",
+        metadata: { from, to, hostTimeZone, googleEnabled, rulesSynced: needsRuleSync },
+      },
+    })
+    .catch(() => null);
 
   return NextResponse.json({
     eventType: {
@@ -162,6 +167,8 @@ export async function GET(request: Request) {
       duration: eventType.duration,
       slotMinutes: eventType.slotMinutes,
       timezone: hostTimeZone,
+      maximumHorizonDays: eventType.maximumHorizonDays,
+      minimumNoticeHours: eventType.minimumNoticeHours,
     },
     hostTimeZone,
     timezone: hostTimeZone,

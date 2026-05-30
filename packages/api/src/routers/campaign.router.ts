@@ -7,8 +7,20 @@ import { normalizeAiPlaceholderSyntax } from "../lib/email-utils";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
+import { loadAiProviderConfig } from "../lib/ai-provider-config";
+import {
+  computeDripScheduledFor,
+  DEFAULT_CAMPAIGN_DRIP_STEPS,
+  DRIP_TIMEZONE,
+  getDripStepConfig,
+  getDripTimezoneLabel,
+  parseCampaignDripSteps,
+  type CampaignDripStepConfig,
+} from "../lib/campaign-drip";
 
 type DripMode = "lead" | "review";
+
+const campaignProfileTypeSchema = z.enum(["LEAD_OUTREACH", "REVIEW_REQUEST"]);
 
 type DripSequenceRunResult = {
   sequenceId: string;
@@ -25,12 +37,6 @@ type DripSequenceRunResult = {
 
 function sequenceName(campaignId: string, campaignName: string, mode: DripMode) {
   return `[${campaignId}] ${campaignName} ${mode === "review" ? "Review" : "Lead"} Drip`;
-}
-
-function addDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
 }
 
 function statusMeansResponded(status: string) {
@@ -70,8 +76,8 @@ async function runScheduledSequence(params: {
   const dueDrafts = await db.emailDraft.findMany({
     where: {
       sequenceId,
-      status: "SCHEDULED",
-      sequenceStep: { in: [2, 3] },
+      status: "APPROVED",
+      sequenceStep: { in: [1, 2, 3] },
       scheduledFor: { lte: now },
       lead: { createdById: workspaceId },
     },
@@ -142,6 +148,7 @@ async function runScheduledSequence(params: {
       recipientCompany: draft.lead.companyName,
       leadId: draft.lead.id,
       userId: workspaceId,
+      trackingDraftId: draft.id,
     });
 
     if (sendResult.success) {
@@ -216,9 +223,9 @@ export async function runAllDueDripsWorker(
   const now = new Date();
   const dueDraftRows = await db.emailDraft.findMany({
     where: {
-      status: "SCHEDULED",
+      status: "APPROVED",
       sequenceId: { not: null },
-      sequenceStep: { in: [2, 3] },
+      sequenceStep: { in: [1, 2, 3] },
       scheduledFor: { lte: now },
     },
     select: {
@@ -362,22 +369,9 @@ function buildLeadFollowUpStep(baseSubject: string, step: number) {
 }
 
 async function getOpenClawClient(db: PrismaClient, workspaceId: string): Promise<{ client: OpenClawClient | null }> {
-  const rows = await loadWorkspaceSettingRows(db, { workspaceId, memberId: workspaceId }, [
-    "api.ai_provider",
-    "openclaw.model",
-    "api.anthropic_key",
-    "api.openai_key",
-  ]);
-  const settings = settingsRowsToMap(rows);
-  const provider = getSettingString(settings, "api.ai_provider", "anthropic");
-  const model = getSettingString(settings, "openclaw.model", "claude-sonnet-4-20250514");
-  const apiKey =
-    provider === "openai"
-      ? getSettingString(settings, "api.openai_key", process.env.OPENAI_API_KEY || "")
-      : getSettingString(settings, "api.anthropic_key", process.env.ANTHROPIC_API_KEY || "");
-
-  if (!apiKey.trim()) return { client: null };
-  return { client: new OpenClawClient({ apiKey: apiKey.trim(), model }) };
+  const { provider, model, apiKey } = await loadAiProviderConfig(db, workspaceId);
+  if (!apiKey) return { client: null };
+  return { client: new OpenClawClient({ apiKey, model, provider }) };
 }
 
 async function ensureCampaignSequence(
@@ -395,11 +389,7 @@ async function ensureCampaignSequence(
         params.mode === "review"
           ? "Review drip (3 stappen: contact, opvolging, laatste keer)"
           : "Lead drip (3 stappen: contact, opvolging, laatste keer)",
-      steps: [
-        { step: 1, label: "Contact", delayDays: 0 },
-        { step: 2, label: "Opvolging", delayDays: 4 },
-        { step: 3, label: "Laatste keer", delayDays: 8 },
-      ],
+      steps: DEFAULT_CAMPAIGN_DRIP_STEPS,
       isActive: true,
     },
   });
@@ -472,6 +462,8 @@ export const campaignRouter = router({
                       sequenceStep: true,
                       scheduledFor: true,
                       sentAt: true,
+                      openedAt: true,
+                      clickedAt: true,
                       repliedAt: true,
                       createdAt: true,
                     },
@@ -521,25 +513,66 @@ export const campaignRouter = router({
         desiredServices: z.array(z.string()).default([]),
         toneOfVoice: z.string().optional(),
         goal: z.string().optional(),
+        profileType: campaignProfileTypeSchema.default("LEAD_OUTREACH"),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const campaign = await ctx.db.campaign.create({
-        data: {
-          ...input,
-          createdById: ctx.user.workspaceId!,
-        },
-      });
+      const workspaceId = ctx.user.workspaceId;
+      if (!workspaceId) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Workspace kon niet worden bepaald. Log opnieuw in.",
+        });
+      }
 
-      await ctx.db.activity.create({
-        data: {
-          userId: ctx.user.id,
-          type: "CAMPAIGN_CREATED",
-          title: `Campagne "${campaign.name}" aangemaakt`,
-        },
-      });
+      const trimOptional = (value: string | undefined) => {
+        const trimmed = value?.trim();
+        return trimmed ? trimmed : null;
+      };
 
-      return campaign;
+      try {
+        const campaign = await ctx.db.campaign.create({
+          data: {
+            name: input.name.trim(),
+            profileType: input.profileType,
+            description: trimOptional(input.description),
+            niche: trimOptional(input.niche),
+            region: trimOptional(input.region),
+            targetAudience: trimOptional(input.targetAudience),
+            toneOfVoice: trimOptional(input.toneOfVoice),
+            goal: trimOptional(input.goal),
+            idealScore: input.idealScore ?? null,
+            desiredServices: input.desiredServices ?? [],
+            createdById: workspaceId,
+          },
+        });
+
+        await ctx.db.activity
+          .create({
+            data: {
+              userId: ctx.user.id,
+              type: "CAMPAIGN_CREATED",
+              title: `Campagneprofiel "${campaign.name}" aangemaakt`,
+              metadata: { campaignId: campaign.id, profileType: campaign.profileType },
+            },
+          })
+          .catch(() => null);
+
+        return campaign;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("profile_type") || message.includes("CampaignProfileType")) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              "Database mist kolom profile_type. Voer packages/db/prisma/manual/campaign-profile-type.sql uit in Supabase.",
+          });
+        }
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: message || "Campagneprofiel aanmaken mislukt.",
+        });
+      }
     }),
 
   update: protectedProcedure
@@ -556,6 +589,7 @@ export const campaignRouter = router({
         toneOfVoice: z.string().nullable().optional(),
         goal: z.string().nullable().optional(),
         status: z.string().optional(),
+        profileType: campaignProfileTypeSchema.optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -682,6 +716,238 @@ export const campaignRouter = router({
         emailsApproved,
         stepBreakdown,
         statusBreakdown,
+      };
+    }),
+
+  getDripConfig: protectedProcedure
+    .input(
+      z.object({
+        campaignId: z.string(),
+        mode: z.enum(["lead", "review"]).default("lead"),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const mode = input.mode as DripMode;
+      const campaign = await ctx.db.campaign.findFirst({
+        where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
+        select: { id: true, name: true, status: true },
+      });
+      if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });
+
+      const sequence = await ensureCampaignSequence(ctx.db, {
+        campaignId: campaign.id,
+        campaignName: campaign.name,
+        mode,
+      });
+
+      return {
+        campaignId: campaign.id,
+        campaignStatus: campaign.status,
+        mode,
+        sequenceId: sequence.id,
+        steps: parseCampaignDripSteps(sequence.steps),
+        timezone: DRIP_TIMEZONE,
+        timezoneLabel: getDripTimezoneLabel(),
+      };
+    }),
+
+  saveDripConfig: protectedProcedure
+    .input(
+      z.object({
+        campaignId: z.string(),
+        mode: z.enum(["lead", "review"]).default("lead"),
+        steps: z
+          .array(
+            z.object({
+              step: z.number().int().min(1).max(3),
+              label: z.string().min(1).max(80),
+              delayDays: z.number().int().min(0).max(90),
+              sendHour: z.number().int().min(0).max(23),
+              sendMinute: z.number().int().min(0).max(59),
+            }),
+          )
+          .length(3),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const mode = input.mode as DripMode;
+      const campaign = await ctx.db.campaign.findFirst({
+        where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
+        select: { id: true, name: true },
+      });
+      if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });
+
+      const sequence = await ensureCampaignSequence(ctx.db, {
+        campaignId: campaign.id,
+        campaignName: campaign.name,
+        mode,
+      });
+
+      const sorted = [...input.steps].sort((a, b) => a.step - b.step) as CampaignDripStepConfig[];
+      await ctx.db.emailSequence.update({
+        where: { id: sequence.id },
+        data: { steps: sorted },
+      });
+
+      return { steps: parseCampaignDripSteps(sorted) };
+    }),
+
+  generateFullDrip: protectedProcedure
+    .input(
+      z.object({
+        campaignId: z.string(),
+        mode: z.enum(["lead", "review"]).default("lead"),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const mode = input.mode as DripMode;
+      const { client } = await getOpenClawClient(ctx.db, ctx.user.workspaceId!);
+      if (mode === "lead" && !client) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "API key niet geconfigureerd. Ga naar Instellingen -> Integraties.",
+        });
+      }
+
+      const campaign = await ctx.db.campaign.findFirst({
+        where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
+        include: {
+          campaignLeads: {
+            include: {
+              lead: {
+                include: {
+                  scoringFactors: { include: { scoringWeight: true } },
+                  emailDrafts: {
+                    select: {
+                      id: true,
+                      subject: true,
+                      sequenceId: true,
+                      sequenceStep: true,
+                      status: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });
+
+      const sequence = await ensureCampaignSequence(ctx.db, {
+        campaignId: campaign.id,
+        campaignName: campaign.name,
+        mode,
+      });
+      const dripSteps = parseCampaignDripSteps(sequence.steps);
+      const now = new Date();
+
+      let generatedStep1 = 0;
+      let generatedStep2 = 0;
+      let generatedStep3 = 0;
+      let skippedLeads = 0;
+      const errors: string[] = [];
+
+      for (const campaignLead of campaign.campaignLeads) {
+        const lead = campaignLead.lead;
+        if (!lead.email || lead.doNotContact) {
+          errors.push(`${lead.companyName}: geen e-mail of niet contacteren`);
+          continue;
+        }
+
+        const sequenceDrafts = lead.emailDrafts.filter((d) => d.sequenceId === sequence.id);
+        if (
+          sequenceDrafts.some((d) => d.sequenceStep === 1) &&
+          sequenceDrafts.some((d) => d.sequenceStep === 2) &&
+          sequenceDrafts.some((d) => d.sequenceStep === 3)
+        ) {
+          skippedLeads += 1;
+          continue;
+        }
+
+        let step1Draft = sequenceDrafts.find((d) => d.sequenceStep === 1);
+
+        try {
+          if (!step1Draft) {
+            let subject = "";
+            let body = "";
+            if (mode === "review") {
+              const review = buildReviewStep(1);
+              subject = review.subject;
+              body = review.body;
+            } else {
+              const aiDraft = await client!.draftEmail(buildOpenclawContext(lead, campaign));
+              subject = normalizeAiPlaceholderSyntax(aiDraft.subject);
+              body = normalizeAiPlaceholderSyntax(aiDraft.body);
+            }
+
+            step1Draft = await ctx.db.emailDraft.create({
+              data: {
+                leadId: lead.id,
+                toEmail: lead.email,
+                subject,
+                body,
+                status: "DRAFT",
+                authorId: ctx.user.id,
+                sequenceId: sequence.id,
+                sequenceStep: 1,
+                scheduledFor: computeDripScheduledFor(now, getDripStepConfig(dripSteps, 1)),
+              },
+            });
+            generatedStep1 += 1;
+          }
+
+          const baseSubject = step1Draft.subject || `Contact: ${lead.companyName}`;
+
+          if (!sequenceDrafts.find((d) => d.sequenceStep === 2)) {
+            const step2 =
+              mode === "review" ? buildReviewStep(2) : buildLeadFollowUpStep(baseSubject, 2);
+            await ctx.db.emailDraft.create({
+              data: {
+                leadId: lead.id,
+                toEmail: lead.email,
+                subject: step2.subject,
+                body: step2.body,
+                status: "DRAFT",
+                authorId: ctx.user.id,
+                sequenceId: sequence.id,
+                sequenceStep: 2,
+                scheduledFor: computeDripScheduledFor(now, getDripStepConfig(dripSteps, 2)),
+              },
+            });
+            generatedStep2 += 1;
+          }
+
+          if (!sequenceDrafts.find((d) => d.sequenceStep === 3)) {
+            const step3 =
+              mode === "review" ? buildReviewStep(3) : buildLeadFollowUpStep(baseSubject, 3);
+            await ctx.db.emailDraft.create({
+              data: {
+                leadId: lead.id,
+                toEmail: lead.email,
+                subject: step3.subject,
+                body: step3.body,
+                status: "DRAFT",
+                authorId: ctx.user.id,
+                sequenceId: sequence.id,
+                sequenceStep: 3,
+                scheduledFor: computeDripScheduledFor(now, getDripStepConfig(dripSteps, 3)),
+              },
+            });
+            generatedStep3 += 1;
+          }
+        } catch (error: any) {
+          errors.push(`${lead.companyName}: ${error.message}`);
+        }
+      }
+
+      return {
+        totalLeads: campaign.campaignLeads.length,
+        generatedStep1,
+        generatedStep2,
+        generatedStep3,
+        skippedLeads,
+        errors,
       };
     }),
 
@@ -841,6 +1107,7 @@ export const campaignRouter = router({
         campaignName: campaign.name,
         mode,
       });
+      const dripSteps = parseCampaignDripSteps(sequence.steps);
 
       const now = new Date();
       let generatedStep1 = 0;
@@ -909,7 +1176,7 @@ export const campaignRouter = router({
                 authorId: ctx.user.id,
                 sequenceId: sequence.id,
                 sequenceStep: 1,
-                scheduledFor: now,
+                scheduledFor: computeDripScheduledFor(now, getDripStepConfig(dripSteps, 1)),
               },
             });
             generatedStep1 += 1;
@@ -931,11 +1198,11 @@ export const campaignRouter = router({
               toEmail: lead.email,
               subject: step2.subject,
               body: step2.body,
-              status: "SCHEDULED",
+              status: "DRAFT",
               authorId: ctx.user.id,
               sequenceId: sequence.id,
               sequenceStep: 2,
-              scheduledFor: addDays(now, 4),
+              scheduledFor: computeDripScheduledFor(now, getDripStepConfig(dripSteps, 2)),
             },
           });
           generatedStep2 += 1;
@@ -950,55 +1217,16 @@ export const campaignRouter = router({
               toEmail: lead.email,
               subject: step3.subject,
               body: step3.body,
-              status: "SCHEDULED",
+              status: "DRAFT",
               authorId: ctx.user.id,
               sequenceId: sequence.id,
               sequenceStep: 3,
-              scheduledFor: addDays(now, 8),
+              scheduledFor: computeDripScheduledFor(now, getDripStepConfig(dripSteps, 3)),
             },
           });
           generatedStep3 += 1;
         }
 
-        // Atomically claim the draft for sending — prevents race condition if activateAll runs concurrently
-        const claimed = await ctx.db.emailDraft.updateMany({
-          where: { id: step1Draft.id, status: { notIn: ["SENT", "SENDING"] } },
-          data: { status: "SENDING" },
-        });
-
-        if (claimed.count > 0) {
-          const sendResult = await sendBrandedEmail(ctx.db, {
-            toEmail: lead.email,
-            subject: step1Draft.subject,
-            body: step1Draft.body,
-            recipientCompany: lead.companyName,
-            leadId: lead.id,
-            userId: ctx.user.id,
-          });
-
-          if (sendResult.success) {
-            await ctx.db.emailDraft.update({
-              where: { id: step1Draft.id },
-              data: {
-                status: "SENT",
-                sentAt: now,
-                messageId: sendResult.messageId || null,
-                rejectionNote: null,
-              },
-            });
-            sentStep1 += 1;
-          } else {
-            await ctx.db.emailDraft.update({
-              where: { id: step1Draft.id },
-              data: {
-                status: "FAILED",
-                rejectionNote: sendResult.error || "Verzenden mislukt",
-              },
-            });
-            failed += 1;
-            errors.push(`${lead.companyName} (verzenden stap 1): ${sendResult.error || "mislukt"}`);
-          }
-        }
       }
 
       await ctx.db.campaign.update({

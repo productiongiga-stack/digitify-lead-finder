@@ -9,10 +9,13 @@ import { normalizeTlsOptions } from "../lib/email-utils";
 import { buildLeadContext, generateBrandedHtml, normalizeHtmlEmailDocument, replacePlaceholders, type EmailLayout } from "@digitify/email";
 import { loadEmailSettings } from "../lib/email-sender";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
-import { ensureLeadLink } from "../lib/lead-link";
+import { findLeadByEmailInWorkspace, resolveLeadForEmail, ensureLeadLink } from "../lib/lead-link";
 import { extractEmailTemplateMetadata } from "../lib/email-content";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser, type WorkspaceScope } from "../lib/workspace-settings";
 import { log } from "../lib/logger";
+import { generateInboxAiMessage } from "../lib/inbox-ai-reply";
+import { fetchInboxMessageForAi } from "../lib/inbox-message-fetch";
+import { extractHtmlFromRaw, extractTextFromRaw } from "../lib/inbox-mime-body";
 
 /* ---------- helpers ---------- */
 
@@ -290,13 +293,15 @@ async function sendInboxMessage(params: {
 
   const fromEmail = emailSettings.fromEmail || smtpConfig.user;
   const fromName = emailSettings.fromName || emailSettings.companyName || smtpConfig.user;
+  const workspaceId = scope.workspaceId;
   const requestedLeadId = params.input.leadId?.trim();
   let linkedLead = null as Awaited<ReturnType<typeof ensureLeadLink>>;
 
   if (requestedLeadId) {
     linkedLead = await ensureLeadLink({
       db: params.db,
-      userId: params.userId,
+      userId: workspaceId,
+      workspaceId,
       leadId: requestedLeadId,
       email: params.input.to,
       source: params.input.type === "reply" ? "inbox_reply" : "inbox_send",
@@ -307,12 +312,10 @@ async function sendInboxMessage(params: {
         message: "Gekozen lead kon niet worden gekoppeld.",
       });
     }
-  } else if (params.input.type === "reply") {
-    linkedLead = await ensureLeadLink({
-      db: params.db,
-      userId: params.userId,
-      email: params.input.to,
-      source: "inbox_reply",
+  } else {
+    linkedLead = await resolveLeadForEmail(params.db, workspaceId, params.input.to, {
+      createIfMissing: true,
+      source: `inbox_${params.input.type}`,
     });
   }
 
@@ -458,12 +461,16 @@ async function sendInboxMessage(params: {
       leadId: linkedLead?.id || null,
       userId: params.userId,
       type: "EMAIL_SENT",
-      title: `Inbox e-mail verzonden naar ${params.input.to}`,
+      title: `E-mail verzonden: ${subject}`,
       metadata: {
         channel: "inbox",
+        direction: "outbound",
         kind: params.input.type,
-        messageId: info.messageId,
+        subject,
+        from: fromEmail,
         to: params.input.to,
+        messageId: info.messageId,
+        bodyPreview: plainBody.slice(0, 280),
         sendGuardKey: guardKey,
         draftId: draft.id,
       },
@@ -696,60 +703,114 @@ export const inboxRouter = router({
         },
       });
     }),
+
+  resolveLeadByEmail: protectedProcedure
+    .input(z.object({ email: z.string().email() }))
+    .query(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      const lead = await findLeadByEmailInWorkspace(ctx.db, workspaceId, input.email);
+      if (!lead) return null;
+      return {
+        id: lead.id,
+        companyName: lead.companyName,
+        email: lead.email,
+        status: lead.status,
+      };
+    }),
+
+  recordInbound: protectedProcedure
+    .input(
+      z.object({
+        uid: z.number(),
+        mailbox: z.string().default("INBOX"),
+        fromEmail: z.string().email(),
+        subject: z.string(),
+        messageId: z.string().optional(),
+        bodyPreview: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      const lead = await findLeadByEmailInWorkspace(ctx.db, workspaceId, input.fromEmail);
+      if (!lead) {
+        return { linked: false as const, lead: null };
+      }
+
+      if (input.messageId) {
+        const existing = await ctx.db.activity.findFirst({
+          where: {
+            leadId: lead.id,
+            type: "EMAIL_REPLIED",
+            metadata: {
+              path: ["messageId"],
+              equals: input.messageId,
+            },
+          },
+        });
+        if (existing) {
+          return {
+            linked: true as const,
+            lead: { id: lead.id, companyName: lead.companyName },
+            duplicate: true,
+          };
+        }
+      }
+
+      await ctx.db.activity.create({
+        data: {
+          leadId: lead.id,
+          userId: ctx.user.id,
+          type: "EMAIL_REPLIED",
+          title: `E-mail ontvangen: ${input.subject}`,
+          metadata: {
+            channel: "inbox",
+            direction: "inbound",
+            subject: input.subject,
+            from: input.fromEmail,
+            messageId: input.messageId || null,
+            bodyPreview: input.bodyPreview?.slice(0, 280) || null,
+            mailbox: input.mailbox,
+            uid: input.uid,
+          },
+        },
+      });
+
+      return {
+        linked: true as const,
+        lead: { id: lead.id, companyName: lead.companyName },
+        duplicate: false,
+      };
+    }),
+
+  suggestReply: protectedProcedure
+    .input(
+      z.object({
+        uid: z.number(),
+        mailbox: z.string().default("INBOX"),
+        style: z.string(),
+        draftBody: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromUser(ctx.user);
+      const fetched = await fetchInboxMessageForAi(ctx.db, scope, {
+        uid: input.uid,
+        mailbox: input.mailbox,
+      });
+      const replySubject = fetched.subject.startsWith("Re:") ? fetched.subject : `Re: ${fetched.subject}`;
+      return generateInboxAiMessage(ctx.db, ctx.user.workspaceId!, {
+        purpose: "reply",
+        style: input.style,
+        draftBody: input.draftBody,
+        subject: replySubject,
+        incomingSubject: fetched.subject,
+        incomingBody: fetched.text,
+        incomingHtml: fetched.html,
+        recipientEmail: fetched.fromAddress,
+        recipientName: fetched.fromName,
+      });
+    }),
 });
-
-/* ---------- MIME helpers ---------- */
-
-function extractHtmlFromRaw(raw: string): string {
-  // Look for text/html content in MIME parts
-  const htmlMatch = raw.match(
-    /Content-Type:\s*text\/html[^\r\n]*\r?\n(?:Content-Transfer-Encoding:\s*[^\r\n]*\r?\n)?(?:[^\r\n]*\r?\n)*?\r?\n([\s\S]*?)(?:\r?\n--|\r?\n\.\r?\n|$)/i,
-  );
-  if (htmlMatch?.[1]) {
-    const body = htmlMatch[1].trim();
-    // Check for base64 encoding
-    if (/Content-Transfer-Encoding:\s*base64/i.test(raw.slice(0, raw.indexOf(body)))) {
-      try {
-        return Buffer.from(body.replace(/\s/g, ""), "base64").toString("utf-8");
-      } catch {
-        return body;
-      }
-    }
-    // Check for quoted-printable
-    if (/Content-Transfer-Encoding:\s*quoted-printable/i.test(raw.slice(0, raw.indexOf(body)))) {
-      return decodeQuotedPrintable(body);
-    }
-    return body;
-  }
-  return "";
-}
-
-function extractTextFromRaw(raw: string): string {
-  const textMatch = raw.match(
-    /Content-Type:\s*text\/plain[^\r\n]*\r?\n(?:Content-Transfer-Encoding:\s*[^\r\n]*\r?\n)?(?:[^\r\n]*\r?\n)*?\r?\n([\s\S]*?)(?:\r?\n--|\r?\n\.\r?\n|$)/i,
-  );
-  if (textMatch?.[1]) {
-    const body = textMatch[1].trim();
-    if (/Content-Transfer-Encoding:\s*base64/i.test(raw.slice(0, raw.indexOf(body)))) {
-      try {
-        return Buffer.from(body.replace(/\s/g, ""), "base64").toString("utf-8");
-      } catch {
-        return body;
-      }
-    }
-    if (/Content-Transfer-Encoding:\s*quoted-printable/i.test(raw.slice(0, raw.indexOf(body)))) {
-      return decodeQuotedPrintable(body);
-    }
-    return body;
-  }
-  return "";
-}
-
-function decodeQuotedPrintable(str: string): string {
-  return str
-    .replace(/=\r?\n/g, "")
-    .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-}
 
 function buildRawEmail(opts: {
   from: string;

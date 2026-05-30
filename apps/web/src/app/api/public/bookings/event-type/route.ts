@@ -3,6 +3,8 @@ import { prisma } from "@digitify/db";
 import {
   applyWorkspaceEmbedSettingsToEventType,
   ensureDefaultBookingEventType,
+  eventTypeNeedsAvailabilityRuleSync,
+  loadEmbedAvailabilityRulesFromSettings,
 } from "@digitify/api/src/lib/booking-utils";
 import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-schema-compat";
@@ -27,7 +29,8 @@ export async function GET(request: Request) {
     "availabilityRules" in eventType && Array.isArray(eventType.availabilityRules)
       ? eventType.availabilityRules
       : [];
-  if (rules.length === 0 || !rules.some((rule) => rule.enabled)) {
+  const settingsRules = await loadEmbedAvailabilityRulesFromSettings(prisma, tenantUserId);
+  if (eventTypeNeedsAvailabilityRuleSync(rules, settingsRules)) {
     await applyWorkspaceEmbedSettingsToEventType(prisma, tenantUserId, eventType.id);
   }
 

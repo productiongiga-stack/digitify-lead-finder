@@ -25,7 +25,7 @@ export default function SettingsPage() {
   ].slice(0, 4);
   const groupedSections = {
     essentials: visibleSections.filter((section) =>
-      ["/settings/account", "/settings/integrations", "/settings/branding", "/settings/company", "/settings/display", "/settings/performance"].includes(section.href)
+      ["/settings/account", "/settings/integrations", "/settings/branding", "/settings/seo", "/settings/company", "/settings/display", "/settings/performance"].includes(section.href)
     ),
     communication: visibleSections.filter((section) =>
       ["/settings/email", "/settings/ai", "/settings/reviews", "/settings/chatbot", "/settings/feedback"].includes(section.href)

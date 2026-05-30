@@ -1,5 +1,11 @@
 import { create } from "zustand";
 
+type OpenClawAssistLaunch = {
+  pathname: string;
+  seedMessage?: string;
+  assistBookings?: boolean;
+};
+
 interface UIStore {
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
@@ -10,6 +16,9 @@ interface UIStore {
   openClawOpen: boolean;
   setOpenClawOpen: (open: boolean) => void;
   toggleOpenClaw: () => void;
+  openClawAssistLaunch: OpenClawAssistLaunch | null;
+  openOpenClawAssist: (launch: OpenClawAssistLaunch) => void;
+  clearOpenClawAssistLaunch: () => void;
 }
 
 function getSavedSidebarState(): boolean {
@@ -46,4 +55,11 @@ export const useUIStore = create<UIStore>((set) => ({
   openClawOpen: false,
   setOpenClawOpen: (open) => set({ openClawOpen: open }),
   toggleOpenClaw: () => set((state) => ({ openClawOpen: !state.openClawOpen })),
+  openClawAssistLaunch: null,
+  openOpenClawAssist: (launch) =>
+    set({
+      openClawAssistLaunch: launch,
+      openClawOpen: true,
+    }),
+  clearOpenClawAssistLaunch: () => set({ openClawAssistLaunch: null }),
 }));

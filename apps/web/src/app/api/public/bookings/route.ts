@@ -10,8 +10,15 @@ import {
   buildIcsAttachment,
   createPublicToken,
   DEFAULT_BOOKING_TIMEZONE,
+  applyWorkspaceEmbedSettingsToEventType,
   ensureDefaultBookingEventType,
+  eventTypeNeedsAvailabilityRuleSync,
   formatDateKey,
+  getBookingAvailabilityBounds,
+  loadEmbedAvailabilityRulesFromSettings,
+  formatDateKeyInZone,
+  formatTimeInZone,
+  getWeekdayInZone,
   hashPublicToken,
   hasBookingOverlap,
   minutesToTime,
@@ -102,7 +109,7 @@ async function findNextAvailableSlots(
     const candidateDay = new Date(fromDate);
     candidateDay.setDate(fromDate.getDate() + dayOffset);
     const dateKey = formatDateKey(candidateDay);
-    const rule = rules.get(candidateDay.getDay());
+    const rule = rules.get(getWeekdayInZone(dateKey, slotTimeZone));
     if (!rule?.enabled) continue;
 
     const startMinutes = timeToMinutes(rule.start, 9 * 60);
@@ -129,7 +136,9 @@ async function findNextAvailableSlots(
         end: bufferedEnd,
       });
       if (overlap) continue;
-      if (googleWindows.length > 0 && overlapsBusyWindow(bufferedStart, bufferedEnd, googleWindows)) continue;
+      if (googleWindows.length > 0 && overlapsBusyWindow(bufferedStart, bufferedEnd, googleWindows, { hostTimeZone: slotTimeZone })) {
+        continue;
+      }
 
       suggestions.push({ date: dateKey, time: slotTime, start: slotDatetime.toISOString() });
     }
@@ -204,7 +213,7 @@ export async function POST(request: Request) {
     }
 
     _phase = "event-type";
-    const eventType = eventTypeSlug
+    let eventType = eventTypeSlug
       ? await prisma.bookingEventType.findFirst({
           where: { createdById: tenantUserId, slug: eventTypeSlug, isActive: true },
           include: {
@@ -214,6 +223,19 @@ export async function POST(request: Request) {
         })
       : await ensureDefaultBookingEventType(prisma, tenantUserId);
     if (!eventType) return NextResponse.json({ error: "Bookingtype niet gevonden." }, { status: 404 });
+
+    const settingsRules = await loadEmbedAvailabilityRulesFromSettings(prisma, tenantUserId);
+    if (eventTypeNeedsAvailabilityRuleSync(eventType.availabilityRules, settingsRules)) {
+      await applyWorkspaceEmbedSettingsToEventType(prisma, tenantUserId, eventType.id);
+      eventType =
+        (await prisma.bookingEventType.findFirst({
+          where: { id: eventType.id, createdById: tenantUserId },
+          include: {
+            availabilityRules: true,
+            questions: { orderBy: { sortOrder: "asc" } },
+          },
+        })) ?? eventType;
+    }
     if (eventType.requireConsent && !consentAccepted) {
       return NextResponse.json({ error: "Gelieve akkoord te gaan met de privacyvoorwaarden." }, { status: 400 });
     }
@@ -228,7 +250,8 @@ export async function POST(request: Request) {
     const hostUserIdEarly = hostIdsEarly[0] || tenantUserId;
     const googleConfig = await loadGoogleCalendarSyncConfig(prisma, hostUserIdEarly).catch(() => null);
     const slotTimeZone =
-      eventType.timezone?.trim() || googleConfig?.timezone || timezone || DEFAULT_BOOKING_TIMEZONE;
+      eventType.timezone?.trim() || googleConfig?.timezone || DEFAULT_BOOKING_TIMEZONE;
+    const hostTimezone = slotTimeZone;
     const bookingDate =
       /^\d{4}-\d{2}-\d{2}T/.test(date)
         ? new Date(date)
@@ -239,18 +262,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Ongeldige datum." }, { status: 400 });
     }
 
-    const earliest = new Date(Date.now() + Math.max(0, eventType.minimumNoticeHours || 0) * 60 * 60 * 1000);
-    const latest = new Date(Date.now() + Math.max(1, eventType.maximumHorizonDays || 60) * 24 * 60 * 60 * 1000);
+    const { earliest, latest } = getBookingAvailabilityBounds(eventType);
     if (bookingDate < earliest) return NextResponse.json({ error: "Dit tijdslot valt binnen de minimale reservatietijd." }, { status: 400 });
     if (bookingDate > latest) return NextResponse.json({ error: "Dit tijdslot ligt te ver in de toekomst." }, { status: 400 });
 
     const fallbackRule = { enabled: true, start: "09:00", end: "17:00" };
     const rules = parseRules(eventType.availabilityRules, fallbackRule);
-    const weekdaySource = localDate || bookingDate.toISOString().slice(0, 10);
-    const weekday = new Date(`${weekdaySource}T12:00:00`).getDay();
+    const weekdaySource = localDate || formatDateKeyInZone(bookingDate, slotTimeZone);
+    const weekday = getWeekdayInZone(weekdaySource, slotTimeZone);
     const rule = rules.get(weekday) || fallbackRule;
     if (!rule.enabled) return NextResponse.json({ error: "Deze dag is niet beschikbaar voor boekingen." }, { status: 400 });
-    const selectedTime = localTime || `${String(bookingDate.getHours()).padStart(2, "0")}:${String(bookingDate.getMinutes()).padStart(2, "0")}`;
+    const selectedTime = localTime || formatTimeInZone(bookingDate, slotTimeZone);
     const selectedMinutes = selectedTime.split(":").map(Number).reduce((acc, value, index) => acc + value * (index === 0 ? 60 : 1), 0);
     const startMinutes = rule.start.split(":").map(Number).reduce((acc, value, index) => acc + value * (index === 0 ? 60 : 1), 0);
     const endMinutes = rule.end.split(":").map(Number).reduce((acc, value, index) => acc + value * (index === 0 ? 60 : 1), 0);
@@ -354,7 +376,7 @@ export async function POST(request: Request) {
         duration,
         notes: notes || "Aangemaakt via booking embed",
         status: autoConfirm ? "CONFIRMED" : "PENDING",
-        timezone,
+        timezone: hostTimezone,
         location: eventType.location || null,
         eventTypeId: eventType.id,
         hostUserId,
@@ -377,7 +399,7 @@ export async function POST(request: Request) {
     if (answerRows.length) await prisma.bookingQuestionAnswer.createMany({ data: answerRows }).catch(() => null);
 
     await prisma.bookingAnalyticsEvent.create({
-      data: { createdById: tenantUserId, eventTypeId: eventType.id, bookingId: booking.id, type: "submit_success", metadata: { timezone, autoConfirm } },
+      data: { createdById: tenantUserId, eventTypeId: eventType.id, bookingId: booking.id, type: "submit_success", metadata: { timezone: hostTimezone, autoConfirm } },
     }).catch(() => null);
 
     _phase = "settings-fetch";
@@ -512,7 +534,7 @@ export async function POST(request: Request) {
       status: booking.status,
       eventType: eventType.name,
       location: booking.location,
-      timezone,
+      timezone: hostTimezone,
       autoConfirmed: autoConfirm,
     }).catch(() => null);
 

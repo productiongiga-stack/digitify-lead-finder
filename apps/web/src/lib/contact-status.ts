@@ -64,8 +64,14 @@ export const OUTBOUND_STAT_CARD_LABELS: Record<OutboundStatCardStatus, string> =
   FAILED: "Mislukt",
 };
 
-export function getOutboundStatusLabel(status: string) {
+export function getOutboundStatusLabel(status: string, scheduledFor?: Date | string | null) {
+  if (status === "SCHEDULED") return OUTBOUND_STATUS_LABELS.DRAFT!;
+  if (status === "DRAFT" && scheduledFor) return "Concept · gepland";
   return OUTBOUND_STATUS_LABELS[status] ?? status;
+}
+
+export function getOutboundStatusForDisplay(status: string) {
+  return status === "SCHEDULED" ? "DRAFT" : status;
 }
 
 export const SEND_OUTBOUND_TOOLTIP =

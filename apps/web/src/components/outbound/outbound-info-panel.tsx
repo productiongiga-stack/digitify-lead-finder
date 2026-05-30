@@ -1,7 +1,8 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import Link from "next/link";
+import { trpc } from "@/lib/trpc/client";
 import {
   AlertCircle,
   ArrowRight,
@@ -24,8 +25,12 @@ import {
   OUTBOUND_STATUS_LABELS,
   OUTBOUND_STATUS_VARIANTS,
   OUTBOUND_STAT_CARD_LABELS,
+  OUTBOUND_STAT_CARD_STATUSES,
+  type OutboundStatCardStatus,
 } from "@/lib/contact-status";
 import { OutboundWorkflowHelp } from "@/components/outbound/outbound-workflow-help";
+import { OutboundStatsCards } from "@/components/outbound/outbound-stats-cards";
+import type { StatItem } from "@digitify/ui";
 
 export type OutboundInfoStats = {
   draft: number;
@@ -50,12 +55,12 @@ export type OutboundFollowUpItem = {
 };
 
 type OutboundInfoPanelProps = {
-  loading?: boolean;
-  stats: OutboundInfoStats;
   drafts: OutboundInfoDraft[];
   followUpDays?: number;
   followUpItems: OutboundFollowUpItem[];
   topbarFollowUpCount?: number;
+  activeStatusFilter?: string;
+  onStatusCardClick?: (status: OutboundStatCardStatus) => void;
 };
 
 type FocusAction = {
@@ -67,7 +72,8 @@ type FocusAction = {
 };
 
 function getFocusAction(stats: OutboundInfoStats, drafts: OutboundInfoDraft[]): FocusAction {
-  const firstByStatus = (status: string) => drafts.find((draft) => draft.status === status);
+  const firstByStatus = (status: string) =>
+    drafts.find((draft) => draft.status === status || (status === "DRAFT" && draft.status === "SCHEDULED"));
 
   if (stats.pending > 0) {
     const first = firstByStatus("PENDING_APPROVAL");
@@ -183,13 +189,70 @@ const FOCUS_ICON: Record<FocusAction["tone"], ReactNode> = {
 };
 
 export function OutboundInfoPanel({
-  loading,
-  stats,
   drafts,
   followUpDays = 3,
   followUpItems,
   topbarFollowUpCount,
+  activeStatusFilter = "",
+  onStatusCardClick,
 }: OutboundInfoPanelProps) {
+  const { data: outboundStats, isLoading: statsLoading } = trpc.contact.getOutboundStats.useQuery(undefined, {
+    staleTime: 30_000,
+  });
+
+  const stats: OutboundInfoStats = {
+    draft: outboundStats?.draft ?? 0,
+    pending: outboundStats?.pending ?? 0,
+    approved: outboundStats?.approved ?? 0,
+    sent: outboundStats?.sent ?? 0,
+    failed: outboundStats?.failed ?? 0,
+  };
+
+  const statCardItems = useMemo<StatItem[]>(() => {
+    const countByStatus: Record<OutboundStatCardStatus, number> = {
+      DRAFT: stats.draft,
+      PENDING_APPROVAL: stats.pending,
+      APPROVED: stats.approved,
+      SENT: stats.sent,
+      FAILED: stats.failed,
+    };
+    const meta: Record<
+      OutboundStatCardStatus,
+      { icon: ReactNode; tone: NonNullable<StatItem["tone"]> }
+    > = {
+      DRAFT: { icon: <FileEdit className="h-4 w-4" />, tone: "neutral" },
+      PENDING_APPROVAL: { icon: <Clock className="h-4 w-4" />, tone: "warning" },
+      APPROVED: { icon: <ShieldCheck className="h-4 w-4" />, tone: "positive" },
+      SENT: { icon: <Send className="h-4 w-4" />, tone: "positive" },
+      FAILED: { icon: <AlertCircle className="h-4 w-4" />, tone: "negative" },
+    };
+
+    const statusCards: StatItem[] = OUTBOUND_STAT_CARD_STATUSES.map((status) => {
+      const active = activeStatusFilter === status;
+      return {
+        label: OUTBOUND_STAT_CARD_LABELS[status],
+        value: countByStatus[status],
+        icon: meta[status].icon,
+        tone: meta[status].tone,
+        active,
+        onClick: onStatusCardClick ? () => onStatusCardClick(status) : undefined,
+      };
+    });
+
+    return [
+      ...statusCards,
+      {
+        label: "Inkomend",
+        value: "Inbox",
+        icon: <Inbox className="h-4 w-4" />,
+        tone: "info" as const,
+        href: "/contacts/inbox",
+        hint: "Ontvangen e-mail",
+      },
+    ];
+  }, [activeStatusFilter, onStatusCardClick, stats.approved, stats.draft, stats.failed, stats.pending, stats.sent]);
+
+  const loading = statsLoading;
   const focus = getFocusAction(stats, drafts);
   const blockingDrafts = drafts.filter((draft) =>
     ["PENDING_APPROVAL", "FAILED", "APPROVED"].includes(draft.status),
@@ -201,6 +264,8 @@ export function OutboundInfoPanel({
   return (
     <div className="outbound-info-panel space-y-4">
       <OutboundWorkflowHelp />
+
+      <OutboundStatsCards items={statCardItems} loading={statsLoading} />
 
       <div className="grid gap-3 xl:grid-cols-3">
         <Card className={cn("outbound-info-focus-card xl:self-start", FOCUS_TONE_CLASS[focus.tone])}>
@@ -326,8 +391,7 @@ export function OutboundInfoPanel({
                     </div>
                   ) : (
                     <p className="outbound-info-queue-empty">
-                      Geen goedkeuringen, mislukte of klaarstaande mails in de eerste 50
-                      resultaten.
+                      Geen goedkeuringen, mislukte of klaarstaande mails in de huidige lijst.
                     </p>
                   )}
                 </>

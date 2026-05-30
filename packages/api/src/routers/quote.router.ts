@@ -576,13 +576,15 @@ export const quoteRouter = router({
 
       const linkedLead = await ensureLeadLink({
         db: ctx.db,
-        userId: ctx.user.id,
+        userId: ctx.user.workspaceId!,
+        workspaceId: ctx.user.workspaceId!,
         leadId: quote.leadId || undefined,
         email: quote.clientEmail || undefined,
         companyName: quote.clientCompany || quote.clientName,
         phone: quote.clientPhone || undefined,
         address: quote.clientAddress || undefined,
         source: "quote_send",
+        createIfMissing: true,
       });
 
       if (!linkedLead) {

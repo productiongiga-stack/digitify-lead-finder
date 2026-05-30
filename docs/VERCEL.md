@@ -67,8 +67,12 @@ pnpm db:seed            # optional dev/staging only
 
 If production shows missing tables/columns (e.g. `workspace_tasks`, `bodyFormat`):
 
-1. **Supabase → SQL Editor** → run the full script  
-   `packages/db/prisma/manual/production-catch-up.sql` (safe to re-run).
+1. **Supabase → SQL Editor** → run one of:
+   - `packages/db/prisma/manual/workspace_tasks-only.sql` — missing `workspace_tasks`
+   - `packages/db/prisma/manual/email_templates-columns.sql` — missing `email_templates.type` / layout / `bodyFormat`
+   - `packages/db/prisma/manual/production-catch-up.sql` — full catch-up (safe to re-run)
+
+   Ensure Vercel **`DIRECT_URL`** is the Supabase **direct** host (`db.*.supabase.co:5432`), not `localhost`.
 2. Locally with production env (direct URL, not pooler):
 
 ```bash

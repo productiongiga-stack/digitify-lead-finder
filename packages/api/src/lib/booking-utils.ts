@@ -257,6 +257,22 @@ function parseWeeklyHoursFromSettings(
   return rules;
 }
 
+export async function loadEmbedAvailabilityRulesFromSettings(db: PrismaClient, workspaceId: string) {
+  const settingsRows = await loadWorkspaceSettingRows(db, { workspaceId, memberId: workspaceId }, [
+    "bookings.availability_start_time",
+    "bookings.availability_end_time",
+    "bookings.available_days",
+    "bookings.weekly_hours",
+  ]);
+  const settings = settingsRowsToMap(settingsRows);
+  return parseWeeklyHoursFromSettings(
+    settings["bookings.weekly_hours"],
+    getSettingString(settings, "bookings.availability_start_time", "09:00"),
+    getSettingString(settings, "bookings.availability_end_time", "17:00"),
+    getSettingString(settings, "bookings.available_days", "1,2,3,4,5"),
+  );
+}
+
 /** Push embed settings (color, hours, timezone) into a booking event type for public embeds. */
 export async function applyWorkspaceEmbedSettingsToEventType(
   db: PrismaClient,
@@ -351,9 +367,57 @@ export function addDays(date: Date, days: number) {
 export function overlapsBusyWindow(
   start: Date,
   end: Date,
-  windows: Array<{ start: Date; end: Date }>,
+  windows: Array<{ start: Date; end: Date; allDay?: boolean }>,
+  options?: { hostTimeZone?: string },
 ) {
-  return windows.some((window) => start < window.end && window.start < end);
+  const hostTimeZone = options?.hostTimeZone?.trim() || DEFAULT_BOOKING_TIMEZONE;
+  return windows.some((window) => {
+    if (window.allDay) {
+      const slotDay = formatDateKeyInZone(start, hostTimeZone);
+      const busyStartDay = formatDateKeyInZone(window.start, hostTimeZone);
+      const busyEndDay = formatDateKeyInZone(addMinutes(window.end, -1), hostTimeZone);
+      return slotDay >= busyStartDay && slotDay <= busyEndDay;
+    }
+    return start < window.end && window.start < end;
+  });
+}
+
+export function getBookingAvailabilityBounds(
+  eventType: { minimumNoticeHours?: number | null; maximumHorizonDays?: number | null },
+  now = new Date(),
+) {
+  const noticeHours = Math.max(
+    0,
+    Number.isFinite(eventType.minimumNoticeHours as number)
+      ? (eventType.minimumNoticeHours as number)
+      : DEFAULT_MINIMUM_NOTICE_HOURS,
+  );
+  let horizonDays = Number(eventType.maximumHorizonDays);
+  if (!Number.isFinite(horizonDays) || horizonDays < 1) {
+    horizonDays = DEFAULT_MAXIMUM_HORIZON_DAYS;
+  }
+  return {
+    earliest: new Date(now.getTime() + noticeHours * 60 * 60_000),
+    latest: new Date(now.getTime() + horizonDays * 24 * 60 * 60_000),
+  };
+}
+
+export function eventTypeNeedsAvailabilityRuleSync(
+  rules: Array<{ weekday: number; enabled: boolean; startTime: string; endTime: string }>,
+  settingsRules: Array<{ weekday: number; enabled: boolean; startTime: string; endTime: string }>,
+) {
+  if (rules.length === 0) return true;
+  if (!rules.some((rule) => rule.enabled)) return true;
+  const byWeekday = new Map(rules.map((rule) => [rule.weekday, rule]));
+  return settingsRules.some((expected) => {
+    const current = byWeekday.get(expected.weekday);
+    if (!current) return true;
+    return (
+      current.enabled !== expected.enabled ||
+      current.startTime !== expected.startTime ||
+      current.endTime !== expected.endTime
+    );
+  });
 }
 
 export function normalizeSlug(value: string) {

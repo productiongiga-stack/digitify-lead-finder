@@ -5,13 +5,18 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root/packages/db"
 
+direct_candidate="${DIRECT_URL:-${POSTGRES_URL_NON_POOLING:-}}"
+if [[ "$direct_candidate" == *"pooler"* || "$direct_candidate" == *"localhost"* || "$direct_candidate" == *"127.0.0.1"* ]]; then
+  direct_candidate=""
+fi
+
 if [[ -z "${DATABASE_URL:-}" ]]; then
-  export DATABASE_URL="${POSTGRES_URL_NON_POOLING:-${POSTGRES_PRISMA_URL:-}}"
+  export DATABASE_URL="${direct_candidate:-${POSTGRES_PRISMA_URL:-}}"
 fi
 if [[ -z "${DIRECT_URL:-}" ]]; then
-  export DIRECT_URL="${POSTGRES_URL_NON_POOLING:-}"
+  export DIRECT_URL="${direct_candidate:-}"
 fi
-if [[ "$DATABASE_URL" == *"pooler"* ]] && [[ -n "${POSTGRES_HOST:-}" && -n "${POSTGRES_USER:-}" && -n "${POSTGRES_PASSWORD:-}" ]]; then
+if [[ "$DATABASE_URL" == *"pooler"* || "$DATABASE_URL" == *"localhost"* ]] && [[ -n "${POSTGRES_HOST:-}" && -n "${POSTGRES_USER:-}" && -n "${POSTGRES_PASSWORD:-}" ]]; then
   db_name="${POSTGRES_DATABASE:-postgres}"
   export DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:5432/${db_name}"
   export DIRECT_URL="$DATABASE_URL"

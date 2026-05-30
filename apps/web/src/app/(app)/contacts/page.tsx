@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
@@ -23,36 +23,37 @@ import {
   TabsTrigger,
   Input,
   Checkbox,
-  type StatItem,
 } from "@digitify/ui";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
 import { EmptyState } from "@digitify/ui";
 import {
-  AlertCircle,
   CheckCircle,
-  Clock,
   Eye,
-  FileEdit,
   FileText,
   Inbox,
   Mail,
   PenSquare,
   Search,
   Send,
-  ShieldCheck,
   Trash2,
   X,
   Receipt,
   LayoutGrid,
   Info,
+  CalendarDays,
 } from "lucide-react";
+import { OutboundAgendaPanel } from "@/components/outbound/outbound-agenda-panel";
+import {
+  OUTBOUND_EMAIL_TYPE_OPTIONS,
+  OUTBOUND_SOURCE_MODULE_OPTIONS,
+  getOutboundEmailTypeLabel,
+  getOutboundSourceModuleLabel,
+} from "@/lib/outbound-source";
 import { formatDate } from "@/lib/utils";
 import { EmailPreview } from "@/components/email/preview";
 import { extractEmailTemplateMetadata } from "@/lib/email-content";
 import {
-  OUTBOUND_STAT_CARD_STATUSES,
-  OUTBOUND_STAT_CARD_LABELS,
   type OutboundStatCardStatus,
   OUTBOUND_STATUS_LABELS,
   OUTBOUND_STATUS_OPTIONS,
@@ -61,11 +62,11 @@ import {
   canSendOutboundDraft,
   canEditOutboundDraft,
   getOutboundStatusLabel,
+  getOutboundStatusForDisplay,
   getSendButtonLabel,
 } from "@/lib/contact-status";
 import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 import { OutboundInfoPanel } from "@/components/outbound/outbound-info-panel";
-import { OutboundStatsCards } from "@/components/outbound/outbound-stats-cards";
 import {
   extractQuoteIdFromDraftBody,
   getQuoteConfiguratorUrl,
@@ -94,16 +95,21 @@ export default function ContactsPage() {
   const searchParams = useSearchParams();
   const leadIdFilter = searchParams.get("leadId") || undefined;
   const [statusFilter, setStatusFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
   const [searchFilter, setSearchFilter] = useState("");
   const [selectedDraftIds, setSelectedDraftIds] = useState<string[]>([]);
   const [sendingDraftId, setSendingDraftId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<null | { mode: "single"; id: string } | { mode: "bulk" }>(null);
+  const [activeTab, setActiveTab] = useState("overview");
   const utils = trpc.useUtils();
 
   const { data, isLoading } = trpc.contact.listDrafts.useQuery({
     status: statusFilter || undefined,
     search: searchFilter.trim() || undefined,
     leadId: leadIdFilter,
+    type: typeFilter ? (typeFilter as "LEAD_CONTACT") : undefined,
+    sourceModule: sourceFilter ? (sourceFilter as "campaign") : undefined,
     page: 1,
     pageSize: 50,
   });
@@ -128,30 +134,32 @@ export default function ContactsPage() {
     ? String(brandingSettings["email.header_slogan"])
     : "";
 
+  const invalidateOutbound = () => {
+    utils.contact.listDrafts.invalidate();
+    utils.contact.getOutboundStats.invalidate();
+    utils.contact.getTopbarStats.invalidate();
+    utils.contact.listAgenda.invalidate();
+  };
+
   const sendEmail = trpc.contact.sendEmail.useMutation({
-    onSuccess: () => {
-      utils.contact.listDrafts.invalidate();
-    },
+    onSuccess: invalidateOutbound,
   });
   const deleteDraft = trpc.contact.deleteDraft.useMutation({
     onSuccess: (_data, variables) => {
       setSelectedDraftIds((current) => current.filter((id) => id !== variables.id));
-      utils.contact.listDrafts.invalidate();
-      utils.contact.getTopbarStats.invalidate();
+      invalidateOutbound();
     },
   });
   const bulkDeleteDrafts = trpc.contact.bulkDeleteDrafts.useMutation({
     onSuccess: () => {
       setSelectedDraftIds([]);
-      utils.contact.listDrafts.invalidate();
-      utils.contact.getTopbarStats.invalidate();
+      invalidateOutbound();
     },
   });
   const bulkSendDrafts = trpc.contact.bulkSendDrafts.useMutation({
     onSuccess: () => {
       setSelectedDraftIds([]);
-      utils.contact.listDrafts.invalidate();
-      utils.contact.getTopbarStats.invalidate();
+      invalidateOutbound();
     },
   });
 
@@ -161,60 +169,17 @@ export default function ContactsPage() {
   const selectedDrafts = drafts.filter((draft) => selectedSet.has(draft.id));
   const allVisibleSelected = selectableDrafts.length > 0 && selectableDrafts.every((draft) => selectedSet.has(draft.id));
   const sendableSelectedCount = selectedDrafts.filter((draft) => canSendOutboundDraft(draft.status)).length;
-  const stats = {
-    draft: drafts.filter((item) => item.status === "DRAFT").length,
-    pending: drafts.filter((item) => item.status === "PENDING_APPROVAL").length,
-    approved: drafts.filter((item) => item.status === "APPROVED").length,
-    sent: drafts.filter((item) => item.status === "SENT").length,
-    failed: drafts.filter((item) => item.status === "FAILED").length,
-  };
-  const activeFilterCount = (statusFilter ? 1 : 0) + (searchFilter.trim() ? 1 : 0);
+  const activeFilterCount =
+    (statusFilter ? 1 : 0) +
+    (searchFilter.trim() ? 1 : 0) +
+    (sourceFilter ? 1 : 0) +
+    (typeFilter ? 1 : 0);
   const followUpItems = followUpQueue?.items ?? [];
 
-  const outboundStatItems = useMemo<StatItem[]>(() => {
-    const countByStatus: Record<OutboundStatCardStatus, number> = {
-      DRAFT: stats.draft,
-      PENDING_APPROVAL: stats.pending,
-      APPROVED: stats.approved,
-      SENT: stats.sent,
-      FAILED: stats.failed,
-    };
-    const meta: Record<
-      OutboundStatCardStatus,
-      { icon: React.ReactNode; tone: NonNullable<StatItem["tone"]> }
-    > = {
-      DRAFT: { icon: <FileEdit />, tone: "neutral" },
-      PENDING_APPROVAL: { icon: <Clock />, tone: "warning" },
-      APPROVED: { icon: <ShieldCheck />, tone: "positive" },
-      SENT: { icon: <Send />, tone: "positive" },
-      FAILED: { icon: <AlertCircle />, tone: "negative" },
-    };
-
-    const statusCards: StatItem[] = OUTBOUND_STAT_CARD_STATUSES.map((status) => {
-      const count = countByStatus[status];
-      const active = statusFilter === status;
-      return {
-        label: OUTBOUND_STAT_CARD_LABELS[status],
-        value: count,
-        icon: meta[status].icon,
-        tone: meta[status].tone,
-        active,
-        onClick: () => setStatusFilter((current) => (current === status ? "" : status)),
-      };
-    });
-
-    return [
-      ...statusCards,
-      {
-        label: "Inkomend",
-        value: "Inbox",
-        icon: <Inbox />,
-        tone: "info" as const,
-        href: "/contacts/inbox",
-        hint: "Ontvangen e-mail",
-      },
-    ];
-  }, [stats.approved, stats.draft, stats.failed, stats.pending, stats.sent, statusFilter]);
+  function handleStatusCardClick(status: OutboundStatCardStatus) {
+    setStatusFilter((current) => (current === status ? "" : status));
+    setActiveTab("overview");
+  }
 
   function toggleDraftSelection(id: string, checked: boolean) {
     setSelectedDraftIds((current) =>
@@ -299,11 +264,15 @@ export default function ContactsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="page-view-tabs">
           <TabsTrigger value="overview" className="page-view-tabs-trigger">
             <LayoutGrid />
             Overzicht
+          </TabsTrigger>
+          <TabsTrigger value="agenda" className="page-view-tabs-trigger">
+            <CalendarDays />
+            Agenda
           </TabsTrigger>
           <TabsTrigger value="info" className="page-view-tabs-trigger">
             <Info />
@@ -339,6 +308,36 @@ export default function ContactsPage() {
               ))}
             </SelectContent>
           </Select>
+          <Select
+            value={sourceFilter || "all"}
+            onValueChange={(v) => setSourceFilter(v === "all" ? "" : v)}
+          >
+            <SelectTrigger className="h-9 w-full border-border/70 bg-background/80 shadow-none sm:w-[200px]">
+              <SelectValue placeholder="Module" />
+            </SelectTrigger>
+            <SelectContent>
+              {OUTBOUND_SOURCE_MODULE_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={typeFilter || "all"}
+            onValueChange={(v) => setTypeFilter(v === "all" ? "" : v)}
+          >
+            <SelectTrigger className="h-9 w-full border-border/70 bg-background/80 shadow-none sm:w-[190px]">
+              <SelectValue placeholder="Mailtype" />
+            </SelectTrigger>
+            <SelectContent>
+              {OUTBOUND_EMAIL_TYPE_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:shrink-0 lg:border-l lg:border-border/50 lg:pl-4">
@@ -356,6 +355,8 @@ export default function ContactsPage() {
               onClick={() => {
                 setStatusFilter("");
                 setSearchFilter("");
+                setSourceFilter("");
+                setTypeFilter("");
               }}
             >
               <X className="mr-1.5 h-3.5 w-3.5" />
@@ -413,29 +414,6 @@ export default function ContactsPage() {
         </Card>
       ) : null}
 
-      <OutboundStatsCards items={outboundStatItems} loading={isLoading} />
-
-      </TabsContent>
-
-      <TabsContent value="info" className="space-y-4">
-        <OutboundInfoPanel
-          loading={isLoading}
-          stats={stats}
-          drafts={drafts.map((draft) => ({
-            id: draft.id,
-            status: draft.status,
-            subject: draft.subject,
-            lead: draft.lead
-              ? { id: draft.lead.id, companyName: draft.lead.companyName }
-              : { id: "", companyName: draft.toEmail },
-          }))}
-          followUpDays={followUpQueue?.followupDays}
-          followUpItems={followUpItems}
-          topbarFollowUpCount={topbarStats?.followUpCount}
-        />
-      </TabsContent>
-
-      <TabsContent value="overview" className="space-y-4">
       <Card>
         <div className="grid gap-3 p-3 md:hidden">
           {isLoading ? (
@@ -468,14 +446,19 @@ export default function ContactsPage() {
                     </div>
                   </div>
                   <Badge
-                    variant={OUTBOUND_STATUS_VARIANTS[draft.status] || "secondary"}
+                    variant={
+                      OUTBOUND_STATUS_VARIANTS[getOutboundStatusForDisplay(draft.status)] || "secondary"
+                    }
                     className="whitespace-nowrap px-3 py-1 text-xs font-semibold"
                   >
-                    {OUTBOUND_STATUS_LABELS[draft.status] || draft.status}
+                    {getOutboundStatusLabel(draft.status, draft.scheduledFor)}
                   </Badge>
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">
                   {draft.author.name} · {formatDate(draft.createdAt)}
+                  {"sourceModule" in draft && draft.sourceModule ? (
+                    <> · {getOutboundSourceModuleLabel(String(draft.sourceModule))}</>
+                  ) : null}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {canEditOutboundDraft(draft.status) ? (
@@ -545,6 +528,7 @@ export default function ContactsPage() {
               <TableHead>Lead</TableHead>
               <TableHead>Onderwerp</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Module</TableHead>
               <TableHead>Auteur</TableHead>
               <TableHead>Datum</TableHead>
               <TableHead className="text-right">Acties</TableHead>
@@ -554,14 +538,14 @@ export default function ContactsPage() {
             {isLoading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 7 }).map((_, j) => (
+                  {Array.from({ length: 8 }).map((_, j) => (
                     <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                   ))}
                 </TableRow>
               ))
             ) : data?.items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-32 text-center">
+                <TableCell colSpan={8} className="h-32 text-center">
                   <EmptyState icon={<Mail />} title="Nog geen e-mail drafts" size="sm" />
                 </TableCell>
               </TableRow>
@@ -590,11 +574,18 @@ export default function ContactsPage() {
                   </TableCell>
                   <TableCell>
                     <Badge
-                      variant={OUTBOUND_STATUS_VARIANTS[draft.status] || "secondary"}
+                      variant={
+                        OUTBOUND_STATUS_VARIANTS[getOutboundStatusForDisplay(draft.status)] || "secondary"
+                      }
                       className="whitespace-nowrap px-3 py-1 text-xs font-semibold"
                     >
-                      {OUTBOUND_STATUS_LABELS[draft.status] || draft.status}
+                      {getOutboundStatusLabel(draft.status, draft.scheduledFor)}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {"sourceModule" in draft
+                      ? getOutboundSourceModuleLabel(String(draft.sourceModule))
+                      : "—"}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {draft.author.name}
@@ -684,6 +675,28 @@ export default function ContactsPage() {
         </Table>
         </div>
       </Card>
+      </TabsContent>
+
+      <TabsContent value="agenda" className="space-y-4">
+        <OutboundAgendaPanel />
+      </TabsContent>
+
+      <TabsContent value="info" className="space-y-4">
+        <OutboundInfoPanel
+          activeStatusFilter={statusFilter}
+          onStatusCardClick={handleStatusCardClick}
+          drafts={drafts.map((draft) => ({
+            id: draft.id,
+            status: draft.status,
+            subject: draft.subject,
+            lead: draft.lead
+              ? { id: draft.lead.id, companyName: draft.lead.companyName }
+              : { id: "", companyName: draft.toEmail },
+          }))}
+          followUpDays={followUpQueue?.followupDays}
+          followUpItems={followUpItems}
+          topbarFollowUpCount={topbarStats?.followUpCount}
+        />
       </TabsContent>
       </Tabs>
     </div>
