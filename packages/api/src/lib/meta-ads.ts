@@ -179,7 +179,7 @@ export function defaultTargeting(targeting: unknown): Record<string, unknown> {
   return merged;
 }
 
-function resolveAdsetOptimizationGoal(objective: string) {
+export function resolveAdsetOptimizationGoal(objective: string) {
   const normalized = objective.trim().toUpperCase();
   if (normalized === "OUTCOME_TRAFFIC" || normalized === "LINK_CLICKS") return "LINK_CLICKS";
   if (normalized === "OUTCOME_LEADS" || normalized === "LEAD_GENERATION") return "LEAD_GENERATION";
@@ -188,9 +188,13 @@ function resolveAdsetOptimizationGoal(objective: string) {
   return "LINK_CLICKS";
 }
 
-function resolveAdsetDestinationType(objective: string) {
+/** Meta only allows certain destination_type values per campaign objective (see Marketing API docs). */
+export function resolveAdsetDestinationType(objective: string): string | undefined {
   const normalized = objective.trim().toUpperCase();
-  if (normalized.startsWith("OUTCOME_") || normalized === "LINK_CLICKS") return "WEBSITE";
+  // OUTCOME_TRAFFIC: UNDEFINED | MESSENGER | WHATSAPP | PHONE_CALL — not WEBSITE (website URL lives on the creative).
+  if (normalized === "OUTCOME_TRAFFIC" || normalized === "LINK_CLICKS") return undefined;
+  if (normalized === "OUTCOME_LEADS" || normalized === "LEAD_GENERATION") return "WEBSITE";
+  if (normalized === "OUTCOME_SALES") return "WEBSITE";
   return undefined;
 }
 
@@ -262,22 +266,24 @@ export async function pushPausedMetaAdPlan(params: {
   const adsetBudget = plan.dailyBudgetCents
     ? { daily_budget: String(plan.dailyBudgetCents) }
     : { lifetime_budget: String(plan.lifetimeBudgetCents || 0) };
+  const adsetBody: Record<string, string | undefined> = {
+    access_token: config.accessToken,
+    name: `${plan.name} - Adset`,
+    campaign_id: campaign.id,
+    billing_event: "IMPRESSIONS",
+    optimization_goal: optimizationGoal,
+    bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+    status: "PAUSED",
+    targeting: JSON.stringify(defaultTargeting(plan.targeting)),
+    start_time: plan.startTime ? new Date(plan.startTime).toISOString() : undefined,
+    end_time: plan.endTime ? new Date(plan.endTime).toISOString() : undefined,
+    ...adsetBudget,
+  };
+  if (destinationType) adsetBody.destination_type = destinationType;
+
   let adset: { id?: string };
   try {
-    adset = (await metaPost(`${adAccountId}/adsets`, {
-      access_token: config.accessToken,
-      name: `${plan.name} - Adset`,
-      campaign_id: campaign.id,
-      billing_event: "IMPRESSIONS",
-      optimization_goal: optimizationGoal,
-      bid_strategy: "LOWEST_COST_WITHOUT_CAP",
-      status: "PAUSED",
-      targeting: JSON.stringify(defaultTargeting(plan.targeting)),
-      destination_type: destinationType,
-      start_time: plan.startTime ? new Date(plan.startTime).toISOString() : undefined,
-      end_time: plan.endTime ? new Date(plan.endTime).toISOString() : undefined,
-      ...adsetBudget,
-    })) as { id?: string };
+    adset = (await metaPost(`${adAccountId}/adsets`, adsetBody)) as { id?: string };
   } catch (error) {
     throw new Error(`Meta ad set: ${error instanceof Error ? error.message : String(error)}`);
   }

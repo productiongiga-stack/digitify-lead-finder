@@ -228,12 +228,17 @@ type MetaErrorPayload = {
     code?: number;
     type?: string;
     error_subcode?: number;
+    error_user_msg?: string;
+    error_user_title?: string;
   };
 };
 
 export function formatMetaApiError(error: MetaErrorPayload["error"], fallbackStatus?: number) {
   if (!error) return `Meta API fout (${fallbackStatus || "unknown"})`;
-  const parts = [error.message || "Meta API fout"];
+  const parts = [error.error_user_msg || error.message || "Meta API fout"];
+  if (error.error_user_title && error.error_user_title !== parts[0]) {
+    parts.unshift(error.error_user_title);
+  }
   if (error.code) parts.push(`code ${error.code}`);
   if (error.error_subcode) parts.push(`subcode ${error.error_subcode}`);
   if (error.type) parts.push(`type ${error.type}`);
