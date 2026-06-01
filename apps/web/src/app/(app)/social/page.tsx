@@ -98,7 +98,12 @@ export default function SocialPage() {
       await listQuery.refetch();
       showToast({ title: "Draft aangemaakt" });
     },
-    onError: (error) => showToast({ title: "Aanmaken mislukt", description: error.message, variant: "error" }),
+    onError: (error) => {
+      const message = error.message.includes("social_posts")
+        ? "Database mist de tabel social_posts. Voer packages/db/prisma/manual/social-posts-and-meta-ads.sql uit in Supabase SQL Editor (zie docs/VERCEL.md)."
+        : error.message;
+      showToast({ title: "Aanmaken mislukt", description: message, variant: "error" });
+    },
   });
 
   const updateDraft = trpc.social.updateDraft.useMutation({

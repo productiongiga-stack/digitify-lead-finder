@@ -3,7 +3,7 @@
   "framework": "nextjs",
   "regions": ["fra1"],
   "installCommand": "pnpm install",
-  "buildCommand": "pnpm db:migrate && pnpm --filter @digitify/db db:generate && pnpm --filter @digitify/web build",
+  "buildCommand": "pnpm --filter @digitify/db db:generate && pnpm --filter @digitify/web build",
   "outputDirectory": "apps/web/.next",
   "crons": [
     {
