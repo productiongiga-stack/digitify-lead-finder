@@ -25,7 +25,9 @@ describe("setting value validation", () => {
     expect(validateSettingValue("email.provider", "SMTP")).toBe("smtp");
     expect(validateSettingValue("seo.og_locale", "nl_BE")).toBe("nl_BE");
     expect(validateSettingValue("seo.og_locale", "nl_be")).toBe("nl_BE");
+    expect(validateSettingValue("seo.og_locale", "")).toBe("nl_BE");
     expect(() => validateSettingValue("email.provider", "mailgun")).toThrow(TRPCError);
+    expect(() => validateSettingValue("seo.og_locale", "en_GB")).toThrow(TRPCError);
   });
 
   it("validates numeric ranges", () => {

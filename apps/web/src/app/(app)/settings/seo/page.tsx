@@ -35,6 +35,11 @@ const TWITTER_CARD_OPTIONS = [
 
 const OG_LOCALE_OPTIONS = ["nl_BE", "nl_NL", "en_US", "fr_BE", "de_DE"] as const;
 
+function normalizeOgLocale(value: string) {
+  const match = OG_LOCALE_OPTIONS.find((option) => option.toLowerCase() === value.trim().toLowerCase());
+  return match ?? "nl_BE";
+}
+
 const PAGE_FIELDS = [
   { key: "home", label: "Home", titleKey: "seo.page_home_title", descKey: "seo.page_home_description" },
   { key: "product", label: "Product", titleKey: "seo.page_product_title", descKey: "seo.page_product_description" },
@@ -106,7 +111,7 @@ export default function SeoSettingsPage() {
     setKeywords(readSetting(settings, "seo.keywords"));
     setCanonicalBaseUrl(readSetting(settings, "seo.canonical_base_url", getAppUrl()));
     setOgImageUrl(readSetting(settings, "seo.og_image_url"));
-    setOgLocale(readSetting(settings, "seo.og_locale", "nl_BE"));
+    setOgLocale(normalizeOgLocale(readSetting(settings, "seo.og_locale", "nl_BE")));
     setTwitterCard(readSetting(settings, "seo.twitter_card", "summary_large_image"));
     setTwitterSite(readSetting(settings, "seo.twitter_site"));
     setRobotsIndex(readBool(settings, "seo.robots_index", true));

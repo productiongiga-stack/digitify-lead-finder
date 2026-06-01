@@ -213,6 +213,11 @@ export function validateSettingValue(key: string, rawValue: unknown): unknown {
   const enumRule = ENUM_SETTING_KEYS.get(normalizedKey);
   if (enumRule) {
     const value = String(rawValue).trim();
+    if (!value) {
+      if (normalizedKey === "seo.og_locale") return "nl_BE";
+      if (normalizedKey === "seo.twitter_card") return "summary_large_image";
+      invalid(`Instelling "${normalizedKey}" moet één van deze waarden hebben: ${enumRule.join(", ")}.`);
+    }
     const canonicalValue = enumRule.find((allowed) => allowed.toLowerCase() === value.toLowerCase());
     if (!canonicalValue) {
       invalid(`Instelling "${normalizedKey}" moet één van deze waarden hebben: ${enumRule.join(", ")}.`);
