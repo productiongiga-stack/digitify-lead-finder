@@ -1448,6 +1448,11 @@ export default function IntegrationsSettingsPage() {
                     <span className="font-mono"> instagram_business_content_publish</span> — die horen bij een ander product.
                   </li>
                   <li>
+                    <strong className="text-foreground">App mode → Live</strong>: App settings → Basic → zet de app op{" "}
+                    <strong className="text-foreground">Live</strong> (niet Development). Zonder Live mode faalt Meta Ads creative/push met subcode{" "}
+                    <span className="font-mono">1885183</span>.
+                  </li>
+                  <li>
                     <strong className="text-foreground">App roles</strong>: zet <span className="font-mono">productiongiga@gmail.com</span> als Admin/Developer/Tester.
                   </li>
                   <li>
@@ -1502,6 +1507,10 @@ export default function IntegrationsSettingsPage() {
                   </li>
                   <li>
                     Test in Meta “Publication hub”? Die gebruikt permissions uit je Meta-app, niet automatisch Digitify. Pas Use cases aan (stap 2–4 hierboven).
+                  </li>
+                  <li>
+                    Fout <span className="font-mono">development mode</span> / subcode <span className="font-mono">1885183</span>? Zet de Meta-app op{" "}
+                    <strong>Live</strong> (zie stap “App mode → Live” hierboven), wacht 1–2 min, koppel Meta opnieuw in Integraties, en probeer Push opnieuw.
                   </li>
                 </ul>
                 {metaAdsConnection.data?.missingConfiguredScopes?.length ? (

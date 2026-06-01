@@ -233,12 +233,19 @@ type MetaErrorPayload = {
   };
 };
 
+const META_API_ERROR_HINTS: Record<number, string> = {
+  1885183:
+    "Zet je Meta-app op Live: developers.facebook.com → jouw app → App settings → Basic → schakel van Development naar Live.",
+};
+
 export function formatMetaApiError(error: MetaErrorPayload["error"], fallbackStatus?: number) {
   if (!error) return `Meta API fout (${fallbackStatus || "unknown"})`;
   const parts = [error.error_user_msg || error.message || "Meta API fout"];
   if (error.error_user_title && error.error_user_title !== parts[0]) {
     parts.unshift(error.error_user_title);
   }
+  const hint = error.error_subcode ? META_API_ERROR_HINTS[error.error_subcode] : undefined;
+  if (hint) parts.push(hint);
   if (error.code) parts.push(`code ${error.code}`);
   if (error.error_subcode) parts.push(`subcode ${error.error_subcode}`);
   if (error.type) parts.push(`type ${error.type}`);
