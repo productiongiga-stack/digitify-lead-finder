@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, type ReactNode } from "react";
+import { getAppUrl } from "@/lib/config";
 import { trpc } from "@/lib/trpc/client";
 import {
   Button,
@@ -1245,7 +1246,14 @@ export default function IntegrationsSettingsPage() {
                 </div>
               </div>
               <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-                Redirect URL: <span className="font-mono text-foreground">https://leads.digitify.be/api/integrations/google-calendar/callback</span>
+                Redirect URL:{" "}
+                <span className="font-mono text-foreground">
+                  {getAppUrl().replace(/\/$/, "")}/api/integrations/google-calendar/callback
+                </span>
+                <span className="mt-1 block text-muted-foreground">
+                  Client ID moet eindigen op <span className="font-mono">.apps.googleusercontent.com</span> (Web application in Google Cloud Console).
+                  Fout “Client missing a project id” / 401 <span className="font-mono">invalid_client</span> betekent meestal een lege of verkeerde Client ID/Secret (geen komma&apos;s of aanhalingstekens in Vercel).
+                </span>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <Button variant="outline" size="sm" asChild>
@@ -1413,32 +1421,93 @@ export default function IntegrationsSettingsPage() {
                 </div>
               </div>
 
-              <div className="grid gap-2 rounded-xl border bg-muted/20 p-3 text-xs text-muted-foreground sm:grid-cols-3">
-                <div><span className="font-semibold text-foreground">1.</span> Vul App ID en Secret in.</div>
-                <div><span className="font-semibold text-foreground">2.</span> Voeg de redirect URL toe in Meta.</div>
-                <div><span className="font-semibold text-foreground">3.</span> Klik op koppelen en kies Page + IG account.</div>
+              <div className="rounded-xl border bg-muted/20 p-4 text-sm leading-relaxed">
+                <p className="font-semibold text-foreground">Stap-voor-stap: Meta-app instellen</p>
+                <ol className="mt-3 list-decimal space-y-2 pl-5 text-muted-foreground">
+                  <li>
+                    Ga naar{" "}
+                    <a href="https://developers.facebook.com/apps/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                      developers.facebook.com/apps
+                    </a>{" "}
+                    → jouw app → <strong className="text-foreground">Use cases</strong>.
+                  </li>
+                  <li>
+                    Voeg <strong className="text-foreground">Facebook Login for Business</strong> toe (niet alleen “Instagram API with Instagram Login”).
+                  </li>
+                  <li>
+                    Bij die use case → <strong className="text-foreground">Customize</strong> → permissions:
+                    <span className="font-mono"> pages_show_list</span>,
+                    <span className="font-mono"> instagram_basic</span>,
+                    <span className="font-mono"> instagram_content_publish</span>.
+                    Optioneel (Facebook-posts): <span className="font-mono">pages_read_engagement</span>,{" "}
+                    <span className="font-mono">pages_manage_posts</span>.
+                  </li>
+                  <li>
+                    <strong className="text-foreground">Verwijder</strong> uit je app-configuratie:
+                    <span className="font-mono"> instagram_business_basic</span> en{" "}
+                    <span className="font-mono"> instagram_business_content_publish</span> — die horen bij een ander product.
+                  </li>
+                  <li>
+                    <strong className="text-foreground">App roles</strong>: zet <span className="font-mono">productiongiga@gmail.com</span> als Admin/Developer/Tester.
+                  </li>
+                  <li>
+                    Koppel in Meta Business Suite een <strong className="text-foreground">Facebook-pagina</strong> aan je{" "}
+                    <strong className="text-foreground">Instagram Business/Creator</strong>-account.
+                  </li>
+                  <li>
+                    Plak hierboven App ID + Secret, sla op, en klik <strong className="text-foreground">Meta koppelen</strong> (niet alleen de tester in het Meta-dashboard).
+                  </li>
+                </ol>
+              </div>
+
+              <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 p-3 text-xs leading-relaxed text-sky-950 dark:text-sky-100">
+                <p className="font-semibold">Scopes die deze server nu gebruikt</p>
+                <p className="mt-1 font-mono break-all">
+                  {metaConnection.data?.oauthScopes?.join(", ") ||
+                    "pages_show_list, pages_read_engagement, pages_manage_posts, instagram_basic, instagram_content_publish"}
+                </p>
+                <p className="mt-2 text-muted-foreground">
+                  Login-modus: <span className="font-mono">{metaConnection.data?.oauthLoginMode || "facebook"}</span>
+                  {" · "}
+                  Niveau: <span className="font-mono">{metaConnection.data?.oauthScopeLevel || "standard"}</span>
+                </p>
+                {metaConnection.data?.oauthUsesLegacyEnvOverride ? (
+                  <p className="mt-2 font-semibold text-amber-800 dark:text-amber-200">
+                    Vercel heeft nog META_OAUTH_SCOPES met oude instagram_business_* waarden. Verwijder die variabele of deploy opnieuw.
+                  </p>
+                ) : null}
+                {metaConnection.data?.oauthHasDeprecatedScopes ? (
+                  <p className="mt-2 font-semibold text-amber-800 dark:text-amber-200">
+                    Er staan nog instagram_business_* scopes actief. Die veroorzaken “Invalid Scopes”.
+                  </p>
+                ) : null}
+                <p className="mt-2">
+                  Technische check (ingelogd als admin):{" "}
+                  <a href="/api/integrations/meta/scopes" target="_blank" rel="noopener noreferrer" className="font-mono text-primary hover:underline">
+                    /api/integrations/meta/scopes
+                  </a>
+                </p>
               </div>
 
               <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-900 dark:text-amber-100">
-                <p className="font-semibold">Krijg je “Invalid Scopes” bij Meta?</p>
-                <p className="mt-1">
-                  Controleer dat je app Facebook Login/Pages én Instagram Graph publishing ondersteunt. Nieuwe Meta-apps gebruiken vaak
-                  <span className="font-mono"> instagram_business_basic</span> en
-                  <span className="font-mono"> instagram_business_content_publish</span>. Oudere apps kunnen nog
-                  <span className="font-mono"> instagram_basic</span> en
-                  <span className="font-mono"> instagram_content_publish</span> vereisen. Dit kan via
-                  <span className="font-mono"> META_OAUTH_SCOPES</span> worden overschreven.
-                </p>
-                <p className="mt-2">
-                  Voor Meta Ads heeft de app extra Marketing API-scopes nodig:
-                  <span className="font-mono"> ads_read</span>,
-                  <span className="font-mono"> ads_management</span> en meestal
-                  <span className="font-mono"> business_management</span>. Campagnes worden altijd met
-                  <span className="font-mono"> status=PAUSED</span> aangemaakt.
-                </p>
+                <p className="font-semibold">Fout bevat nog instagram_business_* of pages_manage_posts?</p>
+                <ul className="mt-2 list-disc space-y-1 pl-4">
+                  <li>
+                    Zie je <span className="font-mono">instagram_business_basic</span> in de fout? Dan draait productie nog oude code of{" "}
+                    <span className="font-mono">META_OAUTH_SCOPES</span> in Vercel is verkeerd — verwijder die env var en redeploy.
+                  </li>
+                  <li>
+                    Alleen <span className="font-mono">pages_manage_posts</span> invalid? Zet in Vercel tijdelijk{" "}
+                    <span className="font-mono">META_OAUTH_SCOPE_LEVEL=minimal</span> en voeg later Pages-permissions toe in Meta Use cases.
+                  </li>
+                  <li>
+                    Test in Meta “Publication hub”? Die gebruikt permissions uit je Meta-app, niet automatisch Digitify. Pas Use cases aan (stap 2–4 hierboven).
+                  </li>
+                </ul>
                 {metaAdsConnection.data?.missingConfiguredScopes?.length ? (
                   <p className="mt-2 font-semibold">
-                    Huidige OAuth-config mist: <span className="font-mono">{metaAdsConnection.data.missingConfiguredScopes.join(", ")}</span>.
+                    Meta Ads mist scopes: <span className="font-mono">{metaAdsConnection.data.missingConfiguredScopes.join(", ")}</span>.
+                    Zet <span className="font-mono">META_OAUTH_INCLUDE_ADS=true</span> en koppel opnieuw.
                   </p>
                 ) : null}
               </div>

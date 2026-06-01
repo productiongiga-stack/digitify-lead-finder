@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@digitify/db";
 import { getCurrentUser } from "@/lib/auth/session";
+import { resolveOAuthAppUrl } from "@digitify/api/src/lib/oauth-app-url";
 import {
   exchangeMetaOAuthCode,
   loadMetaWorkspaceConfig,
   loadMetaManagedPages,
   pickDefaultMetaPage,
-  resolveAppUrl,
   upsertMetaSettings,
   workspaceScopeFromAuthenticatedUser,
 } from "@digitify/api/src/lib/social-meta";
@@ -46,7 +46,7 @@ export async function GET(request: Request) {
       return NextResponse.redirect(new URL("/settings/integrations?meta=missing-config", request.url));
     }
 
-    const appUrl = resolveAppUrl();
+    const appUrl = resolveOAuthAppUrl(request);
     const redirectUri = `${appUrl}/api/integrations/meta/callback`;
 
     const token = await exchangeMetaOAuthCode({

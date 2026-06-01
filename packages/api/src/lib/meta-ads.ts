@@ -2,7 +2,13 @@ import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
 import { getSettingNumber, getSettingString, settingsRowsToMap } from "./settings";
 import { loadWorkspaceSettingRows, type WorkspaceScope } from "./workspace-settings";
-import { loadMetaWorkspaceConfig, metaGet, metaPost, resolveMetaOAuthScopes } from "./social-meta";
+import {
+  loadMetaWorkspaceConfig,
+  metaGet,
+  metaPost,
+  META_ADS_OAUTH_SCOPES,
+  resolveMetaOAuthScopes,
+} from "./social-meta";
 
 export const META_ADS_SETTING_KEYS = [
   "ads.meta_ad_account_id",
@@ -12,7 +18,7 @@ export const META_ADS_SETTING_KEYS = [
   "ads.max_daily_budget_cents",
 ] as const;
 
-export const META_ADS_REQUIRED_SCOPES = ["ads_read", "ads_management", "business_management"] as const;
+export const META_ADS_REQUIRED_SCOPES = META_ADS_OAUTH_SCOPES;
 
 export type MetaAdsWorkspaceConfig = Awaited<ReturnType<typeof loadMetaAdsWorkspaceConfig>>;
 

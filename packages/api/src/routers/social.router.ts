@@ -9,6 +9,7 @@ import {
   loadMetaWorkspaceConfig,
   publishFacebookImagePost,
   publishInstagramImagePost,
+  resolveMetaOAuthScopeSummary,
   workspaceScopeFromAuthenticatedUser,
 } from "../lib/social-meta";
 
@@ -486,6 +487,7 @@ export const socialRouter = router({
   connectionStatus: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadMetaWorkspaceConfig(ctx.db, scope);
+    const oauthScopes = resolveMetaOAuthScopeSummary();
 
     return {
       hasAppCredentials: Boolean(config.appId && config.appSecret),
@@ -494,6 +496,13 @@ export const socialRouter = router({
       instagramBusinessId: config.instagramBusinessId || null,
       autopostEnabled: config.autopostEnabled,
       tokenExpiresAt: config.tokenExpiresAt || null,
+      oauthLoginMode: oauthScopes.loginMode,
+      oauthScopeLevel: oauthScopes.scopeLevel,
+      oauthScopes: oauthScopes.scopes,
+      oauthIncludeAds: oauthScopes.includeAds,
+      oauthScopesOverridden: oauthScopes.overridden,
+      oauthUsesLegacyEnvOverride: oauthScopes.usesLegacyEnvOverride,
+      oauthHasDeprecatedScopes: oauthScopes.hasDeprecatedInstagramBusinessScopes,
     };
   }),
 

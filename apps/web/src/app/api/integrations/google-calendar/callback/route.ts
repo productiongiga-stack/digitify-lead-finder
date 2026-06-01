@@ -3,29 +3,13 @@ import { cookies } from "next/headers";
 import { prisma, protectSettingValue, revealSettingValue } from "@digitify/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { userSettingKey } from "@digitify/api/src/lib/user-settings";
+import {
+  isValidGoogleOAuthClientId,
+  isValidGoogleOAuthClientSecret,
+} from "@digitify/api/src/lib/oauth-credentials";
+import { resolveOAuthAppUrl } from "@digitify/api/src/lib/oauth-app-url";
 import { loadGoogleOAuthClientConfig } from "@digitify/api/src/lib/google-calendar";
 import { resolveSettingDbKey, workspaceScopeFromUser } from "@digitify/api/src/lib/workspace-settings";
-
-function resolveAppUrl() {
-  const candidates = [
-    process.env.NEXTAUTH_URL,
-    process.env.NEXT_PUBLIC_APP_URL,
-    process.env.APP_URL,
-    // VERCEL_URL is deployment-specific and differs from the registered redirect URI
-  ];
-
-  for (const candidate of candidates) {
-    const trimmed = candidate?.trim();
-    if (!trimmed) continue;
-    try {
-      return new URL(trimmed).toString().replace(/\/$/, "");
-    } catch {
-      continue;
-    }
-  }
-
-  return "http://localhost:3000";
-}
 
 export async function GET(request: Request) {
   const user = await getCurrentUser();
@@ -56,9 +40,15 @@ export async function GET(request: Request) {
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(new URL("/settings/bookings?google=missing-config", request.url));
   }
+  if (!isValidGoogleOAuthClientId(clientId)) {
+    return NextResponse.redirect(new URL("/settings/bookings?google=invalid-client-id", request.url));
+  }
+  if (!isValidGoogleOAuthClientSecret(clientSecret)) {
+    return NextResponse.redirect(new URL("/settings/bookings?google=invalid-client-secret", request.url));
+  }
 
   try {
-    const appUrl = resolveAppUrl();
+    const appUrl = resolveOAuthAppUrl(request);
     const redirectUri = `${appUrl}/api/integrations/google-calendar/callback`;
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",

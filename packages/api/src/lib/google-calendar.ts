@@ -4,6 +4,7 @@ import { getSettingBoolean, getSettingString, settingsRowsToMap, type SettingRow
 import { resolveWorkspaceOwnerId } from "./workspace";
 import { loadUserSettingRows } from "./user-settings";
 import { loadWorkspaceSettingRows } from "./workspace-settings";
+import { sanitizeOAuthClientValue } from "./oauth-credentials";
 
 type SettingsDb = {
   setting: {
@@ -113,8 +114,8 @@ export async function loadGoogleOAuthClientConfig(
   db?: SettingsDb,
   options?: { userId?: string },
 ) {
-  const envClientId = process.env.GOOGLE_CLIENT_ID?.trim() || "";
-  const envClientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
+  const envClientId = sanitizeOAuthClientValue(process.env.GOOGLE_CLIENT_ID);
+  const envClientSecret = sanitizeOAuthClientValue(process.env.GOOGLE_CLIENT_SECRET);
   let settingsClientId = "";
   let settingsClientSecret = "";
 
@@ -141,8 +142,12 @@ export async function loadGoogleOAuthClientConfig(
         ["integrations.google_oauth_client_id", "integrations.google_oauth_client_secret"],
       );
       const settings = settingsRowsToMap(rows);
-      settingsClientId = getSettingString(settings, "integrations.google_oauth_client_id");
-      settingsClientSecret = getSettingString(settings, "integrations.google_oauth_client_secret");
+      settingsClientId = sanitizeOAuthClientValue(
+        getSettingString(settings, "integrations.google_oauth_client_id"),
+      );
+      settingsClientSecret = sanitizeOAuthClientValue(
+        getSettingString(settings, "integrations.google_oauth_client_secret"),
+      );
     }
   }
 

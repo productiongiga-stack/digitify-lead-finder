@@ -182,6 +182,8 @@ export const metaAdsRouter = router({
       requiredScopes: META_ADS_REQUIRED_SCOPES.slice(),
       configuredMarketingScopes: resolveConfiguredMarketingScopes(),
       missingConfiguredScopes: META_ADS_REQUIRED_SCOPES.filter((scope) => !resolveConfiguredMarketingScopes().includes(scope)),
+      adsScopesEnabled: resolveConfiguredMarketingScopes().length === META_ADS_REQUIRED_SCOPES.length,
+      oauthIncludeAdsEnv: process.env.META_OAUTH_INCLUDE_ADS?.trim() || null,
     };
   }),
 

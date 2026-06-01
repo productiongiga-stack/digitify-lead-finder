@@ -670,6 +670,18 @@ export default function BookingSettingsPage() {
         description: "Je hebt de toegang niet toegestaan.",
         variant: "error",
       },
+      "invalid-client-id": {
+        title: "Google Client ID ongeldig",
+        description:
+          "De OAuth Client ID in Instellingen → Integraties moet een Web application zijn en eindigen op .apps.googleusercontent.com. Controleer Google Cloud Console → APIs & Services → Credentials.",
+        variant: "error",
+      },
+      "invalid-client-secret": {
+        title: "Google Client Secret ongeldig",
+        description:
+          "Het secret moet beginnen met GOCSPX-. Zet geen komma's of aanhalingstekens in Vercel env vars. Sla opnieuw op via Integraties.",
+        variant: "error",
+      },
     };
     const message = messages[googleStatus] || messages.error;
     showToast(message);

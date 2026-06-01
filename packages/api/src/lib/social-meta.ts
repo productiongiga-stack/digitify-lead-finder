@@ -1,6 +1,8 @@
 import type { PrismaClient } from "@digitify/db";
 import { protectSettingValue } from "@digitify/db";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "./settings";
+import { sanitizeOAuthClientValue } from "./oauth-credentials";
+import { resolveOAuthAppUrl } from "./oauth-app-url";
 import { loadWorkspaceSettingRows, resolveSettingDbKey, workspaceScopeFromUser, type WorkspaceScope } from "./workspace-settings";
 
 const META_SETTING_KEYS = [
@@ -37,53 +39,142 @@ export type MetaWorkspaceConfig = {
   maxDailyBudgetCents: number;
 };
 
+export type MetaOAuthLoginMode = "facebook" | "instagram";
+
+/** Minimal Facebook Login scopes (when Pages publish permission is not on the Meta app yet). */
+export const META_FACEBOOK_LOGIN_MINIMAL_SCOPES = [
+  "pages_show_list",
+  "instagram_basic",
+  "instagram_content_publish",
+] as const;
+
+/** Scopes for Instagram API with Facebook Login (Page-linked IG). */
+export const META_FACEBOOK_LOGIN_PUBLISHING_SCOPES = [
+  "pages_show_list",
+  "pages_read_engagement",
+  "pages_manage_posts",
+  "instagram_basic",
+  "instagram_content_publish",
+] as const;
+
+/** @deprecated Instagram Login scope names — remapped to Facebook Login equivalents. */
+const LEGACY_META_SCOPE_REMAP: Record<string, string> = {
+  instagram_business_basic: "instagram_basic",
+  instagram_business_content_publish: "instagram_content_publish",
+  instagram_business_manage_comments: "instagram_manage_comments",
+  instagram_business_manage_messages: "instagram_manage_messages",
+  business_basic: "instagram_basic",
+  business_content_publish: "instagram_content_publish",
+};
+
+/** Scopes for Instagram API with Instagram Login (no Facebook Page required). */
+export const META_INSTAGRAM_LOGIN_PUBLISHING_SCOPES = [
+  "instagram_business_basic",
+  "instagram_business_content_publish",
+] as const;
+
+export const META_ADS_OAUTH_SCOPES = ["ads_read", "ads_management", "business_management"] as const;
+
 export function resolveMetaGraphVersion() {
   const raw = process.env.META_GRAPH_API_VERSION?.trim();
   if (!raw) return "v24.0";
   return raw.startsWith("v") ? raw : `v${raw}`;
 }
 
+export function resolveMetaOAuthLoginMode(): MetaOAuthLoginMode {
+  const raw = process.env.META_OAUTH_LOGIN_MODE?.trim().toLowerCase();
+  if (raw === "instagram") return "instagram";
+  return "facebook";
+}
+
+export function resolveMetaOAuthIncludeAds() {
+  const raw = process.env.META_OAUTH_INCLUDE_ADS?.trim().toLowerCase();
+  if (raw === "true" || raw === "1" || raw === "yes") return true;
+  if (raw === "false" || raw === "0" || raw === "no") return false;
+  return false;
+}
+
+export function resolveMetaOAuthScopeLevel(): "minimal" | "standard" {
+  const raw = process.env.META_OAUTH_SCOPE_LEVEL?.trim().toLowerCase();
+  if (raw === "minimal") return "minimal";
+  return "standard";
+}
+
+export function normalizeMetaOAuthScopes(scopes: string[]) {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const scope of scopes) {
+    const trimmed = scope.trim();
+    if (!trimmed) continue;
+    const mapped = LEGACY_META_SCOPE_REMAP[trimmed] || trimmed;
+    if (seen.has(mapped)) continue;
+    seen.add(mapped);
+    normalized.push(mapped);
+  }
+
+  return normalized;
+}
+
 export function resolveMetaOAuthScopes() {
   const raw = process.env.META_OAUTH_SCOPES?.trim();
+  let scopes: string[];
+
   if (raw) {
-    return raw
+    scopes = raw
       .split(/[,\s]+/)
       .map((scope) => scope.trim())
       .filter(Boolean);
+  } else if (resolveMetaOAuthLoginMode() === "instagram") {
+    scopes = [...META_INSTAGRAM_LOGIN_PUBLISHING_SCOPES];
+  } else if (resolveMetaOAuthScopeLevel() === "minimal") {
+    scopes = [...META_FACEBOOK_LOGIN_MINIMAL_SCOPES];
+  } else {
+    scopes = [...META_FACEBOOK_LOGIN_PUBLISHING_SCOPES];
   }
 
-  return [
-    "pages_show_list",
-    "pages_read_engagement",
-    "pages_manage_posts",
-    "instagram_business_basic",
-    "instagram_business_content_publish",
-    "ads_read",
-    "ads_management",
-    "business_management",
-  ];
-}
+  if (resolveMetaOAuthLoginMode() !== "instagram") {
+    scopes = normalizeMetaOAuthScopes(scopes);
+  }
 
-export function resolveAppUrl() {
-  const candidates = [process.env.NEXTAUTH_URL, process.env.NEXT_PUBLIC_APP_URL, process.env.APP_URL];
-  for (const candidate of candidates) {
-    const trimmed = candidate?.trim();
-    if (!trimmed) continue;
-    try {
-      return new URL(trimmed).toString().replace(/\/$/, "");
-    } catch {
-      continue;
+  if (resolveMetaOAuthIncludeAds()) {
+    for (const scope of META_ADS_OAUTH_SCOPES) {
+      if (!scopes.includes(scope)) scopes.push(scope);
     }
   }
-  return "http://localhost:3000";
+
+  return scopes;
+}
+
+export function hasDeprecatedInstagramBusinessScopes(scopes: string[]) {
+  return scopes.some((scope) => scope.startsWith("instagram_business_"));
+}
+
+export function resolveMetaOAuthScopeSummary() {
+  const scopes = resolveMetaOAuthScopes();
+  return {
+    loginMode: resolveMetaOAuthLoginMode(),
+    scopeLevel: resolveMetaOAuthScopeLevel(),
+    includeAds: resolveMetaOAuthIncludeAds(),
+    scopes,
+    overridden: Boolean(process.env.META_OAUTH_SCOPES?.trim()),
+    hasDeprecatedInstagramBusinessScopes: hasDeprecatedInstagramBusinessScopes(scopes),
+    usesLegacyEnvOverride:
+      Boolean(process.env.META_OAUTH_SCOPES?.trim()) &&
+      /instagram_business_|business_basic|business_content_publish/.test(process.env.META_OAUTH_SCOPES || ""),
+  };
+}
+
+export function resolveAppUrl(request?: Request) {
+  return resolveOAuthAppUrl(request);
 }
 
 export async function loadMetaWorkspaceConfig(db: PrismaClient, scope: WorkspaceScope): Promise<MetaWorkspaceConfig> {
   const rows = await loadWorkspaceSettingRows(db, scope, [...META_SETTING_KEYS]);
   const settings = settingsRowsToMap(rows);
   return {
-    appId: getSettingString(settings, "integrations.meta_app_id"),
-    appSecret: getSettingString(settings, "integrations.meta_app_secret"),
+    appId: sanitizeOAuthClientValue(getSettingString(settings, "integrations.meta_app_id")),
+    appSecret: sanitizeOAuthClientValue(getSettingString(settings, "integrations.meta_app_secret")),
     pageId: getSettingString(settings, "social.meta_page_id"),
     instagramBusinessId: getSettingString(settings, "social.meta_instagram_business_id"),
     accessToken: getSettingString(settings, "social.meta_access_token"),

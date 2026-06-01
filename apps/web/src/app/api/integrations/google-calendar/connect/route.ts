@@ -1,29 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
+import {
+  isValidGoogleOAuthClientId,
+  isValidGoogleOAuthClientSecret,
+} from "@digitify/api/src/lib/oauth-credentials";
 import { loadGoogleOAuthClientConfig } from "@digitify/api/src/lib/google-calendar";
+import { resolveOAuthAppUrl } from "@digitify/api/src/lib/oauth-app-url";
 import { getCurrentUser } from "@/lib/auth/session";
-
-function resolveAppUrl() {
-  const candidates = [
-    process.env.NEXTAUTH_URL,
-    process.env.NEXT_PUBLIC_APP_URL,
-    process.env.APP_URL,
-    // VERCEL_URL is deployment-specific and differs from the registered redirect URI
-  ];
-
-  for (const candidate of candidates) {
-    const trimmed = candidate?.trim();
-    if (!trimmed) continue;
-    try {
-      return new URL(trimmed).toString().replace(/\/$/, "");
-    } catch {
-      continue;
-    }
-  }
-
-  return "http://localhost:3000";
-}
 
 export async function GET(request: Request) {
   const user = await getCurrentUser();
@@ -42,7 +26,15 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL("/settings/bookings?google=missing-config", request.url));
   }
 
-  const appUrl = resolveAppUrl();
+  if (!isValidGoogleOAuthClientId(clientId)) {
+    return NextResponse.redirect(new URL("/settings/bookings?google=invalid-client-id", request.url));
+  }
+
+  if (!isValidGoogleOAuthClientSecret(clientSecret)) {
+    return NextResponse.redirect(new URL("/settings/bookings?google=invalid-client-secret", request.url));
+  }
+
+  const appUrl = resolveOAuthAppUrl(request);
   const redirectUri = `${appUrl}/api/integrations/google-calendar/callback`;
   const state = randomUUID();
   const nonce = randomUUID();

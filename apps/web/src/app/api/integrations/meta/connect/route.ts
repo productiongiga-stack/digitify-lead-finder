@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { getCurrentUser } from "@/lib/auth/session";
+import { isValidMetaAppId } from "@digitify/api/src/lib/oauth-credentials";
+import { resolveOAuthAppUrl } from "@digitify/api/src/lib/oauth-app-url";
 import {
   loadMetaWorkspaceConfig,
-  resolveAppUrl,
   resolveMetaGraphVersion,
   resolveMetaOAuthScopes,
   workspaceScopeFromAuthenticatedUser,
@@ -28,8 +29,11 @@ export async function GET(request: Request) {
   if (!config.appId || !config.appSecret) {
     return NextResponse.redirect(new URL("/settings/integrations?meta=missing-config", request.url));
   }
+  if (!isValidMetaAppId(config.appId)) {
+    return NextResponse.redirect(new URL("/settings/integrations?meta=invalid-app-id", request.url));
+  }
 
-  const appUrl = resolveAppUrl();
+  const appUrl = resolveOAuthAppUrl(request);
   const redirectUri = `${appUrl}/api/integrations/meta/callback`;
   const state = randomUUID();
 
