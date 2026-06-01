@@ -76,7 +76,7 @@ async function renderAdSuggestion(
       age_max: 60,
       publisher_platforms: ["facebook", "instagram"],
       facebook_positions: ["feed"],
-      instagram_positions: ["feed", "story"],
+      instagram_positions: ["stream", "story"],
     },
   };
 

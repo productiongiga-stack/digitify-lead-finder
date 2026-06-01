@@ -89,7 +89,7 @@ export default function MetaAdsPage() {
     age_max: 60,
     publisher_platforms: ["facebook", "instagram"],
     facebook_positions: ["feed"],
-    instagram_positions: ["feed", "story"],
+    instagram_positions: ["stream", "story"],
   }, null, 2));
 
   const connection = trpc.metaAds.connectionStatus.useQuery(undefined, { refetchInterval: 30_000 });

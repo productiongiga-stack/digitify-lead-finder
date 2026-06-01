@@ -150,13 +150,29 @@ function asObject(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};
 }
 
-const LEGACY_INSTAGRAM_POSITIONS: Record<string, string> = {
-  stream: "feed",
+/** @see https://developers.facebook.com/docs/marketing-api/audiences/reference/placement-targeting/ */
+export const META_INSTAGRAM_POSITIONS = [
+  "stream",
+  "story",
+  "explore",
+  "explore_home",
+  "reels",
+  "profile_feed",
+  "ig_search",
+  "profile_reels",
+] as const;
+
+const LEGACY_INSTAGRAM_POSITION_ALIASES: Record<string, string> = {
+  feed: "stream",
 };
 
 function sanitizeInstagramPositions(positions: unknown): string[] {
-  if (!Array.isArray(positions)) return ["feed", "story"];
-  return [...new Set(positions.map((item) => LEGACY_INSTAGRAM_POSITIONS[String(item)] || String(item)))];
+  const allowed = new Set<string>(META_INSTAGRAM_POSITIONS);
+  const source = Array.isArray(positions) ? positions : ["stream", "story"];
+  const normalized = source
+    .map((item) => LEGACY_INSTAGRAM_POSITION_ALIASES[String(item)] || String(item))
+    .filter((item) => allowed.has(item));
+  return normalized.length ? [...new Set(normalized)] : ["stream", "story"];
 }
 
 export function defaultTargeting(targeting: unknown): Record<string, unknown> {
@@ -169,7 +185,7 @@ export function defaultTargeting(targeting: unknown): Record<string, unknown> {
         age_max: 65,
         publisher_platforms: ["facebook", "instagram"],
         facebook_positions: ["feed"],
-        instagram_positions: ["feed", "story"],
+        instagram_positions: ["stream", "story"],
       };
 
   if (merged.instagram_positions) {

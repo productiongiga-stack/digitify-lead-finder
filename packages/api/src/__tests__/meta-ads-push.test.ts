@@ -4,16 +4,16 @@ import { defaultTargeting, resolveAdsetDestinationType, resolveAdsetOptimization
 describe("meta ads push helpers", () => {
   it("uses valid instagram_positions for default targeting", () => {
     const targeting = defaultTargeting(undefined) as { instagram_positions?: string[] };
-    expect(targeting.instagram_positions).toEqual(["feed", "story"]);
-    expect(targeting.instagram_positions).not.toContain("stream");
+    expect(targeting.instagram_positions).toEqual(["stream", "story"]);
+    expect(targeting.instagram_positions).not.toContain("feed");
   });
 
-  it("remaps legacy instagram stream position in custom targeting", () => {
+  it("remaps legacy instagram feed alias to stream", () => {
     const targeting = defaultTargeting({
       geo_locations: { countries: ["BE"] },
-      instagram_positions: ["stream", "story"],
+      instagram_positions: ["feed", "story"],
     }) as { instagram_positions?: string[] };
-    expect(targeting.instagram_positions).toEqual(["feed", "story"]);
+    expect(targeting.instagram_positions).toEqual(["stream", "story"]);
   });
 
   it("omits WEBSITE destination_type for OUTCOME_TRAFFIC (Meta rejects it)", () => {
