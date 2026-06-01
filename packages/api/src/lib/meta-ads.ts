@@ -154,14 +154,14 @@ const LEGACY_INSTAGRAM_POSITIONS: Record<string, string> = {
   stream: "feed",
 };
 
-function sanitizeInstagramPositions(positions: unknown) {
-  if (!Array.isArray(positions)) return positions;
+function sanitizeInstagramPositions(positions: unknown): string[] {
+  if (!Array.isArray(positions)) return ["feed", "story"];
   return [...new Set(positions.map((item) => LEGACY_INSTAGRAM_POSITIONS[String(item)] || String(item)))];
 }
 
-export function defaultTargeting(targeting: unknown) {
+export function defaultTargeting(targeting: unknown): Record<string, unknown> {
   const custom = asObject(targeting);
-  const merged = Object.keys(custom).length
+  const merged: Record<string, unknown> = Object.keys(custom).length
     ? { ...custom }
     : {
         geo_locations: { countries: ["BE"] },
