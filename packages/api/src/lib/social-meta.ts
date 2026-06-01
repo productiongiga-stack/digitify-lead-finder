@@ -231,11 +231,19 @@ type MetaErrorPayload = {
   };
 };
 
+export function formatMetaApiError(error: MetaErrorPayload["error"], fallbackStatus?: number) {
+  if (!error) return `Meta API fout (${fallbackStatus || "unknown"})`;
+  const parts = [error.message || "Meta API fout"];
+  if (error.code) parts.push(`code ${error.code}`);
+  if (error.error_subcode) parts.push(`subcode ${error.error_subcode}`);
+  if (error.type) parts.push(`type ${error.type}`);
+  return parts.join(" · ");
+}
+
 async function parseMetaResponse(response: Response) {
   const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & MetaErrorPayload;
   if (!response.ok || data.error) {
-    const message = data.error?.message || `Meta API fout (${response.status})`;
-    throw new Error(message);
+    throw new Error(formatMetaApiError(data.error, response.status));
   }
   return data;
 }

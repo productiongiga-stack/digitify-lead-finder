@@ -150,7 +150,7 @@ function asObject(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};
 }
 
-function defaultTargeting(targeting: unknown) {
+export function defaultTargeting(targeting: unknown) {
   const custom = asObject(targeting);
   if (Object.keys(custom).length) return custom;
   return {
@@ -159,8 +159,23 @@ function defaultTargeting(targeting: unknown) {
     age_max: 65,
     publisher_platforms: ["facebook", "instagram"],
     facebook_positions: ["feed"],
-    instagram_positions: ["stream"],
+    instagram_positions: ["feed", "story"],
   };
+}
+
+function resolveAdsetOptimizationGoal(objective: string) {
+  const normalized = objective.trim().toUpperCase();
+  if (normalized === "OUTCOME_TRAFFIC" || normalized === "LINK_CLICKS") return "LINK_CLICKS";
+  if (normalized === "OUTCOME_LEADS" || normalized === "LEAD_GENERATION") return "LEAD_GENERATION";
+  if (normalized === "OUTCOME_SALES") return "OFFSITE_CONVERSIONS";
+  if (normalized.startsWith("OUTCOME_")) return "LINK_CLICKS";
+  return "LINK_CLICKS";
+}
+
+function resolveAdsetDestinationType(objective: string) {
+  const normalized = objective.trim().toUpperCase();
+  if (normalized.startsWith("OUTCOME_") || normalized === "LINK_CLICKS") return "WEBSITE";
+  return undefined;
 }
 
 function buildObjectStorySpec(config: MetaAdsWorkspaceConfig, creatives: unknown) {
@@ -209,47 +224,73 @@ export async function pushPausedMetaAdPlan(params: {
 
   validateBudgetGuard(plan, config.maxDailyBudgetCents);
 
-  const campaign = (await metaPost(`${adAccountId}/campaigns`, {
-    access_token: config.accessToken,
-    name: plan.name,
-    objective: plan.objective || "OUTCOME_TRAFFIC",
-    status: "PAUSED",
-    special_ad_categories: "[]",
-  })) as { id?: string };
+  const objective = (plan.objective || "OUTCOME_TRAFFIC").trim().toUpperCase();
+  const optimizationGoal = resolveAdsetOptimizationGoal(objective);
+  const destinationType = resolveAdsetDestinationType(objective);
+
+  let campaign: { id?: string };
+  try {
+    campaign = (await metaPost(`${adAccountId}/campaigns`, {
+      access_token: config.accessToken,
+      name: plan.name,
+      objective,
+      status: "PAUSED",
+      special_ad_categories: "[]",
+      is_adset_budget_sharing_enabled: "false",
+    })) as { id?: string };
+  } catch (error) {
+    throw new Error(`Meta campagne: ${error instanceof Error ? error.message : String(error)}`);
+  }
   if (!campaign.id) throw new Error("Meta heeft geen campaign ID teruggegeven.");
 
   const adsetBudget = plan.dailyBudgetCents
     ? { daily_budget: String(plan.dailyBudgetCents) }
-    : { lifetime_budget: String(plan.lifetimeBudgetCents) };
-  const adset = (await metaPost(`${adAccountId}/adsets`, {
-    access_token: config.accessToken,
-    name: `${plan.name} - Adset`,
-    campaign_id: campaign.id,
-    billing_event: "IMPRESSIONS",
-    optimization_goal: "LINK_CLICKS",
-    bid_strategy: "LOWEST_COST_WITHOUT_CAP",
-    status: "PAUSED",
-    targeting: JSON.stringify(defaultTargeting(plan.targeting)),
-    start_time: plan.startTime ? new Date(plan.startTime).toISOString() : undefined,
-    end_time: plan.endTime ? new Date(plan.endTime).toISOString() : undefined,
-    ...adsetBudget,
-  })) as { id?: string };
+    : { lifetime_budget: String(plan.lifetimeBudgetCents || 0) };
+  let adset: { id?: string };
+  try {
+    adset = (await metaPost(`${adAccountId}/adsets`, {
+      access_token: config.accessToken,
+      name: `${plan.name} - Adset`,
+      campaign_id: campaign.id,
+      billing_event: "IMPRESSIONS",
+      optimization_goal: optimizationGoal,
+      bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+      status: "PAUSED",
+      targeting: JSON.stringify(defaultTargeting(plan.targeting)),
+      destination_type: destinationType,
+      start_time: plan.startTime ? new Date(plan.startTime).toISOString() : undefined,
+      end_time: plan.endTime ? new Date(plan.endTime).toISOString() : undefined,
+      ...adsetBudget,
+    })) as { id?: string };
+  } catch (error) {
+    throw new Error(`Meta ad set: ${error instanceof Error ? error.message : String(error)}`);
+  }
   if (!adset.id) throw new Error("Meta heeft geen ad set ID teruggegeven.");
 
-  const creative = (await metaPost(`${adAccountId}/adcreatives`, {
-    access_token: config.accessToken,
-    name: `${plan.name} - Creative`,
-    object_story_spec: JSON.stringify(buildObjectStorySpec(config, plan.creatives)),
-  })) as { id?: string };
+  let creative: { id?: string };
+  try {
+    creative = (await metaPost(`${adAccountId}/adcreatives`, {
+      access_token: config.accessToken,
+      name: `${plan.name} - Creative`,
+      object_story_spec: JSON.stringify(buildObjectStorySpec(config, plan.creatives)),
+    })) as { id?: string };
+  } catch (error) {
+    throw new Error(`Meta creative: ${error instanceof Error ? error.message : String(error)}`);
+  }
   if (!creative.id) throw new Error("Meta heeft geen creative ID teruggegeven.");
 
-  const ad = (await metaPost(`${adAccountId}/ads`, {
-    access_token: config.accessToken,
-    name: `${plan.name} - Ad`,
-    adset_id: adset.id,
-    creative: JSON.stringify({ creative_id: creative.id }),
-    status: "PAUSED",
-  })) as { id?: string };
+  let ad: { id?: string };
+  try {
+    ad = (await metaPost(`${adAccountId}/ads`, {
+      access_token: config.accessToken,
+      name: `${plan.name} - Ad`,
+      adset_id: adset.id,
+      creative: JSON.stringify({ creative_id: creative.id }),
+      status: "PAUSED",
+    })) as { id?: string };
+  } catch (error) {
+    throw new Error(`Meta advertentie: ${error instanceof Error ? error.message : String(error)}`);
+  }
   if (!ad.id) throw new Error("Meta heeft geen ad ID teruggegeven.");
 
   return {
