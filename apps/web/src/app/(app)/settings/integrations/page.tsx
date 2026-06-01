@@ -565,6 +565,7 @@ export default function IntegrationsSettingsPage() {
   const testImap = trpc.settings.testImap.useMutation();
   const metaConnection = trpc.social.connectionStatus.useQuery(undefined, { refetchInterval: 30_000 });
   const metaAdsConnection = trpc.metaAds.connectionStatus.useQuery(undefined, { refetchInterval: 30_000 });
+  const googleAdsConnection = trpc.googleAds.connectionStatus.useQuery(undefined, { refetchInterval: 30_000 });
 
   // Google
   const [googlePlacesKey, setGooglePlacesKey] = useState("");
@@ -1245,15 +1246,39 @@ export default function IntegrationsSettingsPage() {
                   </button>
                 </div>
               </div>
-              <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-                Redirect URL:{" "}
-                <span className="font-mono text-foreground">
-                  {getAppUrl().replace(/\/$/, "")}/api/integrations/google-calendar/callback
+              <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground space-y-2">
+                <p>
+                  Calendar redirect:{" "}
+                  <span className="font-mono text-foreground">
+                    {getAppUrl().replace(/\/$/, "")}/api/integrations/google-calendar/callback
+                  </span>
+                </p>
+                <p>
+                  Google Ads redirect:{" "}
+                  <span className="font-mono text-foreground">
+                    {getAppUrl().replace(/\/$/, "")}/api/integrations/google-ads/callback
+                  </span>
+                </p>
+                <span className="block text-muted-foreground">
+                  Voeg scope <span className="font-mono">https://www.googleapis.com/auth/adwords</span> toe aan de consent screen.
+                  Zet <span className="font-mono">GOOGLE_ADS_DEVELOPER_TOKEN</span> in Vercel.
                 </span>
-                <span className="mt-1 block text-muted-foreground">
-                  Client ID moet eindigen op <span className="font-mono">.apps.googleusercontent.com</span> (Web application in Google Cloud Console).
-                  Fout “Client missing a project id” / 401 <span className="font-mono">invalid_client</span> betekent meestal een lege of verkeerde Client ID/Secret (geen komma&apos;s of aanhalingstekens in Vercel).
-                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-3 text-sm">
+                <span className="text-muted-foreground">Google Ads:</span>
+                {googleAdsConnection.data?.connected ? (
+                  <Badge variant="success">{googleAdsConnection.data.accountEmail || "Gekoppeld"}</Badge>
+                ) : (
+                  <Badge variant="secondary">Niet gekoppeld</Badge>
+                )}
+                <Button variant={googleAdsConnection.data?.connected ? "outline" : "default"} size="sm" asChild disabled={!googleOAuthConfigured}>
+                  <a href="/api/integrations/google-ads/connect">
+                    {googleAdsConnection.data?.connected ? "Opnieuw koppelen" : "Google Ads koppelen"}
+                  </a>
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <Link href="/google-ads">Open Google Ads module</Link>
+                </Button>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <Button variant="outline" size="sm" asChild>

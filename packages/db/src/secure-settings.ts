@@ -16,6 +16,8 @@ const SECRET_SETTING_KEYS = new Set([
   "social.meta_access_token",
   "social.meta_refresh_meta",
   "social.meta_page_access_token",
+  "ads.google_oauth_access_token",
+  "ads.google_oauth_refresh_token",
 ]);
 
 function normalizeKey(key: string) {
@@ -71,6 +73,7 @@ export function isSecretSettingKey(key: string) {
   if (normalized.startsWith("integrations.") && normalized.endsWith("_secret")) return true;
   if (normalized.startsWith("email.") && (normalized.endsWith("_pass") || normalized.endsWith("_password"))) return true;
   if (normalized.startsWith("bookings.google_oauth_") && normalized.endsWith("_token")) return true;
+  if (normalized.startsWith("ads.google_oauth_") && normalized.endsWith("_token")) return true;
   if (normalized.startsWith("social.meta_") && normalized.endsWith("_token")) return true;
   if (normalized === "social.meta_refresh_meta") return true;
   return false;

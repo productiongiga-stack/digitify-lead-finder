@@ -1,0 +1,61 @@
+import { randomUUID } from "node:crypto";
+import { NextResponse } from "next/server";
+import { prisma } from "@digitify/db";
+import {
+  isValidGoogleOAuthClientId,
+  isValidGoogleOAuthClientSecret,
+} from "@digitify/api/src/lib/oauth-credentials";
+import { GOOGLE_ADS_OAUTH_SCOPE } from "@digitify/api/src/lib/google-ads-oauth";
+import { loadGoogleOAuthClientConfig } from "@digitify/api/src/lib/google-calendar";
+import { resolveOAuthAppUrl } from "@digitify/api/src/lib/oauth-app-url";
+import { getCurrentUser } from "@/lib/auth/session";
+
+export async function GET(request: Request) {
+  const user = await getCurrentUser();
+  if (!user) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("callbackUrl", "/settings/integrations");
+    return NextResponse.redirect(loginUrl);
+  }
+
+  const userId = (user as { id?: string }).id;
+  const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(
+    prisma as any,
+    userId ? { userId } : undefined,
+  );
+  if (!clientId || !clientSecret) {
+    return NextResponse.redirect(new URL("/settings/integrations?googleAds=missing-config", request.url));
+  }
+  if (!isValidGoogleOAuthClientId(clientId)) {
+    return NextResponse.redirect(new URL("/settings/integrations?googleAds=invalid-client-id", request.url));
+  }
+  if (!isValidGoogleOAuthClientSecret(clientSecret)) {
+    return NextResponse.redirect(new URL("/settings/integrations?googleAds=invalid-client-secret", request.url));
+  }
+
+  const appUrl = resolveOAuthAppUrl(request);
+  const redirectUri = `${appUrl}/api/integrations/google-ads/callback`;
+  const state = randomUUID();
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent");
+  url.searchParams.set("include_granted_scopes", "true");
+  url.searchParams.set(
+    "scope",
+    ["openid", "email", "profile", GOOGLE_ADS_OAUTH_SCOPE].join(" "),
+  );
+  url.searchParams.set("state", state);
+
+  const response = NextResponse.redirect(url);
+  response.cookies.set("digitify_google_ads_state", state, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: appUrl.startsWith("https://"),
+    path: "/",
+    maxAge: 60 * 15,
+  });
+  return response;
+}

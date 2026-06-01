@@ -29,6 +29,7 @@ const BOOLEAN_SETTING_KEYS = new Set([
   "bookings.reminders_1h_enabled",
   "social.autopost_enabled",
   "ads.autoads_enabled",
+  "ads.google_autoads_enabled",
   "email.smtp_tls_reject_unauthorized",
   "email.imap_tls",
   "seo.robots_index",
@@ -54,6 +55,7 @@ const NUMBER_SETTING_KEYS = new Map<string, { min: number; max: number; integer?
   ["bookings.slot_minutes", { min: 5, max: 240, integer: true }],
   ["openclaw.max_tokens", { min: 256, max: 8192, integer: true }],
   ["ads.max_daily_budget_cents", { min: 100, max: 100_000_000, integer: true }],
+  ["ads.google_max_daily_budget_cents", { min: 100, max: 100_000_000, integer: true }],
 ]);
 
 function invalid(message: string): never {

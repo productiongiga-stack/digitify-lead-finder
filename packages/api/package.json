@@ -19,6 +19,7 @@
     "@digitify/scoring": "workspace:^",
     "@sentry/node": "^10.53.1",
     "@trpc/server": "^11.0.0",
+    "google-ads-api": "^20.0.0",
     "imapflow": "^1.2.18",
     "nodemailer": "^6.9.0",
     "redis": "^4.7.0",

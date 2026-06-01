@@ -59,6 +59,9 @@ model User {
   metaAdAccounts       MetaAdAccount[]   @relation("MetaAdAccountCreatedBy")
   metaAdPlans          MetaAdPlan[]      @relation("MetaAdPlanCreatedBy")
   approvedMetaAdPlans  MetaAdPlan[]      @relation("MetaAdPlanApprovedBy")
+  googleAdAccounts     GoogleAdAccount[] @relation("GoogleAdAccountCreatedBy")
+  googleAdPlans        GoogleAdPlan[]    @relation("GoogleAdPlanCreatedBy")
+  approvedGoogleAdPlans GoogleAdPlan[]   @relation("GoogleAdPlanApprovedBy")
 
   @@index([workspaceOwnerId])
   @@map("users")
@@ -675,6 +678,12 @@ enum ActivityType {
   META_AD_REJECTED
   META_AD_PUSHED_PAUSED
   META_AD_FAILED
+  GOOGLE_AD_DRAFT_CREATED
+  GOOGLE_AD_SUBMITTED
+  GOOGLE_AD_APPROVED
+  GOOGLE_AD_REJECTED
+  GOOGLE_AD_PUSHED_PAUSED
+  GOOGLE_AD_FAILED
 }
 
 enum SocialPostStatus {
@@ -700,6 +709,21 @@ enum MetaAdPlanStatus {
   PUSHED_PAUSED
   FAILED
   CANCELLED
+}
+
+enum GoogleAdPlanStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  PUSHING
+  PUSHED_PAUSED
+  FAILED
+  CANCELLED
+}
+
+enum GoogleAdCampaignType {
+  SEARCH
+  PERFORMANCE_MAX
 }
 
 model SocialPost {
@@ -776,6 +800,55 @@ model MetaAdPlan {
   @@index([createdById, status])
   @@index([createdById, updatedAt(sort: Desc)])
   @@map("meta_ad_plans")
+}
+
+model GoogleAdAccount {
+  id                 String    @id @default(cuid())
+  createdById        String
+  externalCustomerId String
+  name               String
+  currency           String?   @default("EUR")
+  timezoneName       String?
+  isSelected         Boolean   @default(false)
+  lastSyncedAt       DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  createdBy User @relation("GoogleAdAccountCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@unique([createdById, externalCustomerId])
+  @@index([createdById, isSelected])
+  @@map("google_ad_accounts")
+}
+
+model GoogleAdPlan {
+  id                  String               @id @default(cuid())
+  createdById         String
+  approvedById        String?
+  name                String
+  campaignType        GoogleAdCampaignType @default(SEARCH)
+  status              GoogleAdPlanStatus   @default(DRAFT)
+  dailyBudgetCents    Int?
+  lifetimeBudgetCents Int?
+  currency            String               @default("EUR")
+  startTime           DateTime?
+  endTime             DateTime?
+  targeting           Json?
+  creatives           Json?
+  externalIds         Json?
+  approvedAt          DateTime?
+  pushedAt            DateTime?
+  retryCount          Int                  @default(0)
+  lastError           String?              @db.Text
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  createdBy  User  @relation("GoogleAdPlanCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  approvedBy User? @relation("GoogleAdPlanApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@index([createdById, status])
+  @@index([createdById, updatedAt(sort: Desc)])
+  @@map("google_ad_plans")
 }
 
 // ENRICHMENT DATA

@@ -68,7 +68,8 @@ pnpm db:seed            # optional dev/staging only
 If production shows missing tables/columns (e.g. `workspace_tasks`, `bodyFormat`):
 
 1. **Supabase → SQL Editor** → run one of:
-   - `packages/db/prisma/manual/social-posts-and-meta-ads.sql` — missing `social_posts` / `meta_ad_plans`
+   - `packages/db/prisma/manual/social-posts-and-meta-ads.sql` — missing `social_posts` / `meta_ad_plans` / `google_ad_plans`
+   - `packages/db/prisma/manual/google-ads-only.sql` — missing Google Ads tables only
    - `packages/db/prisma/manual/workspace_tasks-only.sql` — missing `workspace_tasks`
    - `packages/db/prisma/manual/email_templates-columns.sql` — missing `email_templates.type` / layout / `bodyFormat`
    - `packages/db/prisma/manual/production-catch-up.sql` — full catch-up (safe to re-run)
@@ -86,6 +87,18 @@ bash scripts/mark-pending-migrations-applied.sh
 Or run `pnpm db:migrate` when `DATABASE_URL` / `DIRECT_URL` point at the direct connection.
 
 Do **not** run seed on production unless intentional.
+
+## Google Ads module
+
+1. **Google Cloud** — same OAuth client as Calendar (`integrations.google_oauth_client_id` / `secret` in Integraties).
+2. **OAuth consent screen** — add sensitive scope `https://www.googleapis.com/auth/adwords`.
+3. **Authorized redirect URI** (Production + local):
+   - `https://leads.digitify.be/api/integrations/google-ads/callback`
+   - `http://localhost:3000/api/integrations/google-ads/callback`
+4. **Google Ads API Center** — create a **developer token** (Test for dev; Basic/Standard for production).
+5. **Vercel env** — `GOOGLE_ADS_DEVELOPER_TOKEN` (required). Optional `GOOGLE_ADS_LOGIN_CUSTOMER_ID` if using an MCC.
+6. **Integraties** → Google Ads → koppelen → selecteer customer ID op `/google-ads` → Instellingen.
+7. **Supabase** — if tables are missing after deploy, run `packages/db/prisma/manual/google-ads-only.sql` in SQL Editor (do not rely on `db:migrate` during Vercel build).
 
 ## Production domain
 
