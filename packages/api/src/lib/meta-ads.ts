@@ -150,17 +150,33 @@ function asObject(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};
 }
 
+const LEGACY_INSTAGRAM_POSITIONS: Record<string, string> = {
+  stream: "feed",
+};
+
+function sanitizeInstagramPositions(positions: unknown) {
+  if (!Array.isArray(positions)) return positions;
+  return [...new Set(positions.map((item) => LEGACY_INSTAGRAM_POSITIONS[String(item)] || String(item)))];
+}
+
 export function defaultTargeting(targeting: unknown) {
   const custom = asObject(targeting);
-  if (Object.keys(custom).length) return custom;
-  return {
-    geo_locations: { countries: ["BE"] },
-    age_min: 18,
-    age_max: 65,
-    publisher_platforms: ["facebook", "instagram"],
-    facebook_positions: ["feed"],
-    instagram_positions: ["feed", "story"],
-  };
+  const merged = Object.keys(custom).length
+    ? { ...custom }
+    : {
+        geo_locations: { countries: ["BE"] },
+        age_min: 18,
+        age_max: 65,
+        publisher_platforms: ["facebook", "instagram"],
+        facebook_positions: ["feed"],
+        instagram_positions: ["feed", "story"],
+      };
+
+  if (merged.instagram_positions) {
+    merged.instagram_positions = sanitizeInstagramPositions(merged.instagram_positions);
+  }
+
+  return merged;
 }
 
 function resolveAdsetOptimizationGoal(objective: string) {

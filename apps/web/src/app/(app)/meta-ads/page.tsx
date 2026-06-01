@@ -88,6 +88,8 @@ export default function MetaAdsPage() {
     age_min: 24,
     age_max: 60,
     publisher_platforms: ["facebook", "instagram"],
+    facebook_positions: ["feed"],
+    instagram_positions: ["feed", "story"],
   }, null, 2));
 
   const connection = trpc.metaAds.connectionStatus.useQuery(undefined, { refetchInterval: 30_000 });
@@ -152,6 +154,14 @@ export default function MetaAdsPage() {
     onError: (error) => showToast({ title: "Selecteren mislukt", description: error.message, variant: "error" }),
   });
 
+  const setAutoadsEnabled = trpc.metaAds.setAutoadsEnabled.useMutation({
+    onSuccess: async () => {
+      await invalidate();
+      showToast({ title: "Meta Ads module bijgewerkt" });
+    },
+    onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
+  });
+
   const rows = drafts.data ?? [];
   const selectedPlan = rows.find((row: any) => row.id === selectedPlanId) || rows[0] || null;
   const totalSpend = useMemo(() => (insights.data || []).reduce((sum: number, row: any) => sum + Number(row.spend || 0), 0), [insights.data]);
@@ -201,6 +211,25 @@ export default function MetaAdsPage() {
           <Link href="/settings/integrations">Meta koppeling beheren</Link>
         </Button>
       </div>
+
+      {!connection.data?.autoadsEnabled ? (
+        <Card className="border-destructive/30 bg-destructive/10">
+          <CardContent className="p-4 text-sm">
+            <p className="font-medium text-destructive">Meta Ads module staat uit</p>
+            <p className="mt-1 text-muted-foreground">Zet de module hieronder aan om drafts naar Meta te kunnen pushen.</p>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {connection.data?.missingConfiguredScopes?.length ? (
+        <Card className="border-amber-500/30 bg-amber-500/10">
+          <CardContent className="p-4 text-sm text-amber-950 dark:text-amber-100">
+            <AlertTriangle className="mr-2 inline h-4 w-4" />
+            OAuth mist ads-scopes: <span className="font-mono">{connection.data.missingConfiguredScopes.join(", ")}</span>.
+            Zet in Vercel <span className="font-mono">META_OAUTH_INCLUDE_ADS=true</span>, redeploy, en koppel Meta opnieuw via Integraties.
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card className="border-amber-500/30 bg-amber-500/10">
         <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -295,7 +324,15 @@ export default function MetaAdsPage() {
                   <div className="mt-3 flex flex-wrap gap-2">
                     {row.status === "DRAFT" || row.status === "FAILED" || row.status === "CANCELLED" ? <Button size="sm" variant="outline" onClick={() => submitForApproval.mutate({ id: row.id })}>Indienen</Button> : null}
                     {row.status === "PENDING_APPROVAL" ? <Button size="sm" onClick={() => approveDraft.mutate({ id: row.id })}>Goedkeuren</Button> : null}
-                    {row.status === "APPROVED" ? <Button size="sm" onClick={() => pushPaused.mutate({ id: row.id })}><Send className="mr-2 h-3 w-3" /> Push paused</Button> : null}
+                    {row.status === "APPROVED" ? (
+                      <Button
+                        size="sm"
+                        disabled={!connection.data?.autoadsEnabled || pushPaused.isPending}
+                        onClick={() => pushPaused.mutate({ id: row.id })}
+                      >
+                        <Send className="mr-2 h-3 w-3" /> Push paused
+                      </Button>
+                    ) : null}
                     {row.status === "FAILED" ? <Button size="sm" variant="outline" onClick={() => retryFailed.mutate({ id: row.id })}><RefreshCcw className="mr-2 h-3 w-3" /> Retry</Button> : null}
                     {!["PUSHING", "PUSHED_PAUSED", "CANCELLED"].includes(row.status) ? <Button size="sm" variant="outline" onClick={() => rejectDraft.mutate({ id: row.id, reason: "Aanpassing gevraagd" })}>Afkeuren</Button> : null}
                     {!["PUSHING", "PUSHED_PAUSED", "CANCELLED"].includes(row.status) ? <Button size="sm" variant="outline" onClick={() => cancelDraft.mutate({ id: row.id })}>Annuleren</Button> : null}
@@ -346,8 +383,17 @@ export default function MetaAdsPage() {
             <CardContent className="space-y-4">
               {connection.data?.missingConfiguredScopes?.length ? <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-950 dark:text-amber-100"><AlertTriangle className="mr-2 inline h-4 w-4" />OAuth mist scopes: <span className="font-mono">{connection.data.missingConfiguredScopes.join(", ")}</span>. Koppel Meta opnieuw nadat je scopes/App Review juist staan.</div> : null}
               <div className="rounded-xl border p-3 text-sm">
-                <div className="flex items-center justify-between gap-3"><span>Autoads feature flag</span><Switch checked={Boolean(connection.data?.autoadsEnabled)} disabled /></div>
-                <p className="mt-2 text-xs text-muted-foreground">Aan/uit zet je voorlopig in Integraties via workspace settings.</p>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium">Meta Ads module</p>
+                    <p className="text-xs text-muted-foreground">Vereist om Push paused naar Meta te gebruiken.</p>
+                  </div>
+                  <Switch
+                    checked={Boolean(connection.data?.autoadsEnabled)}
+                    disabled={setAutoadsEnabled.isPending}
+                    onCheckedChange={(enabled) => setAutoadsEnabled.mutate({ enabled })}
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Beschikbare Meta Ad Accounts</Label>

@@ -6,6 +6,7 @@ import { adminProcedure, protectedProcedure, router } from "../trpc";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import { upsertMetaSettings, workspaceScopeFromAuthenticatedUser } from "../lib/social-meta";
 import {
+  defaultTargeting,
   getMetaCampaign,
   getMetaInsights,
   listMetaAdAccounts,
@@ -74,6 +75,8 @@ async function renderAdSuggestion(
       age_min: 24,
       age_max: 60,
       publisher_platforms: ["facebook", "instagram"],
+      facebook_positions: ["feed"],
+      instagram_positions: ["feed", "story"],
     },
   };
 
@@ -99,7 +102,13 @@ async function renderAdSuggestion(
 
   try {
     const parsed = JSON.parse(response || "{}");
-    return { ...fallback, ...parsed, provider, model };
+    return {
+      ...fallback,
+      ...parsed,
+      targeting: defaultTargeting(parsed.targeting ?? fallback.targeting),
+      provider,
+      model,
+    };
   } catch {
     return { ...fallback, provider, model };
   }
@@ -234,6 +243,14 @@ export const metaAdsRouter = router({
         },
       });
       return row;
+    }),
+
+  setAutoadsEnabled: adminProcedure
+    .input(z.object({ enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      await upsertMetaSettings(ctx.db, scope, [{ key: "ads.autoads_enabled", value: String(input.enabled) }]);
+      return { enabled: input.enabled };
     }),
 
   listCampaigns: protectedProcedure.query(async ({ ctx }) => {
