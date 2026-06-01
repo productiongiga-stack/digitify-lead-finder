@@ -148,6 +148,9 @@ const TENANT_SCHEMA_STATEMENTS = [
   `ALTER TABLE "booking_analytics_events" ADD COLUMN IF NOT EXISTS "bookingId" TEXT`,
   `ALTER TABLE "booking_analytics_events" ADD COLUMN IF NOT EXISTS "metadata" JSONB`,
   `ALTER TABLE "booking_analytics_events" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
+  `ALTER TABLE "booking_event_types" ALTER COLUMN "updatedAt" SET DEFAULT CURRENT_TIMESTAMP`,
+  `ALTER TABLE "booking_availability_rules" ALTER COLUMN "updatedAt" SET DEFAULT CURRENT_TIMESTAMP`,
+  `ALTER TABLE "booking_questions" ALTER COLUMN "updatedAt" SET DEFAULT CURRENT_TIMESTAMP`,
 
   `DROP INDEX IF EXISTS "pipeline_stages_name_key"`,
   `DROP INDEX IF EXISTS "tags_name_key"`,
@@ -351,10 +354,11 @@ const TENANT_SCHEMA_STATEMENTS = [
   `ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "bodyFormat" "EmailTemplateBodyFormat" NOT NULL DEFAULT 'TEXT'`,
 ];
 
-export async function ensureTenantSchemaCompatibility(db: PrismaClient) {
+export async function ensureTenantSchemaCompatibility(db: PrismaClient, options?: { force?: boolean }) {
   const now = Date.now();
-  if (!ensurePromise && failedAt > 0 && now - failedAt < FAILURE_RETRY_TTL_MS) return;
-  if (!ensurePromise && ensuredAt > 0 && now - ensuredAt < ENSURE_TTL_MS) return;
+  const force = Boolean(options?.force);
+  if (!force && !ensurePromise && failedAt > 0 && now - failedAt < FAILURE_RETRY_TTL_MS) return;
+  if (!force && !ensurePromise && ensuredAt > 0 && now - ensuredAt < ENSURE_TTL_MS) return;
   if (ensurePromise) {
     await ensurePromise;
     return;

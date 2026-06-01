@@ -50,6 +50,7 @@ function getSetting(settings: Array<{ key: string; value: unknown }>, key: strin
 }
 
 type DaySchedule = { enabled: boolean; start: string; end: string };
+type PublicBookingEventType = NonNullable<Awaited<ReturnType<typeof ensureDefaultBookingEventType>>>;
 
 function parseRules(rawRules: Array<{ weekday: number; enabled: boolean; startTime: string; endTime: string }>, fallback: DaySchedule) {
   const rules = new Map<number, DaySchedule>();
@@ -61,6 +62,68 @@ function parseRules(rawRules: Array<{ weekday: number; enabled: boolean; startTi
 }
 
 type SuggestedSlot = { date: string; time: string; start: string };
+
+async function loadPublicBookingEventType(tenantUserId: string, eventTypeSlug: string) {
+  async function query() {
+    const bySlug = eventTypeSlug
+      ? await prisma.bookingEventType.findFirst({
+          where: { createdById: tenantUserId, slug: eventTypeSlug, isActive: true },
+          include: {
+            availabilityRules: true,
+            questions: { orderBy: { sortOrder: "asc" } },
+          },
+        })
+      : null;
+
+    if (bySlug) return bySlug;
+    if (eventTypeSlug) {
+      log.api.warn("Public booking event type slug not found, falling back to default", {
+        tenantUserId,
+        eventTypeSlug,
+      });
+    }
+    return ensureDefaultBookingEventType(prisma, tenantUserId);
+  }
+
+  try {
+    return await query();
+  } catch (error) {
+    log.api.warn("Public booking event type lookup failed, forcing schema compatibility retry", {
+      tenantUserId,
+      eventTypeSlug: eventTypeSlug || null,
+    }, error);
+    await ensureTenantSchemaCompatibility(prisma, { force: true }).catch(() => null);
+    return query();
+  }
+}
+
+async function syncEventTypeSettingsSafely(
+  tenantUserId: string,
+  eventType: PublicBookingEventType,
+) {
+  try {
+    const settingsRules = await loadEmbedAvailabilityRulesFromSettings(prisma, tenantUserId);
+    const currentRules = Array.isArray(eventType.availabilityRules) ? eventType.availabilityRules : [];
+    if (!eventTypeNeedsAvailabilityRuleSync(currentRules, settingsRules)) return eventType;
+
+    await applyWorkspaceEmbedSettingsToEventType(prisma, tenantUserId, eventType.id);
+    return (
+      (await prisma.bookingEventType.findFirst({
+        where: { id: eventType.id, createdById: tenantUserId },
+        include: {
+          availabilityRules: true,
+          questions: { orderBy: { sortOrder: "asc" } },
+        },
+      })) ?? eventType
+    );
+  } catch (error) {
+    log.api.warn("Public booking event type settings sync skipped", {
+      tenantUserId,
+      eventTypeId: eventType.id,
+    }, error);
+    return eventType;
+  }
+}
 
 async function findNextAvailableSlots(
   db: typeof prisma,
@@ -213,29 +276,19 @@ export async function POST(request: Request) {
     }
 
     _phase = "event-type";
-    let eventType = eventTypeSlug
-      ? await prisma.bookingEventType.findFirst({
-          where: { createdById: tenantUserId, slug: eventTypeSlug, isActive: true },
-          include: {
-            availabilityRules: true,
-            questions: { orderBy: { sortOrder: "asc" } },
-          },
-        })
-      : await ensureDefaultBookingEventType(prisma, tenantUserId);
-    if (!eventType) return NextResponse.json({ error: "Bookingtype niet gevonden." }, { status: 404 });
-
-    const settingsRules = await loadEmbedAvailabilityRulesFromSettings(prisma, tenantUserId);
-    if (eventTypeNeedsAvailabilityRuleSync(eventType.availabilityRules, settingsRules)) {
-      await applyWorkspaceEmbedSettingsToEventType(prisma, tenantUserId, eventType.id);
-      eventType =
-        (await prisma.bookingEventType.findFirst({
-          where: { id: eventType.id, createdById: tenantUserId },
-          include: {
-            availabilityRules: true,
-            questions: { orderBy: { sortOrder: "asc" } },
-          },
-        })) ?? eventType;
+    let eventType = await loadPublicBookingEventType(tenantUserId, eventTypeSlug);
+    if (!eventType) {
+      log.api.error("Public booking event type could not be resolved", {
+        route: "/api/public/bookings",
+        tenantUserId,
+        eventTypeSlug: eventTypeSlug || null,
+      });
+      return NextResponse.json(
+        { error: "Bookingtype kon niet worden geladen. Vernieuw de pagina en probeer opnieuw." },
+        { status: 500 },
+      );
     }
+    eventType = await syncEventTypeSettingsSafely(tenantUserId, eventType);
     if (eventType.requireConsent && !consentAccepted) {
       return NextResponse.json({ error: "Gelieve akkoord te gaan met de privacyvoorwaarden." }, { status: 400 });
     }

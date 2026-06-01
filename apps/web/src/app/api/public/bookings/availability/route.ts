@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { listGoogleBusyWindows } from "@digitify/api/src/lib/google-calendar";
+import { log } from "@digitify/api/src/lib/logger";
 import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-schema-compat";
 import {
@@ -36,23 +37,40 @@ export async function GET(request: Request) {
   const slug = url.searchParams.get("eventType")?.trim() || "";
   const from = url.searchParams.get("from") || formatDateKey(new Date());
   const to = url.searchParams.get("to") || from;
-  let eventType = slug
-    ? await prisma.bookingEventType.findFirst({
-        where: { createdById: tenantUserId, slug, isActive: true },
-        include: { availabilityRules: true },
-      })
-    : await ensureDefaultBookingEventType(prisma, tenantUserId);
+  let eventType;
+  try {
+    eventType = slug
+      ? await prisma.bookingEventType.findFirst({
+          where: { createdById: tenantUserId, slug, isActive: true },
+          include: { availabilityRules: true },
+        })
+      : null;
+    if (!eventType) {
+      if (slug) log.api.warn("Public availability event type slug not found, falling back to default", { tenantUserId, slug });
+      eventType = await ensureDefaultBookingEventType(prisma, tenantUserId);
+    }
+  } catch (error) {
+    log.api.warn("Public availability event type lookup failed, forcing schema compatibility retry", { tenantUserId, slug }, error);
+    await ensureTenantSchemaCompatibility(prisma, { force: true }).catch(() => null);
+    eventType = await ensureDefaultBookingEventType(prisma, tenantUserId);
+  }
   if (!eventType) return NextResponse.json({ error: "Bookingtype niet gevonden." }, { status: 404 });
 
-  const settingsRules = await loadEmbedAvailabilityRulesFromSettings(prisma, tenantUserId);
-  const needsRuleSync = eventTypeNeedsAvailabilityRuleSync(eventType.availabilityRules, settingsRules);
-  if (needsRuleSync) {
-    await applyWorkspaceEmbedSettingsToEventType(prisma, tenantUserId, eventType.id);
-    eventType =
-      (await prisma.bookingEventType.findFirst({
-        where: { id: eventType.id, createdById: tenantUserId },
-        include: { availabilityRules: true },
-      })) ?? eventType;
+  let needsRuleSync = false;
+  try {
+    const settingsRules = await loadEmbedAvailabilityRulesFromSettings(prisma, tenantUserId);
+    needsRuleSync = eventTypeNeedsAvailabilityRuleSync(eventType.availabilityRules, settingsRules);
+    if (needsRuleSync) {
+      await applyWorkspaceEmbedSettingsToEventType(prisma, tenantUserId, eventType.id);
+      eventType =
+        (await prisma.bookingEventType.findFirst({
+          where: { id: eventType.id, createdById: tenantUserId },
+          include: { availabilityRules: true },
+        })) ?? eventType;
+    }
+  } catch (error) {
+    log.api.warn("Public availability event type settings sync skipped", { tenantUserId, eventTypeId: eventType.id }, error);
+    needsRuleSync = false;
   }
 
   const hostIds = Array.isArray(eventType.hostUserIds)
