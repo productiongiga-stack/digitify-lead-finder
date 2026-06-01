@@ -77,6 +77,7 @@ async function renderAdSuggestion(
       publisher_platforms: ["facebook", "instagram"],
       facebook_positions: ["feed"],
       instagram_positions: ["stream", "story"],
+      targeting_automation: { advantage_audience: 0 },
     },
   };
 

@@ -90,6 +90,7 @@ export default function MetaAdsPage() {
     publisher_platforms: ["facebook", "instagram"],
     facebook_positions: ["feed"],
     instagram_positions: ["stream", "story"],
+    targeting_automation: { advantage_audience: 0 },
   }, null, 2));
 
   const connection = trpc.metaAds.connectionStatus.useQuery(undefined, { refetchInterval: 30_000 });

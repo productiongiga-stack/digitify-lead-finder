@@ -26,4 +26,16 @@ describe("meta ads push helpers", () => {
     expect(resolveAdsetDestinationType("OUTCOME_LEADS")).toBe("WEBSITE");
     expect(resolveAdsetDestinationType("OUTCOME_SALES")).toBe("WEBSITE");
   });
+
+  it("sets targeting_automation.advantage_audience for custom age targeting (Meta v23+)", () => {
+    const targeting = defaultTargeting({
+      geo_locations: { countries: ["BE"] },
+      age_min: 24,
+      age_max: 60,
+      publisher_platforms: ["facebook", "instagram"],
+      facebook_positions: ["feed"],
+      instagram_positions: ["stream", "story"],
+    }) as { targeting_automation?: { advantage_audience?: number } };
+    expect(targeting.targeting_automation?.advantage_audience).toBe(0);
+  });
 });

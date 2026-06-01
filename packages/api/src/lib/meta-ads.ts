@@ -175,6 +175,30 @@ function sanitizeInstagramPositions(positions: unknown): string[] {
   return normalized.length ? [...new Set(normalized)] : ["stream", "story"];
 }
 
+/** Meta API v23+ requires explicit Advantage+ audience opt-in/out when using custom targeting. */
+export function resolveMetaAdvantageAudienceFlag(): 0 | 1 {
+  const raw = process.env.META_ADS_ADVANTAGE_AUDIENCE?.trim().toLowerCase();
+  if (raw === "1" || raw === "true" || raw === "yes") return 1;
+  return 0;
+}
+
+function normalizeAdvantageAudienceFlag(value: unknown): 0 | 1 | null {
+  if (value === 0 || value === 1) return value;
+  if (value === "0" || value === "false") return 0;
+  if (value === "1" || value === "true") return 1;
+  return null;
+}
+
+function ensureTargetingAutomation(targeting: Record<string, unknown>): Record<string, unknown> {
+  const automation = asObject(targeting.targeting_automation);
+  const explicit = normalizeAdvantageAudienceFlag(automation.advantage_audience);
+  targeting.targeting_automation = {
+    ...automation,
+    advantage_audience: explicit ?? resolveMetaAdvantageAudienceFlag(),
+  };
+  return targeting;
+}
+
 export function defaultTargeting(targeting: unknown): Record<string, unknown> {
   const custom = asObject(targeting);
   const merged: Record<string, unknown> = Object.keys(custom).length
@@ -186,13 +210,14 @@ export function defaultTargeting(targeting: unknown): Record<string, unknown> {
         publisher_platforms: ["facebook", "instagram"],
         facebook_positions: ["feed"],
         instagram_positions: ["stream", "story"],
+        targeting_automation: { advantage_audience: resolveMetaAdvantageAudienceFlag() },
       };
 
   if (merged.instagram_positions) {
     merged.instagram_positions = sanitizeInstagramPositions(merged.instagram_positions);
   }
 
-  return merged;
+  return ensureTargetingAutomation(merged);
 }
 
 export function resolveAdsetOptimizationGoal(objective: string) {
