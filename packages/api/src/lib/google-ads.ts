@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
-import { GoogleAdsApi, enums, resources, toMicros, ResourceNames, type MutateOperation } from "google-ads-api";
+import { GoogleAdsApi, enums, errors, resources, toMicros, ResourceNames, type MutateOperation } from "google-ads-api";
 import { validateBudgetGuard } from "./meta-ads";
 import { type WorkspaceScope } from "./workspace-settings";
 import {
@@ -37,16 +37,71 @@ export function centsToBudgetMicros(cents: number) {
   return Math.max(1, Math.round(cents)) * 10_000;
 }
 
+/** Required on all new campaigns (EU political ads regulation). */
+const EU_POLITICAL_ADS_DECLARATION = "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING";
+
+function formatGoogleAdsErrorEntry(error: {
+  message?: string | null;
+  error_code?: unknown;
+  trigger?: unknown;
+  location?: { field_path_elements?: Array<{ field_name?: string | null; index?: number | null }> };
+}) {
+  const codeParts =
+    error.error_code && typeof error.error_code === "object"
+      ? Object.entries(error.error_code as Record<string, unknown>)
+          .filter(([, value]) => value != null && value !== 0 && value !== "UNSPECIFIED")
+          .map(([key, value]) => `${key}: ${String(value)}`)
+      : [];
+  const fieldPath =
+    error.location?.field_path_elements
+      ?.map((element) => element.field_name || (element.index != null ? `[${element.index}]` : ""))
+      .filter(Boolean)
+      .join(".") || "";
+  return [
+    error.message,
+    codeParts.length ? codeParts.join(", ") : "",
+    fieldPath ? `veld: ${fieldPath}` : "",
+    error.trigger != null && error.trigger !== "" ? `trigger: ${String(error.trigger)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" — ");
+}
+
 export function formatGoogleAdsError(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const anyErr = error as { errors?: Array<{ message?: string; error_code?: unknown }> };
-  if (anyErr.errors?.length) {
-    const parts = anyErr.errors
-      .map((item) => item.message || JSON.stringify(item.error_code || {}))
-      .filter(Boolean);
+  if (error instanceof errors.GoogleAdsFailure) {
+    const parts = error.errors.map((entry) => formatGoogleAdsErrorEntry(entry)).filter(Boolean);
     if (parts.length) return parts.join(" · ");
   }
-  return error.message;
+
+  if (error instanceof Error) {
+    const anyErr = error as { errors?: Array<Parameters<typeof formatGoogleAdsErrorEntry>[0]> };
+    if (anyErr.errors?.length) {
+      const parts = anyErr.errors.map((entry) => formatGoogleAdsErrorEntry(entry)).filter(Boolean);
+      if (parts.length) return parts.join(" · ");
+    }
+    if (error.message && error.message !== "[object Object]") return error.message;
+  }
+
+  if (error && typeof error === "object") {
+    const nested = (error as { errors?: unknown[] }).errors;
+    if (Array.isArray(nested) && nested.length) {
+      const parts = nested
+        .map((entry) =>
+          typeof entry === "object" && entry
+            ? formatGoogleAdsErrorEntry(entry as Parameters<typeof formatGoogleAdsErrorEntry>[0])
+            : String(entry),
+        )
+        .filter(Boolean);
+      if (parts.length) return parts.join(" · ");
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+
+  return String(error);
 }
 
 export function defaultSearchTargeting(targeting: unknown) {
@@ -254,6 +309,7 @@ async function pushSearchPaused(params: {
           target_search_network: true,
           target_content_network: false,
         },
+        contains_eu_political_advertising: EU_POLITICAL_ADS_DECLARATION,
       },
     },
   ];
@@ -285,35 +341,22 @@ async function pushSearchPaused(params: {
     throw new Error(`Google ad group: ${formatGoogleAdsError(error)}`);
   }
 
-  let adResourceName = "";
-  try {
-    const adResult = (await (customer as unknown as { ads: { create: (ads: unknown[]) => Promise<MutateResourcesResult> } }).ads.create([
-      {
-        responsive_search_ad: {
-          headlines: creative.headlines.map((text) => ({ text })),
-          descriptions: creative.descriptions.map((text) => ({ text })),
-        },
-        final_urls: [creative.finalUrl],
-        type: enums.AdType.RESPONSIVE_SEARCH_AD,
-      },
-    ])) as MutateResourcesResult;
-    adResourceName = adResult.results?.[0]?.resource_name || "";
-  } catch (error) {
-    throw new Error(`Google advertentie: ${formatGoogleAdsError(error)}`);
-  }
-
-  if (!adResourceName) throw new Error("Google heeft geen ad resource name teruggegeven.");
-
   try {
     await customer.adGroupAds.create([
       {
         ad_group: adGroupRn,
-        ad: { resource_name: adResourceName },
         status: enums.AdGroupAdStatus.PAUSED,
+        ad: {
+          responsive_search_ad: {
+            headlines: creative.headlines.map((text) => ({ text })),
+            descriptions: creative.descriptions.map((text) => ({ text })),
+          },
+          final_urls: [creative.finalUrl],
+        },
       },
     ]);
   } catch (error) {
-    throw new Error(`Google ad group ad: ${formatGoogleAdsError(error)}`);
+    throw new Error(`Google advertentie: ${formatGoogleAdsError(error)}`);
   }
 
   try {
@@ -334,7 +377,6 @@ async function pushSearchPaused(params: {
   return {
     campaignResourceName: createdCampaignRn,
     adGroupResourceName: adGroupRn,
-    adResourceName,
     status: "PAUSED" as const,
   };
 }
@@ -382,6 +424,7 @@ async function pushPerformanceMaxPaused(params: {
         advertising_channel_type: enums.AdvertisingChannelType.PERFORMANCE_MAX,
         status: enums.CampaignStatus.PAUSED,
         campaign_budget: budgetResourceName,
+        contains_eu_political_advertising: EU_POLITICAL_ADS_DECLARATION,
       },
     },
     {

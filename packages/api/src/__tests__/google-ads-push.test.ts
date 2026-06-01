@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   centsToBudgetMicros,
   defaultSearchTargeting,
+  formatGoogleAdsError,
   normalizeSearchCreatives,
 } from "../lib/google-ads";
 
@@ -20,6 +21,20 @@ describe("google ads push helpers", () => {
     expect(() => normalizeSearchCreatives({ headlines: ["a", "b", "c"], descriptions: ["x", "y"] })).toThrow(
       /finalUrl/i,
     );
+  });
+
+  it("formats nested Google API errors instead of [object Object]", () => {
+    const message = formatGoogleAdsError({
+      errors: [
+        {
+          message: "Required field is missing",
+          error_code: { field_error: "REQUIRED" },
+          location: { field_path_elements: [{ field_name: "contains_eu_political_advertising" }] },
+        },
+      ],
+    });
+    expect(message).toContain("Required field is missing");
+    expect(message).not.toContain("[object Object]");
   });
 
   it("normalizes RSA headlines and descriptions", () => {
