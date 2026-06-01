@@ -3,6 +3,8 @@ import { ALL_MODULES } from "@/lib/navigation";
 /** Longest-prefix wins. Paths without moduleId are always allowed. */
 export const ROUTE_MODULE_RULES: Array<{ prefix: string; moduleId: string }> = [
   { prefix: "/campaigns", moduleId: "campaigns" },
+  { prefix: "/social", moduleId: "social" },
+  { prefix: "/meta-ads", moduleId: "metaAds" },
   { prefix: "/contacts", moduleId: "contacts" },
   { prefix: "/templates", moduleId: "templates" },
   { prefix: "/quotes", moduleId: "quotes" },

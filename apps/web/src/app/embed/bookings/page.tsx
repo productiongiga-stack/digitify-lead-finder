@@ -278,6 +278,7 @@ function BookingEmbedContent() {
   const [loadingAvailability, setLoadingAvailability] = useState(false);
   const [availabilityMonthKey, setAvailabilityMonthKey] = useState<string | null>(null);
   const [hostTimeZone, setHostTimeZone] = useState(timezone);
+  const [googleCalendarSynced, setGoogleCalendarSynced] = useState(false);
   const [selectedSlotStart, setSelectedSlotStart] = useState("");
   const [suggestedSlots, setSuggestedSlots] = useState<SuggestedSlot[]>([]);
 
@@ -337,6 +338,7 @@ function BookingEmbedContent() {
         if (data?.days) {
           if (data.hostTimeZone) setHostTimeZone(data.hostTimeZone);
           else if (data.timezone) setHostTimeZone(data.timezone);
+          setGoogleCalendarSynced(Boolean(data.googleCalendarSynced));
           const dayEntries = data.days as AvailabilityDayPayload[];
           setAvailability((prev) => ({
             ...prev,
@@ -381,8 +383,12 @@ function BookingEmbedContent() {
       setSelectedSlotStart("");
       return;
     }
-    const active = selectedSlots.find((slot) => slot.key === selectedSlotStart || slot.hostTime === selectedTime);
-    if (!active) {
+    const active = selectedSlotStart
+      ? selectedSlots.find((slot) => slot.start === selectedSlotStart)
+      : null;
+    if (active) {
+      if (selectedTime !== active.hostTime) setSelectedTime(active.hostTime);
+    } else {
       const first = selectedSlots[0];
       setSelectedTime(first.hostTime);
       setSelectedSlotStart(first.start);
@@ -615,6 +621,12 @@ function BookingEmbedContent() {
                 <span className="text-sm">
                   {formatTimezoneLabel(slotTimeZone)}
                   <span className={`ml-1 text-xs ${tc.muted}`}>({slotTimeZone})</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <CalendarDays className="h-3.5 w-3.5 shrink-0" style={{ color: effectiveColor }} />
+                <span className={`text-sm ${tc.muted}`}>
+                  {googleCalendarSynced ? "Google Agenda blokkeert bezette momenten" : "Beschikbaarheid volgens ingestelde uren"}
                 </span>
               </div>
             </div>
@@ -883,8 +895,11 @@ function BookingEmbedContent() {
               {/* Form fields */}
               <div className="mt-5 space-y-3.5">
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium">Naam *</label>
+                  <label htmlFor="booking-client-name" className="text-sm font-medium">Naam *</label>
                   <input
+                    id="booking-client-name"
+                    name="clientName"
+                    autoComplete="name"
                     value={clientName}
                     onChange={(e) => setClientName(e.target.value)}
                     placeholder="Jan Janssen"
@@ -895,9 +910,12 @@ function BookingEmbedContent() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium">E-mail *</label>
+                  <label htmlFor="booking-client-email" className="text-sm font-medium">E-mail *</label>
                   <input
+                    id="booking-client-email"
+                    name="clientEmail"
                     type="email"
+                    autoComplete="email"
                     value={clientEmail}
                     onChange={(e) => setClientEmail(e.target.value)}
                     placeholder="jan@bedrijf.be"
@@ -907,8 +925,10 @@ function BookingEmbedContent() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium">Opmerking</label>
+                  <label htmlFor="booking-notes" className="text-sm font-medium">Opmerking</label>
                   <textarea
+                    id="booking-notes"
+                    name="notes"
                     rows={3}
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
@@ -927,9 +947,10 @@ function BookingEmbedContent() {
                 {/* Custom questions */}
                 {eventType?.questions.map((q) => (
                   <div key={q.id} className="space-y-1.5">
-                    <label className="text-sm font-medium">{q.label}{q.required ? " *" : ""}</label>
+                    <label htmlFor={`booking-question-${q.id}`} className="text-sm font-medium">{q.label}{q.required ? " *" : ""}</label>
                     {q.type === "textarea" ? (
                       <textarea
+                        id={`booking-question-${q.id}`}
                         required={q.required}
                         rows={3}
                         value={questionAnswers[q.id] || ""}
@@ -941,6 +962,7 @@ function BookingEmbedContent() {
                     ) : q.type === "checkbox" ? (
                       <label className="flex items-center gap-2 text-sm">
                         <input
+                          id={`booking-question-${q.id}`}
                           type="checkbox"
                           checked={questionAnswers[q.id] === "yes"}
                           onChange={(e) => setQuestionAnswers((prev) => ({ ...prev, [q.id]: e.target.checked ? "yes" : "" }))}
@@ -950,6 +972,7 @@ function BookingEmbedContent() {
                       </label>
                     ) : (
                       <input
+                        id={`booking-question-${q.id}`}
                         required={q.required}
                         type={q.type === "phone" ? "tel" : q.type}
                         value={questionAnswers[q.id] || ""}

@@ -23,6 +23,8 @@ import { taskRouter } from "./routers/task.router";
 import { invoiceRouter } from "./routers/invoice.router";
 import { auditRouter } from "./routers/audit.router";
 import { templateRouter } from "./routers/template.router";
+import { socialRouter } from "./routers/social.router";
+import { metaAdsRouter } from "./routers/meta-ads.router";
 
 export const appRouter = router({
   dashboard: dashboardRouter,
@@ -49,6 +51,8 @@ export const appRouter = router({
   invoice: invoiceRouter,
   audit: auditRouter,
   template: templateRouter,
+  social: socialRouter,
+  metaAds: metaAdsRouter,
 });
 
 export type AppRouter = typeof appRouter;

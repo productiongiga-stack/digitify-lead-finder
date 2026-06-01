@@ -486,6 +486,9 @@ export default function LeadSearchPage() {
       <TabsContent value="overview" className="space-y-4">
       {(campaignsQuery.isError || popularSearchesQuery.isError) && (
         <QueryErrorState
+          variant="inline"
+          title="Suggesties tijdelijk niet volledig beschikbaar"
+          message="Leads zoeken werkt nog. Alleen campagnes of populaire zoektermen konden niet worden geladen."
           onRetry={() => {
             void campaignsQuery.refetch();
             void popularSearchesQuery.refetch();

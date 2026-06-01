@@ -27,6 +27,8 @@ model User {
   accounts       Account[]
   sessions       Session[]
   leads          Lead[]           @relation("CreatedByUser")
+  savedLeads     Lead[]           @relation("LeadSavedBy")
+  editedLeads    Lead[]           @relation("LeadLastEditedBy")
   assignedLeads  Lead[]           @relation("AssignedToUser")
   notes          Note[]
   activities     Activity[]
@@ -52,6 +54,11 @@ model User {
   workspaceTasks       WorkspaceTask[]
   workspaceInvoices    WorkspaceInvoice[]
   workspaceSavedSearches WorkspaceSavedSearch[]
+  socialPosts          SocialPost[]      @relation("SocialPostCreatedBy")
+  approvedSocialPosts  SocialPost[]      @relation("SocialPostApprovedBy")
+  metaAdAccounts       MetaAdAccount[]   @relation("MetaAdAccountCreatedBy")
+  metaAdPlans          MetaAdPlan[]      @relation("MetaAdPlanCreatedBy")
+  approvedMetaAdPlans  MetaAdPlan[]      @relation("MetaAdPlanApprovedBy")
 
   @@index([workspaceOwnerId])
   @@map("users")
@@ -69,6 +76,8 @@ model RegistrationRequest {
   emailVerificationToken String                   @unique
   emailVerifiedAt       DateTime?
   reviewedById          String?
+  targetWorkspaceOwnerId String?
+  invitedById           String?
   reviewedAt            DateTime?
   rejectionReason       String?                   @db.Text
   createdAt             DateTime                  @default(now())
@@ -77,6 +86,8 @@ model RegistrationRequest {
   reviewedBy            User?                     @relation("RegistrationReviewer", fields: [reviewedById], references: [id])
 
   @@index([status, createdAt])
+  @@index([targetWorkspaceOwnerId, status, createdAt])
+  @@index([invitedById])
   @@index([email])
   @@map("registration_requests")
 }
@@ -170,6 +181,8 @@ model Lead {
   status          LeadStatus  @default(NEW)
   pipelineStageId String?
   createdById     String
+  savedById       String?
+  lastEditedById  String?
   assignedToId    String?
 
   companyName     String
@@ -215,6 +228,8 @@ model Lead {
   updatedAt       DateTime    @updatedAt
 
   createdBy       User        @relation("CreatedByUser", fields: [createdById], references: [id])
+  savedBy         User?       @relation("LeadSavedBy", fields: [savedById], references: [id], onDelete: SetNull)
+  lastEditedBy    User?       @relation("LeadLastEditedBy", fields: [lastEditedById], references: [id], onDelete: SetNull)
   assignedTo      User?       @relation("AssignedToUser", fields: [assignedToId], references: [id])
   pipelineStage   PipelineStage? @relation(fields: [pipelineStageId], references: [id])
 
@@ -241,6 +256,8 @@ model Lead {
   @@index([status])
   @@index([scorePriority])
   @@index([assignedToId])
+  @@index([savedById])
+  @@index([lastEditedById])
   @@index([source])
   @@index([createdAt(sort: Desc)])
   @@index([createdById])
@@ -646,6 +663,119 @@ enum ActivityType {
   QUOTE_CREATED
   QUOTE_SENT
   REVIEW_SENT
+  SOCIAL_POST_CREATED
+  SOCIAL_POST_SUBMITTED
+  SOCIAL_POST_APPROVED
+  SOCIAL_POST_REJECTED
+  SOCIAL_POST_PUBLISHED
+  SOCIAL_POST_FAILED
+  META_AD_DRAFT_CREATED
+  META_AD_SUBMITTED
+  META_AD_APPROVED
+  META_AD_REJECTED
+  META_AD_PUSHED_PAUSED
+  META_AD_FAILED
+}
+
+enum SocialPostStatus {
+  DRAFT
+  PENDING_APPROVAL
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELLED
+}
+
+enum SocialPlatform {
+  FACEBOOK
+  INSTAGRAM
+}
+
+enum MetaAdPlanStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  PUSHING
+  PUSHED_PAUSED
+  FAILED
+  CANCELLED
+}
+
+model SocialPost {
+  id              String           @id @default(cuid())
+  createdById     String
+  approvedById    String?
+  caption         String           @db.Text
+  imageUrl        String
+  scheduledFor    DateTime?
+  status          SocialPostStatus @default(DRAFT)
+  targetPlatforms SocialPlatform[]
+  externalPostIds Json?
+  approvedAt      DateTime?
+  publishedAt     DateTime?
+  retryCount      Int              @default(0)
+  lastError       String?          @db.Text
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  createdBy User  @relation("SocialPostCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  approvedBy User? @relation("SocialPostApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@index([createdById, status])
+  @@index([status, scheduledFor])
+  @@index([createdById, updatedAt(sort: Desc)])
+  @@map("social_posts")
+}
+
+model MetaAdAccount {
+  id                String    @id @default(cuid())
+  createdById       String
+  externalAccountId String
+  name              String
+  currency          String?   @default("EUR")
+  timezoneName      String?
+  businessId        String?
+  isSelected        Boolean   @default(false)
+  lastSyncedAt      DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  createdBy User @relation("MetaAdAccountCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@unique([createdById, externalAccountId])
+  @@index([createdById, isSelected])
+  @@map("meta_ad_accounts")
+}
+
+model MetaAdPlan {
+  id                  String           @id @default(cuid())
+  createdById         String
+  approvedById        String?
+  name                String
+  objective           String           @default("OUTCOME_TRAFFIC")
+  status              MetaAdPlanStatus @default(DRAFT)
+  dailyBudgetCents    Int?
+  lifetimeBudgetCents Int?
+  currency            String           @default("EUR")
+  startTime           DateTime?
+  endTime             DateTime?
+  targeting           Json?
+  creatives           Json?
+  externalIds         Json?
+  approvedAt          DateTime?
+  pushedAt            DateTime?
+  retryCount          Int              @default(0)
+  lastError           String?          @db.Text
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  createdBy  User  @relation("MetaAdPlanCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  approvedBy User? @relation("MetaAdPlanApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@index([createdById, status])
+  @@index([createdById, updatedAt(sort: Desc)])
+  @@map("meta_ad_plans")
 }
 
 // ENRICHMENT DATA

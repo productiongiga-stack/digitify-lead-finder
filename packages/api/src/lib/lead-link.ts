@@ -125,6 +125,8 @@ export async function ensureLeadLink(input: EnsureLeadLinkInput): Promise<Linked
   return input.db.lead.create({
     data: {
       createdById: workspaceId,
+      savedById: input.userId,
+      lastEditedById: input.userId,
       companyName: companyName || deriveCompanyFromEmail(email),
       email: email || null,
       phone: input.phone?.trim() || null,

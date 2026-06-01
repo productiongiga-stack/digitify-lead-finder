@@ -39,6 +39,8 @@ const TENANT_SCHEMA_STATEMENTS = [
   `ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "reminder1hSentAt" TIMESTAMP(3)`,
   `ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "consentText" TEXT`,
   `ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "consentedAt" TIMESTAMP(3)`,
+  `ALTER TABLE "leads" ADD COLUMN IF NOT EXISTS "savedById" TEXT`,
+  `ALTER TABLE "leads" ADD COLUMN IF NOT EXISTS "lastEditedById" TEXT`,
 
   `CREATE TABLE IF NOT EXISTS "booking_event_types" (
     "id" TEXT NOT NULL,
@@ -109,6 +111,43 @@ const TENANT_SCHEMA_STATEMENTS = [
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "booking_analytics_events_pkey" PRIMARY KEY ("id")
   )`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "description" TEXT`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "duration" INTEGER NOT NULL DEFAULT 60`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "slotMinutes" INTEGER NOT NULL DEFAULT 30`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "color" TEXT NOT NULL DEFAULT '#f9ae5a'`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "location" TEXT DEFAULT 'Google Meet'`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "meetingProvider" TEXT DEFAULT 'manual'`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "approvalMode" TEXT NOT NULL DEFAULT 'manual'`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "timezone" TEXT NOT NULL DEFAULT 'Europe/Brussels'`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "bufferBefore" INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "bufferAfter" INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "minimumNoticeHours" INTEGER NOT NULL DEFAULT 4`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "maximumHorizonDays" INTEGER NOT NULL DEFAULT 60`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "privacyText" TEXT`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "requireConsent" BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "isDefault" BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "isActive" BOOLEAN NOT NULL DEFAULT true`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "hostUserIds" JSONB`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
+  `ALTER TABLE "booking_event_types" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
+  `ALTER TABLE "booking_availability_rules" ADD COLUMN IF NOT EXISTS "hostUserId" TEXT`,
+  `ALTER TABLE "booking_availability_rules" ADD COLUMN IF NOT EXISTS "enabled" BOOLEAN NOT NULL DEFAULT true`,
+  `ALTER TABLE "booking_availability_rules" ADD COLUMN IF NOT EXISTS "startTime" TEXT NOT NULL DEFAULT '09:00'`,
+  `ALTER TABLE "booking_availability_rules" ADD COLUMN IF NOT EXISTS "endTime" TEXT NOT NULL DEFAULT '17:00'`,
+  `ALTER TABLE "booking_availability_rules" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
+  `ALTER TABLE "booking_availability_rules" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
+  `ALTER TABLE "booking_questions" ADD COLUMN IF NOT EXISTS "type" TEXT NOT NULL DEFAULT 'text'`,
+  `ALTER TABLE "booking_questions" ADD COLUMN IF NOT EXISTS "required" BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE "booking_questions" ADD COLUMN IF NOT EXISTS "options" JSONB`,
+  `ALTER TABLE "booking_questions" ADD COLUMN IF NOT EXISTS "sortOrder" INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE "booking_questions" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
+  `ALTER TABLE "booking_questions" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
+  `ALTER TABLE "booking_question_answers" ADD COLUMN IF NOT EXISTS "questionId" TEXT`,
+  `ALTER TABLE "booking_question_answers" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
+  `ALTER TABLE "booking_analytics_events" ADD COLUMN IF NOT EXISTS "eventTypeId" TEXT`,
+  `ALTER TABLE "booking_analytics_events" ADD COLUMN IF NOT EXISTS "bookingId" TEXT`,
+  `ALTER TABLE "booking_analytics_events" ADD COLUMN IF NOT EXISTS "metadata" JSONB`,
+  `ALTER TABLE "booking_analytics_events" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP`,
 
   `DROP INDEX IF EXISTS "pipeline_stages_name_key"`,
   `DROP INDEX IF EXISTS "tags_name_key"`,
@@ -126,11 +165,20 @@ const TENANT_SCHEMA_STATEMENTS = [
   `CREATE UNIQUE INDEX IF NOT EXISTS "email_templates_createdById_name_key" ON "email_templates"("createdById", "name")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "service_catalog_createdById_category_name_key" ON "service_catalog"("createdById", "category", "name")`,
 
+  // Scoring settings were made workspace-scoped after the initial schema.
+  `ALTER TABLE "scoring_weights" ADD COLUMN IF NOT EXISTS "createdById" TEXT NOT NULL DEFAULT '_global'`,
+  `UPDATE "scoring_weights" SET "createdById" = '_global' WHERE "createdById" IS NULL OR "createdById" = ''`,
+  `DROP INDEX IF EXISTS "scoring_weights_factorKey_key"`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "scoring_weights_createdById_factorKey_key" ON "scoring_weights"("createdById", "factorKey")`,
+  `CREATE INDEX IF NOT EXISTS "scoring_weights_createdById_idx" ON "scoring_weights"("createdById")`,
+
   // Performance indexes for tenant-scoped reads
   `CREATE INDEX IF NOT EXISTS "leads_createdById_idx" ON "leads"("createdById")`,
   `CREATE INDEX IF NOT EXISTS "leads_createdById_createdAt_idx" ON "leads"("createdById", "createdAt" DESC)`,
   `CREATE INDEX IF NOT EXISTS "leads_createdById_updatedAt_idx" ON "leads"("createdById", "updatedAt" DESC)`,
   `CREATE INDEX IF NOT EXISTS "leads_createdById_status_idx" ON "leads"("createdById", "status")`,
+  `CREATE INDEX IF NOT EXISTS "leads_savedById_idx" ON "leads"("savedById")`,
+  `CREATE INDEX IF NOT EXISTS "leads_lastEditedById_idx" ON "leads"("lastEditedById")`,
   `CREATE INDEX IF NOT EXISTS "campaigns_createdById_idx" ON "campaigns"("createdById")`,
   `CREATE INDEX IF NOT EXISTS "bookings_createdById_idx" ON "bookings"("createdById")`,
   `CREATE INDEX IF NOT EXISTS "bookings_createdById_date_idx" ON "bookings"("createdById", "date" ASC)`,
@@ -161,6 +209,125 @@ const TENANT_SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS "email_drafts_approverId_idx" ON "email_drafts"("approverId")`,
   `CREATE INDEX IF NOT EXISTS "email_drafts_type_idx" ON "email_drafts"("type")`,
   `CREATE INDEX IF NOT EXISTS "chat_sessions_assignedToId_updatedAt_idx" ON "chat_sessions"("assignedToId", "updatedAt" DESC)`,
+
+  `ALTER TYPE "ActivityType" ADD VALUE IF NOT EXISTS 'META_AD_DRAFT_CREATED'`,
+  `ALTER TYPE "ActivityType" ADD VALUE IF NOT EXISTS 'META_AD_SUBMITTED'`,
+  `ALTER TYPE "ActivityType" ADD VALUE IF NOT EXISTS 'META_AD_APPROVED'`,
+  `ALTER TYPE "ActivityType" ADD VALUE IF NOT EXISTS 'META_AD_REJECTED'`,
+  `ALTER TYPE "ActivityType" ADD VALUE IF NOT EXISTS 'META_AD_PUSHED_PAUSED'`,
+  `ALTER TYPE "ActivityType" ADD VALUE IF NOT EXISTS 'META_AD_FAILED'`,
+  `DO $$ BEGIN CREATE TYPE "MetaAdPlanStatus" AS ENUM ('DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'PUSHING', 'PUSHED_PAUSED', 'FAILED', 'CANCELLED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+  `CREATE TABLE IF NOT EXISTS "meta_ad_accounts" (
+    "id" TEXT NOT NULL,
+    "createdById" TEXT NOT NULL,
+    "externalAccountId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "currency" TEXT DEFAULT 'EUR',
+    "timezoneName" TEXT,
+    "businessId" TEXT,
+    "isSelected" BOOLEAN NOT NULL DEFAULT false,
+    "lastSyncedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "meta_ad_accounts_pkey" PRIMARY KEY ("id")
+  )`,
+  `CREATE TABLE IF NOT EXISTS "meta_ad_plans" (
+    "id" TEXT NOT NULL,
+    "createdById" TEXT NOT NULL,
+    "approvedById" TEXT,
+    "name" TEXT NOT NULL,
+    "objective" TEXT NOT NULL DEFAULT 'OUTCOME_TRAFFIC',
+    "status" "MetaAdPlanStatus" NOT NULL DEFAULT 'DRAFT',
+    "dailyBudgetCents" INTEGER,
+    "lifetimeBudgetCents" INTEGER,
+    "currency" TEXT NOT NULL DEFAULT 'EUR',
+    "startTime" TIMESTAMP(3),
+    "endTime" TIMESTAMP(3),
+    "targeting" JSONB,
+    "creatives" JSONB,
+    "externalIds" JSONB,
+    "approvedAt" TIMESTAMP(3),
+    "pushedAt" TIMESTAMP(3),
+    "retryCount" INTEGER NOT NULL DEFAULT 0,
+    "lastError" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "meta_ad_plans_pkey" PRIMARY KEY ("id")
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "meta_ad_accounts_createdById_externalAccountId_key" ON "meta_ad_accounts"("createdById", "externalAccountId")`,
+  `CREATE INDEX IF NOT EXISTS "meta_ad_accounts_createdById_isSelected_idx" ON "meta_ad_accounts"("createdById", "isSelected")`,
+  `CREATE INDEX IF NOT EXISTS "meta_ad_plans_createdById_status_idx" ON "meta_ad_plans"("createdById", "status")`,
+  `CREATE INDEX IF NOT EXISTS "meta_ad_plans_createdById_updatedAt_idx" ON "meta_ad_plans"("createdById", "updatedAt" DESC)`,
+  `DO $$ BEGIN
+    ALTER TABLE "meta_ad_accounts" ADD CONSTRAINT "meta_ad_accounts_createdById_fkey"
+      FOREIGN KEY ("createdById") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+  `DO $$ BEGIN
+    ALTER TABLE "meta_ad_plans" ADD CONSTRAINT "meta_ad_plans_createdById_fkey"
+      FOREIGN KEY ("createdById") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+  `DO $$ BEGIN
+    ALTER TABLE "meta_ad_plans" ADD CONSTRAINT "meta_ad_plans_approvedById_fkey"
+      FOREIGN KEY ("approvedById") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+
+  `DO $$ BEGIN CREATE TYPE "WorkspaceInvoiceStatus" AS ENUM ('DRAFT', 'SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+  `CREATE TABLE IF NOT EXISTS "workspace_invoices" (
+    "id" TEXT NOT NULL,
+    "createdById" TEXT NOT NULL,
+    "invoiceNumber" TEXT NOT NULL,
+    "quoteId" TEXT,
+    "leadId" TEXT,
+    "clientName" TEXT NOT NULL,
+    "clientEmail" TEXT,
+    "clientCompany" TEXT,
+    "clientAddress" TEXT,
+    "clientVat" TEXT,
+    "status" "WorkspaceInvoiceStatus" NOT NULL DEFAULT 'DRAFT',
+    "issueDate" TIMESTAMP(3) NOT NULL,
+    "dueDate" TIMESTAMP(3) NOT NULL,
+    "subtotal" DOUBLE PRECISION NOT NULL,
+    "vatRate" DOUBLE PRECISION NOT NULL,
+    "vatAmount" DOUBLE PRECISION NOT NULL,
+    "total" DOUBLE PRECISION NOT NULL,
+    "currency" TEXT NOT NULL DEFAULT 'EUR',
+    "paymentReference" TEXT NOT NULL,
+    "notes" TEXT,
+    "reminderCount" INTEGER NOT NULL DEFAULT 0,
+    "lastReminderAt" TIMESTAMP(3),
+    "paidAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "workspace_invoices_pkey" PRIMARY KEY ("id")
+  )`,
+  `CREATE TABLE IF NOT EXISTS "workspace_invoice_items" (
+    "id" TEXT NOT NULL,
+    "invoiceId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "quantity" DOUBLE PRECISION NOT NULL,
+    "unitPrice" DOUBLE PRECISION NOT NULL,
+    "total" DOUBLE PRECISION NOT NULL,
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT "workspace_invoice_items_pkey" PRIMARY KEY ("id")
+  )`,
+  `CREATE INDEX IF NOT EXISTS "workspace_invoices_createdById_status_idx" ON "workspace_invoices"("createdById", "status")`,
+  `CREATE INDEX IF NOT EXISTS "workspace_invoices_createdById_issueDate_idx" ON "workspace_invoices"("createdById", "issueDate")`,
+  `CREATE INDEX IF NOT EXISTS "workspace_invoices_quoteId_idx" ON "workspace_invoices"("quoteId")`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "workspace_invoices_createdById_invoiceNumber_key" ON "workspace_invoices"("createdById", "invoiceNumber")`,
+  `CREATE INDEX IF NOT EXISTS "workspace_invoice_items_invoiceId_idx" ON "workspace_invoice_items"("invoiceId")`,
+  `DO $$ BEGIN
+    ALTER TABLE "workspace_invoices" ADD CONSTRAINT "workspace_invoices_createdById_fkey"
+      FOREIGN KEY ("createdById") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+  `DO $$ BEGIN
+    ALTER TABLE "workspace_invoices" ADD CONSTRAINT "workspace_invoices_quoteId_fkey"
+      FOREIGN KEY ("quoteId") REFERENCES "quotes"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+  `DO $$ BEGIN
+    ALTER TABLE "workspace_invoice_items" ADD CONSTRAINT "workspace_invoice_items_invoiceId_fkey"
+      FOREIGN KEY ("invoiceId") REFERENCES "workspace_invoices"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 
   `CREATE TABLE IF NOT EXISTS "workspace_saved_searches" (
     "id" TEXT NOT NULL,

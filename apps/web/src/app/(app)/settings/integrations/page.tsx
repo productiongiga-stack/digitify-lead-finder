@@ -44,6 +44,7 @@ import {
   Lightbulb,
   ExternalLink,
   Trash2,
+  Megaphone,
 } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
@@ -561,6 +562,8 @@ export default function IntegrationsSettingsPage() {
   const testSmtp = trpc.settings.testSmtp.useMutation();
   const checkEmailDns = trpc.settings.checkEmailDns.useMutation();
   const testImap = trpc.settings.testImap.useMutation();
+  const metaConnection = trpc.social.connectionStatus.useQuery(undefined, { refetchInterval: 30_000 });
+  const metaAdsConnection = trpc.metaAds.connectionStatus.useQuery(undefined, { refetchInterval: 30_000 });
 
   // Google
   const [googlePlacesKey, setGooglePlacesKey] = useState("");
@@ -570,6 +573,14 @@ export default function IntegrationsSettingsPage() {
   const [googleOAuthClientSecret, setGoogleOAuthClientSecret] = useState("");
   const [googleOAuthSecretConfigured, setGoogleOAuthSecretConfigured] = useState(false);
   const [showGoogleOAuthSecret, setShowGoogleOAuthSecret] = useState(false);
+  const [metaAppId, setMetaAppId] = useState("");
+  const [metaAppSecret, setMetaAppSecret] = useState("");
+  const [metaAppSecretConfigured, setMetaAppSecretConfigured] = useState(false);
+  const [showMetaAppSecret, setShowMetaAppSecret] = useState(false);
+  const [socialAutopostEnabled, setSocialAutopostEnabled] = useState(false);
+  const [adsAutoadsEnabled, setAdsAutoadsEnabled] = useState(false);
+  const [adsDefaultCurrency, setAdsDefaultCurrency] = useState("EUR");
+  const [adsMaxDailyBudgetCents, setAdsMaxDailyBudgetCents] = useState("5000");
 
   // AI
   const [selectedAiProvider, setSelectedAiProvider] = useState<AiProviderId>("anthropic");
@@ -610,6 +621,11 @@ export default function IntegrationsSettingsPage() {
   const initialState = useMemo(() => ({
     googlePlacesKey: readSettingString(settings, "api.google_places_key"),
     googleOAuthClientId: readSettingString(settings, "integrations.google_oauth_client_id"),
+    metaAppId: readSettingString(settings, "integrations.meta_app_id"),
+    socialAutopostEnabled: readSettingBoolean(settings, "social.autopost_enabled", false),
+    adsAutoadsEnabled: readSettingBoolean(settings, "ads.autoads_enabled", false),
+    adsDefaultCurrency: readSettingString(settings, "ads.default_currency", "EUR"),
+    adsMaxDailyBudgetCents: readSettingString(settings, "ads.max_daily_budget_cents", "5000"),
     anthropicKey: readSettingString(settings, "api.anthropic_key"),
     openaiKey: readSettingString(settings, "api.openai_key"),
     deepseekKey: readSettingString(settings, "api.deepseek_key"),
@@ -623,10 +639,19 @@ export default function IntegrationsSettingsPage() {
     imapUser: readSettingString(settings, "email.imap_user"),
     imapTls: readSettingBoolean(settings, "email.imap_tls", true),
   }), [settings]);
-  const googleDirty =
+  const googleProviderDirty =
     googlePlacesKey.trim() !== initialState.googlePlacesKey
     || googleOAuthClientId.trim() !== initialState.googleOAuthClientId
     || Boolean(googleOAuthClientSecret.trim());
+  const metaProviderDirty =
+    metaAppId.trim() !== initialState.metaAppId
+    || socialAutopostEnabled !== initialState.socialAutopostEnabled
+    || adsAutoadsEnabled !== initialState.adsAutoadsEnabled
+    || adsDefaultCurrency.trim() !== initialState.adsDefaultCurrency
+    || adsMaxDailyBudgetCents.trim() !== initialState.adsMaxDailyBudgetCents
+    || Boolean(metaAppSecret.trim());
+  const googleDirty = googleProviderDirty || metaProviderDirty;
+  const metaDirty = metaProviderDirty;
   const aiDirty =
     anthropicKey.trim() !== initialState.anthropicKey
     || openaiKey.trim() !== initialState.openaiKey
@@ -677,6 +702,8 @@ export default function IntegrationsSettingsPage() {
   const googleOAuthConfigured = Boolean(
     googleOAuthClientId.trim() && (googleOAuthClientSecret.trim() || googleOAuthSecretConfigured),
   );
+  const metaConfigured = Boolean(metaAppId.trim() && (metaAppSecret.trim() || metaAppSecretConfigured));
+  const metaRedirectUrl = "https://leads.digitify.be/api/integrations/meta/callback";
 
   function extractDomainFromEmail(value: string) {
     const candidate = value.trim().toLowerCase();
@@ -689,6 +716,7 @@ export default function IntegrationsSettingsPage() {
     if (settings) {
       const googleKeyRaw = readSettingString(settings, "api.google_places_key");
       const googleOAuthSecretRaw = readSettingString(settings, "integrations.google_oauth_client_secret");
+      const metaAppSecretRaw = readSettingString(settings, "integrations.meta_app_secret");
       const anthropicKeyRaw = readSettingString(settings, "api.anthropic_key");
       const openaiKeyRaw = readSettingString(settings, "api.openai_key");
       const deepseekKeyRaw = readSettingString(settings, "api.deepseek_key");
@@ -698,6 +726,7 @@ export default function IntegrationsSettingsPage() {
 
       setGooglePlacesConfigured(Boolean(googleKeyRaw));
       setGoogleOAuthSecretConfigured(Boolean(googleOAuthSecretRaw));
+      setMetaAppSecretConfigured(Boolean(metaAppSecretRaw));
       setAnthropicConfigured(Boolean(anthropicKeyRaw));
       setOpenaiConfigured(Boolean(openaiKeyRaw));
       setDeepseekConfigured(Boolean(deepseekKeyRaw));
@@ -708,6 +737,12 @@ export default function IntegrationsSettingsPage() {
       setGooglePlacesKey(googleKeyRaw === SECRET_MASK ? "" : googleKeyRaw);
       setGoogleOAuthClientId(readSettingString(settings, "integrations.google_oauth_client_id"));
       setGoogleOAuthClientSecret(googleOAuthSecretRaw === SECRET_MASK ? "" : googleOAuthSecretRaw);
+      setMetaAppId(readSettingString(settings, "integrations.meta_app_id"));
+      setMetaAppSecret(metaAppSecretRaw === SECRET_MASK ? "" : metaAppSecretRaw);
+      setSocialAutopostEnabled(readSettingBoolean(settings, "social.autopost_enabled", false));
+      setAdsAutoadsEnabled(readSettingBoolean(settings, "ads.autoads_enabled", false));
+      setAdsDefaultCurrency(readSettingString(settings, "ads.default_currency", "EUR"));
+      setAdsMaxDailyBudgetCents(readSettingString(settings, "ads.max_daily_budget_cents", "5000"));
       setAnthropicKey(anthropicKeyRaw === SECRET_MASK ? "" : anthropicKeyRaw);
       setOpenaiKey(openaiKeyRaw === SECRET_MASK ? "" : openaiKeyRaw);
       setDeepseekKey(deepseekKeyRaw === SECRET_MASK ? "" : deepseekKeyRaw);
@@ -737,6 +772,12 @@ export default function IntegrationsSettingsPage() {
       { key: "api.google_places_key", value: googlePlacesKey.trim() },
       { key: "integrations.google_oauth_client_id", value: googleOAuthClientId.trim() },
       { key: "integrations.google_oauth_client_secret", value: googleOAuthClientSecret },
+      { key: "integrations.meta_app_id", value: metaAppId.trim() },
+      { key: "integrations.meta_app_secret", value: metaAppSecret },
+      { key: "social.autopost_enabled", value: String(socialAutopostEnabled) },
+      { key: "ads.autoads_enabled", value: String(adsAutoadsEnabled) },
+      { key: "ads.default_currency", value: adsDefaultCurrency.trim().toUpperCase() || "EUR" },
+      { key: "ads.max_daily_budget_cents", value: adsMaxDailyBudgetCents.trim() || "5000" },
       { key: "api.anthropic_key", value: anthropicKey.trim() },
       { key: "api.openai_key", value: openaiKey.trim() },
       { key: "api.deepseek_key", value: deepseekKey.trim() },
@@ -760,6 +801,12 @@ export default function IntegrationsSettingsPage() {
       { key: "api.google_places_key", value: googlePlacesKey.trim() },
       { key: "integrations.google_oauth_client_id", value: googleOAuthClientId.trim() },
       { key: "integrations.google_oauth_client_secret", value: googleOAuthClientSecret },
+      { key: "integrations.meta_app_id", value: metaAppId.trim() },
+      { key: "integrations.meta_app_secret", value: metaAppSecret },
+      { key: "social.autopost_enabled", value: String(socialAutopostEnabled) },
+      { key: "ads.autoads_enabled", value: String(adsAutoadsEnabled) },
+      { key: "ads.default_currency", value: adsDefaultCurrency.trim().toUpperCase() || "EUR" },
+      { key: "ads.max_daily_budget_cents", value: adsMaxDailyBudgetCents.trim() || "5000" },
     ]);
   }
 
@@ -950,7 +997,7 @@ export default function IntegrationsSettingsPage() {
                 <Button
                   size="sm"
                   onClick={handleSaveGoogle}
-                  disabled={batchUpdate.isPending || !googleDirty}
+                  disabled={batchUpdate.isPending || !googleProviderDirty}
                 >
                   {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
                   Opslaan
@@ -1235,9 +1282,212 @@ export default function IntegrationsSettingsPage() {
                       OAuth wissen
                     </Button>
                   ) : null}
-                  <Button size="sm" onClick={handleSaveGoogle} disabled={batchUpdate.isPending || !googleDirty}>
+                  <Button size="sm" onClick={handleSaveGoogle} disabled={batchUpdate.isPending || !googleProviderDirty}>
                     {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
                     Google OAuth opslaan
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden border-indigo-500/20">
+            <CardHeader className="border-b bg-gradient-to-br from-indigo-500/10 via-sky-500/5 to-background">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-500 text-white shadow-sm">
+                    <Megaphone className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base">Meta publicatiehub</CardTitle>
+                    <CardDescription className="mt-1 max-w-2xl text-xs leading-relaxed">
+                      Verbind exact één Facebook Page en gekoppeld Instagram Business-account. Drafts blijven veilig:
+                      alleen goedgekeurde en ingeplande posts worden door de cron gepubliceerd.
+                    </CardDescription>
+                  </div>
+                </div>
+                {metaConnection.data?.connected ? (
+                  <Badge variant="success"><CheckCircle className="mr-1 h-3 w-3" /> Klaar om te posten</Badge>
+                ) : metaConfigured ? (
+                  <Badge variant="secondary"><AlertCircle className="mr-1 h-3 w-3" /> App klaar, nog koppelen</Badge>
+                ) : (
+                  <Badge variant="secondary"><XCircle className="mr-1 h-3 w-3" /> Setup nodig</Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5 pt-5">
+              <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+                <div className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Meta App ID</Label>
+                      <Input
+                        value={metaAppId}
+                        onChange={(event) => setMetaAppId(event.target.value)}
+                        placeholder="123456789012345"
+                        className="font-mono text-sm"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Meta App Secret</Label>
+                      <div className="relative">
+                        <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          type={showMetaAppSecret ? "text" : "password"}
+                          value={metaAppSecret}
+                          onChange={(event) => setMetaAppSecret(event.target.value)}
+                          placeholder={metaAppSecretConfigured ? "Nieuwe secret invullen om te vervangen" : "••••••••"}
+                          className="pl-9 pr-10 font-mono text-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowMetaAppSecret(!showMetaAppSecret)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        >
+                          {showMetaAppSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border bg-muted/20 p-3">
+                    <DnsCopyField label="Redirect URL voor Meta" value={metaRedirectUrl} />
+                  </div>
+                </div>
+
+                <div className="space-y-3 rounded-xl border bg-card p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Verbindingsstatus</p>
+                  <div className="grid gap-2 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Facebook Page</span>
+                      <span className="truncate font-mono text-xs">{metaConnection.data?.pageId || "Niet gekoppeld"}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Instagram Business</span>
+                      <span className="truncate font-mono text-xs">{metaConnection.data?.instagramBusinessId || "Niet gekoppeld"}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Autopost</span>
+                      <span className={socialAutopostEnabled ? "text-emerald-600" : "text-muted-foreground"}>
+                        {socialAutopostEnabled ? "Actief" : "Uit"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Meta Ads account</span>
+                      <span className="truncate font-mono text-xs">
+                        {metaAdsConnection.data?.selectedAdAccountName || metaAdsConnection.data?.selectedAdAccountId || "Niet gekozen"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Max dagbudget</span>
+                      <span className="font-mono text-xs">{adsDefaultCurrency} {Number(adsMaxDailyBudgetCents || 0) / 100}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-2">
+                    <div>
+                      <p className="text-sm font-medium">Autopost inschakelen</p>
+                      <p className="text-xs text-muted-foreground">Publiceert alleen posts met status Scheduled.</p>
+                    </div>
+                    <Switch checked={socialAutopostEnabled} onCheckedChange={setSocialAutopostEnabled} />
+                  </div>
+                  <div className="space-y-3 rounded-lg bg-muted/30 px-3 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">Meta Ads module</p>
+                        <p className="text-xs text-muted-foreground">Laat drafts en paused pushes toe na approval.</p>
+                      </div>
+                      <Switch checked={adsAutoadsEnabled} onCheckedChange={setAdsAutoadsEnabled} />
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Valuta</Label>
+                        <Input value={adsDefaultCurrency} onChange={(event) => setAdsDefaultCurrency(event.target.value.toUpperCase())} maxLength={3} className="h-8" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Max dagbudget (cent)</Label>
+                        <Input value={adsMaxDailyBudgetCents} onChange={(event) => setAdsMaxDailyBudgetCents(event.target.value)} inputMode="numeric" className="h-8" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-2 rounded-xl border bg-muted/20 p-3 text-xs text-muted-foreground sm:grid-cols-3">
+                <div><span className="font-semibold text-foreground">1.</span> Vul App ID en Secret in.</div>
+                <div><span className="font-semibold text-foreground">2.</span> Voeg de redirect URL toe in Meta.</div>
+                <div><span className="font-semibold text-foreground">3.</span> Klik op koppelen en kies Page + IG account.</div>
+              </div>
+
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-900 dark:text-amber-100">
+                <p className="font-semibold">Krijg je “Invalid Scopes” bij Meta?</p>
+                <p className="mt-1">
+                  Controleer dat je app Facebook Login/Pages én Instagram Graph publishing ondersteunt. Nieuwe Meta-apps gebruiken vaak
+                  <span className="font-mono"> instagram_business_basic</span> en
+                  <span className="font-mono"> instagram_business_content_publish</span>. Oudere apps kunnen nog
+                  <span className="font-mono"> instagram_basic</span> en
+                  <span className="font-mono"> instagram_content_publish</span> vereisen. Dit kan via
+                  <span className="font-mono"> META_OAUTH_SCOPES</span> worden overschreven.
+                </p>
+                <p className="mt-2">
+                  Voor Meta Ads heeft de app extra Marketing API-scopes nodig:
+                  <span className="font-mono"> ads_read</span>,
+                  <span className="font-mono"> ads_management</span> en meestal
+                  <span className="font-mono"> business_management</span>. Campagnes worden altijd met
+                  <span className="font-mono"> status=PAUSED</span> aangemaakt.
+                </p>
+                {metaAdsConnection.data?.missingConfiguredScopes?.length ? (
+                  <p className="mt-2 font-semibold">
+                    Huidige OAuth-config mist: <span className="font-mono">{metaAdsConnection.data.missingConfiguredScopes.join(", ")}</span>.
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <Button variant={metaConnection.data?.connected ? "outline" : "default"} size="sm" asChild disabled={!metaConfigured}>
+                  <a href="/api/integrations/meta/connect">
+                    {metaConnection.data?.connected ? "Opnieuw koppelen" : "Meta koppelen"}
+                  </a>
+                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {metaAppSecretConfigured || metaConnection.data?.connected ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      disabled={removeSettings.isPending}
+                      onClick={() =>
+                        requestRemoveSetting({
+                          title: "Meta OAuth-gegevens verwijderen?",
+                          description: "Meta app-secret en alle gekoppelde social tokens/IDs worden gewist.",
+                          keys: [
+                            "integrations.meta_app_secret",
+                            "social.meta_access_token",
+                            "social.meta_refresh_meta",
+                            "social.meta_page_access_token",
+                            "social.meta_page_id",
+                            "social.meta_instagram_business_id",
+                            "social.meta_token_expires_at",
+                            "ads.meta_ad_account_id",
+                            "ads.meta_business_id",
+                          ],
+                          onCleared: () => {
+                            setMetaAppSecret("");
+                            setMetaAppSecretConfigured(false);
+                            metaConnection.refetch();
+                            metaAdsConnection.refetch();
+                          },
+                        })
+                      }
+                    >
+                      <Trash2 className="mr-2 h-3 w-3" />
+                      Meta loskoppelen
+                    </Button>
+                  ) : null}
+                  <Button size="sm" onClick={handleSaveGoogle} disabled={batchUpdate.isPending || !metaDirty}>
+                    {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
+                    Meta instellingen opslaan
                   </Button>
                 </div>
               </div>

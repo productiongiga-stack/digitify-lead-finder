@@ -27,6 +27,7 @@ import {
   ScanSearch,
   Library,
   UserCircle,
+  Megaphone,
 } from "lucide-react";
 import type { AppRole } from "@/lib/permissions";
 
@@ -61,6 +62,8 @@ export const MAIN_NAV_ITEMS: NavItem[] = [
 export const LEADS_WORKFLOW_ITEMS: QuickNavItem[] = [
   { href: "/leads/search", label: "Leads zoeken", icon: Search },
   { href: "/campaigns", label: "Campagneprofielen", icon: Target, moduleId: "campaigns" },
+  { href: "/social", label: "Social Planner", icon: Megaphone, moduleId: "social" },
+  { href: "/meta-ads", label: "Meta Ads", icon: Megaphone, moduleId: "metaAds" },
   { href: "/contacts", label: "Outbound", icon: SendHorizonal, moduleId: "contacts" },
   { href: "/contacts/inbox", label: "Inbox", icon: Inbox, moduleId: "contacts" },
   { href: "/quotes", label: "Offertes", icon: Receipt, moduleId: "quotes" },
@@ -87,6 +90,8 @@ export const TOOL_NAV_ITEMS: NavItem[] = [
 export const ALL_MODULES = [
   { id: "bookings", label: "Boekingen" },
   { id: "campaigns", label: "Campagnes" },
+  { id: "social", label: "Social Planner" },
+  { id: "metaAds", label: "Meta Ads" },
   { id: "contacts", label: "Outbound / Contacten" },
   { id: "quotes", label: "Offertes" },
   { id: "invoices", label: "Facturen" },
@@ -140,6 +145,8 @@ const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
   { path: "/leads", title: "Leads" },
   { path: "/campaigns/new", title: "Nieuw campagneprofiel" },
   { path: "/campaigns", title: "Campagneprofielen" },
+  { path: "/social", title: "Social Planner" },
+  { path: "/meta-ads", title: "Meta Ads" },
   { path: "/notifications", title: "Meldingen" },
   { path: "/contacts/inbox", title: "Inbox" },
   { path: "/contacts/compose", title: "Outbound Opstellen" },

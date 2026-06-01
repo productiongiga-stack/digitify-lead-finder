@@ -76,6 +76,10 @@ function readStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
 }
 
+function userLabel(user: { name?: string | null; email?: string | null } | null | undefined) {
+  return user?.name || user?.email || "Onbekend";
+}
+
 function ScoreRing({ score, size = 96 }: { score: number | null | undefined; size?: number }) {
   const s = score ?? 0;
   const radius = (size - 12) / 2;
@@ -1160,6 +1164,14 @@ export default function LeadDetailPage() {
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Toegewezen aan</span>
                     <span className="font-medium">{lead.assignedTo?.name ?? "Niet toegewezen"}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">Opgeslagen door</span>
+                    <span className="text-right font-medium">{userLabel(lead.savedBy)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-muted-foreground">Laatst bewerkt door</span>
+                    <span className="text-right font-medium">{userLabel(lead.lastEditedBy)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Bron</span>

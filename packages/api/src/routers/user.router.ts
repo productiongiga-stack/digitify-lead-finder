@@ -267,9 +267,19 @@ export const userRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const email = input.email.trim().toLowerCase();
-      const existing = await ctx.db.user.findUnique({ where: { email } });
-      if (existing) {
-        throw new TRPCError({ code: "CONFLICT", message: "Er bestaat al een gebruiker met dit e-mailadres." });
+      const workspaceId = ctx.user.workspaceId!;
+      const existing = await ctx.db.user.findUnique({
+        where: { email },
+        select: { id: true, name: true, role: true, workspaceOwnerId: true, passwordHash: true },
+      });
+      if (existing?.id === workspaceId || existing?.workspaceOwnerId === workspaceId) {
+        throw new TRPCError({ code: "CONFLICT", message: "Deze gebruiker zit al in je team." });
+      }
+      if (existing?.workspaceOwnerId && existing.workspaceOwnerId !== workspaceId) {
+        throw new TRPCError({ code: "CONFLICT", message: "Deze gebruiker hoort al bij een andere workspace." });
+      }
+      if (existing?.role === "OWNER") {
+        throw new TRPCError({ code: "CONFLICT", message: "Owner-accounts kunnen niet als teamlid worden toegevoegd." });
       }
       const existingRequest = await ctx.db.registrationRequest.findFirst({
         where: {
@@ -290,12 +300,14 @@ export const userRouter = router({
       const token = randomBytes(32).toString("hex");
       await ctx.db.registrationRequest.create({
         data: {
-          name: input.name,
+          name: existing?.name || input.name,
           email,
-          passwordHash: hashPassword(input.password),
+          passwordHash: existing?.passwordHash || hashPassword(input.password),
           requestedRole: "MEMBER",
           status: "PENDING_EMAIL_VERIFICATION",
           emailVerificationToken: token,
+          targetWorkspaceOwnerId: workspaceId,
+          invitedById: ctx.user.id,
         },
       });
 
@@ -307,7 +319,7 @@ export const userRouter = router({
           `Hallo ${input.name},\n\n` +
           `Je bent uitgenodigd voor een team workspace in Digitify Lead Finder.\n` +
           `Bevestig je e-mailadres via deze link:\n${verifyUrl}\n\n` +
-          `Na bevestiging kan je workspace-owner je account afronden als teamlid.\n\nDigitify`,
+          `Na bevestiging word je gekoppeld aan de gedeelde team-workspace. Vanaf dan zie je teamleads en ziet het team duidelijk welke acties jij uitvoert.\n\nDigitify`,
       });
 
       return { success: true };

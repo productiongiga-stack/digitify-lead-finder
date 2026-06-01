@@ -23,6 +23,8 @@ describe("setting value validation", () => {
 
   it("validates enum values", () => {
     expect(validateSettingValue("email.provider", "SMTP")).toBe("smtp");
+    expect(validateSettingValue("seo.og_locale", "nl_BE")).toBe("nl_BE");
+    expect(validateSettingValue("seo.og_locale", "nl_be")).toBe("nl_BE");
     expect(() => validateSettingValue("email.provider", "mailgun")).toThrow(TRPCError);
   });
 

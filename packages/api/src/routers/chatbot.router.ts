@@ -180,6 +180,8 @@ export const chatbotRouter = router({
           source: "chatbot",
           industry: session.intent || undefined,
           createdById: ctx.user.workspaceId!,
+          savedById: ctx.user.id,
+          lastEditedById: ctx.user.id,
         },
       });
 
@@ -220,6 +222,8 @@ export const chatbotRouter = router({
             source: "chatbot",
             industry: session.intent || undefined,
             createdById: ctx.user.workspaceId!,
+            savedById: ctx.user.id,
+            lastEditedById: ctx.user.id,
           },
           select: { id: true },
         });

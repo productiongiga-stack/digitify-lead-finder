@@ -447,6 +447,8 @@ export const searchRouter = router({
           source: "google_places",
           sourceQuery: input.displayName,
           createdById: ctx.user.workspaceId!,
+          savedById: ctx.user.id,
+          lastEditedById: ctx.user.id,
         },
       });
 

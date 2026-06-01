@@ -27,6 +27,8 @@ const BOOLEAN_SETTING_KEYS = new Set([
   "bookings.google_sync_enabled",
   "bookings.reminders_24h_enabled",
   "bookings.reminders_1h_enabled",
+  "social.autopost_enabled",
+  "ads.autoads_enabled",
   "email.smtp_tls_reject_unauthorized",
   "email.imap_tls",
   "seo.robots_index",
@@ -42,6 +44,7 @@ const ENUM_SETTING_KEYS = new Map<string, readonly string[]>([
   ["api.ai_provider", ["anthropic", "openai", "deepseek"]],
   ["seo.twitter_card", ["summary", "summary_large_image"]],
   ["seo.og_locale", ["nl_BE", "nl_NL", "en_US", "fr_BE", "de_DE"]],
+  ["ads.default_currency", ["EUR", "USD", "GBP"]],
 ]);
 
 const NUMBER_SETTING_KEYS = new Map<string, { min: number; max: number; integer?: boolean }>([
@@ -50,6 +53,7 @@ const NUMBER_SETTING_KEYS = new Map<string, { min: number; max: number; integer?
   ["email.followup_days", { min: 1, max: 365, integer: true }],
   ["bookings.slot_minutes", { min: 5, max: 240, integer: true }],
   ["openclaw.max_tokens", { min: 256, max: 8192, integer: true }],
+  ["ads.max_daily_budget_cents", { min: 100, max: 100_000_000, integer: true }],
 ]);
 
 function invalid(message: string): never {
@@ -208,11 +212,12 @@ export function validateSettingValue(key: string, rawValue: unknown): unknown {
 
   const enumRule = ENUM_SETTING_KEYS.get(normalizedKey);
   if (enumRule) {
-    const value = String(rawValue).trim().toLowerCase();
-    if (!enumRule.includes(value)) {
+    const value = String(rawValue).trim();
+    const canonicalValue = enumRule.find((allowed) => allowed.toLowerCase() === value.toLowerCase());
+    if (!canonicalValue) {
       invalid(`Instelling "${normalizedKey}" moet één van deze waarden hebben: ${enumRule.join(", ")}.`);
     }
-    return value;
+    return canonicalValue;
   }
 
   if (BOOLEAN_SETTING_KEYS.has(normalizedKey)) {

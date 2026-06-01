@@ -8,10 +8,14 @@ const SECRET_SETTING_KEYS = new Set([
   "api.openai_key",
   "api.google_places_key",
   "integrations.google_oauth_client_secret",
+  "integrations.meta_app_secret",
   "email.smtp_pass",
   "email.imap_pass",
   "bookings.google_oauth_access_token",
   "bookings.google_oauth_refresh_token",
+  "social.meta_access_token",
+  "social.meta_refresh_meta",
+  "social.meta_page_access_token",
 ]);
 
 function normalizeKey(key: string) {
@@ -64,8 +68,11 @@ export function isSecretSettingKey(key: string) {
   const normalized = normalizeKey(key);
   if (SECRET_SETTING_KEYS.has(normalized)) return true;
   if (normalized.startsWith("api.") && normalized.endsWith("_key")) return true;
+  if (normalized.startsWith("integrations.") && normalized.endsWith("_secret")) return true;
   if (normalized.startsWith("email.") && (normalized.endsWith("_pass") || normalized.endsWith("_password"))) return true;
   if (normalized.startsWith("bookings.google_oauth_") && normalized.endsWith("_token")) return true;
+  if (normalized.startsWith("social.meta_") && normalized.endsWith("_token")) return true;
+  if (normalized === "social.meta_refresh_meta") return true;
   return false;
 }
 

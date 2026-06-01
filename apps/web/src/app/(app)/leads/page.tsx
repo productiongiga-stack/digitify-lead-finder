@@ -61,6 +61,7 @@ import {
   MousePointerClick,
   LayoutGrid,
   Info,
+  UserRound,
 } from "lucide-react";
 import { cn, formatScore, formatDate, safeExternalUrl } from "@/lib/utils";
 import { LEADS_WORKFLOW_ITEMS } from "@/lib/navigation";
@@ -86,6 +87,8 @@ type Lead = {
   instagramUrl: string | null;
   linkedinUrl: string | null;
   createdAt: string | Date;
+  savedBy: { id: string; name: string | null; email: string } | null;
+  lastEditedBy: { id: string; name: string | null; email: string } | null;
   tags: { tag: { id: string; name: string; color: string } }[];
 };
 
@@ -109,6 +112,10 @@ function formatLeadLocation(lead: Lead) {
 function formatLeadContact(lead: Lead) {
   if (lead.email && lead.phone) return `${lead.email} · ${lead.phone}`;
   return lead.email || lead.phone || "Geen contactgegevens";
+}
+
+function formatUserLabel(user: Lead["savedBy"]) {
+  return user?.name || user?.email || "Onbekend";
 }
 
 export default function LeadsPage() {
@@ -398,11 +405,17 @@ export default function LeadsPage() {
       },
       {
         id: "createdAt",
-        header: "Datum",
+        header: "Audit",
         sortKey: "createdAt",
         hideBelow: "md",
         cell: (lead) => (
-          <span className="text-sm text-muted-foreground">{formatDate(lead.createdAt)}</span>
+          <div className="min-w-[150px] space-y-1 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5">
+              <UserRound className="h-3.5 w-3.5" />
+              <span className="truncate">Opgeslagen door {formatUserLabel(lead.savedBy)}</span>
+            </div>
+            <div>{formatDate(lead.createdAt)}</div>
+          </div>
         ),
       },
     ],
@@ -427,6 +440,10 @@ export default function LeadsPage() {
               </p>
               <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
                 {formatLeadContact(lead)}
+              </p>
+              <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <UserRound className="h-3 w-3" />
+                Opgeslagen door {formatUserLabel(lead.savedBy)}
               </p>
             </div>
             <span className={cn("text-base font-semibold", scoreClass(lead.overallScore))}>

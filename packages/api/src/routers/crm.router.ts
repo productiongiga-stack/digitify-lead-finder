@@ -283,6 +283,8 @@ export const crmRouter = router({
       const lead = await ctx.db.lead.create({
         data: {
           createdById: ctx.user.workspaceId!,
+          savedById: ctx.user.id,
+          lastEditedById: ctx.user.id,
           companyName,
           email: email || undefined,
           phone: input.phone?.trim() || undefined,
@@ -333,7 +335,7 @@ export const crmRouter = router({
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       const lead = await ctx.db.lead.update({
         where: { id: input.leadId, createdById: ctx.user.workspaceId! },
-        data: { status: "WON" },
+        data: { status: "WON", lastEditedById: ctx.user.id },
         select: { id: true, companyName: true, status: true },
       });
 

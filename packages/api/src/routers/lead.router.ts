@@ -180,6 +180,8 @@ export const leadRouter = router({
             tags: { include: { tag: true } },
             pipelineStage: true,
             assignedTo: { select: { id: true, name: true, email: true } },
+            savedBy: { select: { id: true, name: true, email: true } },
+            lastEditedBy: { select: { id: true, name: true, email: true } },
             _count: { select: { notes: true, emailDrafts: true } },
           },
         }),
@@ -204,6 +206,8 @@ export const leadRouter = router({
           tags: { include: { tag: true } },
           pipelineStage: true,
           assignedTo: { select: { id: true, name: true, email: true } },
+          savedBy: { select: { id: true, name: true, email: true } },
+          lastEditedBy: { select: { id: true, name: true, email: true } },
           contacts: true,
           notes: {
             orderBy: { createdAt: "desc" },
@@ -307,6 +311,8 @@ export const leadRouter = router({
         data: {
           ...input,
           createdById: ctx.user.workspaceId!,
+          savedById: ctx.user.id,
+          lastEditedById: ctx.user.id,
         },
       });
 
@@ -372,6 +378,7 @@ export const leadRouter = router({
           ? { connect: { id: assignedToId } }
           : { disconnect: true };
       }
+      data.lastEditedBy = { connect: { id: ctx.user.id } };
       const lead = await ctx.db.lead.update({
         where: { id, createdById: ctx.user.workspaceId! },
         data: data as any,
@@ -407,7 +414,7 @@ export const leadRouter = router({
     .mutation(async ({ ctx, input }) => {
       const result = await ctx.db.lead.updateMany({
         where: { id: { in: input.ids }, createdById: ctx.user.workspaceId! },
-        data: { status: input.status },
+        data: { status: input.status, lastEditedById: ctx.user.id },
       });
       return { updated: result.count };
     }),
@@ -446,6 +453,10 @@ export const leadRouter = router({
       if (toCreate.length > 0) {
         await ctx.db.leadTag.createMany({
           data: toCreate.map((leadId) => ({ leadId, tagId: input.tagId })),
+        });
+        await ctx.db.lead.updateMany({
+          where: { id: { in: toCreate }, createdById: ctx.user.workspaceId! },
+          data: { lastEditedById: ctx.user.id },
         });
       }
       return { added: toCreate.length };
@@ -654,6 +665,8 @@ export const leadRouter = router({
         const payload: Record<string, unknown> = {
           companyName,
           createdById: ctx.user.workspaceId!,
+          savedById: ctx.user.id,
+          lastEditedById: ctx.user.id,
           source: input.source || "csv_import",
         };
         if (email) payload.email = email;

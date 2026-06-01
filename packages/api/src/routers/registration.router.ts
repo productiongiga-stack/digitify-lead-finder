@@ -36,6 +36,76 @@ async function notifyRegistrationAdmins(db: any, subject: string, body: string) 
   );
 }
 
+function canReviewGlobalRegistrations(workspaceId: string) {
+  return Boolean(process.env.REGISTRATION_NOTIFY_WORKSPACE_ID?.trim() === workspaceId);
+}
+
+async function activateTargetedInvitation(ctx: { db: any }, request: {
+  id: string;
+  name: string;
+  email: string;
+  passwordHash: string;
+  emailVerifiedAt: Date | null;
+  targetWorkspaceOwnerId: string | null;
+}) {
+  if (!request.targetWorkspaceOwnerId) return null;
+
+  const existingUser = await ctx.db.user.findUnique({
+    where: { email: request.email },
+    select: { id: true, role: true, workspaceOwnerId: true, name: true },
+  });
+
+  if (existingUser) {
+    if (existingUser.id === request.targetWorkspaceOwnerId || existingUser.role === "OWNER") {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Owner-accounts kunnen niet als teamlid aan een andere workspace worden gekoppeld.",
+      });
+    }
+    if (existingUser.workspaceOwnerId && existingUser.workspaceOwnerId !== request.targetWorkspaceOwnerId) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "Deze gebruiker hoort al bij een andere workspace.",
+      });
+    }
+
+    const user = await ctx.db.user.update({
+      where: { id: existingUser.id },
+      data: {
+        workspaceOwnerId: request.targetWorkspaceOwnerId,
+        role: "MEMBER",
+        emailVerified: request.emailVerifiedAt || new Date(),
+        name: existingUser.name || request.name,
+      },
+    });
+
+    await ctx.db.registrationRequest.update({
+      where: { id: request.id },
+      data: { status: "APPROVED", reviewedAt: new Date() },
+    });
+
+    return user;
+  }
+
+  const user = await ctx.db.user.create({
+    data: {
+      name: request.name,
+      email: request.email,
+      passwordHash: request.passwordHash,
+      role: "MEMBER",
+      emailVerified: request.emailVerifiedAt || new Date(),
+      workspaceOwnerId: request.targetWorkspaceOwnerId,
+    },
+  });
+
+  await ctx.db.registrationRequest.update({
+    where: { id: request.id },
+    data: { status: "APPROVED", reviewedAt: new Date() },
+  });
+
+  return user;
+}
+
 export const registrationRouter = router({
   requestAccess: publicProcedure
     .input(
@@ -97,6 +167,16 @@ export const registrationRouter = router({
         },
       });
 
+      if (updated.targetWorkspaceOwnerId) {
+        await activateTargetedInvitation(ctx, updated);
+        await sendBrandedEmail(ctx.db, {
+          toEmail: updated.email,
+          subject: "Je team-uitnodiging is geactiveerd",
+          body: `Hallo ${updated.name},\n\nJe hebt de team-uitnodiging bevestigd. Je kunt nu inloggen en werkt voortaan in de gedeelde workspace van je team.\n\nLogin: ${appUrl()}/login\n\nDigitify`,
+        });
+        return { success: true, status: "APPROVED" };
+      }
+
       await notifyRegistrationAdmins(
         ctx.db,
         "Nieuwe registratieaanvraag voor Digitify Lead Finder",
@@ -106,8 +186,16 @@ export const registrationRouter = router({
       return { success: true, status: updated.status };
     }),
 
-  listRequests: ownerProcedure.query(({ ctx }) =>
-    ctx.db.registrationRequest.findMany({
+  listRequests: ownerProcedure.query(({ ctx }) => {
+    const workspaceId = ctx.user.workspaceId ?? ctx.user.id;
+    const includeGlobal = canReviewGlobalRegistrations(workspaceId);
+    return ctx.db.registrationRequest.findMany({
+      where: {
+        OR: [
+          { targetWorkspaceOwnerId: workspaceId },
+          ...(includeGlobal ? [{ targetWorkspaceOwnerId: null }] : []),
+        ],
+      },
       orderBy: { createdAt: "desc" },
       take: 50,
       select: {
@@ -120,8 +208,8 @@ export const registrationRouter = router({
         createdAt: true,
         emailVerifiedAt: true,
       },
-    })
-  ),
+    });
+  }),
 
   approve: ownerProcedure
     .input(z.object({ requestId: z.string() }))
@@ -131,7 +219,18 @@ export const registrationRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "Deze aanvraag kan niet worden goedgekeurd." });
       }
 
-      const workspaceId = ctx.user.workspaceId ?? ctx.user.id;
+      const currentWorkspaceId = ctx.user.workspaceId ?? ctx.user.id;
+      if (
+        request.targetWorkspaceOwnerId &&
+        request.targetWorkspaceOwnerId !== currentWorkspaceId
+      ) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Deze aanvraag hoort bij een andere workspace." });
+      }
+      if (!request.targetWorkspaceOwnerId && !canReviewGlobalRegistrations(currentWorkspaceId)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Alleen de website-owner kan globale registraties goedkeuren." });
+      }
+
+      const workspaceId = request.targetWorkspaceOwnerId || null;
       const user = await ctx.db.user.create({
         data: {
           name: request.name,
@@ -142,7 +241,7 @@ export const registrationRouter = router({
           workspaceOwnerId: workspaceId,
         },
       });
-      await ensureUserWorkspace(ctx.db, workspaceId, ctx.user.name);
+      await ensureUserWorkspace(ctx.db, workspaceId || user.id, workspaceId ? ctx.user.name : request.name);
 
       await ctx.db.registrationRequest.update({
         where: { id: request.id },
@@ -152,7 +251,7 @@ export const registrationRouter = router({
       await sendBrandedEmail(ctx.db, {
         toEmail: request.email,
         subject: "Je toegang tot Digitify Lead Finder is goedgekeurd",
-        body: `Hallo ${request.name},\n\nJe aanvraag is goedgekeurd. Je kunt nu inloggen met het wachtwoord dat je zelf hebt gekozen.\n\nLogin: ${appUrl()}/login\n\nDigitify`,
+        body: `Hallo ${request.name},\n\nJe aanvraag is goedgekeurd. Je start in je eigen persoonlijke workspace, zodat je geen leads of instellingen van andere teams ziet. Een owner kan je later expliciet aan een team-workspace toevoegen.\n\nLogin: ${appUrl()}/login\n\nDigitify`,
       });
 
       return user;
@@ -161,6 +260,21 @@ export const registrationRouter = router({
   reject: ownerProcedure
     .input(z.object({ requestId: z.string(), reason: z.string().max(800).optional() }))
     .mutation(async ({ ctx, input }) => {
+      const existing = await ctx.db.registrationRequest.findUnique({ where: { id: input.requestId } });
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Aanvraag niet gevonden." });
+      }
+      const currentWorkspaceId = ctx.user.workspaceId ?? ctx.user.id;
+      if (
+        existing.targetWorkspaceOwnerId &&
+        existing.targetWorkspaceOwnerId !== currentWorkspaceId
+      ) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Deze aanvraag hoort bij een andere workspace." });
+      }
+      if (!existing.targetWorkspaceOwnerId && !canReviewGlobalRegistrations(currentWorkspaceId)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Alleen de website-owner kan globale registraties afkeuren." });
+      }
+
       const request = await ctx.db.registrationRequest.update({
         where: { id: input.requestId },
         data: {
