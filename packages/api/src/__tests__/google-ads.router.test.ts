@@ -57,6 +57,7 @@ describe("googleAds router flow", () => {
     vi.mocked(googleAdsLib.loadGoogleAdsWorkspaceConfig).mockResolvedValue(baseConfig as any);
     vi.mocked(googleAdsLib.pushPausedGoogleAdPlan).mockResolvedValue({
       campaignResourceName: "customers/123/campaigns/1",
+      adGroupResourceName: "customers/123/adGroups/1",
       status: "PAUSED",
     });
   });
@@ -111,5 +112,25 @@ describe("googleAds router flow", () => {
     const pushed = await caller.pushPausedToGoogle({ id: "plan_1" });
     expect(pushed.status).toBe("PUSHED_PAUSED");
     expect(googleAdsLib.pushPausedGoogleAdPlan).toHaveBeenCalled();
+  });
+
+  it("reports missing operational requirements in connection status", async () => {
+    vi.mocked(googleAdsLib.loadGoogleAdsWorkspaceConfig).mockResolvedValue({
+      ...baseConfig,
+      refreshToken: "",
+      customerId: "",
+      autoadsEnabled: false,
+    } as any);
+
+    const caller = googleAdsRouter.createCaller(
+      makeCtx({
+        googleAdAccount: { findFirst: vi.fn().mockResolvedValue(null) },
+      }),
+    );
+
+    const status = await caller.connectionStatus();
+    expect(status.missingOperationalRequirements).toContain("GOOGLE_OAUTH_MISSING");
+    expect(status.missingOperationalRequirements).toContain("GOOGLE_CUSTOMER_NOT_SELECTED");
+    expect(status.missingOperationalRequirements).toContain("GOOGLE_AUTOMATION_DISABLED");
   });
 });

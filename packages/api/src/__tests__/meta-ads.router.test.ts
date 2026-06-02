@@ -62,8 +62,10 @@ describe("metaAds router flow", () => {
     vi.mocked(metaAdsLib.pushPausedMetaAdPlan).mockResolvedValue({
       campaignId: "cmp_1",
       adsetId: "adset_1",
+      adsetIds: ["adset_1", "adset_2"],
       creativeId: "creative_1",
       adId: "ad_1",
+      adIds: ["ad_1", "ad_2"],
       status: "PAUSED",
     });
   });
@@ -143,6 +145,28 @@ describe("metaAds router flow", () => {
     );
 
     await expect(caller.approveDraft({ id: "plan_budget" })).rejects.toThrow(/Budget guard/i);
+  });
+
+  it("accepts expanded Meta outcome objectives from the wizard", async () => {
+    const create = vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: "plan_sales", ...data }));
+    const caller = metaAdsRouter.createCaller(
+      makeCtx({
+        metaAdPlan: { create },
+        activity: { create: vi.fn().mockResolvedValue({ id: "act_3" }) },
+      }),
+    );
+
+    const created = await caller.createDraft({
+      name: "Sales wizard campaign",
+      objective: "OUTCOME_SALES",
+      dailyBudgetCents: 2500,
+      currency: "EUR",
+      targeting: { campaignSettings: { optimizationGoal: "OFFSITE_CONVERSIONS" } },
+      creatives: { linkUrl: "https://example.com" },
+    });
+
+    expect(created.objective).toBe("OUTCOME_SALES");
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ objective: "OUTCOME_SALES" }) }));
   });
 });
 

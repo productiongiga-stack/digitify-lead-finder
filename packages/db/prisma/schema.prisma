@@ -735,6 +735,7 @@ model SocialPost {
   scheduledFor    DateTime?
   status          SocialPostStatus @default(DRAFT)
   targetPlatforms SocialPlatform[]
+  metadata        Json?
   externalPostIds Json?
   approvedAt      DateTime?
   publishedAt     DateTime?

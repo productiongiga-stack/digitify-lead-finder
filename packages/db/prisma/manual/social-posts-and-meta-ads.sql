@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS "social_posts" (
   "scheduledFor" TIMESTAMP(3),
   "status" "SocialPostStatus" NOT NULL DEFAULT 'DRAFT',
   "targetPlatforms" "SocialPlatform"[] DEFAULT ARRAY['FACEBOOK']::"SocialPlatform"[],
+  "metadata" JSONB,
   "externalPostIds" JSONB,
   "approvedAt" TIMESTAMP(3),
   "publishedAt" TIMESTAMP(3),
@@ -42,6 +43,8 @@ CREATE TABLE IF NOT EXISTS "social_posts" (
   "updatedAt" TIMESTAMP(3) NOT NULL,
   CONSTRAINT "social_posts_pkey" PRIMARY KEY ("id")
 );
+
+ALTER TABLE "social_posts" ADD COLUMN IF NOT EXISTS "metadata" JSONB;
 
 CREATE INDEX IF NOT EXISTS "social_posts_createdById_status_idx" ON "social_posts"("createdById", "status");
 CREATE INDEX IF NOT EXISTS "social_posts_status_scheduledFor_idx" ON "social_posts"("status", "scheduledFor");

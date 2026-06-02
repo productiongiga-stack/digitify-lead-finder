@@ -195,6 +195,12 @@ export const googleAdsRouter = router({
           .catch(() => null)
       : null;
 
+    const missingOperationalRequirements: string[] = [];
+    if (!resolveGoogleAdsDeveloperToken()) missingOperationalRequirements.push("GOOGLE_DEV_TOKEN_MISSING");
+    if (!config.refreshToken) missingOperationalRequirements.push("GOOGLE_OAUTH_MISSING");
+    if (!config.customerId) missingOperationalRequirements.push("GOOGLE_CUSTOMER_NOT_SELECTED");
+    if (!config.autoadsEnabled) missingOperationalRequirements.push("GOOGLE_AUTOMATION_DISABLED");
+
     return {
       hasOAuthClient: Boolean(config.clientId && config.clientSecret),
       hasDeveloperToken: Boolean(resolveGoogleAdsDeveloperToken()),
@@ -206,6 +212,7 @@ export const googleAdsRouter = router({
       autoadsEnabled: config.autoadsEnabled,
       defaultCurrency: config.defaultCurrency,
       maxDailyBudgetCents: config.maxDailyBudgetCents,
+      missingOperationalRequirements,
     };
   }),
 

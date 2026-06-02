@@ -4,14 +4,27 @@ import { OpenClawClient } from "@digitify/openclaw";
 import { z } from "zod";
 import { adminProcedure, protectedProcedure, router } from "../trpc";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
+import { probeSocialImage, validateSocialImageForPublish } from "../lib/social-image";
 import {
   clearMetaSettings,
   loadMetaWorkspaceConfig,
   publishFacebookImagePost,
+  publishFacebookImageStory,
   publishInstagramImagePost,
+  publishInstagramImageStory,
+  publishInstagramReel,
   resolveMetaOAuthScopeSummary,
   workspaceScopeFromAuthenticatedUser,
 } from "../lib/social-meta";
+import {
+  normalizeFeedFormat,
+  normalizePlacementAssets,
+  normalizePlacements,
+  probeFormatForPlacement,
+  resolvePlacementImageUrl,
+  resolvePrimaryImageUrl,
+  type SocialPlacement,
+} from "../lib/social-placements";
 
 const SOCIAL_PLATFORM = ["FACEBOOK", "INSTAGRAM"] as const;
 const SOCIAL_STATUS = [
@@ -26,6 +39,53 @@ const SOCIAL_STATUS = [
 
 const socialPlatformEnum = z.enum(SOCIAL_PLATFORM);
 const socialStatusEnum = z.enum(SOCIAL_STATUS);
+const socialPostFormatEnum = z.enum(["SQUARE", "PORTRAIT", "LANDSCAPE", "STORY"]);
+const socialPlacementEnum = z.enum(["FEED", "STORY", "REEL"]);
+const socialFeedFormatEnum = z.enum(["SQUARE", "PORTRAIT", "LANDSCAPE"]);
+
+const socialImageUrlSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(
+    (value) => value.startsWith("data:image/") || z.string().url().safeParse(value).success,
+    { message: "Gebruik een publieke https-URL of upload een JPG, PNG of WebP." },
+  );
+
+const socialVideoUrlSchema = z
+  .string()
+  .trim()
+  .url()
+  .refine((value) => /^https:\/\//i.test(value), {
+    message: "Reel-video moet een publieke https-URL zijn (MP4).",
+  });
+
+const socialPlacementAssetSchema = z.object({
+  imageUrl: socialImageUrlSchema.optional(),
+  videoUrl: socialVideoUrlSchema.optional(),
+});
+
+const socialPostMetadataSchema = z
+  .object({
+    headline: z.string().max(160).optional(),
+    cta: z.string().max(160).optional(),
+    hashtags: z.string().max(500).optional(),
+    linkUrl: z.union([z.string().url(), z.literal("")]).optional(),
+    firstComment: z.string().max(1000).optional(),
+    altText: z.string().max(500).optional(),
+    brandSignature: z.string().max(240).optional(),
+    postFormat: socialPostFormatEnum.default("SQUARE").optional(),
+    placements: z.array(socialPlacementEnum).min(1).max(3).optional(),
+    feedFormat: socialFeedFormatEnum.optional(),
+    assets: z
+      .object({
+        FEED: socialPlacementAssetSchema.optional(),
+        STORY: socialPlacementAssetSchema.optional(),
+        REEL: socialPlacementAssetSchema.optional(),
+      })
+      .optional(),
+  })
+  .optional();
 
 const listInputSchema = z
   .object({
@@ -51,6 +111,116 @@ function ensureSchedulableStatus(status: string) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: `Post met status ${status} kan niet ingepland worden.`,
+    });
+  }
+}
+
+function cleanOptionalText(value?: string | null) {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
+}
+
+function normalizeHashtags(value?: string | null) {
+  const raw = value?.trim();
+  if (!raw) return "";
+  return raw
+    .split(/[\s,]+/)
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .map((tag) => (tag.startsWith("#") ? tag : `#${tag.replace(/^#+/, "")}`))
+    .join(" ");
+}
+
+function normalizeSocialMetadata(metadata?: z.infer<typeof socialPostMetadataSchema>) {
+  if (!metadata) return {};
+  const placements = normalizePlacements(metadata);
+  const feedFormat = normalizeFeedFormat(metadata);
+  const assets = normalizePlacementAssets(metadata);
+  return {
+    headline: cleanOptionalText(metadata.headline),
+    cta: cleanOptionalText(metadata.cta),
+    hashtags: normalizeHashtags(metadata.hashtags) || undefined,
+    linkUrl: cleanOptionalText(metadata.linkUrl),
+    firstComment: cleanOptionalText(metadata.firstComment),
+    altText: cleanOptionalText(metadata.altText),
+    brandSignature: cleanOptionalText(metadata.brandSignature),
+    postFormat: metadata.postFormat || feedFormat,
+    placements,
+    feedFormat,
+    assets,
+  };
+}
+
+function buildPublishedCaption(caption: string, rawMetadata?: unknown, placement?: SocialPlacement) {
+  const metadata = normalizeSocialMetadata((rawMetadata || undefined) as z.infer<typeof socialPostMetadataSchema>);
+  if (placement === "STORY") return "";
+
+  const parts = [
+    metadata.headline,
+    caption.trim(),
+    metadata.cta,
+    metadata.linkUrl,
+    metadata.brandSignature,
+    metadata.hashtags,
+  ].filter(Boolean);
+
+  return parts.join("\n\n").trim();
+}
+
+function placementLabel(placement: SocialPlacement) {
+  if (placement === "FEED") return "Feed post";
+  if (placement === "STORY") return "Story";
+  return "Reel";
+}
+
+async function ensurePostCanPublish(post: { imageUrl: string; targetPlatforms: string[]; metadata?: unknown }) {
+  const metadata = normalizeSocialMetadata((post.metadata || undefined) as z.infer<typeof socialPostMetadataSchema>);
+  const placements = metadata.placements || ["FEED"];
+  const assets = metadata.assets || normalizePlacementAssets(metadata);
+
+  if (!placements.length) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Kies minstens één publicatietype (Feed, Story of Reel)." });
+  }
+
+  if (placements.includes("REEL") && !post.targetPlatforms.includes("INSTAGRAM")) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Reels worden alleen naar Instagram gepubliceerd. Schakel Instagram in of verwijder Reel.",
+    });
+  }
+
+  for (const placement of placements) {
+    if (placement === "REEL") {
+      const videoUrl = assets.REEL?.videoUrl?.trim();
+      if (!videoUrl) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Reel vereist een publieke MP4-video-URL.",
+        });
+      }
+      const coverUrl = resolvePlacementImageUrl("REEL", metadata, post.imageUrl);
+      if (coverUrl) {
+        await validateSocialImageForPublish({
+          imageUrl: coverUrl,
+          targetPlatforms: post.targetPlatforms,
+          placement: "REEL",
+        });
+      }
+      continue;
+    }
+
+    const imageUrl = resolvePlacementImageUrl(placement, metadata, post.imageUrl);
+    if (!imageUrl) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Afbeelding ontbreekt voor ${placementLabel(placement)}.`,
+      });
+    }
+
+    await validateSocialImageForPublish({
+      imageUrl,
+      targetPlatforms: post.targetPlatforms,
+      placement: probeFormatForPlacement(placement),
     });
   }
 }
@@ -151,28 +321,75 @@ export async function runDueSocialPostsWorker(db: PrismaClient) {
       });
 
       const externalIds: Record<string, string> = {};
+      const metadata = normalizeSocialMetadata(post.metadata);
+      const placements = metadata.placements || ["FEED"];
+      const assets = metadata.assets || normalizePlacementAssets(metadata);
 
-      if (post.targetPlatforms.includes("FACEBOOK")) {
-        const id = await publishFacebookImagePost({
-          pageId: config.pageId,
-          pageAccessToken: config.pageAccessToken,
-          caption: post.caption,
-          imageUrl: post.imageUrl,
-        });
-        externalIds.facebook = id;
-      }
+      await ensurePostCanPublish({
+        imageUrl: post.imageUrl,
+        targetPlatforms: post.targetPlatforms,
+        metadata,
+      });
 
-      if (post.targetPlatforms.includes("INSTAGRAM")) {
+      if (post.targetPlatforms.includes("INSTAGRAM") && placements.some((p) => p === "STORY" || p === "REEL")) {
         if (!config.instagramBusinessId) {
           throw new Error("Instagram Business-account ontbreekt voor deze workspace.");
         }
-        const id = await publishInstagramImagePost({
-          instagramBusinessId: config.instagramBusinessId,
-          pageAccessToken: config.pageAccessToken,
-          caption: post.caption,
-          imageUrl: post.imageUrl,
-        });
-        externalIds.instagram = id;
+      }
+
+      for (const placement of placements) {
+        if (placement === "FEED") {
+          const imageUrl = resolvePlacementImageUrl("FEED", metadata, post.imageUrl);
+          const publishCaption = buildPublishedCaption(post.caption, metadata, "FEED");
+          if (post.targetPlatforms.includes("FACEBOOK")) {
+            externalIds.facebook = await publishFacebookImagePost({
+              pageId: config.pageId,
+              pageAccessToken: config.pageAccessToken,
+              caption: publishCaption,
+              imageUrl,
+            });
+          }
+          if (post.targetPlatforms.includes("INSTAGRAM")) {
+            externalIds.instagram = await publishInstagramImagePost({
+              instagramBusinessId: config.instagramBusinessId!,
+              pageAccessToken: config.pageAccessToken,
+              caption: publishCaption,
+              imageUrl,
+            });
+          }
+        }
+
+        if (placement === "STORY") {
+          const imageUrl = resolvePlacementImageUrl("STORY", metadata, post.imageUrl);
+          if (post.targetPlatforms.includes("FACEBOOK")) {
+            externalIds.facebookStory = await publishFacebookImageStory({
+              pageId: config.pageId,
+              pageAccessToken: config.pageAccessToken,
+              imageUrl,
+            });
+          }
+          if (post.targetPlatforms.includes("INSTAGRAM")) {
+            externalIds.instagramStory = await publishInstagramImageStory({
+              instagramBusinessId: config.instagramBusinessId!,
+              pageAccessToken: config.pageAccessToken,
+              imageUrl,
+            });
+          }
+        }
+
+        if (placement === "REEL") {
+          const videoUrl = assets.REEL?.videoUrl?.trim();
+          if (!videoUrl) throw new Error("Reel-video ontbreekt.");
+          const coverUrl = resolvePlacementImageUrl("REEL", metadata, post.imageUrl);
+          const publishCaption = buildPublishedCaption(post.caption, metadata, "REEL");
+          externalIds.instagramReel = await publishInstagramReel({
+            instagramBusinessId: config.instagramBusinessId!,
+            pageAccessToken: config.pageAccessToken,
+            caption: publishCaption,
+            videoUrl,
+            coverUrl: coverUrl || undefined,
+          });
+        }
       }
 
       await socialDb.socialPost.update({
@@ -257,21 +474,36 @@ export const socialRouter = router({
     return row;
   }),
 
+  probeImage: protectedProcedure
+    .input(
+      z.object({
+        imageUrl: z.string().trim().min(1).max(12_000_000),
+        postFormat: socialPostFormatEnum.optional(),
+      }),
+    )
+    .query(async ({ input }) => {
+      return probeSocialImage(input.imageUrl);
+    }),
+
   createDraft: protectedProcedure
     .input(
       z.object({
         caption: z.string().min(1).max(6000),
-        imageUrl: z.string().url(),
+        imageUrl: socialImageUrlSchema,
         targetPlatforms: z.array(socialPlatformEnum).min(1).max(2).default(["FACEBOOK", "INSTAGRAM"]),
+        metadata: socialPostMetadataSchema,
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const metadata = normalizeSocialMetadata(input.metadata);
+      const primaryImage = resolvePrimaryImageUrl(metadata, input.imageUrl.trim()) || input.imageUrl.trim();
       const row = await (ctx.db as any).socialPost.create({
         data: {
           createdById: ctx.user.workspaceId!,
           caption: input.caption.trim(),
-          imageUrl: input.imageUrl.trim(),
+          imageUrl: primaryImage,
           targetPlatforms: input.targetPlatforms,
+          metadata,
           status: "DRAFT",
         },
       });
@@ -291,8 +523,9 @@ export const socialRouter = router({
       z.object({
         id: z.string(),
         caption: z.string().min(1).max(6000).optional(),
-        imageUrl: z.string().url().optional(),
+        imageUrl: socialImageUrlSchema.optional(),
         targetPlatforms: z.array(socialPlatformEnum).min(1).max(2).optional(),
+        metadata: socialPostMetadataSchema,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -307,12 +540,19 @@ export const socialRouter = router({
         });
       }
 
+      const metadata = input.metadata === undefined ? undefined : normalizeSocialMetadata(input.metadata);
+      const nextImageUrl =
+        metadata && input.imageUrl !== undefined
+          ? resolvePrimaryImageUrl(metadata, input.imageUrl.trim()) || input.imageUrl.trim()
+          : input.imageUrl?.trim();
+
       return socialDb.socialPost.update({
         where: { id: input.id },
         data: {
           caption: input.caption?.trim(),
-          imageUrl: input.imageUrl?.trim(),
+          imageUrl: nextImageUrl,
           targetPlatforms: input.targetPlatforms,
+          metadata,
           status: "DRAFT",
           lastError: null,
         },
@@ -329,6 +569,11 @@ export const socialRouter = router({
       if (!["DRAFT", "FAILED", "CANCELLED"].includes(row.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Deze post kan niet ter goedkeuring worden aangeboden." });
       }
+      await ensurePostCanPublish({
+        imageUrl: row.imageUrl,
+        targetPlatforms: row.targetPlatforms,
+        metadata: row.metadata,
+      });
 
       const updated = await socialDb.socialPost.update({
         where: { id: input.id },
@@ -362,6 +607,11 @@ export const socialRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Social post niet gevonden." });
       ensureWorkspaceAccess(row, ctx.user.workspaceId!);
       ensureSchedulableStatus(row.status);
+      await ensurePostCanPublish({
+        imageUrl: row.imageUrl,
+        targetPlatforms: row.targetPlatforms,
+        metadata: row.metadata,
+      });
 
       const updated = await socialDb.socialPost.update({
         where: { id: input.id },

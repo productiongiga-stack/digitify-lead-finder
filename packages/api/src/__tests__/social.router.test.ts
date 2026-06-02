@@ -4,7 +4,10 @@ const mockedMeta = vi.hoisted(() => ({
   clearMetaSettings: vi.fn(),
   loadMetaWorkspaceConfig: vi.fn(),
   publishFacebookImagePost: vi.fn(),
+  publishFacebookImageStory: vi.fn(),
   publishInstagramImagePost: vi.fn(),
+  publishInstagramImageStory: vi.fn(),
+  publishInstagramReel: vi.fn(),
   workspaceScopeFromAuthenticatedUser: vi.fn((user: { id: string; workspaceId?: string }) => ({
     workspaceId: user.workspaceId || user.id,
     memberId: user.id,
@@ -12,6 +15,15 @@ const mockedMeta = vi.hoisted(() => ({
 }));
 
 vi.mock("../lib/social-meta", () => mockedMeta);
+vi.mock("../lib/social-image", () => ({
+  validateSocialImageForPublish: vi.fn().mockResolvedValue({
+    width: 1080,
+    height: 1080,
+    aspectRatio: 1,
+    contentType: "image/jpeg",
+    byteLength: 1000,
+  }),
+}));
 
 import { socialRouter, runDueSocialPostsWorker } from "../routers/social.router";
 
@@ -94,7 +106,9 @@ describe("social publish worker", () => {
   beforeEach(() => {
     mockedMeta.loadMetaWorkspaceConfig.mockReset();
     mockedMeta.publishFacebookImagePost.mockReset();
+    mockedMeta.publishFacebookImageStory.mockReset();
     mockedMeta.publishInstagramImagePost.mockReset();
+    mockedMeta.publishInstagramImageStory.mockReset();
   });
 
   it("retries failed post with exponential backoff", async () => {
@@ -141,6 +155,64 @@ describe("social publish worker", () => {
         data: expect.objectContaining({
           status: "SCHEDULED",
           retryCount: 2,
+        }),
+      }),
+    );
+  });
+
+  it("publishes story posts through story endpoints", async () => {
+    const post = {
+      id: "sp_story",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Interne story notitie",
+      imageUrl: "https://example.com/story.jpg",
+      targetPlatforms: ["FACEBOOK", "INSTAGRAM"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+      metadata: { postFormat: "STORY" },
+    };
+
+    const socialPostFindMany = vi.fn().mockResolvedValue([post]);
+    const socialPostUpdate = vi.fn().mockResolvedValue({});
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "ig_123",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.publishFacebookImageStory.mockResolvedValue("fb_story_1");
+    mockedMeta.publishInstagramImageStory.mockResolvedValue("ig_story_1");
+
+    const result = await runDueSocialPostsWorker({
+      socialPost: {
+        findMany: socialPostFindMany,
+        update: socialPostUpdate,
+      },
+      activity: { create: vi.fn().mockResolvedValue({ id: "act_story" }) },
+    } as any);
+
+    expect(result.published).toBe(1);
+    expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
+    expect(mockedMeta.publishInstagramImagePost).not.toHaveBeenCalled();
+    expect(mockedMeta.publishFacebookImageStory).toHaveBeenCalledWith(
+      expect.objectContaining({ pageId: "123", imageUrl: post.imageUrl }),
+    );
+    expect(mockedMeta.publishInstagramImageStory).toHaveBeenCalledWith(
+      expect.objectContaining({ instagramBusinessId: "ig_123", imageUrl: post.imageUrl }),
+    );
+    expect(socialPostUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "PUBLISHED",
+          externalPostIds: { facebookStory: "fb_story_1", instagramStory: "ig_story_1" },
         }),
       }),
     );

@@ -3,6 +3,7 @@ import {
   META_ADS_OAUTH_SCOPES,
   META_FACEBOOK_LOGIN_PUBLISHING_SCOPES,
   META_INSTAGRAM_LOGIN_PUBLISHING_SCOPES,
+  formatMetaApiError,
   normalizeMetaOAuthScopes,
   resolveMetaOAuthIncludeAds,
   resolveMetaOAuthLoginMode,
@@ -79,5 +80,19 @@ describe("resolveMetaOAuthScopes", () => {
       "instagram_basic",
       "instagram_content_publish",
     ]);
+  });
+
+  it("adds a clear hint for Instagram aspect-ratio publish errors", () => {
+    const message = formatMetaApiError({
+      message: "Invalid aspect ratio",
+      code: 36003,
+      type: "OAuthException",
+      error_subcode: 2207009,
+    });
+
+    expect(message).toContain("Afbeeldingsverhouding ongeldig");
+    expect(message).toContain("1080x1080");
+    expect(message).toContain("code 36003");
+    expect(message).toContain("subcode 2207009");
   });
 });

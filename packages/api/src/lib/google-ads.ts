@@ -33,6 +33,11 @@ function asStringArray(value: unknown, min = 1): string[] {
   return value.map((item) => String(item).trim()).filter(Boolean).slice(0, 15);
 }
 
+function asLongStringArray(value: unknown, max = 80): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item).trim()).filter(Boolean).slice(0, max);
+}
+
 export function centsToBudgetMicros(cents: number) {
   return Math.max(1, Math.round(cents)) * 10_000;
 }
@@ -44,7 +49,7 @@ function formatGoogleAdsErrorEntry(error: {
   message?: string | null;
   error_code?: unknown;
   trigger?: unknown;
-  location?: { field_path_elements?: Array<{ field_name?: string | null; index?: number | null }> };
+  location?: { field_path_elements?: Array<{ field_name?: string | null; index?: number | null }> | null } | null;
 }) {
   const codeParts =
     error.error_code && typeof error.error_code === "object"
@@ -67,19 +72,47 @@ function formatGoogleAdsErrorEntry(error: {
     .join(" — ");
 }
 
+function googleAdsHintFor(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes("developer_token") || lower.includes("developer token")) {
+    return "Tip: zet GOOGLE_ADS_DEVELOPER_TOKEN in de server/Vercel env en controleer Google Ads API Center toegang.";
+  }
+  if (lower.includes("invalid_grant") || lower.includes("refresh_token") || lower.includes("oauth") || lower.includes("authorization")) {
+    return "Tip: koppel Google Ads opnieuw via Integraties met de adwords scope en controleer accounttoegang.";
+  }
+  if (lower.includes("field_error") || lower.includes("required") || lower.includes("missing") || lower.includes("veld:")) {
+    return "Tip: controleer het genoemde veld; Search vereist minstens 3 headlines, 2 beschrijvingen en een geldige finalUrl.";
+  }
+  if (lower.includes("policy") || lower.includes("disapproved")) {
+    return "Tip: controleer Google Ads Policy Manager; pas claims, hoofdletters, verboden woorden of landingspagina-inhoud aan.";
+  }
+  if (lower.includes("customer") || lower.includes("resource_not_found") || lower.includes("not found")) {
+    return "Tip: selecteer de Google Ads customer opnieuw en controleer manager/login customer toegang.";
+  }
+  if (lower.includes("budget")) {
+    return "Tip: verlaag het budget of verhoog de workspace budgetlimiet.";
+  }
+  return "Tip: controleer Google OAuth, customer, developer token, billing status en het veldpad in de foutmelding.";
+}
+
+function withGoogleAdsHint(message: string): string {
+  if (!message || message.includes("Tip:")) return message;
+  return `${message} · ${googleAdsHintFor(message)}`;
+}
+
 export function formatGoogleAdsError(error: unknown): string {
   if (error instanceof errors.GoogleAdsFailure) {
     const parts = error.errors.map((entry) => formatGoogleAdsErrorEntry(entry)).filter(Boolean);
-    if (parts.length) return parts.join(" · ");
+    if (parts.length) return withGoogleAdsHint(parts.join(" · "));
   }
 
   if (error instanceof Error) {
     const anyErr = error as { errors?: Array<Parameters<typeof formatGoogleAdsErrorEntry>[0]> };
     if (anyErr.errors?.length) {
       const parts = anyErr.errors.map((entry) => formatGoogleAdsErrorEntry(entry)).filter(Boolean);
-      if (parts.length) return parts.join(" · ");
+      if (parts.length) return withGoogleAdsHint(parts.join(" · "));
     }
-    if (error.message && error.message !== "[object Object]") return error.message;
+    if (error.message && error.message !== "[object Object]") return withGoogleAdsHint(error.message);
   }
 
   if (error && typeof error === "object") {
@@ -92,29 +125,35 @@ export function formatGoogleAdsError(error: unknown): string {
             : String(entry),
         )
         .filter(Boolean);
-      if (parts.length) return parts.join(" · ");
+      if (parts.length) return withGoogleAdsHint(parts.join(" · "));
     }
     try {
-      return JSON.stringify(error);
+      return withGoogleAdsHint(JSON.stringify(error));
     } catch {
-      return String(error);
+      return withGoogleAdsHint(String(error));
     }
   }
 
-  return String(error);
+  return withGoogleAdsHint(String(error));
 }
 
 export function defaultSearchTargeting(targeting: unknown) {
   const custom = asObject(targeting);
-  const keywords = asStringArray(custom.keywords, 1);
+  const keywords = asLongStringArray(custom.keywords, 80);
   return {
     geoTargetConstants: asStringArray(custom.geoTargetConstants).length
       ? asStringArray(custom.geoTargetConstants)
       : ["geoTargetConstants/2056"],
     keywords: keywords.length ? keywords : ["digitify leads", "lead generatie belgie"],
+    negativeKeywords: asLongStringArray(custom.negativeKeywords, 80),
     languageConstants: asStringArray(custom.languageConstants).length
       ? asStringArray(custom.languageConstants)
       : ["languageConstants/1010"],
+    matchType: String(custom.matchType || "PHRASE").toUpperCase(),
+    adGroupName: String(custom.adGroupName || "").trim(),
+    searchPartners: custom.searchPartners !== false,
+    displayExpansion: Boolean(custom.displayExpansion),
+    campaignSettings: asObject(custom.campaignSettings),
   };
 }
 
@@ -129,9 +168,97 @@ export function normalizeSearchCreatives(creatives: unknown) {
   }
   const headlines = asStringArray(creative.headlines || creative.headline, 3);
   const descriptions = asStringArray(creative.descriptions || creative.description, 2);
+  const longHeadlines = asStringArray(creative.longHeadlines || creative.longHeadline, 1);
   while (headlines.length < 3) headlines.push(`Meer weten over ${headlines.length + 1}`);
   while (descriptions.length < 2) descriptions.push(`Ontdek meer via onze website.`);
-  return { finalUrl, headlines: headlines.slice(0, 15), descriptions: descriptions.slice(0, 4) };
+  return {
+    finalUrl,
+    headlines: headlines.slice(0, 15),
+    longHeadlines: longHeadlines.slice(0, 5),
+    descriptions: descriptions.slice(0, 5),
+    headlinePin1: String(creative.headlinePin1 || "").trim(),
+    descriptionPin1: String(creative.descriptionPin1 || "").trim(),
+    businessName: String(creative.businessName || "").trim(),
+    path1: String(creative.path1 || "").trim().slice(0, 15),
+    path2: String(creative.path2 || "").trim().slice(0, 15),
+    imageUrl: String(creative.imageUrl || creative.marketingImageUrl || "").trim(),
+    squareImageUrl: String(creative.squareImageUrl || creative.squareMarketingImageUrl || "").trim(),
+    portraitImageUrl: String(creative.portraitImageUrl || "").trim(),
+    logoUrl: String(creative.logoUrl || "").trim(),
+    callToAction: String(creative.callToAction || "").trim(),
+    assetGroupName: String(creative.assetGroupName || "").trim(),
+    brandGuidelinesEnabled: Boolean(creative.brandGuidelinesEnabled),
+  };
+}
+
+function resolveKeywordMatchType(value: string) {
+  const normalized = value.trim().toUpperCase();
+  if (normalized === "BROAD") return enums.KeywordMatchType.BROAD;
+  if (normalized === "EXACT") return enums.KeywordMatchType.EXACT;
+  return enums.KeywordMatchType.PHRASE;
+}
+
+function textAsset(text: string, pinnedField?: number) {
+  return pinnedField ? { text, pinned_field: pinnedField } : { text };
+}
+
+function validatePerformanceMaxAssets(creative: ReturnType<typeof normalizeSearchCreatives>) {
+  if (creative.brandGuidelinesEnabled) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message:
+        "Performance Max brand guidelines staan aan, maar V1 pusht nog geen campaign-level brand assets. Zet brand guidelines uit of maak deze campagne voorlopig handmatig in Google Ads.",
+    });
+  }
+  if (creative.headlines.length < 3) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Performance Max vereist minstens 3 headlines." });
+  }
+  if (creative.longHeadlines.length < 1) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Performance Max vereist minstens 1 long headline." });
+  }
+  if (creative.descriptions.length < 2) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Performance Max vereist minstens 2 beschrijvingen." });
+  }
+  if (!creative.imageUrl || !creative.squareImageUrl) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Performance Max vereist minstens 1 landscape image URL en 1 square image URL.",
+    });
+  }
+  if (!creative.businessName || creative.businessName.length > 25) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Performance Max business name is verplicht en maximaal 25 tekens.",
+    });
+  }
+  if (!creative.logoUrl) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Performance Max vereist in V1 een logo URL wanneer brand guidelines uit staan.",
+    });
+  }
+}
+
+async function fetchImageAssetData(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Afbeelding downloaden mislukt (${response.status}). Gebruik een publieke JPG/PNG/GIF URL.`,
+    });
+  }
+  const contentType = response.headers.get("content-type") || "";
+  if (!/image\/(png|jpe?g|gif)/i.test(contentType)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Afbeelding heeft ongeldig content-type (${contentType || "onbekend"}). Gebruik JPG, PNG of GIF.`,
+    });
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > 5_120_000) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Afbeelding is groter dan 5120 KB, Google Ads weigert deze asset." });
+  }
+  return bytes;
 }
 
 function createAdsClient(config: GoogleAdsWorkspaceConfig) {
@@ -246,7 +373,9 @@ export async function getGoogleAdsInsights(config: GoogleAdsWorkspaceConfig) {
       campaign.name,
       metrics.impressions,
       metrics.clicks,
-      metrics.cost_micros
+      metrics.cost_micros,
+      metrics.ctr,
+      metrics.conversions
     FROM campaign
     WHERE segments.date DURING LAST_30_DAYS
       AND campaign.status != 'REMOVED'
@@ -259,6 +388,9 @@ export async function getGoogleAdsInsights(config: GoogleAdsWorkspaceConfig) {
     impressions: Number(row.metrics?.impressions || 0),
     clicks: Number(row.metrics?.clicks || 0),
     spend: Number(row.metrics?.cost_micros || 0) / 1_000_000,
+    ctr: Number(row.metrics?.ctr || 0),
+    conversions: Number(row.metrics?.conversions || 0),
+    cpc: Number(row.metrics?.clicks || 0) > 0 ? Number(row.metrics?.cost_micros || 0) / Number(row.metrics?.clicks || 1) / 1_000_000 : 0,
   }));
 }
 
@@ -306,11 +438,11 @@ async function pushSearchPaused(params: {
         manual_cpc: { enhanced_cpc_enabled: false },
         network_settings: {
           target_google_search: true,
-          target_search_network: true,
-          target_content_network: false,
+          target_search_network: targeting.searchPartners,
+          target_content_network: targeting.displayExpansion,
         },
         contains_eu_political_advertising: EU_POLITICAL_ADS_DECLARATION,
-      },
+      } as any,
     },
   ];
 
@@ -329,7 +461,7 @@ async function pushSearchPaused(params: {
   try {
     const adGroupResult = await customer.adGroups.create([
       {
-        name: `${plan.name} - Ad Group`,
+        name: targeting.adGroupName || `${plan.name} - Ad Group`,
         campaign: createdCampaignRn,
         status: enums.AdGroupStatus.PAUSED,
         type: enums.AdGroupType.SEARCH_STANDARD,
@@ -348,10 +480,18 @@ async function pushSearchPaused(params: {
         status: enums.AdGroupAdStatus.PAUSED,
         ad: {
           responsive_search_ad: {
-            headlines: creative.headlines.map((text) => ({ text })),
-            descriptions: creative.descriptions.map((text) => ({ text })),
-          },
+            headlines: creative.headlines.map((text) =>
+              textAsset(text, text === creative.headlinePin1 ? enums.ServedAssetFieldType.HEADLINE_1 : undefined),
+            ),
+            descriptions: creative.descriptions.slice(0, 4).map((text) =>
+              textAsset(text, text === creative.descriptionPin1 ? enums.ServedAssetFieldType.DESCRIPTION_1 : undefined),
+            ),
+            path1: creative.path1 || undefined,
+            path2: creative.path1 && creative.path2 ? creative.path2 : undefined,
+          } as any,
           final_urls: [creative.finalUrl],
+          tracking_url_template: String(targeting.campaignSettings.trackingTemplate || "").trim() || undefined,
+          final_url_suffix: String(targeting.campaignSettings.finalUrlSuffix || "").trim() || undefined,
         },
       },
     ]);
@@ -366,12 +506,29 @@ async function pushSearchPaused(params: {
         status: enums.AdGroupCriterionStatus.PAUSED,
         keyword: {
           text,
-          match_type: enums.KeywordMatchType.PHRASE,
+          match_type: resolveKeywordMatchType(targeting.matchType),
         },
       })),
     );
   } catch (error) {
     throw new Error(`Google keywords: ${formatGoogleAdsError(error)}`);
+  }
+
+  if (targeting.negativeKeywords.length) {
+    try {
+      await customer.adGroupCriteria.create(
+        targeting.negativeKeywords.map((text) => ({
+          ad_group: adGroupRn,
+          negative: true,
+          keyword: {
+            text,
+            match_type: resolveKeywordMatchType(targeting.matchType),
+          },
+        })),
+      );
+    } catch (error) {
+      throw new Error(`Google negatieve keywords: ${formatGoogleAdsError(error)}`);
+    }
   }
 
   return {
@@ -394,16 +551,28 @@ async function pushPerformanceMaxPaused(params: {
 }) {
   const { customer, customerId, plan } = params;
   const creative = normalizeSearchCreatives(plan.creatives);
+  validatePerformanceMaxAssets(creative);
   const targeting = defaultSearchTargeting(plan.targeting);
   const dailyCents = Number(plan.dailyBudgetCents || plan.lifetimeBudgetCents || 0);
   const amountMicros = centsToBudgetMicros(dailyCents);
+  const campaignSettings = asObject(targeting.campaignSettings);
+  const biddingStrategy = String(campaignSettings.biddingStrategy || "MAXIMIZE_CONVERSIONS").toUpperCase();
+  const targetCpaCents = Number(campaignSettings.targetCpaCents || 0);
+  const targetRoas = Number(campaignSettings.targetRoas || 0);
+  const bidding =
+    biddingStrategy === "MAXIMIZE_CONVERSION_VALUE"
+      ? { maximize_conversion_value: targetRoas > 0 ? { target_roas: targetRoas } : {} }
+      : { maximize_conversions: targetCpaCents > 0 ? { target_cpa_micros: centsToBudgetMicros(targetCpaCents) } : {} };
 
   const budgetResourceName = ResourceNames.campaignBudget(customerId, "-1");
   const campaignResourceName = ResourceNames.campaign(customerId, "-2");
   const assetGroupResourceName = ResourceNames.assetGroup(customerId, "-3");
+  let tempAssetId = -10;
+
+  const nextAssetResourceName = () => ResourceNames.asset(customerId, tempAssetId--);
 
   // google-ads-api MutateOperation typings are narrower than batch create payloads.
-  const operations: MutateOperation<resources.ICampaignBudget | resources.ICampaign | resources.IAssetGroup | resources.IAssetGroupAsset>[] =
+  const operations: MutateOperation<resources.ICampaignBudget | resources.ICampaign | resources.IAssetGroup | resources.IAssetGroupAsset | resources.IAsset>[] =
     [
     {
       entity: "campaign_budget",
@@ -425,14 +594,17 @@ async function pushPerformanceMaxPaused(params: {
         status: enums.CampaignStatus.PAUSED,
         campaign_budget: budgetResourceName,
         contains_eu_political_advertising: EU_POLITICAL_ADS_DECLARATION,
-      },
+        final_url_suffix: String(campaignSettings.finalUrlSuffix || "").trim() || undefined,
+        tracking_url_template: String(campaignSettings.trackingTemplate || "").trim() || undefined,
+        ...bidding,
+      } as any,
     },
     {
       entity: "asset_group",
       operation: "create",
       resource: {
         resource_name: assetGroupResourceName,
-        name: `${plan.name} Asset Group`,
+        name: creative.assetGroupName || `${plan.name} Asset Group`,
         campaign: campaignResourceName,
         status: enums.AssetGroupStatus.PAUSED,
         final_urls: [creative.finalUrl],
@@ -440,41 +612,65 @@ async function pushPerformanceMaxPaused(params: {
     },
   ];
 
-  for (const text of creative.headlines.slice(0, 5)) {
+  const addTextAsset = (text: string, fieldType: number) => {
+    const assetResourceName = nextAssetResourceName();
+    operations.push({
+      entity: "asset",
+      operation: "create",
+      resource: {
+        resource_name: assetResourceName,
+        text_asset: { text },
+      },
+    } as unknown as MutateOperation<resources.IAsset>);
     operations.push({
       entity: "asset_group_asset",
       operation: "create",
       resource: {
         asset_group: assetGroupResourceName,
-        field_type: enums.AssetFieldType.HEADLINE,
-        asset: { text_asset: { text } },
+        asset: assetResourceName,
+        field_type: fieldType,
       },
     } as unknown as MutateOperation<resources.IAssetGroupAsset>);
-  }
+  };
 
+  const addImageAsset = async (url: string, fieldType: number, label: string) => {
+    const assetResourceName = nextAssetResourceName();
+    const data = await fetchImageAssetData(url);
+    operations.push({
+      entity: "asset",
+      operation: "create",
+      resource: {
+        resource_name: assetResourceName,
+        name: `${plan.name} - ${label}`,
+        image_asset: { data },
+      },
+    } as unknown as MutateOperation<resources.IAsset>);
+    operations.push({
+      entity: "asset_group_asset",
+      operation: "create",
+      resource: {
+        asset_group: assetGroupResourceName,
+        asset: assetResourceName,
+        field_type: fieldType,
+      },
+    } as unknown as MutateOperation<resources.IAssetGroupAsset>);
+  };
+
+  for (const text of creative.headlines.slice(0, 15)) {
+    addTextAsset(text, enums.AssetFieldType.HEADLINE);
+  }
+  for (const text of creative.longHeadlines.slice(0, 5)) {
+    addTextAsset(text, enums.AssetFieldType.LONG_HEADLINE);
+  }
   for (const text of creative.descriptions.slice(0, 5)) {
-    operations.push({
-      entity: "asset_group_asset",
-      operation: "create",
-      resource: {
-        asset_group: assetGroupResourceName,
-        field_type: enums.AssetFieldType.DESCRIPTION,
-        asset: { text_asset: { text } },
-      },
-    } as unknown as MutateOperation<resources.IAssetGroupAsset>);
+    addTextAsset(text, enums.AssetFieldType.DESCRIPTION);
   }
-
-  const imageUrl = String(asObject(plan.creatives).imageUrl || "").trim();
-  if (imageUrl) {
-    operations.push({
-      entity: "asset_group_asset",
-      operation: "create",
-      resource: {
-        asset_group: assetGroupResourceName,
-        field_type: enums.AssetFieldType.MARKETING_IMAGE,
-        asset: { image_asset: { full_size: { url: imageUrl } } },
-      },
-    } as unknown as MutateOperation<resources.IAssetGroupAsset>);
+  addTextAsset(creative.businessName, enums.AssetFieldType.BUSINESS_NAME);
+  await addImageAsset(creative.imageUrl, enums.AssetFieldType.MARKETING_IMAGE, "landscape image");
+  await addImageAsset(creative.squareImageUrl, enums.AssetFieldType.SQUARE_MARKETING_IMAGE, "square image");
+  await addImageAsset(creative.logoUrl, enums.AssetFieldType.LOGO, "logo");
+  if (creative.portraitImageUrl) {
+    await addImageAsset(creative.portraitImageUrl, enums.AssetFieldType.PORTRAIT_MARKETING_IMAGE, "portrait image");
   }
 
   const geoOps: MutateOperation<resources.ICampaignCriterion>[] = [];

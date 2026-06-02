@@ -4,7 +4,7 @@ import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 import { storeUploadedImage } from "@/lib/upload-storage";
 import { log } from "@digitify/api/src/lib/logger";
 
-const ALLOWED_TYPES = [
+const ALLOWED_IMAGE_TYPES = [
   "image/png",
   "image/jpeg",
   "image/svg+xml",
@@ -12,6 +12,8 @@ const ALLOWED_TYPES = [
   "image/vnd.microsoft.icon",
   "image/webp",
 ];
+
+const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/quicktime"];
 
 export async function POST(req: NextRequest) {
   const currentUser = await getCurrentUser();
@@ -36,12 +38,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Geen bestand ontvangen." }, { status: 400 });
   }
 
-  const maxSize = 2 * 1024 * 1024;
+  const isVideo = ALLOWED_VIDEO_TYPES.includes(file.type);
+  const maxSize = isVideo ? 100 * 1024 * 1024 : 2 * 1024 * 1024;
   if (file.size > maxSize) {
-    return NextResponse.json({ error: "Bestand is te groot (max 2MB)." }, { status: 400 });
+    return NextResponse.json(
+      { error: isVideo ? "Video is te groot (max 100MB)." : "Bestand is te groot (max 2MB)." },
+      { status: 400 },
+    );
   }
 
-  if (!ALLOWED_TYPES.includes(file.type)) {
+  if (!ALLOWED_IMAGE_TYPES.includes(file.type) && !isVideo) {
     return NextResponse.json({ error: "Ongeldig bestandstype." }, { status: 400 });
   }
 

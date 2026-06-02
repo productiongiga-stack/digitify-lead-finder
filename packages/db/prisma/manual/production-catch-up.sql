@@ -207,6 +207,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS "scoring_weights_createdById_factorKey_key"
   ON "scoring_weights"("createdById", "factorKey");
 CREATE INDEX IF NOT EXISTS "scoring_weights_createdById_idx" ON "scoring_weights"("createdById");
 
+ALTER TABLE IF EXISTS "social_posts" ADD COLUMN IF NOT EXISTS "metadata" JSONB;
+
 ALTER TABLE "enrichment_data" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "enrichment_data" FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS workspace_isolation ON "enrichment_data";

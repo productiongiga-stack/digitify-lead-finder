@@ -7,22 +7,38 @@ import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import { upsertMetaSettings, workspaceScopeFromAuthenticatedUser } from "../lib/social-meta";
 import {
   defaultTargeting,
+  getMetaCampaignDetails,
   getMetaCampaign,
   getMetaInsights,
   listMetaAdAccounts,
   listMetaCampaigns,
   loadMetaAdsWorkspaceConfig,
+  MetaAdsPushPartialError,
+  MetaInsightLevel,
   normalizeAdAccountId,
   pushPausedMetaAdPlan,
   resolveConfiguredMarketingScopes,
+  scoreMetaAdDraft,
+  syncMetaCampaigns,
+  updateMetaCampaignStatus,
   validateBudgetGuard,
   META_ADS_REQUIRED_SCOPES,
 } from "../lib/meta-ads";
 
 const PLAN_STATUS = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "PUSHING", "PUSHED_PAUSED", "FAILED", "CANCELLED"] as const;
-const OBJECTIVES = ["OUTCOME_TRAFFIC", "OUTCOME_LEADS", "LINK_CLICKS", "LEAD_GENERATION"] as const;
+const OBJECTIVES = [
+  "OUTCOME_TRAFFIC",
+  "OUTCOME_LEADS",
+  "OUTCOME_SALES",
+  "OUTCOME_ENGAGEMENT",
+  "OUTCOME_AWARENESS",
+  "LINK_CLICKS",
+  "LEAD_GENERATION",
+] as const;
+const INSIGHT_LEVELS = ["campaign", "adset", "ad"] as const;
 const planStatusEnum = z.enum(PLAN_STATUS);
 const objectiveEnum = z.enum(OBJECTIVES);
+const insightLevelEnum = z.enum(INSIGHT_LEVELS);
 
 const jsonRecord = z.record(z.any());
 
@@ -37,6 +53,14 @@ const draftInputSchema = z.object({
   targeting: jsonRecord.optional().nullable(),
   creatives: jsonRecord.optional().nullable(),
 });
+const scoreInputSchema = draftInputSchema.partial().extend({
+  objective: objectiveEnum.default("OUTCOME_TRAFFIC"),
+  name: z.string().min(1).default("Conceptcampagne"),
+});
+
+function asRecord(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};
+}
 
 function ensureWorkspaceAccess(row: { createdById: string }, workspaceId: string) {
   if (row.createdById !== workspaceId) {
@@ -67,9 +91,13 @@ async function renderAdSuggestion(
 ) {
   const fallback = {
     name: `${input.product.trim()} campagne`,
+    objective: "OUTCOME_LEADS",
     primaryText: `Ontdek hoe ${input.product.trim()} je bedrijf helpt groeien. Vraag vandaag nog meer info aan.`,
     headline: `Meer resultaat met ${input.product.trim()}`,
     description: "Veilig voorbereid als gepauzeerde Meta-campagne.",
+    ctaType: "LEARN_MORE",
+    ctaLabel: "Meer informatie",
+    imageBrief: "Gebruik een heldere brand visual met duidelijk productvoordeel en CTA.",
     targeting: {
       geo_locations: { countries: ["BE"] },
       age_min: 24,
@@ -78,6 +106,18 @@ async function renderAdSuggestion(
       facebook_positions: ["feed"],
       instagram_positions: ["stream", "story"],
       targeting_automation: { advantage_audience: 0 },
+      adsets: [
+        {
+          name: "Belgie breed",
+          geo_locations: { countries: ["BE"] },
+          age_min: 24,
+          age_max: 60,
+          publisher_platforms: ["facebook", "instagram"],
+          facebook_positions: ["feed"],
+          instagram_positions: ["stream", "story"],
+          interestSignals: ["Leadgeneratie", "Digitalisering", "KMO-groei"],
+        },
+      ],
     },
   };
 
@@ -91,7 +131,9 @@ async function renderAdSuggestion(
         role: "user",
         content:
           `Maak een compacte Meta Ads draft in JSON voor een Belgische KMO-campagne. ` +
-          `Gebruik velden name, primaryText, headline, description, targeting. ` +
+          `Gebruik velden name, objective, primaryText, headline, description, ctaType, ctaLabel, imageBrief, targeting. ` +
+          `targeting mag geo_locations, age_min, age_max, publisher_platforms, facebook_positions, instagram_positions en adsets bevatten. ` +
+          `Elke adset mag name, geo_locations, age_min, age_max, publisher_platforms, facebook_positions, instagram_positions en interestSignals bevatten. ` +
           `Geen markdown. Product/dienst: ${input.product}. Doelgroep: ${input.audience || "lokale ondernemers"}. Tone: ${input.tone || "professioneel en helder"}.`,
       },
     ],
@@ -103,13 +145,61 @@ async function renderAdSuggestion(
 
   try {
     const parsed = JSON.parse(response || "{}");
+    const parsedTargeting = asRecord(parsed.targeting);
+    const normalizedTargeting = defaultTargeting(parsedTargeting);
     return {
       ...fallback,
       ...parsed,
-      targeting: defaultTargeting(parsed.targeting ?? fallback.targeting),
+      targeting: {
+        ...normalizedTargeting,
+        adsets: Array.isArray(parsedTargeting.adsets) && parsedTargeting.adsets.length ? parsedTargeting.adsets : fallback.targeting.adsets,
+      },
       provider,
       model,
     };
+  } catch {
+    return { ...fallback, provider, model };
+  }
+}
+
+async function renderVariantSuggestion(
+  db: PrismaClient,
+  workspaceId: string,
+  input: { product: string; audience?: string; tone?: string; angle?: string; landingUrl?: string },
+) {
+  const fallback = {
+    adName: `${input.product.trim()} variant`,
+    primaryText: `Ontdek hoe ${input.product.trim()} jouw team sneller resultaat geeft. Vraag vandaag nog meer info aan.`,
+    headline: `Meer resultaat met ${input.product.trim()}`,
+    description: "Variant voor Meta A/B testing.",
+    ctaType: "LEARN_MORE",
+    ctaLabel: "Meer informatie",
+    linkUrl: input.landingUrl || "https://leads.digitify.be",
+    publishAsset: "feed",
+  };
+
+  const { provider, model, apiKey } = await loadAiProviderConfig(db, workspaceId);
+  if (!apiKey) return { ...fallback, provider: "fallback", model: "none" };
+
+  const client = new OpenClawClient({ provider, model, apiKey, maxTokens: 500 });
+  const response = await client.chat(
+    [
+      {
+        role: "user",
+        content:
+          `Maak een Meta creative variant in JSON met velden adName, primaryText, headline, description, ctaType, ctaLabel, linkUrl, publishAsset. ` +
+          `Geen markdown. Product/dienst: ${input.product}. Doelgroep: ${input.audience || "Belgische ondernemers"}. ` +
+          `Tone: ${input.tone || "professioneel"}. Invalshoek: ${input.angle || "sterke leadgeneratie en duidelijk voordeel"}.`,
+      },
+    ],
+    {
+      currentPage: "/meta-ads",
+      settings: { aggressiveness: "balanced", tone: input.tone || "professioneel", language: "nl", companyName: "Digitify" },
+    },
+  );
+
+  try {
+    return { ...fallback, ...JSON.parse(response || "{}"), provider, model };
   } catch {
     return { ...fallback, provider, model };
   }
@@ -155,15 +245,21 @@ async function pushPlanToMeta(ctx: { db: PrismaClient; user: NonNullable<Paramet
     return updated;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Onbekende Meta Ads fout";
+    const partialExternalIds = error instanceof MetaAdsPushPartialError ? error.externalIds : undefined;
     await createMetaAdsActivity(ctx.db, {
       userId: ctx.user.id,
       type: "META_AD_FAILED",
       title: "Meta Ads push mislukt",
-      metadata: { metaAdPlanId: id, error: message },
+      metadata: { metaAdPlanId: id, error: message, partialExternalIds: partialExternalIds || null },
     });
     const updated = await adsDb.metaAdPlan.update({
       where: { id },
-      data: { status: "FAILED", retryCount: Number(plan.retryCount || 0) + 1, lastError: message },
+      data: {
+        status: "FAILED",
+        retryCount: Number(plan.retryCount || 0) + 1,
+        lastError: message,
+        externalIds: partialExternalIds ?? undefined,
+      },
     });
     return updated;
   }
@@ -194,6 +290,12 @@ export const metaAdsRouter = router({
       missingConfiguredScopes: META_ADS_REQUIRED_SCOPES.filter((scope) => !resolveConfiguredMarketingScopes().includes(scope)),
       adsScopesEnabled: resolveConfiguredMarketingScopes().length === META_ADS_REQUIRED_SCOPES.length,
       oauthIncludeAdsEnv: process.env.META_OAUTH_INCLUDE_ADS?.trim() || null,
+      missingOperationalRequirements: [
+        !config.accessToken ? "META_SCOPE_MISSING" : null,
+        !config.pageId ? "META_PAGE_MISSING" : null,
+        !config.adAccountId ? "META_ACCOUNT_NOT_SELECTED" : null,
+        resolveConfiguredMarketingScopes().length !== META_ADS_REQUIRED_SCOPES.length ? "META_SCOPE_MISSING" : null,
+      ].filter(Boolean),
     };
   }),
 
@@ -261,11 +363,59 @@ export const metaAdsRouter = router({
     return listMetaCampaigns({ adAccountId: config.adAccountId, accessToken: config.accessToken });
   }),
 
+  syncMetaCampaigns: adminProcedure.mutation(async ({ ctx }) => {
+    const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+    const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
+    if (!config.accessToken || !config.adAccountId) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Meta Ad Account of access token ontbreekt." });
+    }
+    const result = await syncMetaCampaigns({ adAccountId: config.adAccountId, accessToken: config.accessToken });
+    await (ctx.db as any).metaAdAccount.updateMany({
+      where: { createdById: ctx.user.workspaceId!, externalAccountId: normalizeAdAccountId(config.adAccountId) },
+      data: { lastSyncedAt: new Date(result.syncedAt) },
+    }).catch(() => null);
+
+    const plans = await (ctx.db as any).metaAdPlan.findMany({
+      where: { createdById: ctx.user.workspaceId!, status: { in: ["APPROVED", "PUSHED_PAUSED", "FAILED"] } },
+      take: 100,
+    }).catch(() => []);
+
+    for (const row of plans) {
+      const externalIds = asRecord(row.externalIds);
+      const campaignId = String(externalIds.campaignId || "");
+      if (!campaignId) continue;
+      const remote = (result.campaigns as any[]).find((item) => String(item.id || "") === campaignId);
+      if (!remote) continue;
+      await (ctx.db as any).metaAdPlan.update({
+        where: { id: row.id },
+        data: {
+          externalIds: {
+            ...externalIds,
+            syncedAt: result.syncedAt,
+            metaState: {
+              configuredStatus: remote.configured_status || remote.status || null,
+              effectiveStatus: remote.effective_status || remote.status || null,
+            },
+          },
+        },
+      }).catch(() => null);
+    }
+
+    return result;
+  }),
+
   getCampaign: protectedProcedure.input(z.object({ campaignId: z.string().min(1) })).query(async ({ ctx, input }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
     if (!config.accessToken) throw new TRPCError({ code: "BAD_REQUEST", message: "Meta is niet gekoppeld." });
     return getMetaCampaign({ campaignId: input.campaignId, accessToken: config.accessToken });
+  }),
+
+  getCampaignDetails: protectedProcedure.input(z.object({ campaignId: z.string().min(1) })).query(async ({ ctx, input }) => {
+    const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+    const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
+    if (!config.accessToken) throw new TRPCError({ code: "BAD_REQUEST", message: "Meta is niet gekoppeld." });
+    return getMetaCampaignDetails({ campaignId: input.campaignId, accessToken: config.accessToken });
   }),
 
   getInsights: protectedProcedure
@@ -274,7 +424,21 @@ export const metaAdsRouter = router({
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
       const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
       if (!config.accessToken || !config.adAccountId) return [];
-      return getMetaInsights({ adAccountId: config.adAccountId, accessToken: config.accessToken, datePreset: input?.datePreset });
+      return getMetaInsights({ adAccountId: config.adAccountId, accessToken: config.accessToken, datePreset: input?.datePreset, level: "campaign" });
+    }),
+
+  listInsights: protectedProcedure
+    .input(z.object({ datePreset: z.string().default("last_30d"), level: insightLevelEnum.default("campaign") }).optional())
+    .query(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
+      if (!config.accessToken || !config.adAccountId) return [];
+      return getMetaInsights({
+        adAccountId: config.adAccountId,
+        accessToken: config.accessToken,
+        datePreset: input?.datePreset,
+        level: (input?.level || "campaign") as MetaInsightLevel,
+      });
     }),
 
   listDrafts: protectedProcedure
@@ -284,6 +448,13 @@ export const metaAdsRouter = router({
       if (input?.status) where.status = input.status;
       return (ctx.db as any).metaAdPlan.findMany({ where, orderBy: { updatedAt: "desc" }, take: 100 });
     }),
+
+  getDraftById: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+    const row = await (ctx.db as any).metaAdPlan.findUnique({ where: { id: input.id } });
+    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
+    ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    return row;
+  }),
 
   createDraft: protectedProcedure.input(draftInputSchema).mutation(async ({ ctx, input }) => {
     const row = await (ctx.db as any).metaAdPlan.create({
@@ -336,9 +507,67 @@ export const metaAdsRouter = router({
     });
   }),
 
+  duplicateDraft: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+    const adsDb = ctx.db as any;
+    const row = await adsDb.metaAdPlan.findUnique({ where: { id: input.id } });
+    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
+    ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    return adsDb.metaAdPlan.create({
+      data: {
+        createdById: ctx.user.workspaceId!,
+        name: `${row.name} (kopie)`,
+        objective: row.objective,
+        dailyBudgetCents: row.dailyBudgetCents,
+        lifetimeBudgetCents: row.lifetimeBudgetCents,
+        currency: row.currency,
+        startTime: row.startTime,
+        endTime: row.endTime,
+        targeting: row.targeting || {},
+        creatives: row.creatives || {},
+        status: "DRAFT",
+        approvedById: null,
+        approvedAt: null,
+        pushedAt: null,
+        externalIds: null,
+        retryCount: 0,
+        lastError: null,
+      },
+    });
+  }),
+
+  archiveDraft: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+    const adsDb = ctx.db as any;
+    const row = await adsDb.metaAdPlan.findUnique({ where: { id: input.id } });
+    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
+    ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    if (["PUSHING"].includes(row.status)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Een draft die nu naar Meta pusht kan niet gearchiveerd worden." });
+    }
+    return adsDb.metaAdPlan.update({
+      where: { id: input.id },
+      data: { status: "CANCELLED", lastError: "Gearchiveerd" },
+    });
+  }),
+
   generateSuggestion: protectedProcedure
     .input(z.object({ product: z.string().min(2).max(400), audience: z.string().max(400).optional(), tone: z.string().max(80).optional() }))
     .mutation(async ({ ctx, input }) => renderAdSuggestion(ctx.db, ctx.user.workspaceId!, input)),
+
+  generateVariantSuggestion: protectedProcedure
+    .input(
+      z.object({
+        product: z.string().min(2).max(400),
+        audience: z.string().max(400).optional(),
+        tone: z.string().max(80).optional(),
+        angle: z.string().max(200).optional(),
+        landingUrl: z.string().max(500).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => renderVariantSuggestion(ctx.db, ctx.user.workspaceId!, input)),
+
+  scoreDraft: protectedProcedure
+    .input(scoreInputSchema)
+    .mutation(async ({ input }) => scoreMetaAdDraft(input)),
 
   submitForApproval: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const adsDb = ctx.db as any;
@@ -402,6 +631,56 @@ export const metaAdsRouter = router({
       });
       return updated;
     }),
+
+  pauseInMeta: adminProcedure.input(z.object({ campaignId: z.string().min(1), draftId: z.string().optional() })).mutation(async ({ ctx, input }) => {
+    const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+    const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
+    if (!config.accessToken) throw new TRPCError({ code: "BAD_REQUEST", message: "Meta is niet gekoppeld." });
+    await updateMetaCampaignStatus({ campaignId: input.campaignId, accessToken: config.accessToken, status: "PAUSED" });
+    if (input.draftId) {
+      const row = await (ctx.db as any).metaAdPlan.findUnique({ where: { id: input.draftId } });
+      if (row) {
+        ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+        const externalIds = asRecord(row.externalIds);
+        await (ctx.db as any).metaAdPlan.update({
+          where: { id: input.draftId },
+          data: {
+            externalIds: {
+              ...externalIds,
+              syncedAt: new Date().toISOString(),
+              metaState: { configuredStatus: "PAUSED", effectiveStatus: "PAUSED" },
+            },
+          },
+        });
+      }
+    }
+    return { ok: true };
+  }),
+
+  resumeInMeta: adminProcedure.input(z.object({ campaignId: z.string().min(1), draftId: z.string().optional() })).mutation(async ({ ctx, input }) => {
+    const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+    const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
+    if (!config.accessToken) throw new TRPCError({ code: "BAD_REQUEST", message: "Meta is niet gekoppeld." });
+    await updateMetaCampaignStatus({ campaignId: input.campaignId, accessToken: config.accessToken, status: "ACTIVE" });
+    if (input.draftId) {
+      const row = await (ctx.db as any).metaAdPlan.findUnique({ where: { id: input.draftId } });
+      if (row) {
+        ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+        const externalIds = asRecord(row.externalIds);
+        await (ctx.db as any).metaAdPlan.update({
+          where: { id: input.draftId },
+          data: {
+            externalIds: {
+              ...externalIds,
+              syncedAt: new Date().toISOString(),
+              metaState: { configuredStatus: "ACTIVE", effectiveStatus: "ACTIVE" },
+            },
+          },
+        });
+      }
+    }
+    return { ok: true };
+  }),
 
   pushPausedToMeta: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToMeta(ctx as any, input.id)),
 

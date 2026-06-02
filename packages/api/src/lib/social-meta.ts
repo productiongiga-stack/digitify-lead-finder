@@ -236,6 +236,10 @@ type MetaErrorPayload = {
 const META_API_ERROR_HINTS: Record<number, string> = {
   1885183:
     "Zet je Meta-app op Live: developers.facebook.com → jouw app → App settings → Basic → schakel van Development naar Live.",
+  2207009:
+    "Afbeeldingsverhouding ongeldig voor Instagram. Gebruik een publieke JPG/PNG/WebP tussen 4:5 en 1.91:1, bijvoorbeeld 1080x1080 of 1080x1350.",
+  33:
+    "Meta ondersteunt deze edge mogelijk niet voor jouw app of Page. Controleer of Page Stories publishing beschikbaar is en of je app de juiste rechten/App Review heeft.",
 };
 
 export function formatMetaApiError(error: MetaErrorPayload["error"], fallbackStatus?: number) {
@@ -244,7 +248,12 @@ export function formatMetaApiError(error: MetaErrorPayload["error"], fallbackSta
   if (error.error_user_title && error.error_user_title !== parts[0]) {
     parts.unshift(error.error_user_title);
   }
-  const hint = error.error_subcode ? META_API_ERROR_HINTS[error.error_subcode] : undefined;
+  const hint =
+    (error.error_subcode ? META_API_ERROR_HINTS[error.error_subcode] : undefined) ||
+    (error.code ? META_API_ERROR_HINTS[error.code] : undefined);
+  if (error.code === 36003 && !hint) {
+    parts.push("Afbeelding geweigerd door Meta. Controleer beeldratio, bestandstype en publieke bereikbaarheid van de image URL.");
+  }
   if (hint) parts.push(hint);
   if (error.code) parts.push(`code ${error.code}`);
   if (error.error_subcode) parts.push(`subcode ${error.error_subcode}`);
@@ -373,6 +382,20 @@ export async function publishFacebookImagePost(params: {
   return response.post_id || response.id || "";
 }
 
+export async function publishFacebookImageStory(params: {
+  pageId: string;
+  pageAccessToken: string;
+  imageUrl: string;
+}) {
+  const response = (await metaPost(`${params.pageId}/photo_stories`, {
+    access_token: params.pageAccessToken,
+    url: params.imageUrl,
+    published: "true",
+  })) as { post_id?: string; id?: string; success?: boolean };
+
+  return response.post_id || response.id || (response.success ? "facebook_story_published" : "");
+}
+
 export async function publishInstagramImagePost(params: {
   instagramBusinessId: string;
   pageAccessToken: string;
@@ -386,6 +409,55 @@ export async function publishInstagramImagePost(params: {
   })) as { id?: string };
 
   if (!created.id) throw new Error("Instagram media container kon niet worden aangemaakt.");
+
+  const published = (await metaPost(`${params.instagramBusinessId}/media_publish`, {
+    access_token: params.pageAccessToken,
+    creation_id: created.id,
+  })) as { id?: string };
+
+  return published.id || "";
+}
+
+export async function publishInstagramImageStory(params: {
+  instagramBusinessId: string;
+  pageAccessToken: string;
+  imageUrl: string;
+}) {
+  const created = (await metaPost(`${params.instagramBusinessId}/media`, {
+    access_token: params.pageAccessToken,
+    image_url: params.imageUrl,
+    media_type: "STORIES",
+  })) as { id?: string };
+
+  if (!created.id) throw new Error("Instagram Story media container kon niet worden aangemaakt.");
+
+  const published = (await metaPost(`${params.instagramBusinessId}/media_publish`, {
+    access_token: params.pageAccessToken,
+    creation_id: created.id,
+  })) as { id?: string };
+
+  return published.id || "";
+}
+
+export async function publishInstagramReel(params: {
+  instagramBusinessId: string;
+  pageAccessToken: string;
+  caption: string;
+  videoUrl: string;
+  coverUrl?: string;
+}) {
+  const payload: Record<string, string> = {
+    access_token: params.pageAccessToken,
+    media_type: "REELS",
+    video_url: params.videoUrl,
+    caption: params.caption,
+  };
+  if (params.coverUrl?.trim()) {
+    payload.cover_url = params.coverUrl.trim();
+  }
+
+  const created = (await metaPost(`${params.instagramBusinessId}/media`, payload)) as { id?: string };
+  if (!created.id) throw new Error("Instagram Reel media container kon niet worden aangemaakt.");
 
   const published = (await metaPost(`${params.instagramBusinessId}/media_publish`, {
     access_token: params.pageAccessToken,

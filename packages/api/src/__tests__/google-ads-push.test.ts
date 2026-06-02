@@ -34,6 +34,7 @@ describe("google ads push helpers", () => {
       ],
     });
     expect(message).toContain("Required field is missing");
+    expect(message).toContain("Tip:");
     expect(message).not.toContain("[object Object]");
   });
 
