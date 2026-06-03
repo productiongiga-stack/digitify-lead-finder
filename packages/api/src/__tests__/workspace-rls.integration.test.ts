@@ -95,14 +95,16 @@ describe.skipIf(!runIntegration)("workspace RLS (integration)", () => {
       select: { id: true },
     });
 
-    const leadA = await prisma.lead.create({
-      data: {
-        companyName: "RLS tenant A lead",
-        createdById: ownerA.id,
-        status: "NEW",
-      },
-      select: { id: true },
-    });
+    const leadA = await withWorkspaceRls(prisma, ownerA.id, async (db) =>
+      db.lead.create({
+        data: {
+          companyName: "RLS tenant A lead",
+          createdById: ownerA.id,
+          status: "NEW",
+        },
+        select: { id: true },
+      }),
+    );
 
     await prisma.$transaction(async (tx) => {
       await setWorkspaceRlsContext(tx, ownerB.id);

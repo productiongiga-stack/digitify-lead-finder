@@ -69,6 +69,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Enforce RLS for CI Postgres role
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          PGPASSWORD=ci psql -h localhost -U ci -d digitify_ci -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE ci NOBYPASSRLS;"
+
       - name: Generate Prisma client
         run: pnpm db:generate
 

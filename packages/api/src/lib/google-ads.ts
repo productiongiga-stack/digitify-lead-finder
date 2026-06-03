@@ -776,7 +776,7 @@ export async function suggestBeneluxGeoTargets(
           locale: "nl",
           country_code: countryCode,
           location_names: { names: [trimmed] },
-        });
+        } as never);
       } catch {
         return null;
       }
@@ -787,12 +787,12 @@ export async function suggestBeneluxGeoTargets(
   const seen = new Set<string>();
 
   for (const response of responses) {
-    const items = (response as { geo_target_constant_suggestions?: Array<Record<string, unknown>> })
-      ?.geo_target_constant_suggestions;
-    if (!Array.isArray(items)) continue;
+    const items = response?.geo_target_constant_suggestions;
+    if (!items?.length) continue;
 
     for (const item of items) {
-      const geo = (item.geo_target_constant || {}) as Record<string, unknown>;
+      const geo = item.geo_target_constant;
+      if (!geo) continue;
       const resourceName = String(geo.resource_name || "");
       if (!resourceName || seen.has(resourceName)) continue;
 

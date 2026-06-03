@@ -461,7 +461,7 @@ export function MetaAdsDashboardOverview({
               { tab: "builder", icon: Megaphone, label: "Wizard" },
               { tab: "campaigns", icon: Radio, label: "Live" },
               { tab: "approval", icon: FileText, label: "Goedkeuring", badge: pendingApprovalCount },
-            ] as const
+            ] as Array<{ tab: string; icon: typeof Megaphone; label: string; badge?: number }>
           ).map(({ tab, icon: Icon, label, badge }) => (
             <Button
               key={tab}
