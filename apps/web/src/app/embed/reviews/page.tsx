@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getReviewTextDefault } from "@/lib/review-text";
+import { safeExternalUrl } from "@/lib/utils";
 
 const reviewPlatforms = [
   { key: "googleUrl", label: "Google" },
@@ -37,7 +38,7 @@ function ReviewEmbedContent() {
   const links = reviewPlatforms
     .map((platform) => ({
       label: platform.label,
-      url: params.get(platform.key),
+      url: safeExternalUrl(params.get(platform.key)),
     }))
     .filter((platform) => platform.url);
 

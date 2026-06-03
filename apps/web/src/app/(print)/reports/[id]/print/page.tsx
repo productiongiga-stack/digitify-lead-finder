@@ -116,8 +116,8 @@ export default function ReportPrintPage() {
   const reportId = params.id as string;
   const [ready, setReady] = useState(false);
 
-  const { data: report } = trpc.report.getById.useQuery({ id: reportId });
-  const { data: brandingSettings } = trpc.settings.getAll.useQuery(undefined, {
+  const { data: report, isLoading: reportLoading, isError: reportError } = trpc.report.getById.useQuery({ id: reportId });
+  const { data: brandingSettings, isLoading: settingsLoading, isError: settingsError } = trpc.settings.getAll.useQuery(undefined, {
     staleTime: 60_000,
   });
 
@@ -131,17 +131,28 @@ export default function ReportPrintPage() {
   };
 
   useEffect(() => {
-    if (report && brandingSettings) {
+    if (!reportLoading && !settingsLoading && report && brandingSettings) {
       setReady(true);
       const timer = setTimeout(() => window.print(), 600);
       return () => clearTimeout(timer);
     }
-  }, [report, brandingSettings]);
+  }, [report, brandingSettings, reportLoading, settingsLoading]);
 
   const isLeadProposal = useMemo(() => {
     const data = report?.data as Record<string, unknown> | undefined;
     return report?.type === "lead_proposal" || Boolean(data && "lead" in data);
   }, [report]);
+
+  if ((!reportLoading && (reportError || !report)) || (!settingsLoading && settingsError)) {
+    return (
+      <div style={{ display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center", fontFamily: "Inter, system-ui, sans-serif" }}>
+        <div style={{ textAlign: "center", color: "#991b1b" }}>
+          <p style={{ margin: 0, fontWeight: 700 }}>Rapport kan niet worden geladen.</p>
+          <p style={{ marginTop: 8, color: "#64748b" }}>Controleer of de link klopt en probeer opnieuw.</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!ready || !report) {
     return (

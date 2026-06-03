@@ -11,7 +11,6 @@ type RemoteSettings = {
   offlineMessage: string;
   primaryColor: string;
   avatarUrl: string;
-  trainingNotes: string;
   autoMessagesEnabled: boolean;
   aiResponsesEnabled: boolean;
   askNameBeforeChat: boolean;

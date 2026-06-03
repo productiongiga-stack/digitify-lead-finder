@@ -886,13 +886,14 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
           total: entry.unitPrice * entry.quantity,
           packageLabel: entry.packageLabel,
           packageKey: entry.packageKey,
+          variableValue: entry.source === "slider" ? sliderValues[cartKey] : undefined,
           isConfirmed: Boolean(confirmedProducts[cartKey]),
           isConfigurable,
           isCustomLine,
         };
       })
       .filter((item) => item.quantity > 0 && item.unitPrice >= 0);
-  }, [cart, confirmedProducts, isPreviewRoute, payload?.services]);
+  }, [cart, confirmedProducts, isPreviewRoute, payload?.services, sliderValues]);
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.total, 0);
   const discountRaw = sanitizeNumber(discountInput);
@@ -1013,6 +1014,11 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
     ].filter(Boolean);
 
     const itemsPayload = cartItems.map((item) => ({
+      cartKey: item.cartKey,
+      serviceId: item.serviceId,
+      source: item.source,
+      packageKey: item.packageKey,
+      variableValue: item.variableValue,
       category: item.category,
       name: item.source === "product" ? `${item.name} - ${item.packageLabel}` : item.name,
       description: item.description,

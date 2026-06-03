@@ -22,19 +22,24 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    });
+    try {
+      const result = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+      });
 
-    setLoading(false);
+      if (!result?.ok || result.error) {
+        setError("Ongeldige inloggegevens");
+        return;
+      }
 
-    if (result?.error) {
-      setError("Ongeldige inloggegevens");
-    } else {
       router.push("/dashboard");
       router.refresh();
+    } catch {
+      setError("Inloggen mislukt. Probeer opnieuw.");
+    } finally {
+      setLoading(false);
     }
   }
 

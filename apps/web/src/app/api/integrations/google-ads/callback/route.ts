@@ -19,6 +19,9 @@ export async function GET(request: Request) {
   if (!user) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
+  if (!["OWNER", "ADMIN"].includes(String(user.role || ""))) {
+    return NextResponse.redirect(new URL("/settings/integrations?googleAds=forbidden", request.url));
+  }
   const userId = (user as { id?: string }).id;
   if (!userId) {
     return NextResponse.redirect(new URL("/login", request.url));

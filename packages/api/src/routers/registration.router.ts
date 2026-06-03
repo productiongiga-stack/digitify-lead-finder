@@ -40,6 +40,19 @@ function canReviewGlobalRegistrations(workspaceId: string) {
   return Boolean(process.env.REGISTRATION_NOTIFY_WORKSPACE_ID?.trim() === workspaceId);
 }
 
+async function getFeedbackWorkspaceUserIds(ctx: { db: any; user: { id: string; workspaceId?: string | null } }) {
+  const workspaceId = ctx.user.workspaceId || ctx.user.id;
+  const users = await ctx.db.user.findMany({
+    where: {
+      OR: [{ id: workspaceId }, { workspaceOwnerId: workspaceId }],
+    },
+    select: { id: true },
+  });
+  const ids = users.map((user: { id: string }) => user.id);
+  if (!ids.includes(ctx.user.id)) ids.push(ctx.user.id);
+  return ids;
+}
+
 async function activateTargetedInvitation(ctx: { db: any }, request: {
   id: string;
   name: string;
@@ -299,7 +312,11 @@ export const registrationRouter = router({
       throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang tot feedbackbeheer." });
     }
     try {
+      const workspaceUserIds = await getFeedbackWorkspaceUserIds(ctx);
       return await ctx.db.feedbackItem.findMany({
+        where: {
+          userId: { in: workspaceUserIds },
+        },
         orderBy: { createdAt: "desc" },
         take: 100,
         select: {
@@ -334,6 +351,17 @@ export const registrationRouter = router({
     .mutation(async ({ ctx, input }) => {
       if (!["OWNER", "ADMIN", "MODERATOR", "MEMBER"].includes(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang tot feedbackbeheer." });
+      }
+      const workspaceUserIds = await getFeedbackWorkspaceUserIds(ctx);
+      const feedback = await ctx.db.feedbackItem.findFirst({
+        where: {
+          id: input.id,
+          userId: { in: workspaceUserIds },
+        },
+        select: { id: true },
+      });
+      if (!feedback) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Feedback niet gevonden." });
       }
       return ctx.db.feedbackItem.update({
         where: { id: input.id },

@@ -11,6 +11,7 @@ function VerifyRegistrationContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token") || "";
   const verify = trpc.registration.verifyEmail.useMutation();
+  const missingToken = !token.trim();
 
   useEffect(() => {
     if (token && verify.status === "idle") {
@@ -22,11 +23,19 @@ function VerifyRegistrationContent() {
     <Card className="border-0 shadow-2xl">
       <CardHeader className="text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-md bg-[#f9ae5a] text-[#14100b]">
-          {verify.isPending || verify.status === "idle" ? <Loader2 className="h-6 w-6 animate-spin" /> : verify.isError ? <XCircle className="h-6 w-6" /> : <CheckCircle2 className="h-6 w-6" />}
+          {missingToken || verify.isError ? (
+            <XCircle className="h-6 w-6" />
+          ) : verify.isPending || verify.status === "idle" ? (
+            <Loader2 className="h-6 w-6 animate-spin" />
+          ) : (
+            <CheckCircle2 className="h-6 w-6" />
+          )}
         </div>
-        <CardTitle>{verify.isError ? "Verificatie mislukt" : verify.isSuccess ? "E-mail bevestigd" : "E-mail verifiëren"}</CardTitle>
+        <CardTitle>{missingToken || verify.isError ? "Verificatie mislukt" : verify.isSuccess ? "E-mail bevestigd" : "E-mail verifiëren"}</CardTitle>
         <CardDescription>
-          {verify.isError
+          {missingToken
+            ? "Deze verificatielink mist een token."
+            : verify.isError
             ? verify.error.message
             : verify.isSuccess
               ? "Je aanvraag staat klaar voor goedkeuring door een admin."

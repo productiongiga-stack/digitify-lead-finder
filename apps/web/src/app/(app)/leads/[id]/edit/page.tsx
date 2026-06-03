@@ -11,23 +11,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger,
 } from "@digitify/ui";
 import { ArrowLeft, Save, Loader2, Trash2 } from "lucide-react";
+import { LEAD_STATUS_OPTIONS } from "@/lib/lead-status";
 
 const INDUSTRIES = [
   "Horeca", "Bouw", "Transport", "Retail", "Beauty",
   "Gezondheid", "Onderwijs", "IT", "Financiën", "Vastgoed",
   "Landbouw", "Juridisch", "Auto", "Sport", "Voeding", "Anders",
-];
-
-const STATUS_OPTIONS = [
-  { value: "NEW", label: "Nieuw" },
-  { value: "REVIEWED", label: "Bekeken" },
-  { value: "CONTACTED", label: "Gecontacteerd" },
-  { value: "RESPONDED", label: "Gereageerd" },
-  { value: "QUALIFIED", label: "Gekwalificeerd" },
-  { value: "PROPOSED", label: "Voorstel verstuurd" },
-  { value: "WON", label: "Gewonnen" },
-  { value: "LOST", label: "Verloren" },
-  { value: "ARCHIVED", label: "Gearchiveerd" },
 ];
 
 export default function LeadEditPage() {
@@ -321,7 +310,7 @@ export default function LeadEditPage() {
               onChange={(event) => setField("status", event.target.value)}
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              {STATUS_OPTIONS.map((s) => (
+              {LEAD_STATUS_OPTIONS.map((s) => (
                 <option key={s.value} value={s.value}>{s.label}</option>
               ))}
             </select>

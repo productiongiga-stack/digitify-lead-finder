@@ -57,7 +57,12 @@ export default function ClientPortalPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, action: "approve" }),
     });
-    if (response.ok) load();
+    if (response.ok) {
+      load();
+      return;
+    }
+    const data = await response.json().catch(() => ({}));
+    setError(data.error || "Offerte goedkeuren mislukt.");
   }
 
   async function uploadFile(file: File) {
@@ -68,7 +73,7 @@ export default function ClientPortalPage() {
       let binary = "";
       for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i] || 0);
       const dataUrl = `data:${file.type || "application/octet-stream"};base64,${btoa(binary)}`;
-      await fetch(`/api/public/portal/${encodeURIComponent(quoteId)}`, {
+      const response = await fetch(`/api/public/portal/${encodeURIComponent(quoteId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -79,7 +84,14 @@ export default function ClientPortalPage() {
           dataUrl,
         }),
       });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setError(data.error || "Bestand uploaden mislukt.");
+        return;
+      }
       load();
+    } catch {
+      setError("Bestand uploaden mislukt.");
     } finally {
       setUploading(false);
     }
@@ -96,6 +108,8 @@ export default function ClientPortalPage() {
   if (error) {
     return <div className="mx-auto max-w-4xl p-6 text-sm text-destructive">{error}</div>;
   }
+
+  const bookingHref = `${payload.bookingEmbedUrl}${payload.bookingEmbedUrl.includes("?") ? "&" : "?"}fromPortal=1`;
 
   return (
     <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
@@ -146,7 +160,7 @@ export default function ClientPortalPage() {
         <p className="mt-1 text-xs text-muted-foreground">Plan hier meteen je afspraak na goedkeuring.</p>
         <div className="mt-3">
           <Link
-            href={`${payload.bookingEmbedUrl}&fromPortal=1`}
+            href={bookingHref}
             className="inline-flex rounded-lg border px-3 py-2 text-sm hover:bg-accent"
           >
             Open booking widget
