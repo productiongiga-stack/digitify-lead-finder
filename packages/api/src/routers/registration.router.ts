@@ -2,11 +2,12 @@ import { randomBytes, scryptSync } from "crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { Prisma } from "@digitify/db";
-import { router, ownerProcedure, protectedProcedure, publicProcedure } from "../trpc";
+import { router, ownerProcedure, protectedProcedure, publicRateLimitedProcedure, mutationProcedure } from "../trpc";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { ensureUserWorkspace } from "../lib/user-workspace";
 import { passwordPolicySchema } from "../lib/password-policy";
 import { notifyWorkspaceAdmins } from "../lib/workspace-members";
+import { log } from "../lib/logger";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -38,6 +39,19 @@ async function notifyRegistrationAdmins(db: any, subject: string, body: string) 
 
 function canReviewGlobalRegistrations(workspaceId: string) {
   return Boolean(process.env.REGISTRATION_NOTIFY_WORKSPACE_ID?.trim() === workspaceId);
+}
+
+async function getFeedbackWorkspaceUserIds(ctx: { db: any; user: { id: string; workspaceId?: string | null } }) {
+  const workspaceId = ctx.user.workspaceId || ctx.user.id;
+  const users = await ctx.db.user.findMany({
+    where: {
+      OR: [{ id: workspaceId }, { workspaceOwnerId: workspaceId }],
+    },
+    select: { id: true },
+  });
+  const ids = users.map((user: { id: string }) => user.id);
+  if (!ids.includes(ctx.user.id)) ids.push(ctx.user.id);
+  return ids;
 }
 
 async function activateTargetedInvitation(ctx: { db: any }, request: {
@@ -107,7 +121,7 @@ async function activateTargetedInvitation(ctx: { db: any }, request: {
 }
 
 export const registrationRouter = router({
-  requestAccess: publicProcedure
+  requestAccess: publicRateLimitedProcedure
     .input(
       z.object({
         name: z.string().min(2),
@@ -121,7 +135,26 @@ export const registrationRouter = router({
       const email = input.email.toLowerCase().trim();
       const existingUser = await ctx.db.user.findUnique({ where: { email } });
       if (existingUser) {
-        throw new TRPCError({ code: "CONFLICT", message: "Er bestaat al een gebruiker met dit e-mailadres." });
+        log.security.info("Registration attempt for existing email", {
+          requestId: ctx.requestId,
+          email,
+        });
+        return { success: true };
+      }
+
+      const pendingRequest = await ctx.db.registrationRequest.findFirst({
+        where: {
+          email,
+          status: { in: ["PENDING_EMAIL_VERIFICATION", "PENDING_APPROVAL"] },
+        },
+        select: { id: true },
+      });
+      if (pendingRequest) {
+        log.security.info("Duplicate registration request", {
+          requestId: ctx.requestId,
+          email,
+        });
+        return { success: true };
       }
 
       const token = randomBytes(32).toString("hex");
@@ -146,14 +179,14 @@ export const registrationRouter = router({
       return { success: true };
     }),
 
-  verifyEmail: publicProcedure
+  verifyEmail: publicRateLimitedProcedure
     .input(z.object({ token: z.string().min(20) }))
     .mutation(async ({ ctx, input }) => {
       const request = await ctx.db.registrationRequest.findUnique({
         where: { emailVerificationToken: input.token },
       });
       if (!request) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Deze verificatielink is ongeldig." });
+        return { success: true };
       }
       if (request.status !== "PENDING_EMAIL_VERIFICATION") {
         return { success: true, status: request.status };
@@ -299,7 +332,11 @@ export const registrationRouter = router({
       throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang tot feedbackbeheer." });
     }
     try {
+      const workspaceUserIds = await getFeedbackWorkspaceUserIds(ctx);
       return await ctx.db.feedbackItem.findMany({
+        where: {
+          userId: { in: workspaceUserIds },
+        },
         orderBy: { createdAt: "desc" },
         take: 100,
         select: {
@@ -329,11 +366,22 @@ export const registrationRouter = router({
     }
   }),
 
-  updateFeedbackStatus: protectedProcedure
+  updateFeedbackStatus: mutationProcedure
     .input(z.object({ id: z.string(), status: z.enum(["OPEN", "TRIAGED", "CLOSED"]) }))
     .mutation(async ({ ctx, input }) => {
       if (!["OWNER", "ADMIN", "MODERATOR", "MEMBER"].includes(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang tot feedbackbeheer." });
+      }
+      const workspaceUserIds = await getFeedbackWorkspaceUserIds(ctx);
+      const feedback = await ctx.db.feedbackItem.findFirst({
+        where: {
+          id: input.id,
+          userId: { in: workspaceUserIds },
+        },
+        select: { id: true },
+      });
+      if (!feedback) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Feedback niet gevonden." });
       }
       return ctx.db.feedbackItem.update({
         where: { id: input.id },
@@ -345,7 +393,7 @@ export const registrationRouter = router({
       });
     }),
 
-  sendFeedback: protectedProcedure
+  sendFeedback: mutationProcedure
     .input(z.object({ subject: z.string().min(3), message: z.string().min(10), pageUrl: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       let feedback;

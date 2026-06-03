@@ -17,6 +17,9 @@ export async function GET(request: Request) {
     loginUrl.searchParams.set("callbackUrl", "/settings/integrations");
     return NextResponse.redirect(loginUrl);
   }
+  if (!["OWNER", "ADMIN"].includes(String(user.role || ""))) {
+    return NextResponse.redirect(new URL("/settings/integrations?googleAds=forbidden", request.url));
+  }
 
   const userId = (user as { id?: string }).id;
   const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(

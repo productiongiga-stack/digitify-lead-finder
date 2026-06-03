@@ -38,8 +38,8 @@ export default function QuotePrintPage() {
   const id = params.id as string;
   const [ready, setReady] = useState(false);
 
-  const { data: quote, isLoading: quoteLoading } = trpc.quote.getById.useQuery({ id });
-  const { data: settings } = trpc.settings.getAll.useQuery(undefined, {
+  const { data: quote, isLoading: quoteLoading, isError: quoteError } = trpc.quote.getById.useQuery({ id });
+  const { data: settings, isLoading: settingsLoading, isError: settingsError } = trpc.settings.getAll.useQuery(undefined, {
     staleTime: 60_000,
   });
 
@@ -79,10 +79,21 @@ export default function QuotePrintPage() {
   const px = (compact: number, normal: number) => (typographyMode === "normal" ? normal : compact);
 
   useEffect(() => {
-    if (!quoteLoading && quote && settings) {
+    if (!quoteLoading && !settingsLoading && quote && settings) {
       setReady(true);
     }
-  }, [quoteLoading, quote, settings]);
+  }, [quoteLoading, quote, settingsLoading, settings]);
+
+  if ((!quoteLoading && (quoteError || !quote)) || (!settingsLoading && settingsError)) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", fontFamily: "Arial, sans-serif" }}>
+        <div style={{ textAlign: "center", color: "#991b1b" }}>
+          <p style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Offerte kan niet worden geladen.</p>
+          <p style={{ fontSize: 13, color: "#666" }}>Controleer of de link klopt en probeer opnieuw.</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!ready || !quote) {
     return (

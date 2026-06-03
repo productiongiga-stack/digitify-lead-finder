@@ -29,7 +29,6 @@ import {
   UserCircle,
   Megaphone,
   BarChart3,
-  Share2,
 } from "lucide-react";
 import type { AppRole } from "@/lib/permissions";
 
@@ -48,133 +47,98 @@ export type QuickNavItem = {
   moduleId?: string;
 };
 
-export type NavDropdown = {
-  id: string;
-  label: string;
-  icon: LucideIcon;
-  items: QuickNavItem[];
-  activeMatch: (pathname: string) => boolean;
+export const DASHBOARD_NAV_ITEM: NavItem = {
+  href: "/dashboard",
+  label: "Dashboard",
+  icon: LayoutDashboard,
 };
-
-export const MAIN_NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-];
-
-function pathMatches(pathname: string, href: string) {
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
-
-function pathMatchesAny(pathname: string, hrefs: string[]) {
-  return hrefs.some((href) => pathMatches(pathname, href));
-}
-
-/** Pipeline: list, search, campaigns, CRM, tasks */
-export const PIPELINE_NAV_ITEMS: QuickNavItem[] = [
-  { href: "/leads", label: "Leadlijst", icon: Users },
-  { href: "/leads/search", label: "Leads zoeken", icon: Search },
-  { href: "/campaigns", label: "Campagneprofielen", icon: Target, moduleId: "campaigns" },
-  { href: "/crm", label: "CRM", icon: Building2, moduleId: "crm" },
-  { href: "/tasks", label: "Taken", icon: CheckSquare, moduleId: "tasks" },
-];
-
-export const PIPELINE_NAV_DROPDOWN: NavDropdown = {
-  id: "pipeline",
-  label: "Leads & pipeline",
-  icon: Users,
-  items: PIPELINE_NAV_ITEMS,
-  activeMatch: (pathname) =>
-    pathMatchesAny(pathname, ["/leads", "/campaigns", "/crm", "/tasks"]),
-};
-
-/** E-mail outreach */
-export const OUTBOUND_NAV_ITEMS: QuickNavItem[] = [
-  { href: "/contacts", label: "Outbound center", icon: SendHorizonal, moduleId: "contacts" },
-  { href: "/contacts/inbox", label: "Inbox", icon: Inbox, moduleId: "contacts" },
-  { href: "/templates", label: "E-mailtemplates", icon: Library, moduleId: "templates" },
-];
-
-export const OUTBOUND_NAV_DROPDOWN: NavDropdown = {
-  id: "outbound",
-  label: "Outbound",
-  icon: SendHorizonal,
-  items: OUTBOUND_NAV_ITEMS,
-  activeMatch: (pathname) => pathMatchesAny(pathname, ["/contacts", "/templates"]),
-};
-
-/** Quotes & invoices */
-export const SALES_NAV_ITEMS: QuickNavItem[] = [
-  { href: "/quotes", label: "Offertes", icon: Receipt, moduleId: "quotes" },
-  { href: "/invoices", label: "Facturen", icon: Banknote, moduleId: "invoices" },
-];
-
-export const SALES_NAV_DROPDOWN: NavDropdown = {
-  id: "sales",
-  label: "Verkoop",
-  icon: Receipt,
-  items: SALES_NAV_ITEMS,
-  activeMatch: (pathname) => pathMatchesAny(pathname, ["/quotes", "/invoices"]),
-};
-
-export const LEADS_SALES_DROPDOWNS: NavDropdown[] = [
-  PIPELINE_NAV_DROPDOWN,
-  OUTBOUND_NAV_DROPDOWN,
-  SALES_NAV_DROPDOWN,
-];
 
 export const ADS_NAV_ITEMS: QuickNavItem[] = [
   { href: "/meta-ads", label: "Meta Ads", icon: Megaphone, moduleId: "metaAds" },
   { href: "/google-ads", label: "Google Ads", icon: BarChart3, moduleId: "googleAds" },
 ];
 
-/** Paid ads dropdown in the Marketing section */
-export const ADS_NAV_DROPDOWN: NavDropdown = {
-  id: "ads",
-  label: "Advertenties",
-  icon: Megaphone,
-  items: ADS_NAV_ITEMS,
-  activeMatch: (pathname) =>
-    ADS_NAV_ITEMS.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`)),
-};
-
-/** Flat list for in-app workflow menus (e.g. leads page) */
-export const LEADS_WORKFLOW_ITEMS: QuickNavItem[] = [
-  ...PIPELINE_NAV_ITEMS,
-  ...OUTBOUND_NAV_ITEMS,
-  ...SALES_NAV_ITEMS,
-];
-
-/** Organic, paid & site quality */
-export const MARKETING_NAV_ITEMS: NavItem[] = [
-  { href: "/social", label: "Social Planner", icon: Share2, moduleId: "social" },
-  { href: "/reports", label: "Website auditor", icon: ScanSearch, moduleId: "reports" },
-];
-
-/** Appointments, reputation & on-site chat */
-export const CLIENT_NAV_ITEMS: NavItem[] = [
-  { href: "/bookings", label: "Boekingen", icon: Calendar, moduleId: "bookings" },
-  { href: "/reviews", label: "Reviews", icon: Star, moduleId: "reviews" },
-  { href: "/chatbot", label: "Chatbot", icon: MessageSquare, moduleId: "chatbot" },
-];
-
-/** Domains & technical assets */
-export const WEBSITE_NAV_ITEMS: NavItem[] = [
-  { href: "/domains", label: "Domeinen", icon: Globe2, moduleId: "domains" },
-];
-
-export type SidebarSectionConfig = {
+export type NavGroup = {
   id: string;
   label: string;
-  links?: NavItem[];
-  dropdowns?: NavDropdown[];
+  icon: LucideIcon;
+  items: QuickNavItem[];
+  /** Open by default when the sidebar is expanded */
+  defaultOpen?: boolean;
 };
 
-export const SIDEBAR_SECTIONS: SidebarSectionConfig[] = [
-  { id: "nav", label: "Navigatie", links: MAIN_NAV_ITEMS },
-  { id: "leads-sales", label: "Leads & verkoop", dropdowns: LEADS_SALES_DROPDOWNS },
-  { id: "marketing", label: "Marketing", dropdowns: [ADS_NAV_DROPDOWN], links: MARKETING_NAV_ITEMS },
-  { id: "client", label: "Klantcontact", links: CLIENT_NAV_ITEMS },
-  { id: "website", label: "Website", links: WEBSITE_NAV_ITEMS },
+/** Sidebar groups — ordered top to bottom */
+export const SIDEBAR_NAV_GROUPS: NavGroup[] = [
+  {
+    id: "prospectie",
+    label: "Prospectie",
+    icon: Users,
+    defaultOpen: true,
+    items: [
+      { href: "/leads", label: "Leads", icon: Users },
+      { href: "/leads/search", label: "Leads zoeken", icon: Search },
+      { href: "/campaigns", label: "Campagneprofielen", icon: Target, moduleId: "campaigns" },
+    ],
+  },
+  {
+    id: "communicatie",
+    label: "Communicatie",
+    icon: SendHorizonal,
+    items: [
+      { href: "/contacts", label: "Outbound", icon: SendHorizonal, moduleId: "contacts" },
+      { href: "/contacts/inbox", label: "Inbox", icon: Inbox, moduleId: "contacts" },
+      { href: "/templates", label: "E-mailtemplates", icon: Library, moduleId: "templates" },
+    ],
+  },
+  {
+    id: "verkoop",
+    label: "Verkoop",
+    icon: Receipt,
+    items: [
+      { href: "/crm", label: "CRM", icon: Building2, moduleId: "crm" },
+      { href: "/tasks", label: "Taken", icon: CheckSquare, moduleId: "tasks" },
+      { href: "/quotes", label: "Offertes", icon: Receipt, moduleId: "quotes" },
+      { href: "/invoices", label: "Facturen", icon: Banknote, moduleId: "invoices" },
+    ],
+  },
+  {
+    id: "analyse",
+    label: "Analyse",
+    icon: ScanSearch,
+    items: [{ href: "/reports", label: "Website auditor", icon: ScanSearch, moduleId: "reports" }],
+  },
+  {
+    id: "advertenties",
+    label: "Advertenties",
+    icon: Megaphone,
+    items: ADS_NAV_ITEMS,
+  },
+  {
+    id: "marketing",
+    label: "Marketing",
+    icon: Globe2,
+    items: [
+      { href: "/social", label: "Social Planner", icon: Megaphone, moduleId: "social" },
+      { href: "/bookings", label: "Boekingen", icon: Calendar, moduleId: "bookings" },
+      { href: "/domains", label: "Domeinen", icon: Globe2, moduleId: "domains" },
+      { href: "/reviews", label: "Reviews", icon: Star, moduleId: "reviews" },
+      { href: "/chatbot", label: "Chatbot", icon: MessageSquare, moduleId: "chatbot" },
+    ],
+  },
 ];
+
+/** Quick links on the leads page (excludes the leads list itself) */
+export const LEADS_WORKFLOW_ITEMS: QuickNavItem[] = SIDEBAR_NAV_GROUPS.flatMap((group) =>
+  group.items.filter((item) => item.href !== "/leads"),
+);
+
+/** @deprecated Use SIDEBAR_NAV_GROUPS — kept for any external imports */
+export const LEADS_MENU_ITEMS: QuickNavItem[] = SIDEBAR_NAV_GROUPS.flatMap((group) => group.items);
+
+/** @deprecated Use SIDEBAR_NAV_GROUPS marketing items */
+export const TOOL_NAV_ITEMS: NavItem[] = SIDEBAR_NAV_GROUPS.find((g) => g.id === "marketing")!.items.map(
+  (item) => ({ ...item }),
+);
 
 // All toggleable modules available for owner management
 export const ALL_MODULES = [

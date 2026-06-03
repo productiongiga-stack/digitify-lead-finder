@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { protectedProcedure, router } from "../trpc";
+import { protectedProcedure, router, mutationProcedure } from "../trpc";
 import { assertLeadAccess } from "../lib/tenant";
 import { migrateLegacyWorkspaceTasks } from "../lib/migrate-workspace-tasks";
 import { workspaceScopeFromUser } from "../lib/workspace-settings";
@@ -208,7 +208,7 @@ export const taskRouter = router({
       return { items, summary };
     }),
 
-  create: protectedProcedure
+  create: mutationProcedure
     .input(
       z.object({
         title: z.string().min(1).max(160),
@@ -280,7 +280,7 @@ export const taskRouter = router({
       return serializeTask(row);
     }),
 
-  update: protectedProcedure
+  update: mutationProcedure
     .input(
       z.object({
         id: z.string(),
@@ -345,7 +345,7 @@ export const taskRouter = router({
       return serializeTask(row);
     }),
 
-  remove: protectedProcedure
+  remove: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.workspaceTask.findFirst({

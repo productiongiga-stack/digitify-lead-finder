@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
 import { OpenClawClient } from "@digitify/openclaw";
 import { z } from "zod";
-import { adminProcedure, protectedProcedure, router } from "../trpc";
+import { adminProcedure, protectedProcedure, aiRateLimitedProcedure, router, mutationProcedure } from "../trpc";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import {
   buildMetaCampaignSystemPrompt,
@@ -79,6 +79,143 @@ function ensureWorkspaceAccess(row: { createdById: string }, workspaceId: string
   if (row.createdById !== workspaceId) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang tot dit Meta Ads plan." });
   }
+}
+
+function normalizeMetaCampaignName(name: string) {
+  return name.trim().toLowerCase();
+}
+
+function metaPlanStatusLabel(status: string) {
+  if (status === "PUSHED_PAUSED") return "online in Meta";
+  if (status === "APPROVED") return "goedgekeurd";
+  if (status === "PENDING_APPROVAL") return "wacht op goedkeuring";
+  if (status === "PUSHING") return "pushen";
+  if (status === "FAILED") return "mislukt";
+  if (status === "CANCELLED") return "gearchiveerd";
+  return "draft";
+}
+
+async function findMetaCampaignNameConflict(
+  ctx: { db: PrismaClient; user: { id: string; workspaceId?: string } },
+  input: { name: string; excludePlanId?: string; excludeLiveCampaignId?: string },
+) {
+  const normalized = normalizeMetaCampaignName(input.name);
+  if (!normalized) return null;
+
+  const adsDb = ctx.db as any;
+  const plans = await adsDb.metaAdPlan
+    .findMany({
+      where: { createdById: ctx.user.workspaceId!, status: { not: "CANCELLED" } },
+      select: { id: true, name: true, status: true },
+      take: 500,
+    })
+    .catch(() => []);
+
+  const planConflict = plans.find(
+    (row: { id: string; name: string; status: string }) =>
+      row.id !== input.excludePlanId && normalizeMetaCampaignName(row.name) === normalized,
+  );
+  if (planConflict) {
+    return {
+      source: "plan" as const,
+      name: planConflict.name,
+      status: planConflict.status,
+    };
+  }
+
+  const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+  const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
+  if (!config.accessToken || !config.adAccountId) return null;
+
+  const liveCampaigns = await listMetaCampaigns({
+    adAccountId: config.adAccountId,
+    accessToken: config.accessToken,
+  }).catch(() => []);
+
+  const liveConflict = liveCampaigns.find(
+    (campaign) =>
+      normalizeMetaCampaignName(String(campaign.name || "")) === normalized &&
+      String(campaign.id || "") !== String(input.excludeLiveCampaignId || ""),
+  );
+  if (liveConflict) {
+    return { source: "live" as const, name: String(liveConflict.name || input.name.trim()) };
+  }
+
+  return null;
+}
+
+async function assertUniqueMetaCampaignName(
+  ctx: { db: PrismaClient; user: { id: string; workspaceId?: string } },
+  input: { name: string; excludePlanId?: string; excludeLiveCampaignId?: string },
+) {
+  const conflict = await findMetaCampaignNameConflict(ctx, input);
+  if (!conflict) return;
+
+  if (conflict.source === "plan") {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: `Er bestaat al een campagne met de naam "${conflict.name}" (${metaPlanStatusLabel(conflict.status)}). Kies een andere naam.`,
+    });
+  }
+
+  throw new TRPCError({
+    code: "CONFLICT",
+    message: `Er staat al een live Meta-campagne met de naam "${conflict.name}". Kies een andere naam.`,
+  });
+}
+
+async function collectReservedMetaCampaignNames(
+  ctx: { db: PrismaClient; user: { id: string; workspaceId?: string } },
+  input: { excludePlanId?: string; excludeLiveCampaignId?: string } = {},
+) {
+  const reserved = new Set<string>();
+  const adsDb = ctx.db as any;
+  const plans = await adsDb.metaAdPlan
+    .findMany({
+      where: { createdById: ctx.user.workspaceId!, status: { not: "CANCELLED" } },
+      select: { id: true, name: true },
+      take: 500,
+    })
+    .catch(() => []);
+
+  for (const row of plans) {
+    if (row.id === input.excludePlanId) continue;
+    const normalized = normalizeMetaCampaignName(row.name);
+    if (normalized) reserved.add(normalized);
+  }
+
+  const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+  const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
+  if (config.accessToken && config.adAccountId) {
+    const liveCampaigns = await listMetaCampaigns({
+      adAccountId: config.adAccountId,
+      accessToken: config.accessToken,
+    }).catch(() => []);
+    for (const campaign of liveCampaigns) {
+      if (String(campaign.id || "") === String(input.excludeLiveCampaignId || "")) continue;
+      const normalized = normalizeMetaCampaignName(String(campaign.name || ""));
+      if (normalized) reserved.add(normalized);
+    }
+  }
+
+  return reserved;
+}
+
+function pickAvailableCopyName(baseName: string, reserved: Set<string>) {
+  const trimmed = baseName.trim();
+  let candidate = `${trimmed} (kopie)`;
+  let suffix = 2;
+  while (reserved.has(normalizeMetaCampaignName(candidate))) {
+    candidate = `${trimmed} (kopie ${suffix})`;
+    suffix += 1;
+    if (suffix > 50) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "Kon geen unieke kopienaam vinden. Hernoem de campagne handmatig.",
+      });
+    }
+  }
+  return candidate;
 }
 
 async function createMetaAdsActivity(
@@ -214,6 +351,11 @@ async function pushPlanToMeta(ctx: { db: PrismaClient; user: NonNullable<Paramet
     throw new TRPCError({ code: "FORBIDDEN", message: "Meta Ads module is nog niet ingeschakeld voor deze workspace." });
   }
   validateBudgetGuard(plan, config.maxDailyBudgetCents);
+  await assertUniqueMetaCampaignName(ctx, {
+    name: plan.name,
+    excludePlanId: plan.id,
+    excludeLiveCampaignId: String(asRecord(plan.externalIds).campaignId || ""),
+  });
 
   await adsDb.metaAdPlan.update({ where: { id }, data: { status: "PUSHING", lastError: null } });
 
@@ -466,7 +608,8 @@ export const metaAdsRouter = router({
     return row;
   }),
 
-  createDraft: protectedProcedure.input(draftInputSchema).mutation(async ({ ctx, input }) => {
+  createDraft: mutationProcedure.input(draftInputSchema).mutation(async ({ ctx, input }) => {
+    await assertUniqueMetaCampaignName(ctx, { name: input.name });
     const row = await (ctx.db as any).metaAdPlan.create({
       data: {
         createdById: ctx.user.workspaceId!,
@@ -491,13 +634,20 @@ export const metaAdsRouter = router({
     return row;
   }),
 
-  updateDraft: protectedProcedure.input(z.object({ id: z.string() }).merge(draftInputSchema.partial())).mutation(async ({ ctx, input }) => {
+  updateDraft: mutationProcedure.input(z.object({ id: z.string() }).merge(draftInputSchema.partial())).mutation(async ({ ctx, input }) => {
     const adsDb = ctx.db as any;
     const row = await adsDb.metaAdPlan.findUnique({ where: { id: input.id } });
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
     ensureWorkspaceAccess(row, ctx.user.workspaceId!);
     if (!["DRAFT", "FAILED", "CANCELLED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen drafts, failed of cancelled plannen kunnen aangepast worden." });
+    }
+    if (input.name !== undefined) {
+      await assertUniqueMetaCampaignName(ctx, {
+        name: input.name,
+        excludePlanId: input.id,
+        excludeLiveCampaignId: String(asRecord(row.externalIds).campaignId || ""),
+      });
     }
     return adsDb.metaAdPlan.update({
       where: { id: input.id },
@@ -517,15 +667,17 @@ export const metaAdsRouter = router({
     });
   }),
 
-  duplicateDraft: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+  duplicateDraft: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const adsDb = ctx.db as any;
     const row = await adsDb.metaAdPlan.findUnique({ where: { id: input.id } });
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
     ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    const reserved = await collectReservedMetaCampaignNames(ctx);
+    const copyName = pickAvailableCopyName(row.name, reserved);
     return adsDb.metaAdPlan.create({
       data: {
         createdById: ctx.user.workspaceId!,
-        name: `${row.name} (kopie)`,
+        name: copyName,
         objective: row.objective,
         dailyBudgetCents: row.dailyBudgetCents,
         lifetimeBudgetCents: row.lifetimeBudgetCents,
@@ -545,7 +697,7 @@ export const metaAdsRouter = router({
     });
   }),
 
-  archiveDraft: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+  archiveDraft: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const adsDb = ctx.db as any;
     const row = await adsDb.metaAdPlan.findUnique({ where: { id: input.id } });
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
@@ -578,11 +730,11 @@ export const metaAdsRouter = router({
       return searchMetaGeoLocations(config.accessToken, input.query, { countryCode: input.countryCode });
     }),
 
-  generateSuggestion: protectedProcedure
+  generateSuggestion: aiRateLimitedProcedure
     .input(z.object({ product: z.string().min(2).max(400), audience: z.string().max(400).optional(), tone: z.string().max(80).optional() }))
     .mutation(async ({ ctx, input }) => renderAdSuggestion(ctx.db, ctx.user.workspaceId!, input)),
 
-  generateVariantSuggestion: protectedProcedure
+  generateVariantSuggestion: aiRateLimitedProcedure
     .input(
       z.object({
         product: z.string().min(2).max(400),
@@ -607,11 +759,11 @@ export const metaAdsRouter = router({
       return { ok: true };
     }),
 
-  scoreDraft: protectedProcedure
+  scoreDraft: aiRateLimitedProcedure
     .input(scoreInputSchema)
     .mutation(async ({ input }) => scoreMetaAdDraft(input)),
 
-  submitForApproval: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+  submitForApproval: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const adsDb = ctx.db as any;
     const row = await adsDb.metaAdPlan.findUnique({ where: { id: input.id } });
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });

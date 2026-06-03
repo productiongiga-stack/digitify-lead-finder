@@ -7,13 +7,30 @@ import {
   loadEmbedAvailabilityRulesFromSettings,
 } from "@digitify/api/src/lib/booking-utils";
 import { log } from "@digitify/api/src/lib/logger";
-import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-schema-compat";
+import { enforceRateLimit } from "@/lib/http-security";
+import {
+  publicBookingRateLimitKey,
+  resolvePublicBookingTenantUserId,
+} from "@/lib/public-booking-tenant";
 
 export async function GET(request: Request) {
   await ensureTenantSchemaCompatibility(prisma).catch(() => null);
   const url = new URL(request.url);
-  const tenantUserId = await resolvePublicTenantUserId(prisma, url.searchParams.get("tenant") || "");
+  const auth = {
+    tenant: url.searchParams.get("tenant"),
+    quotePortal: url.searchParams.get("quotePortal"),
+    portalToken: url.searchParams.get("portalToken"),
+  };
+  const limiter = await enforceRateLimit(request, {
+    key: `public-booking-event-type:${publicBookingRateLimitKey(auth)}`,
+    limit: 60,
+    windowMs: 60_000,
+    message: "Te veel verzoeken. Probeer later opnieuw.",
+  });
+  if (limiter) return limiter;
+
+  const tenantUserId = await resolvePublicBookingTenantUserId(auth);
   if (!tenantUserId) return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
 
   const slug = url.searchParams.get("eventType")?.trim() || "";

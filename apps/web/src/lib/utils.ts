@@ -89,6 +89,21 @@ export function safeExternalUrl(url: string | null | undefined): string | null {
   }
 }
 
+/** Same-origin relative paths only — blocks protocol-relative and open redirects. */
+export function safeRelativeAppPath(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const trimmed = path.trim();
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return null;
+  if (/[\r\n\\]/.test(trimmed)) return null;
+  try {
+    const parsed = new URL(trimmed, "https://example.local");
+    if (parsed.origin !== "https://example.local") return null;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return null;
+  }
+}
+
 export function formatRelativeTime(date: Date | string): string {
   const now = new Date();
   const d = new Date(date);

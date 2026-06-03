@@ -3,6 +3,118 @@ import { prisma } from "@digitify/db";
 import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { log } from "@digitify/api/src/lib/logger";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
+import {
+  buildFallbackSpecs,
+  parseProductSpecs,
+  resolveProductSpecs,
+  type QuoteConfiguratorService,
+} from "@/lib/quote-configurator-specs";
+
+function userSettingKey(userId: string, key: string) {
+  return `user:${userId}:${key.trim()}`;
+}
+
+function readSettingValue(value: unknown) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.replace(/^"|"$/g, "");
+  return String(value);
+}
+
+function parseCartKey(cartKey: string, prefix: string) {
+  const parts = cartKey.split(":");
+  if (parts[0] !== prefix || parts.length < 3) return "";
+  return parts.slice(2).join(":");
+}
+
+function normalizePublicQuoteItems(params: {
+  items: any[];
+  services: QuoteConfiguratorService[];
+  productSpecsJson: string;
+}) {
+  const specsMap = parseProductSpecs(params.productSpecsJson);
+  const servicesById = new Map(params.services.map((service) => [service.id, service]));
+
+  return params.items
+    .map((item: any, index: number) => {
+      const serviceId = String(item.serviceId || "").trim();
+      const service = servicesById.get(serviceId);
+      if (!service) return null;
+
+      const cartKey = String(item.cartKey || "");
+      const source = ["product", "option", "slider"].includes(String(item.source))
+        ? String(item.source)
+        : "product";
+      const siblingExtras = params.services.filter(
+        (candidate) => candidate.category === service.category && candidate.id !== service.id,
+      );
+      const specs = resolveProductSpecs(service, specsMap) || buildFallbackSpecs(service, siblingExtras);
+      const quantity = Math.max(1, Math.min(1000, Number(item.quantity || 1)));
+
+      if (source === "option") {
+        const optionKey = String(item.optionKey || parseCartKey(cartKey, "opt")).trim();
+        const option = (specs.optionSections || [])
+          .flatMap((section) => section.options)
+          .find((candidate) => candidate.key === optionKey);
+        if (!option) return null;
+        const optionQuantity = Math.max(1, option.quantity || quantity);
+        return {
+          category: service.category,
+          name: option.label,
+          description: option.description || null,
+          quantity: optionQuantity,
+          unitPrice: option.price,
+          total: optionQuantity * option.price,
+          sortOrder: index,
+        };
+      }
+
+      if (source === "slider") {
+        const sliderKey = String(item.sliderKey || parseCartKey(cartKey, "sld")).trim();
+        const slider = (specs.sliders || []).find((candidate) => candidate.key === sliderKey);
+        if (!slider) return null;
+        const rawValue = Number(item.variableValue);
+        if (!Number.isFinite(rawValue)) return null;
+        const value = Math.min(slider.max, Math.max(slider.min, rawValue));
+        const chargedUnits = Math.max(0, value - (slider.included || 0));
+        const unitPrice = Math.round(chargedUnits * (slider.pricePerUnit || 0) * 100) / 100;
+        if (unitPrice <= 0) return null;
+        return {
+          category: service.category,
+          name: `${slider.label} (${value}${slider.unitLabel || ""})`,
+          description: slider.hint || "Variabele kost",
+          quantity: 1,
+          unitPrice,
+          total: unitPrice,
+          sortOrder: index,
+        };
+      }
+
+      const requestedPackageKey = String(item.packageKey || "").trim();
+      const fallbackPackage = (specs.packages || []).find((pkg) => pkg.defaultSelected) || specs.packages?.[0];
+      const selectedPackage =
+        (specs.packages || []).find((pkg) => pkg.key === requestedPackageKey) || fallbackPackage;
+      const unitPrice = selectedPackage?.price ?? service.basePrice;
+      const packageLabel = selectedPackage?.label ? ` - ${selectedPackage.label}` : "";
+      return {
+        category: service.category,
+        name: `${service.name}${packageLabel}`,
+        description: selectedPackage?.subtitle || service.description || null,
+        quantity,
+        unitPrice,
+        total: quantity * unitPrice,
+        sortOrder: index,
+      };
+    })
+    .filter(Boolean) as Array<{
+      category: string;
+      name: string;
+      description: string | null;
+      quantity: number;
+      unitPrice: number;
+      total: number;
+      sortOrder: number;
+    }>;
+}
 
 export async function POST(request: Request) {
   try {
@@ -35,8 +147,6 @@ export async function POST(request: Request) {
     const clientCompany = String(body.clientCompany || "").trim().slice(0, 200);
     const clientPhone = String(body.clientPhone || "").trim().slice(0, 50);
     const notes = String(body.notes || "").trim().slice(0, 2000);
-    const discountRaw = Number(body.discount || 0);
-    const vatRateRaw = Number(body.vatRate || 21);
     const items = Array.isArray(body.items) ? body.items.slice(0, 50) : [];
 
     if (!clientName || !items.length) {
@@ -57,28 +167,43 @@ export async function POST(request: Request) {
     });
     const quoteNumber = `${numberPrefix}${String(count + 1).padStart(4, "0")}`;
 
-    const normalizedItems = items
-      .map((item: any, index: number) => {
-        const quantity = Math.max(1, Number(item.quantity || 1));
-        const unitPrice = Math.max(0, Number(item.unitPrice || 0));
-        return {
-          category: String(item.category || "extras"),
-          name: String(item.name || "").trim(),
-          description: String(item.description || "").trim() || null,
-          quantity,
-          unitPrice,
-          total: quantity * unitPrice,
-          sortOrder: index,
-        };
-      })
-      .filter((item: { name: string }) => item.name);
+    const [services, productSpecsRow] = await Promise.all([
+      prisma.serviceCatalog.findMany({
+        where: { isActive: true, createdById: tenantUserId },
+        select: {
+          id: true,
+          category: true,
+          name: true,
+          description: true,
+          basePrice: true,
+          unit: true,
+        },
+      }),
+      prisma.setting.findUnique({
+        where: { key: userSettingKey(tenantUserId, "quotes.embed_product_specs_json") },
+        select: { value: true },
+      }),
+    ]);
+
+    const normalizedItems = normalizePublicQuoteItems({
+      items,
+      services,
+      productSpecsJson: readSettingValue(productSpecsRow?.value),
+    });
+
+    if (!normalizedItems.length) {
+      return NextResponse.json(
+        { error: "Minstens één geldige dienst is verplicht." },
+        { status: 400 },
+      );
+    }
 
     const subtotal = normalizedItems.reduce(
       (sum: number, item: { total: number }) => sum + item.total,
       0
     );
-    const discount = Math.max(0, Math.min(subtotal, Number.isFinite(discountRaw) ? discountRaw : 0));
-    const vatRate = Math.max(0, Number.isFinite(vatRateRaw) ? vatRateRaw : 21);
+    const discount = 0;
+    const vatRate = 21;
     const discountedSubtotal = subtotal - discount;
     const vatAmount = Math.round(discountedSubtotal * (vatRate / 100) * 100) / 100;
     const total = discountedSubtotal + vatAmount;

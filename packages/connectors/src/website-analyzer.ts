@@ -1,4 +1,5 @@
 import { WebsiteAnalysis } from "./types";
+import { assertPublicHttpUrl } from "./ssrf-guard";
 
 function isValidEmail(email: string): boolean {
   // Reject obviously invalid patterns: starts/ends with dot, double dots, missing TLD, etc.
@@ -182,6 +183,51 @@ function hasCTA(html: string): boolean {
   return ctaPatterns.some((p) => p.test(html));
 }
 
+function blockedWebsiteAnalysis(url: string, errors: string[]): WebsiteAnalysis {
+  const displayUrl = url.startsWith("http") ? url : `https://${url}`;
+  return {
+    url: displayUrl,
+    statusCode: 0,
+    hasSSL: displayUrl.startsWith("https://"),
+    isMobileFriendly: false,
+    loadTimeMs: 0,
+    hasMetaTitle: false,
+    metaTitle: null,
+    hasMetaDescription: false,
+    metaDescription: null,
+    hasH1: false,
+    h1Text: null,
+    hasStructuredData: false,
+    hasFavicon: false,
+    hasAnalytics: false,
+    hasCTA: false,
+    contentLength: 0,
+    lastModified: null,
+    technologies: [],
+    socialLinks: {
+      facebook: null,
+      instagram: null,
+      linkedin: null,
+      twitter: null,
+      youtube: null,
+      tiktok: null,
+    },
+    contactInfo: { emails: [], phones: [] },
+    uxAudit: {
+      linkCount: 0,
+      internalLinkCount: 0,
+      buttonCount: 0,
+      formCount: 0,
+      imagesTotal: 0,
+      imagesMissingAlt: 0,
+      pageProbes: [],
+      pagesChecked: 0,
+      pagesBroken: 0,
+    },
+    errors,
+  };
+}
+
 export async function analyzeWebsite(url: string): Promise<WebsiteAnalysis> {
   const errors: string[] = [];
   let html = "";
@@ -190,13 +236,19 @@ export async function analyzeWebsite(url: string): Promise<WebsiteAnalysis> {
   let hasSSL = false;
   let lastModified: string | null = null;
 
+  let safeUrl: string;
   try {
-    // Normalize URL
-    if (!url.startsWith("http")) {
-      url = `https://${url}`;
-    }
-    hasSSL = url.startsWith("https://");
+    const normalized = url.startsWith("http") ? url : `https://${url}`;
+    safeUrl = await assertPublicHttpUrl(normalized);
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : "Ongeldige URL.");
+    return blockedWebsiteAnalysis(url, errors);
+  }
 
+  url = safeUrl;
+  hasSSL = url.startsWith("https://");
+
+  try {
     const start = Date.now();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -231,7 +283,7 @@ export async function analyzeWebsite(url: string): Promise<WebsiteAnalysis> {
       // Try HTTP fallback if HTTPS failed
       if (url.startsWith("https://")) {
         try {
-          const httpUrl = url.replace("https://", "http://");
+          const httpUrl = await assertPublicHttpUrl(url.replace("https://", "http://"));
           const fallbackResp = await fetch(httpUrl, {
             headers: FETCH_HEADERS,
             redirect: "follow",

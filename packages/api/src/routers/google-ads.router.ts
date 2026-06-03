@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
 import { OpenClawClient } from "@digitify/openclaw";
 import { z } from "zod";
-import { adminProcedure, protectedProcedure, router } from "../trpc";
+import { adminProcedure, protectedProcedure, aiRateLimitedProcedure, router, mutationProcedure } from "../trpc";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import {
   defaultSearchTargeting,
@@ -467,7 +467,7 @@ export const googleAdsRouter = router({
       return (ctx.db as any).googleAdPlan.findMany({ where, orderBy: { updatedAt: "desc" }, take: 100 });
     }),
 
-  createDraft: protectedProcedure.input(draftInputSchema).mutation(async ({ ctx, input }) => {
+  createDraft: mutationProcedure.input(draftInputSchema).mutation(async ({ ctx, input }) => {
     const row = await (ctx.db as any).googleAdPlan.create({
       data: {
         createdById: ctx.user.workspaceId!,
@@ -492,7 +492,7 @@ export const googleAdsRouter = router({
     return row;
   }),
 
-  updateDraft: protectedProcedure
+  updateDraft: mutationProcedure
     .input(z.object({ id: z.string() }).merge(draftInputSchema.partial()))
     .mutation(async ({ ctx, input }) => {
       const adsDb = ctx.db as any;
@@ -520,7 +520,7 @@ export const googleAdsRouter = router({
       });
     }),
 
-  generateSuggestion: protectedProcedure
+  generateSuggestion: aiRateLimitedProcedure
     .input(
       z.object({
         product: z.string().min(2).max(400),
@@ -531,7 +531,7 @@ export const googleAdsRouter = router({
     )
     .mutation(async ({ ctx, input }) => renderAdSuggestion(ctx.db, ctx.user.workspaceId!, input)),
 
-  generateAudienceSignals: protectedProcedure
+  generateAudienceSignals: aiRateLimitedProcedure
     .input(
       z.object({
         product: z.string().min(2).max(400),
@@ -549,7 +549,7 @@ export const googleAdsRouter = router({
       }),
     ),
 
-  generateSearchKeywords: protectedProcedure
+  generateSearchKeywords: aiRateLimitedProcedure
     .input(
       z.object({
         product: z.string().min(2).max(400),
@@ -569,7 +569,7 @@ export const googleAdsRouter = router({
       }),
     ),
 
-  submitForApproval: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+  submitForApproval: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const adsDb = ctx.db as any;
     const row = await adsDb.googleAdPlan.findUnique({ where: { id: input.id } });
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Google Ads draft niet gevonden." });

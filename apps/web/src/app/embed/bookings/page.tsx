@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { appendPublicBookingAuthParams } from "@/lib/public-booking-auth";
 import {
   CalendarDays,
   CheckCircle2,
@@ -247,6 +248,10 @@ function BookingEmbedContent() {
   const timezone = params.get("timezone") || "Europe/Brussels";
   const defaultTimeMode = params.get("timeMode") === "12" ? "12" : "24";
   const tenant = params.get("tenant") || "";
+  const quotePortal = params.get("quotePortal") || "";
+  const portalToken = params.get("portalToken") || "";
+  const bookingAuth = { tenant, quotePortal, portalToken };
+  const hasBookingAuth = Boolean(tenant || (quotePortal && portalToken));
   const eventTypeSlug = params.get("eventType") || params.get("type") || "";
 
   const today = useMemo(() => new Date(), []);
@@ -307,26 +312,26 @@ function BookingEmbedContent() {
       start: toBookingIso(selectedDate, time, slotTimeZone),
       hostTime: time,
     }));
-  }, [tenant, availability, selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes, slotTimeZone]);
+  }, [hasBookingAuth, availability, selectedDate, weeklyHours, effectiveDuration, effectiveSlotMinutes, slotTimeZone]);
 
   // ── Effects ────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!tenant) return;
+    if (!hasBookingAuth) return;
     const url = new URL("/api/public/bookings/event-type", window.location.origin);
-    url.searchParams.set("tenant", tenant);
+    appendPublicBookingAuthParams(url, bookingAuth);
     if (eventTypeSlug) url.searchParams.set("eventType", eventTypeSlug);
     fetch(url)
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => { if (data) setEventType(data); })
       .catch(() => null);
-  }, [tenant, eventTypeSlug]);
+  }, [hasBookingAuth, tenant, quotePortal, portalToken, eventTypeSlug]);
 
   useEffect(() => {
-    if (!tenant) return;
+    if (!hasBookingAuth) return;
     const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
     const url = new URL("/api/public/bookings/availability", window.location.origin);
-    url.searchParams.set("tenant", tenant);
+    appendPublicBookingAuthParams(url, bookingAuth);
     if (eventType?.slug || eventTypeSlug) url.searchParams.set("eventType", eventType?.slug || eventTypeSlug);
     url.searchParams.set("from", formatDateKey(currentMonth));
     url.searchParams.set("to", formatDateKey(monthEnd));
@@ -374,7 +379,7 @@ function BookingEmbedContent() {
       })
       .catch(() => null)
       .finally(() => setLoadingAvailability(false));
-  }, [tenant, eventType?.slug, eventTypeSlug, currentMonth]);
+  }, [hasBookingAuth, tenant, quotePortal, portalToken, eventType?.slug, eventTypeSlug, currentMonth]);
 
   // Auto-select first available slot when date changes
   useEffect(() => {
@@ -403,7 +408,7 @@ function BookingEmbedContent() {
     const localSlots = buildSlotsForDate(dateKey, weeklyHours, effectiveDuration, effectiveSlotMinutes);
     const localStatus: DateStatus = localSlots.length > 0 ? "available" : "none";
 
-    if (tenant && availabilityMonthKey === dateMonthKey) {
+    if (hasBookingAuth && availabilityMonthKey === dateMonthKey) {
       const status = dayStatuses[dateKey];
       if (status === "available" || status === "partial" || status === "full") return status;
       const remoteData = availability[dateKey];
@@ -413,7 +418,7 @@ function BookingEmbedContent() {
       if (status === "none") return "none";
     }
 
-    if (tenant && loadingAvailability && availabilityMonthKey !== dateMonthKey) {
+    if (hasBookingAuth && loadingAvailability && availabilityMonthKey !== dateMonthKey) {
       return localStatus;
     }
 
@@ -450,7 +455,8 @@ function BookingEmbedContent() {
           answers: Object.entries(questionAnswers).map(([questionId, value]) => ({ questionId, value })),
           consentAccepted,
           website,
-          tenant: tenant || undefined,
+          ...(tenant ? { tenant } : {}),
+          ...(quotePortal && portalToken ? { quotePortal, portalToken } : {}),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -487,10 +493,10 @@ function BookingEmbedContent() {
         }
       }
       setStatus({ type: "error", message: data.error || "Boeking aanvragen mislukt." });
-      if (tenant) {
+      if (hasBookingAuth) {
         const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
         const refreshUrl = new URL("/api/public/bookings/availability", window.location.origin);
-        refreshUrl.searchParams.set("tenant", tenant);
+        appendPublicBookingAuthParams(refreshUrl, bookingAuth);
         if (eventType?.slug || eventTypeSlug) refreshUrl.searchParams.set("eventType", eventType?.slug || eventTypeSlug);
         refreshUrl.searchParams.set("from", formatDateKey(currentMonth));
         refreshUrl.searchParams.set("to", formatDateKey(monthEnd));

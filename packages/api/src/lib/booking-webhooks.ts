@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import type { PrismaClient } from "@digitify/db";
+import { assertPublicHttpUrl } from "@digitify/connectors";
 import { log } from "./logger";
 
 export type BookingWebhookEvent =
@@ -78,7 +79,15 @@ export async function fireBookingWebhook(
       headers["X-Digitify-Signature"] = `sha256=${sig}`;
     }
 
-    const response = await fetch(url, {
+    let safeUrl: string;
+    try {
+      safeUrl = await assertPublicHttpUrl(url);
+    } catch {
+      log.api.warn("Webhook URL blocked by SSRF guard", { event, url });
+      return;
+    }
+
+    const response = await fetch(safeUrl, {
       method: "POST",
       headers,
       body: payload,

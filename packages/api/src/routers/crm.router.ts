@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { assertLeadAccess } from "../lib/tenant";
 
 const crmSegmentSchema = z.enum(["CUSTOMERS"]);
@@ -248,7 +248,7 @@ export const crmRouter = router({
       };
     }),
 
-  createCustomer: protectedProcedure
+  createCustomer: mutationProcedure
     .input(
       z.object({
         companyName: z.string().min(1),
@@ -329,7 +329,7 @@ export const crmRouter = router({
       return { existed: false, lead };
     }),
 
-  markAsCustomer: protectedProcedure
+  markAsCustomer: mutationProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);

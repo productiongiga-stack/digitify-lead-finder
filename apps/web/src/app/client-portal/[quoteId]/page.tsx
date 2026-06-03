@@ -3,9 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { safeExternalUrl } from "@/lib/utils";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("nl-BE", { style: "currency", currency: "EUR" }).format(value || 0);
+}
+
+function safeDownloadUrl(url: string): string | null {
+  if (url.startsWith("blob:") || url.startsWith("data:")) return url;
+  return safeExternalUrl(url);
 }
 
 export default function ClientPortalPage() {
@@ -57,7 +63,12 @@ export default function ClientPortalPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, action: "approve" }),
     });
-    if (response.ok) load();
+    if (response.ok) {
+      load();
+      return;
+    }
+    const data = await response.json().catch(() => ({}));
+    setError(data.error || "Offerte goedkeuren mislukt.");
   }
 
   async function uploadFile(file: File) {
@@ -68,7 +79,7 @@ export default function ClientPortalPage() {
       let binary = "";
       for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i] || 0);
       const dataUrl = `data:${file.type || "application/octet-stream"};base64,${btoa(binary)}`;
-      await fetch(`/api/public/portal/${encodeURIComponent(quoteId)}`, {
+      const response = await fetch(`/api/public/portal/${encodeURIComponent(quoteId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -79,7 +90,14 @@ export default function ClientPortalPage() {
           dataUrl,
         }),
       });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        setError(data.error || "Bestand uploaden mislukt.");
+        return;
+      }
       load();
+    } catch {
+      setError("Bestand uploaden mislukt.");
     } finally {
       setUploading(false);
     }
@@ -96,6 +114,10 @@ export default function ClientPortalPage() {
   if (error) {
     return <div className="mx-auto max-w-4xl p-6 text-sm text-destructive">{error}</div>;
   }
+
+  const bookingHref = payload.bookingEmbedUrl
+    ? `${payload.bookingEmbedUrl}${payload.bookingEmbedUrl.includes("?") ? "&" : "?"}fromPortal=1`
+    : null;
 
   return (
     <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
@@ -145,12 +167,16 @@ export default function ClientPortalPage() {
         <h2 className="text-sm font-semibold">Boek een service</h2>
         <p className="mt-1 text-xs text-muted-foreground">Plan hier meteen je afspraak na goedkeuring.</p>
         <div className="mt-3">
-          <Link
-            href={`${payload.bookingEmbedUrl}&fromPortal=1`}
-            className="inline-flex rounded-lg border px-3 py-2 text-sm hover:bg-accent"
-          >
-            Open booking widget
-          </Link>
+          {bookingHref ? (
+            <Link
+              href={bookingHref}
+              className="inline-flex rounded-lg border px-3 py-2 text-sm hover:bg-accent"
+            >
+              Open booking widget
+            </Link>
+          ) : (
+            <p className="text-xs text-muted-foreground">Booking is momenteel niet beschikbaar via deze link.</p>
+          )}
         </div>
         {(payload.bookings || []).length > 0 ? (
           <div className="mt-3 space-y-1">
@@ -182,15 +208,20 @@ export default function ClientPortalPage() {
         {uploading ? <p className="mt-2 text-xs text-muted-foreground">Upload bezig...</p> : null}
         {(payload.files || []).length > 0 ? (
           <div className="mt-3 space-y-2">
-            {payload.files.map((file: any) => (
+            {payload.files.map((file: any) => {
+              const downloadUrl = safeDownloadUrl(file.dataUrl);
+              return (
               <div key={file.id} className="rounded-lg border p-2 text-xs">
                 <p className="font-medium">{file.name}</p>
                 <p className="text-muted-foreground">{new Date(file.uploadedAt).toLocaleString("nl-BE")}</p>
-                <a href={file.dataUrl} download={file.name} className="text-primary hover:underline">
-                  Download
-                </a>
+                {downloadUrl ? (
+                  <a href={downloadUrl} download={file.name} className="text-primary hover:underline">
+                    Download
+                  </a>
+                ) : null}
               </div>
-            ))}
+              );
+            })}
           </div>
         ) : null}
       </div>

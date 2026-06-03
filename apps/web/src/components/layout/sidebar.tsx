@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -8,12 +8,10 @@ import { useSidebarLayout, useUIStore } from "@/stores/ui-store";
 import { useBranding } from "@/lib/branding";
 import {
   BOTTOM_NAV_ITEMS,
-  SIDEBAR_SECTIONS,
+  DASHBOARD_NAV_ITEM,
+  SIDEBAR_NAV_GROUPS,
   isNavItemActive,
-  type NavDropdown,
-  type NavItem,
   type QuickNavItem,
-  type SidebarSectionConfig,
 } from "@/lib/navigation";
 import { Button } from "@digitify/ui";
 import { ScrollArea } from "@digitify/ui";
@@ -301,49 +299,64 @@ export function Sidebar() {
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
-  const disabledModules = new Set(moduleAccess?.disabled || []);
-
-  const filterByModule = <T extends { moduleId?: string }>(items: T[]) =>
-    items.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId));
-
-  const visibleDropdown = (dropdown: NavDropdown): NavDropdown | null => {
-    const items = filterByModule(dropdown.items);
-    return items.length > 0 ? { ...dropdown, items } : null;
-  };
-
-  const visibleSections = useMemo(
-    () =>
-      SIDEBAR_SECTIONS.map((section) => {
-        const links = filterByModule(section.links ?? []);
-        const dropdowns = (section.dropdowns ?? [])
-          .map(visibleDropdown)
-          .filter((dropdown): dropdown is NavDropdown => dropdown !== null);
-        return { ...section, links, dropdowns };
-      }).filter((section) => section.links.length > 0 || section.dropdowns.length > 0),
-    [(moduleAccess?.disabled ?? []).join(",")],
+  const disabledModulesKey = (moduleAccess?.disabled ?? []).slice().sort().join("|");
+  const disabledModules = useMemo(
+    () => new Set(moduleAccess?.disabled ?? []),
+    [disabledModulesKey],
   );
 
-  const [openDropdowns, setOpenDropdowns] = useState<Record<string, boolean>>({});
+  const filterVisibleItems = (items: QuickNavItem[]) =>
+    items.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId));
+
+  const visibleNavGroups = useMemo(
+    () =>
+      SIDEBAR_NAV_GROUPS.map((group) => ({
+        ...group,
+        items: filterVisibleItems(group.items),
+      })).filter((group) => group.items.length > 0),
+    [disabledModulesKey],
+  );
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    for (const group of SIDEBAR_NAV_GROUPS) {
+      if (group.defaultOpen) initial[group.id] = true;
+    }
+    return initial;
+  });
+
+  const prevPathnameRef = useRef<string | null>(null);
 
   useEffect(() => {
-    visibleSections.forEach((section) => {
-      section.dropdowns.forEach((dropdown) => {
-        if (dropdown.activeMatch(pathname)) {
-          setOpenDropdowns((prev) => (prev[dropdown.id] ? prev : { ...prev, [dropdown.id]: true }));
+    const pathnameChanged = prevPathnameRef.current !== pathname;
+    prevPathnameRef.current = pathname;
+
+    setOpenGroups((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const group of visibleNavGroups) {
+        const matches = group.items.some(
+          (entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`),
+        );
+        if (!matches) continue;
+        // Re-open on navigation; respect explicit `false` from user collapsing on same page.
+        if (!pathnameChanged && next[group.id] === false) continue;
+        if (!next[group.id]) {
+          next[group.id] = true;
+          changed = true;
         }
-      });
+      }
+      return changed ? next : prev;
     });
-  }, [pathname, visibleSections]);
+  }, [pathname, visibleNavGroups]);
 
   useEffect(() => {
-    // Warm common app routes so first navigation feels instant.
+    const skipPrefetch = new Set(["/meta-ads", "/google-ads", "/contacts/inbox", "/social"]);
     const routes = [
-      ...visibleSections.flatMap((section) => [
-        ...section.links.map((item) => item.href),
-        ...section.dropdowns.flatMap((dropdown) => dropdown.items.map((item) => item.href)),
-      ]),
+      DASHBOARD_NAV_ITEM.href,
+      ...visibleNavGroups.flatMap((group) => group.items.map((item) => item.href)),
       ...BOTTOM_NAV_ITEMS.map((item) => item.href),
-    ];
+    ].filter((href) => !skipPrefetch.has(href.split("?")[0] || href));
     let cancelled = false;
     const prefetchRoutes = () => {
       if (cancelled) return;
@@ -370,83 +383,6 @@ export function Sidebar() {
   const renderContent = (mobile: boolean) => {
     const collapsed = mobile ? false : sidebarCollapsed;
 
-    const renderNavLinks = (items: NavItem[]) =>
-      items.map((item) => {
-        const isActive = isNavItemActive(item, pathname);
-        return (
-          <SidebarNavLink
-            key={item.href}
-            item={item}
-            active={isActive}
-            collapsed={collapsed}
-            onNavigate={() => setMobileSidebarOpen(false)}
-            onPrefetch={(href) => router.prefetch(href)}
-          />
-        );
-      });
-
-    const renderDropdown = (dropdown: NavDropdown) => {
-      const groupActive = dropdown.activeMatch(pathname);
-      const activeHref = dropdown.items
-        .filter((entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`))
-        .sort((left, right) => right.href.length - left.href.length)[0]?.href;
-
-      return (
-        <SidebarNavDropdown
-          key={dropdown.id}
-          label={dropdown.label}
-          icon={dropdown.icon}
-          items={dropdown.items}
-          groupActive={groupActive}
-          open={openDropdowns[dropdown.id] ?? false}
-          onToggleOpen={() =>
-            setOpenDropdowns((prev) => ({ ...prev, [dropdown.id]: !prev[dropdown.id] }))
-          }
-          activeHref={activeHref}
-          collapsed={collapsed}
-          onNavigate={() => setMobileSidebarOpen(false)}
-          onPrefetch={(href) => router.prefetch(href)}
-          expandSidebar={toggleSidebar}
-        />
-      );
-    };
-
-    const renderSidebarSection = (section: SidebarSectionConfig, index: number) => {
-      const links = section.links ?? [];
-      const dropdowns = section.dropdowns ?? [];
-      const content = (
-        <>
-          {dropdowns.map(renderDropdown)}
-          {renderNavLinks(links)}
-        </>
-      );
-
-      if (index === 0) {
-        return (
-          <div key={section.id}>
-            {!collapsed && <NavSectionLabel>{section.label}</NavSectionLabel>}
-            <nav className={cn("space-y-1", collapsed ? "px-2" : "space-y-1.5 px-2")}>{content}</nav>
-          </div>
-        );
-      }
-
-      return (
-        <div key={section.id}>
-          <SidebarDivider collapsed={collapsed} />
-          {!collapsed && <NavSectionLabel>{section.label}</NavSectionLabel>}
-          <nav className={cn("space-y-1", collapsed ? "px-2" : "space-y-1.5 px-2")}>{content}</nav>
-        </div>
-      );
-    };
-
-    const renderSection = (label: string, children: ReactNode) => (
-      <>
-        <SidebarDivider collapsed={collapsed} />
-        {!collapsed && <NavSectionLabel>{label}</NavSectionLabel>}
-        <nav className={cn("space-y-1", collapsed ? "px-2" : "space-y-1.5 px-2")}>{children}</nav>
-      </>
-    );
-
     return (
     <aside
       className={cn(
@@ -465,10 +401,50 @@ export function Sidebar() {
 
       {/* Nav */}
       <ScrollArea className="flex-1 py-3">
-        {visibleSections.map(renderSidebarSection)}
+        {!collapsed && <NavSectionLabel>Navigatie</NavSectionLabel>}
+        <nav className={cn("space-y-1", collapsed ? "px-2" : "space-y-1.5 px-2")}>
+          <SidebarNavLink
+            item={DASHBOARD_NAV_ITEM}
+            active={isNavItemActive(DASHBOARD_NAV_ITEM, pathname)}
+            collapsed={collapsed}
+            onNavigate={() => setMobileSidebarOpen(false)}
+            onPrefetch={(href) => router.prefetch(href)}
+          />
 
-        {renderSection(
-          "Assistent",
+          {visibleNavGroups.map((group) => {
+            const activeMenuHref = group.items
+              .filter((entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`))
+              .sort((left, right) => right.href.length - left.href.length)[0]?.href;
+            const groupActive = Boolean(activeMenuHref);
+            const isOpen = openGroups[group.id] ?? false;
+
+            return (
+              <SidebarNavDropdown
+                key={group.id}
+                label={group.label}
+                icon={group.icon}
+                items={group.items}
+                groupActive={groupActive}
+                open={isOpen}
+                onToggleOpen={() =>
+                  setOpenGroups((prev) => ({
+                    ...prev,
+                    [group.id]: !(prev[group.id] ?? false),
+                  }))
+                }
+                activeHref={activeMenuHref}
+                collapsed={collapsed}
+                onNavigate={() => setMobileSidebarOpen(false)}
+                onPrefetch={(href) => router.prefetch(href)}
+                expandSidebar={toggleSidebar}
+              />
+            );
+          })}
+        </nav>
+
+        <SidebarDivider collapsed={collapsed} />
+
+        <nav className={cn("space-y-1", collapsed ? "px-2" : "px-2")}>
           <SidebarTooltip label="OpenClaw" collapsed={collapsed}>
             <button
               type="button"
@@ -479,8 +455,8 @@ export function Sidebar() {
               <Bot className={cn("shrink-0", collapsed ? "h-[1.125rem] w-[1.125rem]" : "h-4 w-4")} />
               {!collapsed && <span>OpenClaw</span>}
             </button>
-          </SidebarTooltip>,
-        )}
+          </SidebarTooltip>
+        </nav>
       </ScrollArea>
 
       {/* Bottom */}

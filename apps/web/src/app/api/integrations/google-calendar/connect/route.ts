@@ -16,6 +16,9 @@ export async function GET(request: Request) {
     loginUrl.searchParams.set("callbackUrl", "/settings/bookings#google-agenda");
     return NextResponse.redirect(loginUrl);
   }
+  if (!["OWNER", "ADMIN"].includes(String(user.role || ""))) {
+    return NextResponse.redirect(new URL("/settings/bookings?google=forbidden#google-agenda", request.url));
+  }
 
   const userId = (user as { id?: string }).id;
   const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(

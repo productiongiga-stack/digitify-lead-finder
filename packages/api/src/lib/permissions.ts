@@ -14,8 +14,12 @@ const ACCOUNT_SETTING_PREFIXES = ["branding.", "company.", "email."];
 const ADMIN_SETTING_PREFIXES = ["bookings.", "reviews.", "quotes.", "chatbot.", "ads.", ...PERSONAL_SETTING_PREFIXES];
 const MEMBER_SETTING_PREFIXES = ["bookings.", "reviews.", "quotes.", "chatbot.", "pipeline.", "scoring.", ...PERSONAL_SETTING_PREFIXES];
 const OWNER_SETTING_PREFIXES = ["api.", "openclaw.", "seo.", "social.", "integrations."];
-/** Workspace-wide booking timezone; only the workspace owner may change it. */
-const OWNER_ONLY_SETTING_KEYS = new Set(["bookings.google_calendar_timezone"]);
+/** Workspace-wide booking secrets and timezone; only the workspace owner may read or change these. */
+const OWNER_ONLY_SETTING_KEYS = new Set([
+  "bookings.google_calendar_timezone",
+  "bookings.google_service_account_private_key",
+  "bookings.webhook_secret",
+]);
 
 export function normalizeRole(role: string | null | undefined): AppRole {
   if (
@@ -37,6 +41,7 @@ function keyStartsWith(key: string, prefixes: string[]) {
 export function canReadSettingKey(roleValue: string | null | undefined, key: string) {
   const role = normalizeRole(roleValue);
   if (role === "OWNER") return true;
+  if (OWNER_ONLY_SETTING_KEYS.has(key)) return false;
   if (role !== "VIEWER" && keyStartsWith(key, ACCOUNT_SETTING_PREFIXES)) return true;
   if (VISUAL_SETTING_KEYS.has(key) || keyStartsWith(key, PERSONAL_SETTING_PREFIXES)) return true;
   if (role === "ADMIN") return keyStartsWith(key, ADMIN_SETTING_PREFIXES) && !keyStartsWith(key, OWNER_SETTING_PREFIXES);

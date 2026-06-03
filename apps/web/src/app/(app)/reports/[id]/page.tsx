@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { Button, Skeleton } from "@digitify/ui";
@@ -8,7 +9,27 @@ import {
   WebsiteAuditDetail,
   type WebsiteAuditPayload,
 } from "@/components/reports/website-audit-detail";
-import { LeadCampaignReportDetail } from "@/components/reports/lead-campaign-report-detail";
+
+const LeadCampaignReportDetail = dynamic(
+  () =>
+    import("@/components/reports/lead-campaign-report-detail").then(
+      (module) => module.LeadCampaignReportDetail,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="space-y-5">
+        <Skeleton className="h-10 w-64" />
+        <div className="grid gap-4 md:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-28 w-full rounded-lg" />
+          ))}
+        </div>
+        <Skeleton className="h-80 w-full rounded-lg" />
+      </div>
+    ),
+  },
+);
 
 export default function ReportDetailPage() {
   const params = useParams();

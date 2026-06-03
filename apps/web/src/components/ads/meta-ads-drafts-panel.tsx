@@ -123,7 +123,7 @@ export function MetaAdsDraftsPanel({
       </button>
 
       {open ? (
-        <CardContent className="space-y-3 pt-0 sm:pt-0">
+        <CardContent className="space-y-3 pt-4 sm:pt-5">
           {!rows.length ? (
             <EmptyState
               title="Geen drafts"

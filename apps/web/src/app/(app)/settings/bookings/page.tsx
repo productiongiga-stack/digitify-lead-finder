@@ -58,6 +58,8 @@ import { getAppUrl } from "@/lib/config";
 import { hasRole } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
+const SECRET_MASK = "••••••••";
+
 type DayKey = "0" | "1" | "2" | "3" | "4" | "5" | "6";
 type DaySchedule = { enabled: boolean; start: string; end: string };
 type WeeklyHours = Record<DayKey, DaySchedule>;
@@ -610,12 +612,14 @@ export default function BookingSettingsPage() {
   const [googleSyncEnabled, setGoogleSyncEnabled] = useState(false);
   const [googleServiceAccountEmail, setGoogleServiceAccountEmail] = useState("");
   const [googleServicePrivateKey, setGoogleServicePrivateKey] = useState("");
+  const [googleServicePrivateKeyConfigured, setGoogleServicePrivateKeyConfigured] = useState(false);
   const [googleTimezone, setGoogleTimezone] = useState("Europe/Brussels");
   const [copied, setCopied] = useState(false);
   const [snapshot, setSnapshot] = useState("");
   const [approvalMode, setApprovalMode] = useState("manual");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
+  const [webhookSecretConfigured, setWebhookSecretConfigured] = useState(false);
   const [webhookEvents, setWebhookEvents] = useState<WebhookEventKey[]>([]);
   const [reminders24hEnabled, setReminders24hEnabled] = useState(true);
   const [reminders1hEnabled, setReminders1hEnabled] = useState(true);
@@ -718,7 +722,7 @@ export default function BookingSettingsPage() {
     const nextGoogleCalendarId = readSettingString(settings, "bookings.google_calendar_id", "");
     const nextGoogleSyncEnabled = readSettingBoolean(settings, "bookings.google_sync_enabled", false);
     const nextGoogleServiceAccountEmail = readSettingString(settings, "bookings.google_service_account_email", "");
-    const nextGoogleServicePrivateKey = readSettingString(settings, "bookings.google_service_account_private_key", "");
+    const nextGoogleServicePrivateKeyRaw = readSettingString(settings, "bookings.google_service_account_private_key", "");
     const nextGoogleTimezone = readSettingString(settings, "bookings.google_calendar_timezone", "Europe/Brussels");
 
     setTitle(nextTitle);
@@ -737,12 +741,13 @@ export default function BookingSettingsPage() {
     setGoogleCalendarId(nextGoogleCalendarId);
     setGoogleSyncEnabled(nextGoogleSyncEnabled);
     setGoogleServiceAccountEmail(nextGoogleServiceAccountEmail);
-    setGoogleServicePrivateKey(nextGoogleServicePrivateKey);
+    setGoogleServicePrivateKeyConfigured(Boolean(nextGoogleServicePrivateKeyRaw));
+    setGoogleServicePrivateKey(nextGoogleServicePrivateKeyRaw === SECRET_MASK ? "" : nextGoogleServicePrivateKeyRaw);
     setGoogleTimezone(nextGoogleTimezone);
 
     const nextApprovalMode = readSettingString(settings, "bookings.default_approval_mode", "manual");
     const nextWebhookUrl = readSettingString(settings, "bookings.webhook_url", "");
-    const nextWebhookSecret = readSettingString(settings, "bookings.webhook_secret", "");
+    const nextWebhookSecretRaw = readSettingString(settings, "bookings.webhook_secret", "");
     const nextWebhookEventsCsv = readSettingString(settings, "bookings.webhook_events", "");
     const nextWebhookEvents = nextWebhookEventsCsv
       .split(",")
@@ -751,7 +756,8 @@ export default function BookingSettingsPage() {
 
     setApprovalMode(nextApprovalMode);
     setWebhookUrl(nextWebhookUrl);
-    setWebhookSecret(nextWebhookSecret);
+    setWebhookSecretConfigured(Boolean(nextWebhookSecretRaw));
+    setWebhookSecret(nextWebhookSecretRaw === SECRET_MASK ? "" : nextWebhookSecretRaw);
     setWebhookEvents(nextWebhookEvents);
     setReminders24hEnabled(readSettingBoolean(settings, "bookings.reminders_24h_enabled", true));
     setReminders1hEnabled(readSettingBoolean(settings, "bookings.reminders_1h_enabled", true));
@@ -777,11 +783,11 @@ export default function BookingSettingsPage() {
         googleCalendarId: nextGoogleCalendarId,
         googleSyncEnabled: nextGoogleSyncEnabled,
         googleServiceAccountEmail: nextGoogleServiceAccountEmail,
-        googleServicePrivateKey: nextGoogleServicePrivateKey,
+        googleServicePrivateKey: nextGoogleServicePrivateKeyRaw === SECRET_MASK ? "" : nextGoogleServicePrivateKeyRaw,
         googleTimezone: nextGoogleTimezone,
         approvalMode: nextApprovalMode,
         webhookUrl: nextWebhookUrl,
-        webhookSecret: nextWebhookSecret,
+        webhookSecret: nextWebhookSecretRaw === SECRET_MASK ? "" : nextWebhookSecretRaw,
         webhookEvents: nextWebhookEvents,
         reminders24hEnabled: nextReminders24h,
         reminders1hEnabled: nextReminders1h,
@@ -866,7 +872,10 @@ export default function BookingSettingsPage() {
       googleCalendarId.trim() &&
       (
         Boolean(readSettingString(settings || {}, "bookings.google_oauth_account_email", "")) ||
-        Boolean(googleServiceAccountEmail.trim() && googleServicePrivateKey.trim())
+        Boolean(
+          googleServiceAccountEmail.trim() &&
+            (googleServicePrivateKey.trim() || googleServicePrivateKeyConfigured),
+        )
       )
   );
   const googleOauthEmail = readSettingString(settings || {}, "bookings.google_oauth_account_email", "");
@@ -980,13 +989,15 @@ export default function BookingSettingsPage() {
       { key: "bookings.google_calendar_id", value: googleCalendarId.trim() },
       { key: "bookings.google_sync_enabled", value: String(googleSyncEnabled) },
       { key: "bookings.google_service_account_email", value: googleServiceAccountEmail.trim() },
-      { key: "bookings.google_service_account_private_key", value: googleServicePrivateKey },
       ...(isWorkspaceOwner
-        ? [{ key: "bookings.google_calendar_timezone", value: googleTimezone.trim() || "Europe/Brussels" }]
+        ? [
+            { key: "bookings.google_service_account_private_key", value: googleServicePrivateKey },
+            { key: "bookings.google_calendar_timezone", value: googleTimezone.trim() || "Europe/Brussels" },
+            { key: "bookings.webhook_secret", value: webhookSecret },
+          ]
         : []),
       { key: "bookings.default_approval_mode", value: approvalMode },
       { key: "bookings.webhook_url", value: webhookUrlTrimmed },
-      { key: "bookings.webhook_secret", value: webhookSecret },
       { key: "bookings.webhook_events", value: webhookEvents.join(",") },
       { key: "bookings.reminders_24h_enabled", value: String(reminders24hEnabled) },
       { key: "bookings.reminders_1h_enabled", value: String(reminders1hEnabled) },
@@ -1496,12 +1507,23 @@ export default function BookingSettingsPage() {
                   </div>
                   <div className="space-y-2">
                     <Label>Webhook secret (optioneel)</Label>
-                    <Input
-                      value={webhookSecret}
-                      onChange={(event) => setWebhookSecret(event.target.value)}
-                      type="password"
-                      placeholder="Geheime sleutel voor handtekeningverificatie"
-                    />
+                    {isWorkspaceOwner ? (
+                      <Input
+                        value={webhookSecret}
+                        onChange={(event) => setWebhookSecret(event.target.value)}
+                        type="password"
+                        placeholder={
+                          webhookSecretConfigured
+                            ? "Nieuwe secret invullen om te vervangen"
+                            : "Geheime sleutel voor handtekeningverificatie"
+                        }
+                      />
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Alleen de workspace-eigenaar kan de webhook secret bekijken of wijzigen.
+                        {webhookSecretConfigured ? " Er is al een secret geconfigureerd." : null}
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>Actieve eventi (leeg = alle)</Label>
@@ -1644,13 +1666,15 @@ export default function BookingSettingsPage() {
                         </div>
                         <Badge
                           variant={
-                            googleServiceAccountEmail.trim() && googleServicePrivateKey.trim()
+                            googleServiceAccountEmail.trim() &&
+                            (googleServicePrivateKey.trim() || googleServicePrivateKeyConfigured)
                               ? "success"
                               : "secondary"
                           }
                           className="shrink-0 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
                         >
-                          {googleServiceAccountEmail.trim() && googleServicePrivateKey.trim()
+                          {googleServiceAccountEmail.trim() &&
+                          (googleServicePrivateKey.trim() || googleServicePrivateKeyConfigured)
                             ? "Ingevuld"
                             : "Optioneel"}
                         </Badge>
@@ -1670,16 +1694,29 @@ export default function BookingSettingsPage() {
                     placeholder="digitify-bookings@project.iam.gserviceaccount.com"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Service account private key</Label>
-                  <Textarea
-                    value={googleServicePrivateKey}
-                    onChange={(event) => setGoogleServicePrivateKey(event.target.value)}
-                    rows={5}
-                    placeholder={"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"}
-                    className="font-mono text-xs"
-                  />
-                </div>
+                {isWorkspaceOwner ? (
+                  <div className="space-y-2">
+                    <Label>Service account private key</Label>
+                    <Textarea
+                      value={googleServicePrivateKey}
+                      onChange={(event) => setGoogleServicePrivateKey(event.target.value)}
+                      rows={5}
+                      placeholder={
+                        googleServicePrivateKeyConfigured
+                          ? "Nieuwe private key invullen om te vervangen"
+                          : "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
+                      }
+                      className="font-mono text-xs"
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Alleen de workspace-eigenaar kan de service account private key bekijken of wijzigen.
+                    {googleServicePrivateKeyConfigured ? " Er is al een key geconfigureerd." : null}
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" variant="outline" asChild>
                     <a href="https://calendar.google.com" target="_blank" rel="noreferrer">

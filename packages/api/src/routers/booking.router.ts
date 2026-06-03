@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, protectedProcedure, ownerProcedure } from "../trpc";
+import { router, protectedProcedure, ownerProcedure, mutationProcedure } from "../trpc";
 import { type PrismaClient } from "@digitify/db";
 import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
 import { assertLeadAccess } from "../lib/tenant";
@@ -418,7 +418,7 @@ export const bookingRouter = router({
     return { total, pending, scheduled, confirmed, completed, cancelled, rejected, noShow };
   }),
 
-  create: protectedProcedure
+  create: mutationProcedure
     .input(
       z.object({
         clientName: z.string().min(1),
@@ -600,7 +600,7 @@ export const bookingRouter = router({
       return booking;
     }),
 
-  update: protectedProcedure
+  update: mutationProcedure
     .input(
       z.object({
         id: z.string(),
@@ -718,7 +718,7 @@ export const bookingRouter = router({
       return updated;
     }),
 
-  confirm: protectedProcedure
+  confirm: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const booking = await ctx.db.booking.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! } });
@@ -765,7 +765,7 @@ export const bookingRouter = router({
       return synced;
     }),
 
-  reject: protectedProcedure
+  reject: mutationProcedure
     .input(z.object({
       id: z.string(),
       reason: z.string().optional(),
@@ -905,7 +905,7 @@ export const bookingRouter = router({
       return syncHostTimezoneForWorkspace(ctx.db, ctx.user.workspaceId!, input.timezone);
     }),
 
-  syncEmbedFromSettings: protectedProcedure.mutation(async ({ ctx }) => {
+  syncEmbedFromSettings: mutationProcedure.mutation(async ({ ctx }) => {
       const eventTypeId = await applyWorkspaceEmbedSettingsToEventType(
         ctx.db,
         ctx.user.workspaceId!,
@@ -918,7 +918,7 @@ export const bookingRouter = router({
     return buildBookingOpenClawAssistContext(ctx.db, ctx.user.workspaceId!);
   }),
 
-  upsertEventType: protectedProcedure
+  upsertEventType: mutationProcedure
     .input(z.object({
       id: z.string().optional(),
       slug: z.string().optional(),
@@ -1026,7 +1026,7 @@ export const bookingRouter = router({
       });
     }),
 
-  deleteEventType: protectedProcedure
+  deleteEventType: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const eventType = await ctx.db.bookingEventType.findFirst({
@@ -1242,7 +1242,7 @@ export const bookingRouter = router({
       };
     }),
 
-  testGoogleSync: protectedProcedure.mutation(async ({ ctx }) => {
+  testGoogleSync: mutationProcedure.mutation(async ({ ctx }) => {
     const workspaceId = ctx.user.workspaceId!;
     const now = new Date();
     const slot = await isGoogleSlotAvailable(ctx.db as any, {
@@ -1273,7 +1273,7 @@ export const bookingRouter = router({
     };
   }),
 
-  delete: protectedProcedure
+  delete: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.booking.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! } });

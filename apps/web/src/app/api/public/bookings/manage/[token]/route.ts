@@ -8,6 +8,17 @@ import {
   hashPublicToken,
   hasBookingOverlap,
 } from "@digitify/api/src/lib/booking-utils";
+import { enforceRateLimit, getClientIp } from "@/lib/http-security";
+
+async function enforceBookingManageRateLimit(request: Request, token: string) {
+  const ip = getClientIp(request);
+  return enforceRateLimit(request, {
+    key: `public-booking-manage:${token.slice(0, 12)}:${ip}`,
+    limit: 60,
+    windowMs: 60_000,
+    message: "Te veel verzoeken. Probeer later opnieuw.",
+  });
+}
 
 async function findBooking(token: string) {
   const hash = hashPublicToken(token);
@@ -25,8 +36,11 @@ function canManage(booking: { status: string; date: Date; eventType?: { minimumN
   return booking.date.getTime() - Date.now() > cutoffHours * 60 * 60_000;
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ token: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
+  const limiter = await enforceBookingManageRateLimit(request, token);
+  if (limiter) return limiter;
+
   const booking = await findBooking(token);
   if (!booking) return NextResponse.json({ error: "Boeking niet gevonden." }, { status: 404 });
   return NextResponse.json({
@@ -46,6 +60,9 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
 
 export async function POST(request: Request, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
+  const limiter = await enforceBookingManageRateLimit(request, token);
+  if (limiter) return limiter;
+
   const body = await request.json().catch(() => ({}));
   const action = String(body.action || "");
   const booking = await findBooking(token);

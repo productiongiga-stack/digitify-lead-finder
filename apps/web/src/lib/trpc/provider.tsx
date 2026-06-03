@@ -21,7 +21,7 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
             gcTime: 30 * 60 * 1000,
             refetchOnWindowFocus: false,
             refetchOnReconnect: false,
-            refetchOnMount: true,
+            refetchOnMount: false,
             retry: 1,
           },
         },

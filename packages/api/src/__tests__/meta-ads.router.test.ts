@@ -59,6 +59,7 @@ const baseConfig = {
 describe("metaAds router flow", () => {
   beforeEach(() => {
     vi.mocked(metaAdsLib.loadMetaAdsWorkspaceConfig).mockResolvedValue(baseConfig);
+    vi.mocked(metaAdsLib.listMetaCampaigns).mockResolvedValue([]);
     vi.mocked(metaAdsLib.pushPausedMetaAdPlan).mockResolvedValue({
       campaignId: "cmp_1",
       adsetId: "adset_1",
@@ -100,7 +101,7 @@ describe("metaAds router flow", () => {
 
     const caller = metaAdsRouter.createCaller(
       makeCtx({
-        metaAdPlan: { create, findUnique, update },
+        metaAdPlan: { create, findUnique, findMany: vi.fn().mockResolvedValue([]), update },
         activity: { create: vi.fn().mockResolvedValue({ id: "act_1" }) },
       }),
     );
@@ -151,7 +152,7 @@ describe("metaAds router flow", () => {
     const create = vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: "plan_sales", ...data }));
     const caller = metaAdsRouter.createCaller(
       makeCtx({
-        metaAdPlan: { create },
+        metaAdPlan: { create, findMany: vi.fn().mockResolvedValue([]) },
         activity: { create: vi.fn().mockResolvedValue({ id: "act_3" }) },
       }),
     );
@@ -167,6 +168,45 @@ describe("metaAds router flow", () => {
 
     expect(created.objective).toBe("OUTCOME_SALES");
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ objective: "OUTCOME_SALES" }) }));
+  });
+
+  it("blocks duplicate campaign names across drafts and live Meta", async () => {
+    vi.mocked(metaAdsLib.listMetaCampaigns).mockResolvedValue([{ id: "cmp_live", name: "Live campagne" }] as any);
+
+    const caller = metaAdsRouter.createCaller(
+      makeCtx({
+        metaAdPlan: {
+          findMany: vi
+            .fn()
+            .mockResolvedValueOnce([{ id: "plan_2", name: "Existing draft", status: "APPROVED" }])
+            .mockResolvedValueOnce([]),
+          create: vi.fn(),
+        },
+        activity: { create: vi.fn().mockResolvedValue({ id: "act_4" }) },
+      }),
+    );
+
+    await expect(
+      caller.createDraft({
+        name: "Existing draft",
+        objective: "OUTCOME_TRAFFIC",
+        dailyBudgetCents: 2500,
+        currency: "EUR",
+        targeting: {},
+        creatives: {},
+      }),
+    ).rejects.toThrow(/bestaat al/i);
+
+    await expect(
+      caller.createDraft({
+        name: "Live campagne",
+        objective: "OUTCOME_TRAFFIC",
+        dailyBudgetCents: 2500,
+        currency: "EUR",
+        targeting: {},
+        creatives: {},
+      }),
+    ).rejects.toThrow(/live Meta/i);
   });
 });
 

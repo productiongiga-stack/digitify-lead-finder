@@ -71,6 +71,7 @@ import {
   extractQuoteIdFromDraftBody,
   getQuoteConfiguratorUrl,
 } from "@/lib/quote-outbound";
+import { useOutboundEmailPreviewSettings } from "@/lib/outbound-email-settings";
 
 function QuoteConfiguratorButton({
   draft,
@@ -114,25 +115,14 @@ export default function ContactsPage() {
     pageSize: 50,
   });
 
-  const { data: brandingSettings } = trpc.settings.getAll.useQuery(undefined, {
-    staleTime: 60_000,
-  });
+  const { brandCompanyName, brandPrimaryColor, brandHeaderSlogan } = useOutboundEmailPreviewSettings();
   const { data: followUpQueue } = trpc.contact.getFollowUpQueue.useQuery(undefined, {
     staleTime: 60_000,
   });
   const { data: topbarStats } = trpc.contact.getTopbarStats.useQuery(undefined, {
     staleTime: 60_000,
+    refetchOnMount: false,
   });
-
-  const brandCompanyName = brandingSettings?.["branding.company_name"]
-    ? String(brandingSettings["branding.company_name"])
-    : "";
-  const brandPrimaryColor = brandingSettings?.["branding.primary_color"]
-    ? String(brandingSettings["branding.primary_color"])
-    : "#6366f1";
-  const brandHeaderSlogan = brandingSettings?.["email.header_slogan"]
-    ? String(brandingSettings["email.header_slogan"])
-    : "";
 
   const invalidateOutbound = () => {
     utils.contact.listDrafts.invalidate();

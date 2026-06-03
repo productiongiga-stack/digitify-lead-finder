@@ -33,6 +33,14 @@ export type MetaAdAccountSummary = {
   accountStatus?: number;
 };
 
+export type MetaLiveCampaign = {
+  id?: string;
+  name?: string;
+  status?: string;
+  effective_status?: string;
+  objective?: string;
+};
+
 export type MetaInsightLevel = "campaign" | "adset" | "ad";
 
 export type MetaDraftScore = {
@@ -205,12 +213,12 @@ export async function listMetaAdAccounts(accessToken: string): Promise<MetaAdAcc
     .filter((item) => item.id);
 }
 
-export async function listMetaCampaigns(params: { adAccountId: string; accessToken: string }) {
+export async function listMetaCampaigns(params: { adAccountId: string; accessToken: string }): Promise<MetaLiveCampaign[]> {
   const raw = (await metaGet(`${normalizeAdAccountId(params.adAccountId)}/campaigns`, {
     access_token: params.accessToken,
     fields: "id,name,status,effective_status,objective,created_time,updated_time,daily_budget,lifetime_budget,buying_type,configured_status",
     limit: "100",
-  })) as { data?: unknown[] };
+  })) as { data?: MetaLiveCampaign[] };
   return raw.data || [];
 }
 

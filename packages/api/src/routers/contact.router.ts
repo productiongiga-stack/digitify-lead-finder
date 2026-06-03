@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, protectedProcedure, adminProcedure } from "../trpc";
+import { router, protectedProcedure, adminProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { sendApprovedQuoteDraft } from "../lib/quote-outbound-email";
@@ -203,7 +203,7 @@ export const contactRouter = router({
       return { items: rows.map(enrichDraftRow) };
     }),
 
-  updateScheduledFor: protectedProcedure
+  updateScheduledFor: mutationProcedure
     .input(
       z.object({
         id: z.string(),
@@ -263,7 +263,7 @@ export const contactRouter = router({
       return enrichDraftRow(updated);
     }),
 
-  deleteDraft: protectedProcedure
+  deleteDraft: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const draft = await ctx.db.emailDraft.findFirst({
@@ -286,7 +286,7 @@ export const contactRouter = router({
       return { success: true };
     }),
 
-  bulkDeleteDrafts: protectedProcedure
+  bulkDeleteDrafts: mutationProcedure
     .input(z.object({ ids: z.array(z.string()).min(1).max(100) }))
     .mutation(async ({ ctx, input }) => {
       const drafts = await ctx.db.emailDraft.findMany({
@@ -299,7 +299,7 @@ export const contactRouter = router({
       return { success: true, deleted: result.count };
     }),
 
-  bulkSendDrafts: protectedProcedure
+  bulkSendDrafts: mutationProcedure
     .input(z.object({ ids: z.array(z.string()).min(1).max(25) }))
     .mutation(async ({ ctx, input }) => {
       const drafts = await ctx.db.emailDraft.findMany({
@@ -396,7 +396,7 @@ export const contactRouter = router({
     return { followupDays, items };
   }),
 
-  createDraft: protectedProcedure
+  createDraft: mutationProcedure
     .input(
       z.object({
         leadId: z.string(),
@@ -429,7 +429,7 @@ export const contactRouter = router({
       return draft;
     }),
 
-  updateDraft: protectedProcedure
+  updateDraft: mutationProcedure
     .input(
       z.object({
         id: z.string(),
@@ -469,7 +469,7 @@ export const contactRouter = router({
       });
     }),
 
-  submitForApproval: protectedProcedure
+  submitForApproval: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const draft = await ctx.db.emailDraft.findFirst({
@@ -547,7 +547,7 @@ export const contactRouter = router({
       });
     }),
 
-  sendEmail: protectedProcedure
+  sendEmail: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const draft = await ctx.db.emailDraft.findFirst({

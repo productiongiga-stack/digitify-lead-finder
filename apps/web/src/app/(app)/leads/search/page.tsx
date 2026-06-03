@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import { safeExternalUrl } from "@/lib/utils";
 import {
   Button,
   Card,
@@ -832,6 +833,7 @@ export default function LeadSearchPage() {
                   const leadId = savedLeadIds.get(result.placeId) || existingLead?.id;
                   const { score, priority } = calcPreviewScore(result);
                   const isSelected = selectedIds.has(result.placeId);
+                  const websiteUrl = safeExternalUrl(result.websiteUri);
 
                   return (
                     <div
@@ -917,9 +919,9 @@ export default function LeadSearchPage() {
                             Campagne
                           </Button>
                         ) : null}
-                        {result.websiteUri ? (
+                        {websiteUrl ? (
                           <Button asChild size="sm" variant="ghost" className="h-8 text-xs">
-                            <a href={result.websiteUri} target="_blank" rel="noopener noreferrer">
+                            <a href={websiteUrl} target="_blank" rel="noopener noreferrer">
                               <Globe className="mr-1 h-3 w-3" />
                               Website
                             </a>
@@ -956,6 +958,8 @@ export default function LeadSearchPage() {
                   const leadId = savedLeadIds.get(result.placeId) || existingLead?.id;
                   const { score, priority } = calcPreviewScore(result);
                   const isSelected = selectedIds.has(result.placeId);
+                  const websiteUrl = safeExternalUrl(result.websiteUri);
+                  const mapsUrl = safeExternalUrl(result.googleMapsUri);
 
                   return (
                     <div
@@ -1017,9 +1021,9 @@ export default function LeadSearchPage() {
                             </span>
                           )}
 
-                          {result.websiteUri ? (
+                          {websiteUrl ? (
                             <a
-                              href={result.websiteUri}
+                              href={websiteUrl}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="flex items-center gap-1 text-primary hover:underline"
@@ -1034,9 +1038,9 @@ export default function LeadSearchPage() {
                             </span>
                           )}
 
-                          {result.googleMapsUri && (
+                          {mapsUrl ? (
                             <a
-                              href={result.googleMapsUri}
+                              href={mapsUrl}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="flex items-center gap-1 hover:text-primary"
@@ -1044,7 +1048,7 @@ export default function LeadSearchPage() {
                               <ExternalLink className="h-3 w-3" />
                               Maps
                             </a>
-                          )}
+                          ) : null}
 
                           {/* Additional categories */}
                           {result.types && result.types.length > 1 && (

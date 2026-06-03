@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { assertLeadAccess } from "../lib/tenant";
 
 export const tagRouter = router({
@@ -12,13 +12,13 @@ export const tagRouter = router({
     });
   }),
 
-  create: protectedProcedure
+  create: mutationProcedure
     .input(z.object({ name: z.string().min(1), color: z.string().default("#6366f1") }))
     .mutation(async ({ ctx, input }) => {
       return ctx.db.tag.create({ data: { ...input, createdById: ctx.user.workspaceId! } });
     }),
 
-  update: protectedProcedure
+  update: mutationProcedure
     .input(z.object({ id: z.string(), name: z.string().optional(), color: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
@@ -30,7 +30,7 @@ export const tagRouter = router({
       return ctx.db.tag.update({ where: { id }, data });
     }),
 
-  delete: protectedProcedure
+  delete: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const tag = await ctx.db.tag.findFirst({
@@ -42,7 +42,7 @@ export const tagRouter = router({
       return { success: true };
     }),
 
-  addToLead: protectedProcedure
+  addToLead: mutationProcedure
     .input(z.object({ leadId: z.string(), tagId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
@@ -55,7 +55,7 @@ export const tagRouter = router({
       return { success: true };
     }),
 
-  removeFromLead: protectedProcedure
+  removeFromLead: mutationProcedure
     .input(z.object({ leadId: z.string(), tagId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);

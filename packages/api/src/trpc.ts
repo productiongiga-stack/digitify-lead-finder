@@ -14,10 +14,12 @@ export type Context = {
     email: string;
     name: string | null;
     role: string;
-    /** Set by withWorkspace middleware on authenticated requests. */
+    /** From JWT when available; finalized in withWorkspace middleware. */
     workspaceId?: string;
   } | null;
   requestId: string;
+  /** Client IP from reverse proxy headers (public endpoints). */
+  clientIp?: string;
 };
 
 export type AppRole = "OWNER" | "ADMIN" | "MODERATOR" | "MEMBER" | "TRIAL" | "TESTER" | "VIEWER";
@@ -87,6 +89,15 @@ const withLogging = t.middleware(async ({ ctx, path, type, next }) => {
   return result;
 });
 
+const withPublicRateLimit = t.middleware(async ({ ctx, next }) => {
+  const ip = ctx.clientIp ?? ctx.requestId;
+  await enforceRateLimit({ key: `public:${ip}`, limit: 60, windowMs: 60_000 });
+  return next();
+});
+
+/** Unauthenticated endpoints with logging and IP-based rate limiting (60 req/min). */
+export const publicRateLimitedProcedure = t.procedure.use(withLogging).use(withPublicRateLimit);
+
 // --- General rate limit middleware (100 req/min per user; Redis when REDIS_URL is set) ---
 const withRateLimit = t.middleware(async ({ ctx, next }) => {
   const key = ctx.user?.id ?? "anonymous";
@@ -97,7 +108,8 @@ const withRateLimit = t.middleware(async ({ ctx, next }) => {
 // --- Auth middleware ---
 const withWorkspace = t.middleware(async ({ ctx, next }) => {
   if (!ctx.user) return next();
-  const workspaceId = await resolveWorkspaceOwnerId(ctx.db, ctx.user.id);
+  const workspaceId =
+    ctx.user.workspaceId ?? (await resolveWorkspaceOwnerId(ctx.db, ctx.user.id));
   return next({
     ctx: {
       ...ctx,
@@ -151,6 +163,24 @@ export const protectedProcedure = t.procedure
   .use(withWorkspaceRlsContext)
   .use(enforceTrialAccess);
 
+/** VIEWER and TESTER are read-only; TRIAL users keep mutation access during their trial window. */
+const READ_ONLY_ROLES = new Set<AppRole>(["VIEWER", "TESTER"]);
+
+const enforceMutationRole = t.middleware(({ ctx, next }) => {
+  if (!ctx.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "Niet ingelogd." });
+  }
+  if (READ_ONLY_ROLES.has(ctx.user.role as AppRole)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Je rol heeft geen rechten om wijzigingen door te voeren.",
+    });
+  }
+  return next();
+});
+
+export const mutationProcedure = protectedProcedure.use(enforceMutationRole);
+
 // Stricter rate limit for AI/email endpoints (20 req/min)
 export const aiRateLimitedProcedure = t.procedure
   .use(withLogging)
@@ -164,7 +194,8 @@ export const aiRateLimitedProcedure = t.procedure
   .use(isAuthenticated)
   .use(withWorkspace)
   .use(withWorkspaceRlsContext)
-  .use(enforceTrialAccess);
+  .use(enforceTrialAccess)
+  .use(enforceMutationRole);
 
 const hasRole = (...roles: string[]) =>
   t.middleware(({ ctx, next }) => {

@@ -16,6 +16,9 @@ export async function GET(request: Request) {
   if (!user) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
+  if (!["OWNER", "ADMIN"].includes(String(user.role || ""))) {
+    return NextResponse.redirect(new URL("/settings/bookings?google=forbidden#google-agenda", request.url));
+  }
   const userId = (user as any).id as string | undefined;
   if (!userId) {
     return NextResponse.redirect(new URL("/login", request.url));

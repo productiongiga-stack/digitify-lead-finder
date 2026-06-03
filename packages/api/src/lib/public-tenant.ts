@@ -4,8 +4,11 @@ import { userSettingKey } from "./user-settings";
 import { workspaceSettingKey } from "./workspace-settings";
 
 export const PUBLIC_TENANT_SETTING_KEY = "chatbot.public_tenant_token";
+export const PUBLIC_TENANT_LOOKUP_PREFIX = "public_tenant_lookup:";
 const TOKEN_CACHE_TTL_MS = 30 * 60 * 1000;
+const RESOLVE_CACHE_TTL_MS = 5 * 60 * 1000;
 const tokenCache = new Map<string, { token: string; cachedAt: number }>();
+const resolveCache = new Map<string, { ownerId: string; cachedAt: number }>();
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,120}$/;
 
@@ -65,16 +68,30 @@ function tenantSettingKeys(workspaceOwnerId: string) {
   ];
 }
 
+export function publicTenantLookupKey(token: string) {
+  return `${PUBLIC_TENANT_LOOKUP_PREFIX}${token}`;
+}
+
+async function writePublicTenantLookup(db: PrismaClient, token: string, ownerId: string) {
+  await db.setting.upsert({
+    where: { key: publicTenantLookupKey(token) },
+    create: { key: publicTenantLookupKey(token), value: ownerId },
+    update: { value: ownerId },
+  });
+  resolveCache.set(token, { ownerId, cachedAt: Date.now() });
+}
+
 async function syncTenantTokenKeys(db: PrismaClient, workspaceOwnerId: string, token: string) {
-  await Promise.all(
-    tenantSettingKeys(workspaceOwnerId).map((key) =>
+  await Promise.all([
+    ...tenantSettingKeys(workspaceOwnerId).map((key) =>
       db.setting.upsert({
         where: { key },
         create: { key, value: token },
         update: { value: token },
       }),
     ),
-  );
+    writePublicTenantLookup(db, token, workspaceOwnerId),
+  ]);
 }
 
 export async function ensurePublicTenantToken(db: PrismaClient, userId: string) {
@@ -103,6 +120,42 @@ export async function ensurePublicTenantToken(db: PrismaClient, userId: string) 
   return token;
 }
 
+async function resolveOwnerIdFromLookupTable(db: PrismaClient, token: string) {
+  const cached = resolveCache.get(token);
+  if (cached && Date.now() - cached.cachedAt < RESOLVE_CACHE_TTL_MS) {
+    return cached.ownerId;
+  }
+
+  const row = await db.setting.findUnique({
+    where: { key: publicTenantLookupKey(token) },
+    select: { value: true },
+  });
+  const ownerId = parseSettingString(row?.value);
+  if (ownerId) {
+    resolveCache.set(token, { ownerId, cachedAt: Date.now() });
+    return ownerId;
+  }
+  return null;
+}
+
+async function resolveOwnerIdFromLegacyScan(db: PrismaClient, token: string) {
+  const rows = await db.setting.findMany({
+    where: {
+      key: { endsWith: `:${PUBLIC_TENANT_SETTING_KEY}` },
+    },
+    select: { key: true, value: true },
+  });
+
+  for (const row of rows) {
+    if (parseSettingString(row.value) !== token) continue;
+    const ownerId = extractTenantOwnerIdFromSettingKey(row.key);
+    if (!ownerId) continue;
+    await writePublicTenantLookup(db, token, ownerId).catch(() => null);
+    return ownerId;
+  }
+  return null;
+}
+
 export async function resolveUserIdFromPublicTenantToken(
   db: PrismaClient,
   rawTenant: string | null | undefined,
@@ -111,19 +164,9 @@ export async function resolveUserIdFromPublicTenantToken(
   if (!token) return null;
 
   try {
-    const rows = await db.setting.findMany({
-      where: {
-        key: { endsWith: `:${PUBLIC_TENANT_SETTING_KEY}` },
-      },
-      select: { key: true, value: true },
-    });
-
-    for (const row of rows) {
-      if (parseSettingString(row.value) !== token) continue;
-      const ownerId = extractTenantOwnerIdFromSettingKey(row.key);
-      if (ownerId) return ownerId;
-    }
-    return null;
+    const fromLookup = await resolveOwnerIdFromLookupTable(db, token);
+    if (fromLookup) return fromLookup;
+    return resolveOwnerIdFromLegacyScan(db, token);
   } catch (error) {
     console.error("[public-tenant] resolveUserIdFromPublicTenantToken failed", error);
     return null;

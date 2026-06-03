@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { buildInboxHtmlDocument, sanitizeInboxHtml } from "@/lib/sanitize-inbox-html";
 import {
@@ -56,14 +56,6 @@ type MailType = (typeof MAIL_TYPES)[number]["value"];
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function emailPreviewFromMessage(message: { text?: string | null; html?: string | null }) {
-  if (message.text?.trim()) return message.text.trim().slice(0, 280);
-  if (message.html?.trim()) {
-    return message.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 280);
-  }
-  return "";
 }
 
 const INBOX_AI_STYLES = [
@@ -125,6 +117,7 @@ export default function InboxPage() {
   const [composeCtaText, setComposeCtaText] = useState("");
   const [composeCtaUrl, setComposeCtaUrl] = useState("");
   const [inboxAiStyle, setInboxAiStyle] = useState<string>("Professioneler");
+  const composeDraftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [followUpContext, setFollowUpContext] = useState<{
     subject: string;
     from: string;
@@ -197,13 +190,6 @@ export default function InboxPage() {
       refetchOnWindowFocus: false,
     },
   );
-  const recordInbound = trpc.inbox.recordInbound.useMutation({
-    onSuccess: () => {
-      if (linkedFromMessage?.id) {
-        utils.lead.getEmailTimeline.invalidate({ leadId: linkedFromMessage.id });
-      }
-    },
-  });
 
   const sendReply = trpc.inbox.reply.useMutation({
     onSuccess: () => {
@@ -237,6 +223,9 @@ export default function InboxPage() {
       setComposeError("");
       setComposeBody("");
       setComposeSubject("");
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem("digitify_inbox_compose_draft");
+      }
       utils.inbox.list.invalidate();
       if (composeLeadId) {
         utils.lead.getEmailTimeline.invalidate({ leadId: composeLeadId });
@@ -254,17 +243,9 @@ export default function InboxPage() {
   }, [message?.html]);
 
   useEffect(() => {
-    if (!message?.fromAddress || !isValidEmail(message.fromAddress)) return;
-    recordInbound.mutate({
-      uid: message.uid,
-      mailbox: selectedMailbox,
-      fromEmail: message.fromAddress,
-      subject: message.subject,
-      messageId: message.messageId || undefined,
-      bodyPreview: emailPreviewFromMessage(message),
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opened message
-  }, [message?.uid, message?.messageId, selectedMailbox]);
+    if (!message?.uid || !linkedFromMessage?.id) return;
+    utils.lead.getEmailTimeline.invalidate({ leadId: linkedFromMessage.id });
+  }, [message?.uid, linkedFromMessage?.id, utils.lead.getEmailTimeline]);
 
   useEffect(() => {
     if (!linkedFromMessage?.id) return;
@@ -313,7 +294,13 @@ export default function InboxPage() {
       subject: composeSubject,
       body: composeBody,
     };
-    window.localStorage.setItem("digitify_inbox_compose_draft", JSON.stringify(payload));
+    if (composeDraftSaveTimerRef.current) clearTimeout(composeDraftSaveTimerRef.current);
+    composeDraftSaveTimerRef.current = setTimeout(() => {
+      window.localStorage.setItem("digitify_inbox_compose_draft", JSON.stringify(payload));
+    }, 300);
+    return () => {
+      if (composeDraftSaveTimerRef.current) clearTimeout(composeDraftSaveTimerRef.current);
+    };
   }, [composeType, composeLeadId, composeLeadSearch, composeTo, composeSubject, composeBody]);
 
   function handleSelectComposeLead(lead: {

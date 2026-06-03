@@ -741,7 +741,11 @@
   }
 
   .reports-audit-card {
-    @apply border-border/70 bg-card/90 backdrop-blur-sm;
+    @apply border-border/70 bg-gradient-to-br from-card via-card to-muted/20 backdrop-blur-sm;
+  }
+
+  .reports-audit-card:hover {
+    @apply bg-gradient-to-br from-card via-primary/[0.02] to-violet-500/[0.04];
   }
 
   .audit-metrics-section {

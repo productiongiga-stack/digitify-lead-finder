@@ -1,3 +1,5 @@
+import { assertPublicHttpUrl } from "@digitify/connectors";
+
 export type SocialImageInfo = {
   width: number;
   height: number;
@@ -202,9 +204,11 @@ export async function fetchSocialImageInfo(imageUrl: string): Promise<SocialImag
     return parseDataImageUrl(trimmed);
   }
 
+  const safeUrl = await assertPublicHttpUrl(trimmed);
+
   let response: Response;
   try {
-    response = await fetch(trimmed, { signal: AbortSignal.timeout(10_000) });
+    response = await fetch(safeUrl, { signal: AbortSignal.timeout(10_000) });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "onbekende netwerkfout";
     throw new Error(`Afbeelding kon niet opgehaald worden via de publieke URL. Controleer of de URL publiek bereikbaar is. (${detail})`);

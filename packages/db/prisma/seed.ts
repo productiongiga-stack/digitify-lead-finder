@@ -64,6 +64,30 @@ async function main() {
     },
   });
 
+  const viewerEmail = process.env.SEED_VIEWER_EMAIL?.trim().toLowerCase() || "";
+  const viewerPassword = process.env.SEED_VIEWER_PASSWORD?.trim() || adminPassword;
+  if (viewerEmail) {
+    if (viewerPassword.length < 12) {
+      throw new Error("SEED_VIEWER_PASSWORD must be at least 12 characters when SEED_VIEWER_EMAIL is set.");
+    }
+    await prisma.user.upsert({
+      where: { email: viewerEmail },
+      update: {
+        role: UserRole.VIEWER,
+        workspaceOwnerId: admin.id,
+        passwordHash: hashPassword(viewerPassword),
+      },
+      create: {
+        email: viewerEmail,
+        name: "Viewer (read-only)",
+        passwordHash: hashPassword(viewerPassword),
+        emailVerified: new Date(),
+        role: UserRole.VIEWER,
+        workspaceOwnerId: admin.id,
+      },
+    });
+  }
+
   // Create pipeline stages
   const stages = [
     { name: "New", color: "#6366f1", sortOrder: 0, isDefault: true },

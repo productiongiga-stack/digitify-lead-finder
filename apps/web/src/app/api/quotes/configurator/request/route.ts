@@ -85,6 +85,26 @@ async function resolveLeadId(params: {
   return existingLead?.id ?? null;
 }
 
+async function resolveOwnedChatSessionId(params: {
+  workspaceId: string;
+  memberId: string;
+  chatSessionId: string;
+}) {
+  if (!params.chatSessionId) return "";
+  const session = await prisma.chatSession.findFirst({
+    where: {
+      id: params.chatSessionId,
+      OR: [
+        { lead: { createdById: params.workspaceId } },
+        { assignedToId: params.memberId },
+        { tags: { has: `tenant:${params.workspaceId}` } },
+      ],
+    },
+    select: { id: true },
+  });
+  return session?.id || "";
+}
+
 export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user?.id) {
@@ -152,11 +172,16 @@ export async function POST(request: Request) {
     const total = discountedSubtotal + vatAmount;
 
     const workspaceId = workspaceIdFor(user);
+    const ownedChatSessionId = await resolveOwnedChatSessionId({
+      workspaceId,
+      memberId: user.id,
+      chatSessionId,
+    });
     const resolvedLeadId = await resolveLeadId({
       workspaceId,
       memberId: user.id,
       leadId,
-      chatSessionId,
+      chatSessionId: ownedChatSessionId,
       clientEmail,
       clientCompany,
       clientName,
@@ -220,10 +245,10 @@ export async function POST(request: Request) {
         return updated;
       });
 
-      if (chatSessionId) {
+      if (ownedChatSessionId) {
         await prisma.chatMessage.create({
           data: {
-            sessionId: chatSessionId,
+            sessionId: ownedChatSessionId,
             role: "AGENT",
             content: `Offerte ${quote.quoteNumber} bijgewerkt via configurator.`,
           },
@@ -281,10 +306,10 @@ export async function POST(request: Request) {
       },
     });
 
-    if (chatSessionId) {
+    if (ownedChatSessionId) {
       await prisma.chatMessage.create({
         data: {
-          sessionId: chatSessionId,
+          sessionId: ownedChatSessionId,
           role: "AGENT",
           content: `Offerte ${quoteNumber} aangemaakt via configurator.`,
         },

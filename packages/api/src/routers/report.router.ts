@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { assertLeadAccess } from "../lib/tenant";
 
@@ -55,7 +55,7 @@ export const reportRouter = router({
       return report;
     }),
 
-  generate: protectedProcedure
+  generate: mutationProcedure
     .input(
       z.object({
         campaignId: z.string().optional(),
@@ -221,7 +221,7 @@ export const reportRouter = router({
       return report;
     }),
 
-  generateLeadReport: protectedProcedure
+  generateLeadReport: mutationProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
@@ -398,7 +398,7 @@ export const reportRouter = router({
       return report;
     }),
 
-  delete: protectedProcedure
+  delete: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const report = await ctx.db.report.findUnique({

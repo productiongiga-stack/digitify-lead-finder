@@ -42,4 +42,12 @@ describe("social image parsing", () => {
       expect(result.message.length).toBeGreaterThan(0);
     }
   });
+
+  it("blocks SSRF targets such as localhost", async () => {
+    const result = await probeSocialImage("http://127.0.0.1/image.png");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toMatch(/niet toegestaan/i);
+    }
+  });
 });

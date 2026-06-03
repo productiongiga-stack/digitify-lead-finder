@@ -1,4 +1,4 @@
-const DASHBOARD_CACHE_TTL_MS = 20_000;
+const DASHBOARD_CACHE_TTL_MS = 60_000;
 const dashboardCache = new Map<string, { expiresAt: number; value: unknown }>();
 
 export function readDashboardCache<T>(key: string): T | null {

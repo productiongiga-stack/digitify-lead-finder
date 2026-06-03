@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { assertLeadAccess, ownedLeadWhere } from "../lib/tenant";
 import { buildLeadEmailTimeline } from "../lib/lead-email-timeline";
@@ -291,7 +291,7 @@ export const leadRouter = router({
       };
     }),
 
-  create: protectedProcedure
+  create: mutationProcedure
     .input(
       z.object({
         companyName: z.string().min(1),
@@ -328,7 +328,7 @@ export const leadRouter = router({
       return lead;
     }),
 
-  update: protectedProcedure
+  update: mutationProcedure
     .input(
       z.object({
         id: z.string(),
@@ -396,7 +396,7 @@ export const leadRouter = router({
       return lead;
     }),
 
-  delete: protectedProcedure
+  delete: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.id);
@@ -404,7 +404,7 @@ export const leadRouter = router({
       return { success: true };
     }),
 
-  bulkUpdateStatus: protectedProcedure
+  bulkUpdateStatus: mutationProcedure
     .input(
       z.object({
         ids: z.array(z.string()).min(1).max(500),
@@ -419,7 +419,7 @@ export const leadRouter = router({
       return { updated: result.count };
     }),
 
-  bulkDelete: protectedProcedure
+  bulkDelete: mutationProcedure
     .input(z.object({ ids: z.array(z.string()).min(1).max(500) }))
     .mutation(async ({ ctx, input }) => {
       const result = await ctx.db.lead.deleteMany({
@@ -428,7 +428,7 @@ export const leadRouter = router({
       return { deleted: result.count };
     }),
 
-  bulkAddTag: protectedProcedure
+  bulkAddTag: mutationProcedure
     .input(z.object({ leadIds: z.array(z.string()).min(1).max(500), tagId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const tag = await ctx.db.tag.findFirst({
@@ -462,7 +462,7 @@ export const leadRouter = router({
       return { added: toCreate.length };
     }),
 
-  addNote: protectedProcedure
+  addNote: mutationProcedure
     .input(z.object({ leadId: z.string(), content: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
@@ -610,7 +610,7 @@ export const leadRouter = router({
       };
     }),
 
-  importCsv: protectedProcedure
+  importCsv: mutationProcedure
     .input(z.object({ csv: z.string().min(1), source: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const rows = parseCsv(input.csv);

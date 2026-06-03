@@ -51,6 +51,7 @@ import {
   extractQuoteIdFromDraftBody,
   getQuoteConfiguratorUrl,
 } from "@/lib/quote-outbound";
+import { useOutboundEmailPreviewSettings } from "@/lib/outbound-email-settings";
 import { EmailPreview } from "@/components/email/preview";
 import { OutboundDraftTimeline } from "@/components/outbound/outbound-draft-timeline";
 import {
@@ -81,20 +82,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
 
   const { data: draft, isLoading } = trpc.contact.getDraftById.useQuery({ id });
 
-  const { data: brandingSettings } = trpc.settings.getAll.useQuery(undefined, {
-    staleTime: 60_000,
-  });
+  const { brandCompanyName, brandPrimaryColor, brandHeaderSlogan } = useOutboundEmailPreviewSettings();
   const { data: templateData } = trpc.template.list.useQuery({ forOutbound: true });
   const templates = templateData?.templates ?? [];
-  const brandCompanyName = brandingSettings?.["branding.company_name"]
-    ? String(brandingSettings["branding.company_name"])
-    : "";
-  const brandPrimaryColor = brandingSettings?.["branding.primary_color"]
-    ? String(brandingSettings["branding.primary_color"])
-    : "#6366f1";
-  const brandHeaderSlogan = brandingSettings?.["email.header_slogan"]
-    ? String(brandingSettings["email.header_slogan"])
-    : "";
 
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");

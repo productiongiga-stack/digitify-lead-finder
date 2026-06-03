@@ -34,6 +34,11 @@ describe("isSecretSettingKey", () => {
     expect(isSecretSettingKey("api.endpoint")).toBe(false);
     expect(isSecretSettingKey("email.from_name")).toBe(false);
   });
+
+  it("treats bookings private key and webhook secret as secrets", () => {
+    expect(isSecretSettingKey("bookings.google_service_account_private_key")).toBe(true);
+    expect(isSecretSettingKey("bookings.webhook_secret")).toBe(true);
+  });
 });
 
 describe("AES-256-GCM round-trip via protectSettingValue / revealSettingValue", () => {
@@ -123,6 +128,19 @@ describe("redactSecretSettingValue", () => {
 
   it("passes through non-secret keys unchanged", () => {
     expect(redactSecretSettingValue("display.theme", "dark")).toBe("dark");
+  });
+
+  it("redacts bookings private key and webhook secret", () => {
+    const privateKey = protectSettingValue(
+      "bookings.google_service_account_private_key",
+      "-----BEGIN PRIVATE KEY-----\nabc",
+    );
+    const webhookSecret = protectSettingValue("bookings.webhook_secret", "whsec_test123");
+
+    expect(redactSecretSettingValue("bookings.google_service_account_private_key", privateKey)).toBe(
+      SECRET_REDACTION_MASK,
+    );
+    expect(redactSecretSettingValue("bookings.webhook_secret", webhookSecret)).toBe(SECRET_REDACTION_MASK);
   });
 });
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { Button, Card, CardContent, CardHeader, CardTitle } from "@digitify/ui";
+import { Button, Card, CardContent, CardHeader, CardTitle, Skeleton } from "@digitify/ui";
 import { ShieldAlert } from "lucide-react";
 import { canAccessSettingsPath } from "@/lib/permissions";
 
@@ -12,7 +12,9 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const { data: session, status } = useSession();
   const role = (session?.user as { role?: string } | undefined)?.role;
 
-  if (status === "loading") return <>{children}</>;
+  if (status === "loading") {
+    return <Skeleton className="h-32 w-full rounded-xl" />;
+  }
 
   if (!canAccessSettingsPath(role, pathname)) {
     return (

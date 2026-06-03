@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { trpc } from "@/lib/trpc/client";
+import { createContext, useContext, useMemo } from "react";
+import { trpc, type RouterOutputs } from "@/lib/trpc/client";
 import { getLeadStatusDotClass, getLeadStatusLabel } from "@/lib/lead-status";
 import { QueryErrorState } from "@/components/feedback/query-error-state";
 import {
@@ -142,8 +142,22 @@ const ACTION_GROUPS: {
   },
 ];
 
+const DASHBOARD_QUERY_OPTS = { staleTime: 60_000, refetchOnMount: false } as const;
+
+type DashboardOverview = RouterOutputs["dashboard"]["getOverview"];
+
+const DashboardOverviewContext = createContext<{
+  data: DashboardOverview | undefined;
+  isLoading: boolean;
+}>({ data: undefined, isLoading: true });
+
+function useDashboardOverview() {
+  return useContext(DashboardOverviewContext);
+}
+
 function ActionCenter({
   kpis,
+  reminders,
   loading,
 }: {
   kpis:
@@ -153,11 +167,9 @@ function ActionCenter({
         hotLeads: number;
       }
     | undefined;
+  reminders: DashboardOverview["reminders"] | undefined;
   loading: boolean;
 }) {
-  const { data: reminders, isLoading: remindersLoading } =
-    trpc.dashboard.getUnifiedReminders.useQuery(undefined, { staleTime: 60_000 });
-
   const items = useMemo<ReminderItem[]>(() => {
     const list: ReminderItem[] = [];
     if (kpis && kpis.failedEmails > 0) {
@@ -202,7 +214,7 @@ function ActionCenter({
   }, [items]);
 
   const totalCount = items.length;
-  const isLoading = loading || remindersLoading;
+  const isLoading = loading;
 
   return (
     <Card className="dashboard-widget border-border/50 bg-card/90 shadow-sm backdrop-blur-sm">
@@ -336,7 +348,8 @@ function getActivityHref(activity: { lead?: { id: string } | null; metadata?: un
 }
 
 function ActivityFeed() {
-  const { data: activities, isLoading } = trpc.dashboard.getRecentActivity.useQuery();
+  const { data: overview, isLoading } = useDashboardOverview();
+  const activities = overview?.recentActivity;
   const compactActivities = useMemo(() => {
     const seenSettingsBursts = new Set<string>();
     return (activities ?? [])
@@ -410,7 +423,8 @@ function ActivityFeed() {
    Top Leads
    ================================================================ */
 function TopLeads() {
-  const { data: leads, isLoading } = trpc.dashboard.getTopLeads.useQuery();
+  const { data: overview, isLoading } = useDashboardOverview();
+  const leads = overview?.topLeads;
 
   if (isLoading) {
     return (
@@ -478,7 +492,8 @@ function TopLeads() {
    Pipeline Overview
    ================================================================ */
 function PipelineOverview() {
-  const { data: stages, isLoading } = trpc.dashboard.getPipelineOverview.useQuery();
+  const { data: overview, isLoading } = useDashboardOverview();
+  const stages = overview?.pipelineOverview;
 
   if (isLoading) {
     return (
@@ -569,10 +584,8 @@ function PipelineOverview() {
    Lead follow-up snippet — same source as actiecentrum (no duplicate query)
    ================================================================ */
 function LeadFollowUpSnippet() {
-  const { data: reminders, isLoading } = trpc.dashboard.getUnifiedReminders.useQuery(undefined, {
-    staleTime: 60_000,
-  });
-  const items = (reminders?.items ?? []).filter((item) => item.type === "lead_followup").slice(0, 5);
+  const { data: overview, isLoading } = useDashboardOverview();
+  const items = (overview?.reminders.items ?? []).filter((item) => item.type === "lead_followup").slice(0, 5);
 
   if (isLoading) {
     return (
@@ -627,7 +640,8 @@ function LeadFollowUpSnippet() {
    Tasks Today — bookings due today
    ================================================================ */
 function TasksToday() {
-  const { data: bookings, isLoading } = trpc.dashboard.getUpcomingBookings.useQuery();
+  const { data: overview, isLoading } = useDashboardOverview();
+  const bookings = overview?.upcomingBookings;
 
   const todays = useMemo(() => {
     if (!bookings) return [];
@@ -695,7 +709,8 @@ function TasksToday() {
    Upcoming Bookings (all upcoming)
    ================================================================ */
 function UpcomingBookings() {
-  const { data: bookings, isLoading } = trpc.dashboard.getUpcomingBookings.useQuery();
+  const { data: overview, isLoading } = useDashboardOverview();
+  const bookings = overview?.upcomingBookings;
 
   if (isLoading) {
     return (
@@ -747,7 +762,8 @@ function UpcomingBookings() {
    Active Chats
    ================================================================ */
 function ActiveChats() {
-  const { data: chats, isLoading } = trpc.dashboard.getOpenChats.useQuery();
+  const { data: overview, isLoading } = useDashboardOverview();
+  const chats = overview?.openChats;
 
   if (isLoading) {
     return (
@@ -805,7 +821,8 @@ function ActiveChats() {
    Expiring Domains
    ================================================================ */
 function ExpiringDomains() {
-  const { data: domains, isLoading } = trpc.dashboard.getExpiringDomains.useQuery();
+  const { data: overview, isLoading } = useDashboardOverview();
+  const domains = overview?.expiringDomains;
 
   if (isLoading) {
     return (
@@ -872,11 +889,12 @@ function ExpiringDomains() {
    ================================================================ */
 export default function DashboardPage() {
   const {
-    data: kpis,
+    data: overview,
     isLoading,
     isError,
     refetch,
-  } = trpc.dashboard.getKpis.useQuery();
+  } = trpc.dashboard.getOverview.useQuery(undefined, DASHBOARD_QUERY_OPTS);
+  const kpis = overview?.kpis;
   const queueCount =
     (kpis?.pendingDrafts ?? 0) + (kpis?.failedEmails ?? 0) + (kpis?.pendingReviews ?? 0);
 
@@ -994,6 +1012,7 @@ export default function DashboardPage() {
   }
 
   return (
+    <DashboardOverviewContext.Provider value={{ data: overview, isLoading }}>
     <div className="app-page">
       <DashboardHero
         totalLeads={kpis?.totalLeads ?? 0}
@@ -1025,6 +1044,7 @@ export default function DashboardPage() {
                   }
                 : undefined
             }
+            reminders={overview?.reminders}
             loading={isLoading}
           />
 
@@ -1108,5 +1128,6 @@ export default function DashboardPage() {
         </TabsContent>
       </Tabs>
     </div>
+    </DashboardOverviewContext.Provider>
   );
 }

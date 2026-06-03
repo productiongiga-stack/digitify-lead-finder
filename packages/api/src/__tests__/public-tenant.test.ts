@@ -3,6 +3,7 @@ import {
   extractTenantOwnerIdFromSettingKey,
   extractUserIdFromScopedSettingKey,
   normalizePublicTenantToken,
+  publicTenantLookupKey,
 } from "../lib/public-tenant";
 
 describe("public-tenant", () => {
@@ -30,5 +31,10 @@ describe("public-tenant", () => {
     expect(
       extractTenantOwnerIdFromSettingKey("workspace:ws_1:chatbot.public_tenant_token"),
     ).toBe("ws_1");
+  });
+
+  it("builds stable lookup keys for tenant tokens", () => {
+    const token = "a".repeat(24);
+    expect(publicTenantLookupKey(token)).toBe(`public_tenant_lookup:${token}`);
   });
 });

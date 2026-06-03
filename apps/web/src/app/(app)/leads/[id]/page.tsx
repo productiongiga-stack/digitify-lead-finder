@@ -127,8 +127,8 @@ export default function LeadDetailPage() {
     {
       enabled: Boolean(leadId),
       refetchOnMount: "always",
-      refetchOnReconnect: true,
-      staleTime: 0,
+      refetchOnReconnect: false,
+      staleTime: 60_000,
     }
   );
   const duplicateQuery = trpc.lead.findDuplicates.useQuery(
@@ -1038,21 +1038,24 @@ export default function LeadDetailPage() {
                   { label: "Twitter / X", url: lead.twitterUrl, Icon: Twitter },
                   { label: "TikTok", url: lead.tiktokUrl, Icon: CircleDot },
                   { label: "YouTube", url: lead.youtubeUrl, Icon: CircleDot },
-                ].map(({ label, url, Icon }) => (
+                ].map(({ label, url, Icon }) => {
+                  const safeUrl = safeExternalUrl(url);
+                  return (
                   <div key={label} className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
                       <Icon className="h-4 w-4 text-muted-foreground" />
                       <span>{label}</span>
                     </div>
-                    {url ? (
-                      <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                    {safeUrl ? (
+                      <a href={safeUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
                         <ExternalLink className="h-3.5 w-3.5" />
                       </a>
                     ) : (
                       <span className="text-xs text-muted-foreground">Niet gevonden</span>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </CardContent>
             </Card>
 

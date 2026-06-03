@@ -983,6 +983,16 @@ export default function QuoteSettingsPage() {
   const deleteService = trpc.quote.deleteService.useMutation();
 
   useEffect(() => {
+    if (!hasUnpublishedChanges) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [hasUnpublishedChanges]);
+
+  useEffect(() => {
     if (!settings || loaded) return;
     const getStringSetting = (key: string, fallback = "") => {
       const value = settings[key];

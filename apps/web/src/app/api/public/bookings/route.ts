@@ -3,8 +3,11 @@ import { prisma } from "@digitify/db";
 import { sendBrandedEmail } from "@digitify/api/src/lib/email-sender";
 import { log } from "@digitify/api/src/lib/logger";
 import { isGoogleSlotAvailable, listGoogleBusyWindows, loadGoogleCalendarSyncConfig } from "@digitify/api/src/lib/google-calendar";
-import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-schema-compat";
+import {
+  publicBookingRateLimitKey,
+  resolvePublicBookingTenantUserId,
+} from "@/lib/public-booking-tenant";
 import {
   addMinutes,
   buildIcsAttachment,
@@ -218,9 +221,14 @@ export async function POST(request: Request) {
     const body = await request.json();
     _phase = "tenant";
     const ip = getClientIp(request);
+    const bookingAuth = {
+      tenant: String(body.tenant || ""),
+      quotePortal: String(body.quotePortal || ""),
+      portalToken: String(body.portalToken || ""),
+    };
     let tenantUserId: string | null = null;
     try {
-      tenantUserId = await resolvePublicTenantUserId(prisma, String(body.tenant || ""));
+      tenantUserId = await resolvePublicBookingTenantUserId(bookingAuth);
     } catch (error) {
       log.api.error("Public booking tenant lookup failed", { route: "/api/public/bookings", ip }, error);
       return NextResponse.json(
@@ -241,14 +249,14 @@ export async function POST(request: Request) {
 
     _phase = "rate-limit";
     const burstLimiter = await enforceRateLimit(request, {
-      key: `public-booking-burst:${tenantUserId}:${ip}`,
+      key: `public-booking-burst:${publicBookingRateLimitKey(bookingAuth)}:${ip}`,
       limit: 4,
       windowMs: 60_000,
       message: "Te veel aanvragen. Wacht even en probeer opnieuw.",
     });
     if (burstLimiter) return burstLimiter;
     const hourlyLimiter = await enforceRateLimit(request, {
-      key: `public-booking:${tenantUserId}:${ip}`,
+      key: `public-booking:${publicBookingRateLimitKey(bookingAuth)}:${ip}`,
       limit: 12,
       windowMs: 60 * 60 * 1000,
       message: "Te veel aanvragen. Probeer het binnen enkele minuten opnieuw.",
