@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { enforceRateLimit } from "../lib/rate-limit";
@@ -76,7 +76,7 @@ function buildSearchQueries(input: {
 }
 
 export const searchRouter = router({
-  searchPlaces: protectedProcedure
+  searchPlaces: mutationProcedure
     .input(
       z
         .object({
@@ -304,7 +304,7 @@ export const searchRouter = router({
     }
   }),
 
-  saveSearch: protectedProcedure
+  saveSearch: mutationProcedure
     .input(
       z.object({
         id: z.string().optional(),
@@ -349,7 +349,7 @@ export const searchRouter = router({
       return serializeSavedSearch(row);
     }),
 
-  deleteSavedSearch: protectedProcedure
+  deleteSavedSearch: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
@@ -395,7 +395,7 @@ export const searchRouter = router({
       return { score, priority };
     }),
 
-  saveSearchResult: protectedProcedure
+  saveSearchResult: mutationProcedure
     .input(searchResultSchema)
     .mutation(async ({ ctx, input }) => {
       // Check by placeId (exact) or company name (fuzzy duplicate prevention)

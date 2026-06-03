@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, aiRateLimitedProcedure, mutationProcedure } from "../trpc";
 import { computeScore, type ScoringWeightConfig, type LeadData, type EnrichmentPayload } from "@digitify/scoring";
 import { analyzeWebsite } from "@digitify/connectors";
 import { assertLeadAccess } from "../lib/tenant";
@@ -12,7 +12,7 @@ export const scoringRouter = router({
    * Compute score for a lead using current enrichment data + scoring weights.
    * Does NOT re-fetch the website — uses stored enrichment data.
    */
-  computeForLead: protectedProcedure
+  computeForLead: mutationProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
@@ -116,7 +116,7 @@ export const scoringRouter = router({
    * Recompute scores for many or all leads using existing enrichment data.
    * Fast path for keeping the lead list up-to-date without re-running website analysis.
    */
-  recomputeScores: protectedProcedure
+  recomputeScores: mutationProcedure
     .input(
       z
         .object({
@@ -269,7 +269,7 @@ export const scoringRouter = router({
   /**
    * Enrich a lead: analyze its website, store enrichment data, then compute score.
    */
-  enrichLead: protectedProcedure
+  enrichLead: aiRateLimitedProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
@@ -478,7 +478,7 @@ export const scoringRouter = router({
   /**
    * Bulk enrich + score multiple leads.
    */
-  bulkEnrich: protectedProcedure
+  bulkEnrich: aiRateLimitedProcedure
     .input(z.object({ leadIds: z.array(z.string()).min(1).max(50) }))
     .mutation(async ({ ctx, input }) => {
       const results: { leadId: string; score: number; priority: string; error?: string }[] = [];

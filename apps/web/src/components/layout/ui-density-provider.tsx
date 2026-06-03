@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
-import { readSettingString } from "@/lib/settings";
 
 function applyDensity(value: "comfortable" | "compact") {
   if (typeof document === "undefined") return;
@@ -18,10 +17,15 @@ export function UiDensityProvider() {
     pathname.startsWith("/embed") ||
     pathname.startsWith("/review/") ||
     pathname.startsWith("/client-portal/");
-  const { data: settings } = trpc.settings.getAll.useQuery(undefined, {
-    enabled: !isPublicRuntimePath,
-    staleTime: 60_000,
-  });
+  const { data: densitySetting } = trpc.settings.get.useQuery(
+    { key: "ui.density" },
+    {
+      enabled: !isPublicRuntimePath,
+      staleTime: 5 * 60_000,
+      refetchOnMount: false,
+      refetchOnWindowFocus: false,
+    },
+  );
 
   useEffect(() => {
     try {
@@ -35,7 +39,7 @@ export function UiDensityProvider() {
   }, []);
 
   useEffect(() => {
-    const settingDensity = readSettingString(settings, "ui.density", "");
+    const settingDensity = typeof densitySetting === "string" ? densitySetting : "";
     if (settingDensity === "compact" || settingDensity === "comfortable") {
       applyDensity(settingDensity);
       try {
@@ -44,7 +48,7 @@ export function UiDensityProvider() {
         // ignore
       }
     }
-  }, [settings]);
+  }, [densitySetting]);
 
   return null;
 }

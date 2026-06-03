@@ -47,56 +47,98 @@ export type QuickNavItem = {
   moduleId?: string;
 };
 
-export const MAIN_NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  {
-    href: "/leads",
-    label: "Leads",
-    icon: Users,
-    activeMatch: (pathname) => {
-      if (pathname === "/leads" || (pathname.startsWith("/leads/") && !pathname.startsWith("/leads/search"))) return true;
-      return LEADS_WORKFLOW_ITEMS.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
-    },
-  },
-  {
-    href: "/meta-ads",
-    label: "Advertenties",
-    icon: Megaphone,
-    activeMatch: (pathname) =>
-      ADS_NAV_ITEMS.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`)),
-  },
-];
+export const DASHBOARD_NAV_ITEM: NavItem = {
+  href: "/dashboard",
+  label: "Dashboard",
+  icon: LayoutDashboard,
+};
 
 export const ADS_NAV_ITEMS: QuickNavItem[] = [
   { href: "/meta-ads", label: "Meta Ads", icon: Megaphone, moduleId: "metaAds" },
   { href: "/google-ads", label: "Google Ads", icon: BarChart3, moduleId: "googleAds" },
 ];
 
-export const LEADS_WORKFLOW_ITEMS: QuickNavItem[] = [
-  { href: "/leads/search", label: "Leads zoeken", icon: Search },
-  { href: "/campaigns", label: "Campagneprofielen", icon: Target, moduleId: "campaigns" },
-  { href: "/contacts", label: "Outbound", icon: SendHorizonal, moduleId: "contacts" },
-  { href: "/contacts/inbox", label: "Inbox", icon: Inbox, moduleId: "contacts" },
-  { href: "/quotes", label: "Offertes", icon: Receipt, moduleId: "quotes" },
-  { href: "/invoices", label: "Facturen", icon: Banknote, moduleId: "invoices" },
-  { href: "/reports", label: "Website auditor", icon: ScanSearch, moduleId: "reports" },
-  { href: "/crm", label: "CRM", icon: Building2, moduleId: "crm" },
-  { href: "/tasks", label: "Taken", icon: CheckSquare, moduleId: "tasks" },
-  { href: "/templates", label: "E-mailtemplates", icon: Library, moduleId: "templates" },
+export type NavGroup = {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  items: QuickNavItem[];
+  /** Open by default when the sidebar is expanded */
+  defaultOpen?: boolean;
+};
+
+/** Sidebar groups — ordered top to bottom */
+export const SIDEBAR_NAV_GROUPS: NavGroup[] = [
+  {
+    id: "prospectie",
+    label: "Prospectie",
+    icon: Users,
+    defaultOpen: true,
+    items: [
+      { href: "/leads", label: "Leads", icon: Users },
+      { href: "/leads/search", label: "Leads zoeken", icon: Search },
+      { href: "/campaigns", label: "Campagneprofielen", icon: Target, moduleId: "campaigns" },
+    ],
+  },
+  {
+    id: "communicatie",
+    label: "Communicatie",
+    icon: SendHorizonal,
+    items: [
+      { href: "/contacts", label: "Outbound", icon: SendHorizonal, moduleId: "contacts" },
+      { href: "/contacts/inbox", label: "Inbox", icon: Inbox, moduleId: "contacts" },
+      { href: "/templates", label: "E-mailtemplates", icon: Library, moduleId: "templates" },
+    ],
+  },
+  {
+    id: "verkoop",
+    label: "Verkoop",
+    icon: Receipt,
+    items: [
+      { href: "/crm", label: "CRM", icon: Building2, moduleId: "crm" },
+      { href: "/tasks", label: "Taken", icon: CheckSquare, moduleId: "tasks" },
+      { href: "/quotes", label: "Offertes", icon: Receipt, moduleId: "quotes" },
+      { href: "/invoices", label: "Facturen", icon: Banknote, moduleId: "invoices" },
+    ],
+  },
+  {
+    id: "analyse",
+    label: "Analyse",
+    icon: ScanSearch,
+    items: [{ href: "/reports", label: "Website auditor", icon: ScanSearch, moduleId: "reports" }],
+  },
+  {
+    id: "advertenties",
+    label: "Advertenties",
+    icon: Megaphone,
+    items: ADS_NAV_ITEMS,
+  },
+  {
+    id: "marketing",
+    label: "Marketing",
+    icon: Globe2,
+    items: [
+      { href: "/social", label: "Social Planner", icon: Megaphone, moduleId: "social" },
+      { href: "/bookings", label: "Boekingen", icon: Calendar, moduleId: "bookings" },
+      { href: "/domains", label: "Domeinen", icon: Globe2, moduleId: "domains" },
+      { href: "/reviews", label: "Reviews", icon: Star, moduleId: "reviews" },
+      { href: "/chatbot", label: "Chatbot", icon: MessageSquare, moduleId: "chatbot" },
+    ],
+  },
 ];
 
-export const LEADS_MENU_ITEMS: QuickNavItem[] = [
-  { href: "/leads", label: "Leads", icon: Users },
-  ...LEADS_WORKFLOW_ITEMS,
-];
+/** Quick links on the leads page (excludes the leads list itself) */
+export const LEADS_WORKFLOW_ITEMS: QuickNavItem[] = SIDEBAR_NAV_GROUPS.flatMap((group) =>
+  group.items.filter((item) => item.href !== "/leads"),
+);
 
-export const TOOL_NAV_ITEMS: NavItem[] = [
-  { href: "/social", label: "Social Planner", icon: Megaphone, moduleId: "social" },
-  { href: "/bookings", label: "Boekingen", icon: Calendar, moduleId: "bookings" },
-  { href: "/domains", label: "Domeinen", icon: Globe2, moduleId: "domains" },
-  { href: "/reviews", label: "Reviews", icon: Star, moduleId: "reviews" },
-  { href: "/chatbot", label: "Chatbot", icon: MessageSquare, moduleId: "chatbot" },
-];
+/** @deprecated Use SIDEBAR_NAV_GROUPS — kept for any external imports */
+export const LEADS_MENU_ITEMS: QuickNavItem[] = SIDEBAR_NAV_GROUPS.flatMap((group) => group.items);
+
+/** @deprecated Use SIDEBAR_NAV_GROUPS marketing items */
+export const TOOL_NAV_ITEMS: NavItem[] = SIDEBAR_NAV_GROUPS.find((g) => g.id === "marketing")!.items.map(
+  (item) => ({ ...item }),
+);
 
 // All toggleable modules available for owner management
 export const ALL_MODULES = [

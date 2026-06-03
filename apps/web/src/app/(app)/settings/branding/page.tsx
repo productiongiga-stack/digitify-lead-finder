@@ -8,19 +8,22 @@ import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
 
 export default function BrandingSettingsPage() {
-  const { data: settings, isLoading } = trpc.settings.getAll.useQuery();
+  const { data: settings, isLoading } = trpc.settings.getBranding.useQuery(undefined, {
+    staleTime: 5 * 60_000,
+    refetchOnMount: false,
+  });
   const utils = trpc.useUtils();
   const { showToast } = useToast();
 
   const updateSetting = trpc.settings.update.useMutation({
-    onSuccess: () => utils.settings.getAll.invalidate(),
+    onSuccess: () => utils.settings.getBranding.invalidate(),
     onError: (error) =>
       showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
   });
 
   const batchUpdate = trpc.settings.batchUpdate.useMutation({
     onSuccess: () => {
-      utils.settings.getAll.invalidate();
+      utils.settings.getBranding.invalidate();
       setInitialValues({ companyName, companySlogan, primaryColor, fromName, fromEmail });
       setShowSuccess(true);
       showToast({ title: "Branding opgeslagen", description: "Je branding is bijgewerkt voor dit account." });

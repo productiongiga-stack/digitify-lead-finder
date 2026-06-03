@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { replacePlaceholders } from "@digitify/email";
 import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
@@ -82,7 +82,7 @@ export const reviewRouter = router({
     };
   }),
 
-  create: protectedProcedure
+  create: mutationProcedure
     .input(
       z.object({
         clientName: z.string().min(1),
@@ -106,7 +106,7 @@ export const reviewRouter = router({
       });
     }),
 
-  update: protectedProcedure
+  update: mutationProcedure
     .input(
       z.object({
         id: z.string(),
@@ -139,7 +139,7 @@ export const reviewRouter = router({
       return ctx.db.reviewRequest.update({ where: { id }, data: updateData });
     }),
 
-  send: protectedProcedure
+  send: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const review = await ctx.db.reviewRequest.findFirst({
@@ -211,7 +211,7 @@ export const reviewRouter = router({
       return updated;
     }),
 
-  bulkSend: protectedProcedure
+  bulkSend: mutationProcedure
     .input(z.object({ ids: z.array(z.string()).min(1).max(50) }))
     .mutation(async ({ ctx, input }) => {
       const reviews = await ctx.db.reviewRequest.findMany({
@@ -306,7 +306,7 @@ export const reviewRouter = router({
       };
     }),
 
-  delete: protectedProcedure
+  delete: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.reviewRequest.findFirst({

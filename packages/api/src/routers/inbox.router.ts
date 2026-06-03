@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, aiRateLimitedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { ImapFlow } from "imapflow";
 import nodemailer from "nodemailer";
@@ -16,6 +16,23 @@ import { log } from "../lib/logger";
 import { generateInboxAiMessage } from "../lib/inbox-ai-reply";
 import { fetchInboxMessageForAi } from "../lib/inbox-message-fetch";
 import { extractHtmlFromRaw, extractTextFromRaw } from "../lib/inbox-mime-body";
+import {
+  invalidateInboxListCacheForWorkspace,
+  readInboxListCache,
+  writeInboxListCache,
+} from "../lib/inbox-cache";
+
+type InboxListMessage = {
+  uid: number;
+  from: string;
+  to: string;
+  subject: string;
+  date: string;
+  seen: boolean;
+  messageId: string;
+  inReplyTo: string;
+  mailbox: string;
+};
 
 /* ---------- helpers ---------- */
 
@@ -41,6 +58,92 @@ function readPrismaErrorCode(error: unknown) {
     if (typeof candidate === "string") return candidate;
   }
   return "";
+}
+
+async function recordInboundFromOpenedMessage(
+  db: PrismaClient,
+  params: {
+    userId: string;
+    workspaceId: string;
+    fromEmail: string;
+    subject: string;
+    messageId?: string;
+    bodyPreview?: string;
+    mailbox: string;
+    uid: number;
+  },
+) {
+  if (!params.fromEmail) {
+    return { linked: false as const, lead: null };
+  }
+
+  const lead = await findLeadByEmailInWorkspace(db, params.workspaceId, params.fromEmail);
+  if (!lead) {
+    return { linked: false as const, lead: null };
+  }
+
+  if (params.messageId) {
+    const existing = await db.activity.findFirst({
+      where: {
+        leadId: lead.id,
+        type: "EMAIL_REPLIED",
+        metadata: {
+          path: ["messageId"],
+          equals: params.messageId,
+        },
+      },
+    });
+    if (existing) {
+      return {
+        linked: true as const,
+        lead: { id: lead.id, companyName: lead.companyName },
+        duplicate: true,
+      };
+    }
+  } else {
+    const existingByUid = await db.activity.findFirst({
+      where: {
+        leadId: lead.id,
+        type: "EMAIL_REPLIED",
+        AND: [
+          { metadata: { path: ["mailbox"], equals: params.mailbox } },
+          { metadata: { path: ["uid"], equals: params.uid } },
+        ],
+      },
+    });
+    if (existingByUid) {
+      return {
+        linked: true as const,
+        lead: { id: lead.id, companyName: lead.companyName },
+        duplicate: true,
+      };
+    }
+  }
+
+  await db.activity.create({
+    data: {
+      leadId: lead.id,
+      userId: params.userId,
+      type: "EMAIL_REPLIED",
+      title: `E-mail ontvangen: ${params.subject}`,
+      metadata: {
+        channel: "inbox",
+        direction: "inbound",
+        subject: params.subject,
+        from: params.fromEmail,
+        messageId: params.messageId || null,
+        bodyPreview: params.bodyPreview?.slice(0, 280) || null,
+        mailbox: params.mailbox,
+        uid: params.uid,
+      },
+    },
+  });
+
+  return {
+    linked: true as const,
+    lead: { id: lead.id, companyName: lead.companyName },
+    duplicate: false,
+  };
 }
 
 async function assertNotDuplicateSend(
@@ -528,29 +631,22 @@ export const inboxRouter = router({
     .input(z.object({ mailbox: z.string().default("INBOX") }).optional())
     .query(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
-    const config = await getImapConfig(ctx.db, scope);
+      const config = await getImapConfig(ctx.db, scope);
       const mailbox = input?.mailbox || "INBOX";
+      const cacheKey = `inbox:list:${scope.workspaceId}:${mailbox}`;
+      const cached = readInboxListCache<InboxListMessage[]>(cacheKey);
+      if (cached) return cached;
 
-      return withImap(config, async (client) => {
+      const messages = await withImap(config, async (client) => {
         const lock = await client.getMailboxLock(mailbox);
         try {
-          const messages: Array<{
-            uid: number;
-            from: string;
-            to: string;
-            subject: string;
-            date: string;
-            seen: boolean;
-            messageId: string;
-            inReplyTo: string;
-            mailbox: string;
-          }> = [];
+          const items: InboxListMessage[] = [];
 
           // Fetch last 50 messages by sequence number (newest first)
           const mb = client.mailbox;
           const totalMessages =
             mb && typeof mb === "object" && "exists" in mb ? (mb as { exists: number }).exists : 0;
-          if (totalMessages === 0) return messages;
+          if (totalMessages === 0) return items;
 
           const startSeq = Math.max(1, totalMessages - 49);
           const range = `${startSeq}:*`;
@@ -562,7 +658,7 @@ export const inboxRouter = router({
           })) {
             const envelope = msg.envelope;
             if (!envelope) continue;
-            messages.push({
+            items.push({
               uid: msg.uid,
               from: envelope.from?.[0]
                 ? `${envelope.from[0].name || ""} <${envelope.from[0].address || ""}>`.trim()
@@ -580,13 +676,16 @@ export const inboxRouter = router({
           }
 
           // Sort newest first
-          messages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          return messages;
+          items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          return items;
         } finally {
           lock.release();
         }
-    });
-  }),
+      });
+
+      writeInboxListCache(cacheKey, messages);
+      return messages;
+    }),
 
   /**
    * Get full email by UID (including HTML body)
@@ -623,16 +722,38 @@ export const inboxRouter = router({
           // Mark as seen
           await client.messageFlagsAdd(String(input.uid), ["\\Seen"], { uid: true }).catch(() => {});
 
+          const fromAddress = envelope.from?.[0]?.address || "";
+          const subject = envelope.subject || "(geen onderwerp)";
+          const messageId = envelope.messageId || undefined;
+          const bodyPreview = (text || html).slice(0, 280);
+
+          await recordInboundFromOpenedMessage(ctx.db, {
+            userId: ctx.user.id,
+            workspaceId: ctx.user.workspaceId!,
+            fromEmail: fromAddress,
+            subject,
+            messageId,
+            bodyPreview,
+            mailbox: input.mailbox,
+            uid: msg.uid,
+          }).catch((error) => {
+            log.email.warn("Inbound activity record failed", {
+              userId: ctx.user.id,
+              uid: msg.uid,
+              mailbox: input.mailbox,
+            }, error);
+          });
+
           return {
             uid: msg.uid,
             from: envelope.from?.[0]
               ? `${envelope.from[0].name || ""} <${envelope.from[0].address || ""}>`.trim()
               : "",
-            fromAddress: envelope.from?.[0]?.address || "",
+            fromAddress,
             to: envelope.to?.[0]
               ? `${envelope.to[0].name || ""} <${envelope.to[0].address || ""}>`.trim()
               : "",
-            subject: envelope.subject || "(geen onderwerp)",
+            subject,
             date: envelope.date?.toISOString() ?? new Date().toISOString(),
             seen: msg.flags?.has("\\Seen") ?? true,
             messageId: envelope.messageId || "",
@@ -647,7 +768,7 @@ export const inboxRouter = router({
       });
     }),
 
-  send: protectedProcedure
+  send: mutationProcedure
     .input(
       z.object({
         to: z.string().email(),
@@ -659,8 +780,8 @@ export const inboxRouter = router({
         references: z.string().optional(),
       }),
     )
-    .mutation(async ({ ctx, input }) =>
-      sendInboxMessage({
+    .mutation(async ({ ctx, input }) => {
+      const result = await sendInboxMessage({
         db: ctx.db,
         userId: ctx.user.id,
         workspaceScope: workspaceScopeFromUser(ctx.user),
@@ -668,13 +789,15 @@ export const inboxRouter = router({
           ...input,
           leadId: input.leadId?.trim() || undefined,
         },
-      }),
-    ),
+      });
+      invalidateInboxListCacheForWorkspace(ctx.user.workspaceId!);
+      return result;
+    }),
 
   /**
    * Reply to an email - sends via SMTP, appends to IMAP Sent folder
    */
-  reply: protectedProcedure
+  reply: mutationProcedure
     .input(
       z.object({
         uid: z.number(),
@@ -688,7 +811,7 @@ export const inboxRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const replySubject = input.subject.startsWith("Re:") ? input.subject : `Re: ${input.subject}`;
-      return sendInboxMessage({
+      const result = await sendInboxMessage({
         db: ctx.db,
         userId: ctx.user.id,
         workspaceScope: workspaceScopeFromUser(ctx.user),
@@ -702,6 +825,8 @@ export const inboxRouter = router({
           references: [input.inReplyTo, input.messageId].filter(Boolean).join(" "),
         },
       });
+      invalidateInboxListCacheForWorkspace(ctx.user.workspaceId!);
+      return result;
     }),
 
   resolveLeadByEmail: protectedProcedure
@@ -718,71 +843,7 @@ export const inboxRouter = router({
       };
     }),
 
-  recordInbound: protectedProcedure
-    .input(
-      z.object({
-        uid: z.number(),
-        mailbox: z.string().default("INBOX"),
-        fromEmail: z.string().email(),
-        subject: z.string(),
-        messageId: z.string().optional(),
-        bodyPreview: z.string().optional(),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const workspaceId = ctx.user.workspaceId!;
-      const lead = await findLeadByEmailInWorkspace(ctx.db, workspaceId, input.fromEmail);
-      if (!lead) {
-        return { linked: false as const, lead: null };
-      }
-
-      if (input.messageId) {
-        const existing = await ctx.db.activity.findFirst({
-          where: {
-            leadId: lead.id,
-            type: "EMAIL_REPLIED",
-            metadata: {
-              path: ["messageId"],
-              equals: input.messageId,
-            },
-          },
-        });
-        if (existing) {
-          return {
-            linked: true as const,
-            lead: { id: lead.id, companyName: lead.companyName },
-            duplicate: true,
-          };
-        }
-      }
-
-      await ctx.db.activity.create({
-        data: {
-          leadId: lead.id,
-          userId: ctx.user.id,
-          type: "EMAIL_REPLIED",
-          title: `E-mail ontvangen: ${input.subject}`,
-          metadata: {
-            channel: "inbox",
-            direction: "inbound",
-            subject: input.subject,
-            from: input.fromEmail,
-            messageId: input.messageId || null,
-            bodyPreview: input.bodyPreview?.slice(0, 280) || null,
-            mailbox: input.mailbox,
-            uid: input.uid,
-          },
-        },
-      });
-
-      return {
-        linked: true as const,
-        lead: { id: lead.id, companyName: lead.companyName },
-        duplicate: false,
-      };
-    }),
-
-  suggestReply: protectedProcedure
+  suggestReply: aiRateLimitedProcedure
     .input(
       z.object({
         uid: z.number(),

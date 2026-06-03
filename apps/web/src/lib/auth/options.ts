@@ -3,6 +3,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@digitify/db";
 import { scryptSync, timingSafeEqual } from "crypto";
 import { log } from "@digitify/api/src/lib/logger";
+import { resolveWorkspaceOwnerId, resolveWorkspaceOwnerIdSync } from "@digitify/api/src/lib/workspace";
 
 function normalizeAbsoluteUrl(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
@@ -82,7 +83,18 @@ export const authOptions: NextAuthOptions = {
         }
 
         const email = credentials.email.toLowerCase().trim();
-        const user = await prisma.user.findUnique({ where: { email } });
+        const user = await prisma.user.findUnique({
+          where: { email },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            passwordHash: true,
+            emailVerified: true,
+            workspaceOwnerId: true,
+          },
+        });
 
         if (!user || !user.passwordHash) {
           log.auth.warn("Login failed: unknown user", { email });
@@ -118,11 +130,13 @@ export const authOptions: NextAuthOptions = {
         }
 
         log.auth.info("Login success", { userId: user.id, email });
+        const workspaceId = resolveWorkspaceOwnerIdSync(user);
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           role: user.role,
+          workspaceId,
         };
       },
     }),
@@ -131,16 +145,23 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user) {
         token.sub = user.id;
-        token.role = (user as any).role;
+        token.role = (user as { role?: string }).role;
         token.name = user.name;
         token.email = user.email;
+        token.workspaceId = (user as { workspaceId?: string }).workspaceId;
+        return token;
+      }
+      if (token.sub && typeof token.workspaceId !== "string") {
+        token.workspaceId = await resolveWorkspaceOwnerId(prisma, token.sub);
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
-        (session.user as any).id = token.sub;
-        (session.user as any).role = token.role;
+        (session.user as { id?: string; role?: string; workspaceId?: string }).id = token.sub;
+        (session.user as { role?: string }).role = token.role as string | undefined;
+        (session.user as { workspaceId?: string }).workspaceId =
+          typeof token.workspaceId === "string" ? token.workspaceId : undefined;
       }
       return session;
     },

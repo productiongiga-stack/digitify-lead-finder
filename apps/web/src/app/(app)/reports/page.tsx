@@ -5,12 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import {
-  Badge,
   Button,
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
   CreateModal,
   EmptyState,
   Input,
@@ -26,24 +23,11 @@ import {
   TabsList,
   TabsTrigger,
 } from "@digitify/ui";
+import { Globe, Loader2, ScanSearch, Sparkles } from "lucide-react";
 import {
-  Calendar,
-  Globe,
-  Loader2,
-  ScanSearch,
-  Sparkles,
-  Trash2,
-  Zap,
-} from "lucide-react";
-
-function hostnameFromUrl(raw: string) {
-  try {
-    const normalized = raw.startsWith("http") ? raw : `https://${raw}`;
-    return new URL(normalized).hostname.replace(/^www\./, "");
-  } catch {
-    return raw;
-  }
-}
+  WebsiteAuditReportCard,
+  type WebsiteAuditReportCardProps,
+} from "@/components/reports/website-audit-report-card";
 
 export default function ReportsPage() {
   const router = useRouter();
@@ -172,7 +156,7 @@ export default function ReportsPage() {
           {audits.isLoading ? (
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-40 w-full rounded-xl" />
+                <Skeleton key={i} className="h-[7.25rem] w-full rounded-2xl" />
               ))}
             </div>
           ) : (audits.data ?? []).length === 0 ? (
@@ -188,67 +172,17 @@ export default function ReportsPage() {
           ) : (
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {(audits.data ?? []).map((item) => {
-                const data = (item.data ?? {}) as {
-                  url?: string;
-                  metrics?: { overall?: number; speedScore?: number; uxScore?: number };
-                  checks?: { ux?: { pagesBroken?: number; pagesChecked?: number } };
-                };
-                const overall = data.metrics?.overall;
-                const displayUrl = data.url ?? hostnameFromUrl(item.title);
+                const data = (item.data ?? {}) as WebsiteAuditReportCardProps["data"];
                 return (
-                  <Card
+                  <WebsiteAuditReportCard
                     key={item.id}
-                    className="reports-audit-card cursor-pointer transition-all hover:border-primary/25 hover:shadow-md"
-                    onClick={() => router.push(`/reports/${item.id}`)}
-                  >
-                    <CardHeader className="pb-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <CardTitle className="text-sm leading-snug">
-                          {hostnameFromUrl(displayUrl)}
-                        </CardTitle>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteId(item.id);
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      <div className="flex flex-wrap gap-1.5">
-                        <Badge>Website audit</Badge>
-                        {overall != null ? (
-                          <Badge variant={overall >= 70 ? "default" : overall >= 45 ? "secondary" : "destructive"}>
-                            Score {overall}
-                          </Badge>
-                        ) : null}
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <Calendar className="h-3 w-3" />
-                          {new Date(item.createdAt).toLocaleDateString("nl-BE")}
-                        </span>
-                        {data.metrics?.speedScore != null ? (
-                          <span className="flex items-center gap-1">
-                            <Zap className="h-3 w-3" />
-                            Snelheid {data.metrics.speedScore}
-                          </span>
-                        ) : null}
-                      </div>
-                      {data.checks?.ux?.pagesChecked != null ? (
-                        <p className="text-xs text-muted-foreground">
-                          {data.checks.ux.pagesChecked} pagina&apos;s ·{" "}
-                          {data.checks.ux.pagesBroken ?? 0} probleem
-                          {(data.checks.ux.pagesBroken ?? 0) === 1 ? "" : "en"}
-                        </p>
-                      ) : null}
-                    </CardContent>
-                  </Card>
+                    id={item.id}
+                    title={item.title}
+                    createdAt={item.createdAt}
+                    data={data}
+                    onOpen={() => router.push(`/reports/${item.id}`)}
+                    onDelete={() => setDeleteId(item.id)}
+                  />
                 );
               })}
             </div>

@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { isModuleDisabled, moduleLabel, resolveModuleIdForPath } from "@/lib/module-access";
-import { Button, Card, CardContent } from "@digitify/ui";
+import { Button, Card, CardContent, Skeleton } from "@digitify/ui";
 import { Lock } from "lucide-react";
 import Link from "next/link";
 
@@ -17,7 +17,11 @@ export function ModuleAccessGuard({ children }: { children: React.ReactNode }) {
   const moduleId = resolveModuleIdForPath(pathname);
   const blocked = !isLoading && isModuleDisabled(pathname, disabled);
 
-  if (isLoading || !blocked) {
+  if (isLoading) {
+    return <Skeleton className="mx-auto mt-8 h-32 w-full max-w-lg rounded-xl" />;
+  }
+
+  if (!blocked) {
     return <>{children}</>;
   }
 

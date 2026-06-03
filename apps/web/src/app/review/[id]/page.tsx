@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { safeExternalUrl } from "@/lib/utils";
 
 type ReviewPayload = {
   id: string;
@@ -108,10 +109,18 @@ export default function PublicReviewPage() {
       }
 
       if (payload.redirectUrl) {
+        const redirectTarget = safeExternalUrl(String(payload.redirectUrl));
+        if (!redirectTarget) {
+          setThankYouMessage(
+            data?.texts["reviews.public_positive_done"] || "Bedankt voor uw beoordeling. Deze aanvraag is afgerond.",
+          );
+          setStep("done");
+          return;
+        }
         setThankYouMessage(data?.texts["reviews.public_redirect_message"] || `Bedankt. U wordt nu doorgestuurd naar ${data?.platformLabel}.`);
         setStep("redirecting");
         window.setTimeout(() => {
-          window.location.href = payload.redirectUrl;
+          window.location.href = redirectTarget;
         }, 1200);
         return;
       }

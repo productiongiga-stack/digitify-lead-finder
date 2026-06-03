@@ -4,6 +4,7 @@ import { useMemo, useRef, useEffect } from "react";
 import { generateBrandedHtml, normalizeHtmlEmailDocument } from "@digitify/email/html-template";
 import { replacePlaceholders } from "@digitify/email/placeholders";
 import type { EmailLayout } from "@digitify/email/layouts";
+import { buildInboxHtmlDocument, sanitizeInboxHtml } from "@/lib/sanitize-inbox-html";
 
 export interface EmailPreviewProps {
   subject: string;
@@ -56,7 +57,9 @@ export function EmailPreview({
     );
 
     if (isHtml) {
-      return normalizeHtmlEmailDocument(previewBody);
+      const normalized = normalizeHtmlEmailDocument(previewBody);
+      const safe = sanitizeInboxHtml(normalized);
+      return buildInboxHtmlDocument(safe);
     }
 
     return generateBrandedHtml({
@@ -117,7 +120,7 @@ export function EmailPreview({
         title="E-mail preview"
         className="w-full rounded-lg border border-border/60 bg-white"
         style={{ height: iframeHeight, border: "none" }}
-        sandbox="allow-same-origin"
+        sandbox=""
       />
     </div>
   );

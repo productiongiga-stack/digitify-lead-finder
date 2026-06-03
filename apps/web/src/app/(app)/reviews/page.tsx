@@ -42,6 +42,7 @@ import {
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
 import { buildUrl } from "@/lib/config";
+import { safeExternalUrl } from "@/lib/utils";
 import { ReviewQrCodeCard } from "@/components/reviews/qr-code-card";
 
 const REVIEW_STATUSES = ["PENDING", "SENT", "OPENED", "REVIEWED", "FEEDBACK"] as const;
@@ -302,7 +303,9 @@ export default function ReviewsPage() {
         id: "actions",
         header: "",
         stopPropagation: true,
-        cell: (r) => (
+        cell: (r) => {
+          const reviewUrl = safeExternalUrl(r.reviewUrl);
+          return (
           <div className="flex items-center gap-0.5">
             {r.status === "PENDING" ? (
               <Button
@@ -332,8 +335,8 @@ export default function ReviewsPage() {
             >
               <QrCode className="h-3.5 w-3.5" />
             </Button>
-            {r.status === "REVIEWED" && r.reviewUrl ? (
-              <a href={r.reviewUrl} target="_blank" rel="noopener noreferrer" title="Bekijk review">
+            {r.status === "REVIEWED" && reviewUrl ? (
+              <a href={reviewUrl} target="_blank" rel="noopener noreferrer" title="Bekijk review">
                 <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
                   <ExternalLink className="h-3.5 w-3.5" />
                 </Button>
@@ -349,7 +352,8 @@ export default function ReviewsPage() {
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </div>
-        ),
+          );
+        },
       },
     ],
     [sendMutation],

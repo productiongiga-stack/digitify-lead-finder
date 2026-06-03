@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
 import { OpenClawClient } from "@digitify/openclaw";
 import { z } from "zod";
-import { adminProcedure, protectedProcedure, router } from "../trpc";
+import { adminProcedure, protectedProcedure, aiRateLimitedProcedure, router, mutationProcedure } from "../trpc";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import { probeSocialImage, validateSocialImageForPublish } from "../lib/social-image";
 import {
@@ -480,7 +480,14 @@ export const socialRouter = router({
   probeImage: protectedProcedure
     .input(
       z.object({
-        imageUrl: z.string().trim().min(1).max(12_000_000),
+        imageUrl: z
+          .string()
+          .trim()
+          .max(12_000)
+          .url()
+          .refine((value) => /^https:\/\//i.test(value), {
+            message: "Gebruik een publieke https-URL.",
+          }),
         postFormat: socialPostFormatEnum.optional(),
       }),
     )
@@ -488,7 +495,7 @@ export const socialRouter = router({
       return probeSocialImage(input.imageUrl);
     }),
 
-  createDraft: protectedProcedure
+  createDraft: mutationProcedure
     .input(
       z.object({
         caption: z.string().min(1).max(6000),
@@ -521,7 +528,7 @@ export const socialRouter = router({
       return row;
     }),
 
-  updateDraft: protectedProcedure
+  updateDraft: mutationProcedure
     .input(
       z.object({
         id: z.string(),
@@ -562,7 +569,7 @@ export const socialRouter = router({
       });
     }),
 
-  submitForApproval: protectedProcedure
+  submitForApproval: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const socialDb = ctx.db as any;
@@ -712,7 +719,7 @@ export const socialRouter = router({
       });
     }),
 
-  generateSuggestion: protectedProcedure
+  generateSuggestion: aiRateLimitedProcedure
     .input(
       z.object({
         template: z.string().min(1).max(3000),

@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
+import { assertPublicHttpUrl } from "@digitify/connectors";
 import { GoogleAdsApi, enums, errors, resources, toMicros, ResourceNames, type MutateOperation } from "google-ads-api";
 import { validateBudgetGuard } from "./meta-ads";
 import { type WorkspaceScope } from "./workspace-settings";
@@ -241,7 +242,16 @@ function validatePerformanceMaxAssets(creative: ReturnType<typeof normalizeSearc
 }
 
 async function fetchImageAssetData(url: string) {
-  const response = await fetch(url);
+  let safeUrl: string;
+  try {
+    safeUrl = await assertPublicHttpUrl(url);
+  } catch (error) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: error instanceof Error ? error.message : "Deze afbeelding-URL is niet toegestaan.",
+    });
+  }
+  const response = await fetch(safeUrl);
   if (!response.ok) {
     throw new TRPCError({
       code: "BAD_REQUEST",

@@ -33,6 +33,7 @@ import {
 import { templateTypeLabel, type TemplateType } from "@/lib/template-studio";
 import type { RouterOutputs } from "@/lib/trpc/client";
 import { TemplateScopeHelp } from "@/components/templates/template-scope-help";
+import { useOutboundEmailPreviewSettings } from "@/lib/outbound-email-settings";
 import { TemplateStudioToolbar } from "@/components/templates/template-studio-toolbar";
 
 type StarterTemplate = RouterOutputs["template"]["starterPack"]["items"][number];
@@ -75,7 +76,8 @@ export default function TemplatesPage() {
   const { data: starterPack } = trpc.template.starterPack.useQuery(undefined, {
     staleTime: Infinity,
   });
-  const { data: brandingSettings } = trpc.settings.getAll.useQuery(undefined, { staleTime: 60_000 });
+  const { brandCompanyName: previewCompanyName, brandPrimaryColor: previewPrimaryColor, brandHeaderSlogan: previewHeaderSlogan } =
+    useOutboundEmailPreviewSettings();
   const { data: legacyStatus } = trpc.template.legacyLibraryStatus.useQuery();
 
   const remove = trpc.template.remove.useMutation({
@@ -97,15 +99,8 @@ export default function TemplatesPage() {
     },
   });
 
-  const previewCompanyName = brandingSettings?.["branding.company_name"]
-    ? String(brandingSettings["branding.company_name"])
-    : "Digitify";
-  const previewPrimaryColor = brandingSettings?.["branding.primary_color"]
-    ? String(brandingSettings["branding.primary_color"])
-    : "#f59e0b";
-  const previewHeaderSlogan = brandingSettings?.["email.header_slogan"]
-    ? String(brandingSettings["email.header_slogan"])
-    : "";
+  const previewCompanyNameResolved = previewCompanyName || "Digitify";
+  const previewPrimaryColorResolved = previewPrimaryColor || "#f59e0b";
 
   const templates = data?.templates || [];
   const typeCounts = useMemo(() => {
@@ -385,8 +380,8 @@ export default function TemplatesPage() {
         form={form}
         onFormChange={setForm}
         onSaved={() => utils.template.list.invalidate()}
-        previewCompanyName={previewCompanyName}
-        previewPrimaryColor={previewPrimaryColor}
+        previewCompanyName={previewCompanyNameResolved}
+        previewPrimaryColor={previewPrimaryColorResolved}
         previewHeaderSlogan={previewHeaderSlogan}
       />
     </div>

@@ -13,6 +13,8 @@ const SECRET_SETTING_KEYS = new Set([
   "email.imap_pass",
   "bookings.google_oauth_access_token",
   "bookings.google_oauth_refresh_token",
+  "bookings.google_service_account_private_key",
+  "bookings.webhook_secret",
   "social.meta_access_token",
   "social.meta_refresh_meta",
   "social.meta_page_access_token",

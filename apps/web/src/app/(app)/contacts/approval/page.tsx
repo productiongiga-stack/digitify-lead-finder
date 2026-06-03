@@ -26,6 +26,7 @@ import { OutboundWorkflowHelp } from "@/components/outbound/outbound-workflow-he
 import { extractEmailTemplateMetadata } from "@/lib/email-content";
 import { OUTBOUND_STATUS_LABELS, OUTBOUND_STATUS_VARIANTS } from "@/lib/contact-status";
 import { extractQuoteIdFromDraftBody, getQuoteConfiguratorUrl } from "@/lib/quote-outbound";
+import { useOutboundEmailPreviewSettings } from "@/lib/outbound-email-settings";
 
 export default function ApprovalPage() {
   const utils = trpc.useUtils();
@@ -35,18 +36,7 @@ export default function ApprovalPage() {
     pageSize: 50,
   });
 
-  const { data: brandingSettings } = trpc.settings.getAll.useQuery(undefined, {
-    staleTime: 60_000,
-  });
-  const brandCompanyName = brandingSettings?.["branding.company_name"]
-    ? String(brandingSettings["branding.company_name"])
-    : "";
-  const brandPrimaryColor = brandingSettings?.["branding.primary_color"]
-    ? String(brandingSettings["branding.primary_color"])
-    : "#6366f1";
-  const brandHeaderSlogan = brandingSettings?.["email.header_slogan"]
-    ? String(brandingSettings["email.header_slogan"])
-    : "";
+  const { brandCompanyName, brandPrimaryColor, brandHeaderSlogan } = useOutboundEmailPreviewSettings();
 
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectingId, setRejectingId] = useState<string | null>(null);

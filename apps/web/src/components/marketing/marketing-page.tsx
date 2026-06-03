@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { trpc } from "@/lib/trpc/client";
+import { safeExternalUrl } from "@/lib/utils";
 import {
   ArrowRight,
   BarChart3,
@@ -2117,7 +2118,7 @@ function MarketingFooter() {
     phone: footerSettings?.phone || "+32 (0) 486 51 57 73",
     location: footerSettings?.location || "België",
     websiteLabel: footerSettings?.websiteLabel || "www.digitify.be",
-    websiteUrl: footerSettings?.websiteUrl || "https://www.digitify.be",
+    websiteUrl: safeExternalUrl(footerSettings?.websiteUrl || "https://www.digitify.be"),
     legalLine: footerSettings?.legalLine || `© ${new Date().getFullYear()} Digitify`,
     copyrightLine: footerSettings?.copyrightLine || `© ${new Date().getFullYear()} Digitify. Webdesign, media en marketing voor digitale groei.`,
   };
@@ -2158,7 +2159,11 @@ function MarketingFooter() {
           <div className="space-y-2.5 text-sm text-[#b8b0a6]">
             <Link href="/login" className="block transition hover:text-[#f9ae5a]">Login</Link>
             <Link href="/register" className="block transition hover:text-[#f9ae5a]">Toegang aanvragen</Link>
-            <a href={footer.websiteUrl} target="_blank" rel="noopener noreferrer" className="block transition hover:text-[#f9ae5a]">{footer.websiteLabel}</a>
+            {footer.websiteUrl ? (
+              <a href={footer.websiteUrl} target="_blank" rel="noopener noreferrer" className="block transition hover:text-[#f9ae5a]">{footer.websiteLabel}</a>
+            ) : (
+              <span className="block">{footer.websiteLabel}</span>
+            )}
           </div>
         </div>
         <div>

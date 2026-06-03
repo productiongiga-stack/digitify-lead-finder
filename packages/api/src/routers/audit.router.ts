@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { analyzeWebsite } from "@digitify/connectors";
-import { protectedProcedure, router } from "../trpc";
+import { protectedProcedure, router, mutationProcedure } from "../trpc";
 import { assertLeadAccess } from "../lib/tenant";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
@@ -30,7 +30,7 @@ async function lookupGoogleReviews(apiKey: string, placeId: string) {
 }
 
 export const auditRouter = router({
-  run: protectedProcedure
+  run: mutationProcedure
     .input(
       z.object({
         url: z.string().min(1),

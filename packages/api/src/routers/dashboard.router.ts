@@ -453,143 +453,398 @@ async function buildAttentionQueue(ctx: WorkspaceCtx): Promise<AttentionQueueRes
   return { totalCount: dedupedItems.length, items: dedupedItems };
 }
 
-export const dashboardRouter = router({
-  getKpis: protectedProcedure.query(async ({ ctx }) => {
-    const cacheKey = `getKpis:${ctx.user.workspaceId!}`;
-    const cached = readDashboardCache<KpiResult>(cacheKey);
-    if (cached) return cached;
+/** Count-only path for topbar badge (avoids loading draft rows). */
+async function loadAttentionCountOnly(ctx: WorkspaceCtx): Promise<number> {
+  const wsId = ctx.user.workspaceId;
+  const now = new Date();
+  const thirtyDaysFromNow = new Date();
+  thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
 
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
+  const [draftBuckets, pendingReviews, unreadChats, expiringDomainCount, unified] = await Promise.all([
+    ctx.db.emailDraft.groupBy({
+      by: ["status"],
+      where: { lead: { createdById: wsId } },
+      _count: { _all: true },
+    }),
+    ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: wsId } }),
+    ctx.db.chatSession.count({
+      where: { ...ownedChatSessionWhere(wsId, ctx.user.id), isRead: false },
+    }),
+    ctx.db.domain.count({
+      where: {
+        createdById: wsId,
+        expiresAt: { gte: now, lte: thirtyDaysFromNow },
+        status: { in: ["ACTIVE", "EXPIRING"] },
+      },
+    }),
+    loadUnifiedReminders(ctx),
+  ]);
 
-    const [
-      totalLeads,
-      newLeads,
-      hotLeads,
-      leadStatusBuckets,
-      totalCampaigns,
-      emailStatusBuckets,
-      leadsWithScore,
-      activeQuotes,
-      totalQuoteValue,
-      unreadChats,
-      activeCampaignLeadCount,
-      pendingReviews,
-      quoteStatusBuckets,
-    ] = await Promise.all([
-      ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId! } }),
-      ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId!, createdAt: { gte: weekAgo } } }),
-      ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId!, scorePriority: "Hot" } }),
-      ctx.db.lead.groupBy({
-        by: ["status"],
-        where: { createdById: ctx.user.workspaceId! },
-        _count: { _all: true },
-      }),
-      ctx.db.campaign.count({ where: { createdById: ctx.user.workspaceId! } }),
-      ctx.db.emailDraft.groupBy({
-        by: ["status"],
-        where: { lead: { createdById: ctx.user.workspaceId! } },
-        _count: { _all: true },
-      }),
-      ctx.db.lead.aggregate({
-        _avg: { overallScore: true },
-        where: { createdById: ctx.user.workspaceId!, overallScore: { not: null } },
-      }),
-      ctx.db.quote.count({ where: { createdById: ctx.user.workspaceId!, status: { in: ["DRAFT", "SENT", "VIEWED"] } } }),
-      ctx.db.quote.aggregate({
-        _sum: { total: true },
-        where: { createdById: ctx.user.workspaceId!, status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] } },
-      }),
-      ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), isRead: false } }),
-      ctx.db.campaignLead.count({
-        where: {
-          campaign: {
-            status: "ACTIVE",
-            createdById: ctx.user.workspaceId!,
-          },
+  const draftCount = Object.fromEntries(
+    draftBuckets.map((bucket) => [bucket.status, bucket._count._all]),
+  ) as Record<string, number>;
+
+  const pendingApproval = draftCount.PENDING_APPROVAL ?? 0;
+  const approvedCount = draftCount.APPROVED ?? 0;
+  const failedCount = draftCount.FAILED ?? 0;
+  const rejectedCount = draftCount.REJECTED ?? 0;
+
+  let count = 0;
+  count += Math.min(pendingApproval, 20);
+  count += Math.min(approvedCount, 10);
+  if (approvedCount > 10) count += 1;
+
+  if (failedCount > 0) {
+    const shown = Math.min(failedCount, 10);
+    count += shown;
+    if (failedCount > shown) count += 1;
+  }
+
+  count += Math.min(rejectedCount, 10);
+  if (rejectedCount > 10) count += 1;
+
+  if (pendingReviews > 0) count += 1;
+  if (unreadChats > 0) count += 1;
+  count += unified.items.length;
+  count += Math.min(expiringDomainCount, 10);
+
+  return count;
+}
+
+async function loadKpis(ctx: WorkspaceCtx): Promise<KpiResult> {
+  const cacheKey = `getKpis:${ctx.user.workspaceId}`;
+  const cached = readDashboardCache<KpiResult>(cacheKey);
+  if (cached) return cached;
+
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+
+  const [
+    totalLeads,
+    newLeads,
+    hotLeads,
+    leadStatusBuckets,
+    totalCampaigns,
+    emailStatusBuckets,
+    leadsWithScore,
+    activeQuotes,
+    totalQuoteValue,
+    unreadChats,
+    activeCampaignLeadCount,
+    pendingReviews,
+    quoteStatusBuckets,
+  ] = await Promise.all([
+    ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId } }),
+    ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId, createdAt: { gte: weekAgo } } }),
+    ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId, scorePriority: "Hot" } }),
+    ctx.db.lead.groupBy({
+      by: ["status"],
+      where: { createdById: ctx.user.workspaceId },
+      _count: { _all: true },
+    }),
+    ctx.db.campaign.count({ where: { createdById: ctx.user.workspaceId } }),
+    ctx.db.emailDraft.groupBy({
+      by: ["status"],
+      where: { lead: { createdById: ctx.user.workspaceId } },
+      _count: { _all: true },
+    }),
+    ctx.db.lead.aggregate({
+      _avg: { overallScore: true },
+      where: { createdById: ctx.user.workspaceId, overallScore: { not: null } },
+    }),
+    ctx.db.quote.count({ where: { createdById: ctx.user.workspaceId, status: { in: ["DRAFT", "SENT", "VIEWED"] } } }),
+    ctx.db.quote.aggregate({
+      _sum: { total: true },
+      where: { createdById: ctx.user.workspaceId, status: { in: ["DRAFT", "SENT", "VIEWED", "ACCEPTED"] } },
+    }),
+    ctx.db.chatSession.count({ where: { ...ownedChatSessionWhere(ctx.user.workspaceId, ctx.user.id), isRead: false } }),
+    ctx.db.campaignLead.count({
+      where: {
+        campaign: {
+          status: "ACTIVE",
+          createdById: ctx.user.workspaceId,
         },
-      }),
-      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.workspaceId! } }),
-      ctx.db.quote.groupBy({
-        by: ["status"],
-        where: { createdById: ctx.user.workspaceId! },
-        _count: { _all: true },
-      }),
-    ]);
+      },
+    }),
+    ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.workspaceId } }),
+    ctx.db.quote.groupBy({
+      by: ["status"],
+      where: { createdById: ctx.user.workspaceId },
+      _count: { _all: true },
+    }),
+  ]);
 
-    const leadStatusCount = Object.fromEntries(
-      leadStatusBuckets.map((item) => [item.status, item._count._all]),
-    ) as Record<string, number>;
-    const emailStatusCount = Object.fromEntries(
-      emailStatusBuckets.map((item) => [item.status, item._count._all]),
-    ) as Record<string, number>;
-    const quoteStatusCount = Object.fromEntries(
-      quoteStatusBuckets.map((item) => [item.status, item._count._all]),
-    ) as Record<string, number>;
+  const leadStatusCount = Object.fromEntries(
+    leadStatusBuckets.map((item) => [item.status, item._count._all]),
+  ) as Record<string, number>;
+  const emailStatusCount = Object.fromEntries(
+    emailStatusBuckets.map((item) => [item.status, item._count._all]),
+  ) as Record<string, number>;
+  const quoteStatusCount = Object.fromEntries(
+    quoteStatusBuckets.map((item) => [item.status, item._count._all]),
+  ) as Record<string, number>;
 
-    const contactedLeads = leadStatusCount.CONTACTED ?? 0;
-    const wonLeads = leadStatusCount.WON ?? 0;
-    const pendingDrafts = emailStatusCount.PENDING_APPROVAL ?? 0;
-    const sentEmails = emailStatusCount.SENT ?? 0;
-    const scheduledEmails = emailStatusCount.SCHEDULED ?? 0;
-    const failedEmails = emailStatusCount.FAILED ?? 0;
-    const respondedLeads =
-      (leadStatusCount.RESPONDED ?? 0) +
-      (leadStatusCount.QUALIFIED ?? 0) +
-      (leadStatusCount.PROPOSAL_SENT ?? 0) +
-      (leadStatusCount.WON ?? 0);
-    const contactedAndBeyondLeads =
-      (leadStatusCount.CONTACTED ?? 0) +
-      (leadStatusCount.RESPONDED ?? 0) +
-      (leadStatusCount.QUALIFIED ?? 0) +
-      (leadStatusCount.PROPOSAL_SENT ?? 0) +
-      (leadStatusCount.WON ?? 0);
+  const contactedLeads = leadStatusCount.CONTACTED ?? 0;
+  const wonLeads = leadStatusCount.WON ?? 0;
+  const pendingDrafts = emailStatusCount.PENDING_APPROVAL ?? 0;
+  const sentEmails = emailStatusCount.SENT ?? 0;
+  const scheduledEmails = emailStatusCount.SCHEDULED ?? 0;
+  const failedEmails = emailStatusCount.FAILED ?? 0;
+  const respondedLeads =
+    (leadStatusCount.RESPONDED ?? 0) +
+    (leadStatusCount.QUALIFIED ?? 0) +
+    (leadStatusCount.PROPOSAL_SENT ?? 0) +
+    (leadStatusCount.WON ?? 0);
+  const contactedAndBeyondLeads =
+    (leadStatusCount.CONTACTED ?? 0) +
+    (leadStatusCount.RESPONDED ?? 0) +
+    (leadStatusCount.QUALIFIED ?? 0) +
+    (leadStatusCount.PROPOSAL_SENT ?? 0) +
+    (leadStatusCount.WON ?? 0);
 
-    const conversionRate = totalLeads > 0 ? Math.round((wonLeads / totalLeads) * 100) : 0;
-    const responseRate =
-      contactedAndBeyondLeads > 0
-        ? Math.round((respondedLeads / contactedAndBeyondLeads) * 100)
-        : 0;
+  const conversionRate = totalLeads > 0 ? Math.round((wonLeads / totalLeads) * 100) : 0;
+  const responseRate =
+    contactedAndBeyondLeads > 0
+      ? Math.round((respondedLeads / contactedAndBeyondLeads) * 100)
+      : 0;
 
-    const result: KpiResult = {
-      totalLeads,
-      newLeads,
-      hotLeads,
-      contactedLeads,
-      totalCampaigns,
-      pendingDrafts,
-      sentEmails,
-      wonLeads,
-      avgScore: Math.round(leadsWithScore._avg.overallScore ?? 0),
-      activeQuotes: activeQuotes || (quoteStatusCount.DRAFT ?? 0) + (quoteStatusCount.SENT ?? 0) + (quoteStatusCount.VIEWED ?? 0),
-      totalQuoteValue: totalQuoteValue._sum.total ?? 0,
-      unreadChats,
-      activeCampaignLeadCount,
-      scheduledEmails,
-      failedEmails,
-      pendingReviews,
-      conversionRate,
-      responseRate,
-    };
-    writeDashboardCache(cacheKey, result);
-    return result;
+  const result: KpiResult = {
+    totalLeads,
+    newLeads,
+    hotLeads,
+    contactedLeads,
+    totalCampaigns,
+    pendingDrafts,
+    sentEmails,
+    wonLeads,
+    avgScore: Math.round(leadsWithScore._avg.overallScore ?? 0),
+    activeQuotes: activeQuotes || (quoteStatusCount.DRAFT ?? 0) + (quoteStatusCount.SENT ?? 0) + (quoteStatusCount.VIEWED ?? 0),
+    totalQuoteValue: totalQuoteValue._sum.total ?? 0,
+    unreadChats,
+    activeCampaignLeadCount,
+    scheduledEmails,
+    failedEmails,
+    pendingReviews,
+    conversionRate,
+    responseRate,
+  };
+  writeDashboardCache(cacheKey, result);
+  return result;
+}
+
+async function loadRecentActivity(ctx: WorkspaceCtx) {
+  return ctx.db.activity.findMany({
+    where: {
+      OR: [
+        { userId: ctx.user.id },
+        { lead: { createdById: ctx.user.workspaceId } },
+      ],
+    },
+    take: 20,
+    orderBy: { createdAt: "desc" },
+    include: {
+      lead: { select: { id: true, companyName: true } },
+      user: { select: { id: true, name: true, email: true } },
+    },
+  });
+}
+
+async function loadPipelineOverview(ctx: WorkspaceCtx) {
+  const [stages, leadCounts] = await Promise.all([
+    ctx.db.pipelineStage.findMany({
+      where: { createdById: ctx.user.workspaceId },
+      orderBy: { sortOrder: "asc" },
+      select: { id: true, name: true, color: true },
+    }),
+    ctx.db.lead.groupBy({
+      by: ["pipelineStageId"],
+      _count: { id: true },
+      where: { createdById: ctx.user.workspaceId, pipelineStageId: { not: null } },
+    }),
+  ]);
+  const countMap = new Map(
+    leadCounts
+      .filter((entry) => entry.pipelineStageId)
+      .map((entry) => [entry.pipelineStageId as string, entry._count.id]),
+  );
+  return stages.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+    count: countMap.get(s.id) ?? 0,
+  }));
+}
+
+async function loadTopLeads(ctx: WorkspaceCtx) {
+  const rows = await ctx.db.lead.findMany({
+    where: { overallScore: { not: null }, createdById: ctx.user.workspaceId },
+    orderBy: { overallScore: "desc" },
+    take: 24,
+    select: {
+      id: true,
+      companyName: true,
+      city: true,
+      overallScore: true,
+      scorePriority: true,
+      status: true,
+    },
+  });
+  const seen = new Set<string>();
+  const unique: typeof rows = [];
+  for (const row of rows) {
+    const key = row.companyName.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(row);
+    if (unique.length >= 5) break;
+  }
+  return unique;
+}
+
+async function loadUpcomingBookings(ctx: WorkspaceCtx) {
+  const now = new Date();
+  return ctx.db.booking.findMany({
+    where: {
+      createdById: ctx.user.workspaceId,
+      date: { gte: now },
+      status: { in: ["PENDING", "SCHEDULED", "CONFIRMED"] },
+    },
+    orderBy: { date: "asc" },
+    take: 5,
+    select: {
+      id: true,
+      clientName: true,
+      clientEmail: true,
+      date: true,
+      duration: true,
+      status: true,
+      notes: true,
+    },
+  });
+}
+
+async function loadExpiringDomains(ctx: WorkspaceCtx) {
+  const now = new Date();
+  const thirtyDaysFromNow = new Date();
+  thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+
+  return ctx.db.domain.findMany({
+    where: {
+      createdById: ctx.user.workspaceId,
+      expiresAt: {
+        gte: now,
+        lte: thirtyDaysFromNow,
+      },
+      status: { in: ["ACTIVE", "EXPIRING"] },
+    },
+    orderBy: { expiresAt: "asc" },
+    take: 5,
+    select: {
+      id: true,
+      domainName: true,
+      expiresAt: true,
+      status: true,
+      registrar: true,
+    },
+  });
+}
+
+async function loadOpenChats(ctx: WorkspaceCtx) {
+  const sessions = await ctx.db.chatSession.findMany({
+    where: {
+      ...ownedChatSessionWhere(ctx.user.workspaceId, ctx.user.id),
+      status: { in: ["OPEN", "WAITING"] },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 5,
+    select: {
+      id: true,
+      visitorName: true,
+      visitorCompany: true,
+      status: true,
+      isRead: true,
+      updatedAt: true,
+      messages: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { content: true, role: true, createdAt: true },
+      },
+    },
+  });
+
+  return sessions.map((s) => ({
+    id: s.id,
+    visitorName: s.visitorName ?? "Anoniem",
+    visitorCompany: s.visitorCompany,
+    status: s.status,
+    isRead: s.isRead,
+    updatedAt: s.updatedAt,
+    lastMessage: s.messages[0]?.content ?? null,
+    lastMessageAt: s.messages[0]?.createdAt ?? s.updatedAt,
+  }));
+}
+
+type DashboardOverviewResult = {
+  kpis: KpiResult;
+  recentActivity: Awaited<ReturnType<typeof loadRecentActivity>>;
+  topLeads: Awaited<ReturnType<typeof loadTopLeads>>;
+  pipelineOverview: Awaited<ReturnType<typeof loadPipelineOverview>>;
+  reminders: UnifiedRemindersResult;
+  upcomingBookings: Awaited<ReturnType<typeof loadUpcomingBookings>>;
+  openChats: Awaited<ReturnType<typeof loadOpenChats>>;
+  expiringDomains: Awaited<ReturnType<typeof loadExpiringDomains>>;
+};
+
+async function loadDashboardOverview(ctx: WorkspaceCtx): Promise<DashboardOverviewResult> {
+  const cacheKey = `getOverview:${ctx.user.workspaceId}`;
+  const cached = readDashboardCache<DashboardOverviewResult>(cacheKey);
+  if (cached) return cached;
+
+  const [
+    kpis,
+    recentActivity,
+    topLeads,
+    pipelineOverview,
+    reminders,
+    upcomingBookings,
+    openChats,
+    expiringDomains,
+  ] = await Promise.all([
+    loadKpis(ctx),
+    loadRecentActivity(ctx),
+    loadTopLeads(ctx),
+    loadPipelineOverview(ctx),
+    loadUnifiedReminders(ctx),
+    loadUpcomingBookings(ctx),
+    loadOpenChats(ctx),
+    loadExpiringDomains(ctx),
+  ]);
+
+  const result: DashboardOverviewResult = {
+    kpis,
+    recentActivity,
+    topLeads,
+    pipelineOverview,
+    reminders,
+    upcomingBookings,
+    openChats,
+    expiringDomains,
+  };
+  writeDashboardCache(cacheKey, result);
+  return result;
+}
+
+export const dashboardRouter = router({
+  getOverview: protectedProcedure.query(async ({ ctx }) => {
+    return loadDashboardOverview(asWorkspaceCtx(ctx));
+  }),
+
+  getKpis: protectedProcedure.query(async ({ ctx }) => {
+    return loadKpis(asWorkspaceCtx(ctx));
   }),
 
   getRecentActivity: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.db.activity.findMany({
-      where: {
-        OR: [
-          { userId: ctx.user.id },
-          { lead: { createdById: ctx.user.workspaceId! } },
-        ],
-      },
-      take: 20,
-      orderBy: { createdAt: "desc" },
-      include: {
-        lead: { select: { id: true, companyName: true } },
-        user: { select: { id: true, name: true, email: true } },
-      },
-    });
+    return loadRecentActivity(asWorkspaceCtx(ctx));
   }),
 
   getUnifiedReminders: protectedProcedure.query(async ({ ctx }) => {
@@ -606,14 +861,15 @@ export const dashboardRouter = router({
   }),
 
   getAttentionSummary: protectedProcedure.query(async ({ ctx }) => {
-    const cacheKey = `getAttentionSummary:${ctx.user.workspaceId!}`;
+    const wctx = asWorkspaceCtx(ctx);
+    const cacheKey = `getAttentionSummary:${wctx.user.workspaceId}`;
     const cached = readDashboardCache<{ totalCount: number }>(cacheKey);
     if (cached) return cached;
 
-    const queueCache = readDashboardCache<AttentionQueueResult>(`getAttentionQueue:${ctx.user.workspaceId!}`);
+    const queueCache = readDashboardCache<AttentionQueueResult>(`getAttentionQueue:${wctx.user.workspaceId}`);
     const totalCount = queueCache
       ? queueCache.totalCount
-      : (await buildAttentionQueue(asWorkspaceCtx(ctx))).totalCount;
+      : await loadAttentionCountOnly(wctx);
 
     const result = { totalCount };
     writeDashboardCache(cacheKey, result);
@@ -621,29 +877,7 @@ export const dashboardRouter = router({
   }),
 
   getPipelineOverview: protectedProcedure.query(async ({ ctx }) => {
-    const [stages, leadCounts] = await Promise.all([
-      ctx.db.pipelineStage.findMany({
-        where: { createdById: ctx.user.workspaceId! },
-        orderBy: { sortOrder: "asc" },
-        select: { id: true, name: true, color: true },
-      }),
-      ctx.db.lead.groupBy({
-        by: ["pipelineStageId"],
-        _count: { id: true },
-        where: { createdById: ctx.user.workspaceId!, pipelineStageId: { not: null } },
-      }),
-    ]);
-    const countMap = new Map(
-      leadCounts
-        .filter((entry) => entry.pipelineStageId)
-        .map((entry) => [entry.pipelineStageId as string, entry._count.id]),
-    );
-    return stages.map((s) => ({
-      id: s.id,
-      name: s.name,
-      color: s.color,
-      count: countMap.get(s.id) ?? 0,
-    }));
+    return loadPipelineOverview(asWorkspaceCtx(ctx));
   }),
 
   getScoreDistribution: protectedProcedure.query(async ({ ctx }) => {
@@ -751,29 +985,7 @@ export const dashboardRouter = router({
   }),
 
   getTopLeads: protectedProcedure.query(async ({ ctx }) => {
-    const rows = await ctx.db.lead.findMany({
-      where: { overallScore: { not: null }, createdById: ctx.user.workspaceId! },
-      orderBy: { overallScore: "desc" },
-      take: 24,
-      select: {
-        id: true,
-        companyName: true,
-        city: true,
-        overallScore: true,
-        scorePriority: true,
-        status: true,
-      },
-    });
-    const seen = new Set<string>();
-    const unique: typeof rows = [];
-    for (const row of rows) {
-      const key = row.companyName.trim().toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      unique.push(row);
-      if (unique.length >= 5) break;
-    }
-    return unique;
+    return loadTopLeads(asWorkspaceCtx(ctx));
   }),
 
   getQuoteStats: protectedProcedure.query(async ({ ctx }) => {
@@ -806,51 +1018,11 @@ export const dashboardRouter = router({
   }),
 
   getUpcomingBookings: protectedProcedure.query(async ({ ctx }) => {
-    const now = new Date();
-    return ctx.db.booking.findMany({
-      where: {
-        createdById: ctx.user.workspaceId!,
-        date: { gte: now },
-        status: { in: ["PENDING", "SCHEDULED", "CONFIRMED"] },
-      },
-      orderBy: { date: "asc" },
-      take: 5,
-      select: {
-        id: true,
-        clientName: true,
-        clientEmail: true,
-        date: true,
-        duration: true,
-        status: true,
-        notes: true,
-      },
-    });
+    return loadUpcomingBookings(asWorkspaceCtx(ctx));
   }),
 
   getExpiringDomains: protectedProcedure.query(async ({ ctx }) => {
-    const now = new Date();
-    const thirtyDaysFromNow = new Date();
-    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-
-    return ctx.db.domain.findMany({
-      where: {
-        createdById: ctx.user.workspaceId!,
-        expiresAt: {
-          gte: now,
-          lte: thirtyDaysFromNow,
-        },
-        status: { in: ["ACTIVE", "EXPIRING"] },
-      },
-      orderBy: { expiresAt: "asc" },
-      take: 5,
-      select: {
-        id: true,
-        domainName: true,
-        expiresAt: true,
-        status: true,
-        registrar: true,
-      },
-    });
+    return loadExpiringDomains(asWorkspaceCtx(ctx));
   }),
 
   getDomainMonitor: protectedProcedure.query(async ({ ctx }) => {
@@ -921,37 +1093,6 @@ export const dashboardRouter = router({
   }),
 
   getOpenChats: protectedProcedure.query(async ({ ctx }) => {
-    const sessions = await ctx.db.chatSession.findMany({
-      where: {
-        ...ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id),
-        status: { in: ["OPEN", "WAITING"] },
-      },
-      orderBy: { updatedAt: "desc" },
-      take: 5,
-      select: {
-        id: true,
-        visitorName: true,
-        visitorCompany: true,
-        status: true,
-        isRead: true,
-        updatedAt: true,
-        messages: {
-          orderBy: { createdAt: "desc" },
-          take: 1,
-          select: { content: true, role: true, createdAt: true },
-        },
-      },
-    });
-
-    return sessions.map((s) => ({
-      id: s.id,
-      visitorName: s.visitorName ?? "Anoniem",
-      visitorCompany: s.visitorCompany,
-      status: s.status,
-      isRead: s.isRead,
-      updatedAt: s.updatedAt,
-      lastMessage: s.messages[0]?.content ?? null,
-      lastMessageAt: s.messages[0]?.createdAt ?? s.updatedAt,
-    }));
+    return loadOpenChats(asWorkspaceCtx(ctx));
   }),
 });

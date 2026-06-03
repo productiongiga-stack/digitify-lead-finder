@@ -50,6 +50,7 @@ import { applyEmailTemplateSelection } from "@/lib/apply-email-template";
 import { TemplatePicker } from "@/components/templates/template-picker";
 import { TemplateScopeHelp } from "@/components/templates/template-scope-help";
 import { OutboundWorkflowHelp } from "@/components/outbound/outbound-workflow-help";
+import { useOutboundEmailSettings } from "@/lib/outbound-email-settings";
 // Inline placeholder data/functions to avoid importing @digitify/email (which pulls in nodemailer/server deps)
 type PlaceholderContext = Record<string, string | number | undefined>;
 
@@ -157,35 +158,24 @@ export default function ComposePage() {
   );
 
   // Branding settings for email preview
-  const { data: brandingSettings } = trpc.settings.getAll.useQuery(undefined, {
-    staleTime: 60_000,
-  });
+  const {
+    brandCompanyName,
+    brandPrimaryColor,
+    brandWebsite,
+    brandHeaderSlogan,
+    followupDays,
+    typographyMode,
+    defaultEmailLayout,
+    senderEmail,
+    senderName,
+    senderTitle,
+    senderPhone,
+  } = useOutboundEmailSettings();
 
   const preloadedLeadQuery = trpc.lead.getById.useQuery(
     { id: leadIdFromQuery },
     { enabled: !!leadIdFromQuery }
   );
-  const brandCompanyName = brandingSettings?.["branding.company_name"]
-    ? String(brandingSettings["branding.company_name"])
-    : "";
-  const brandPrimaryColor = brandingSettings?.["branding.primary_color"]
-    ? String(brandingSettings["branding.primary_color"])
-    : "#6366f1";
-  const brandWebsite = brandingSettings?.["branding.website"]
-    ? String(brandingSettings["branding.website"])
-    : brandingSettings?.["company.website"]
-      ? String(brandingSettings["company.website"])
-      : "";
-  const brandHeaderSlogan = brandingSettings?.["email.header_slogan"]
-    ? String(brandingSettings["email.header_slogan"])
-    : "";
-  const followupDays = brandingSettings?.["email.followup_days"]
-    ? Math.max(1, Number.parseInt(String(brandingSettings["email.followup_days"]), 10) || 3)
-    : 3;
-  const typographyMode = brandingSettings?.["display.typography_mode"] === "normal" ? "normal" : "compact";
-  const defaultEmailLayout = brandingSettings?.["email.default_layout"]
-    ? String(brandingSettings["email.default_layout"]) as EmailLayout
-    : "proposal";
 
   // Selected lead details
   const selectedLead = useMemo(() => {
@@ -199,18 +189,6 @@ export default function ComposePage() {
   // Build placeholder context from selected lead
   const placeholderContext = useMemo<PlaceholderContext>(() => {
     if (!selectedLead) return {};
-    const senderEmail = brandingSettings?.["email.from_email"]
-      ? String(brandingSettings["email.from_email"])
-      : "";
-    const senderName = brandingSettings?.["email.from_name"]
-      ? String(brandingSettings["email.from_name"])
-      : "";
-    const senderTitle = brandingSettings?.["email.from_title"]
-      ? String(brandingSettings["email.from_title"])
-      : "";
-    const senderPhone = brandingSettings?.["company.phone"]
-      ? String(brandingSettings["company.phone"])
-      : "";
     return buildLeadContext(selectedLead as Parameters<typeof buildLeadContext>[0], {
       senderName,
       senderTitle,
@@ -218,7 +196,7 @@ export default function ComposePage() {
       senderEmail,
       senderPhone,
     });
-  }, [selectedLead]);
+  }, [selectedLead, senderName, senderTitle, brandCompanyName, senderEmail, senderPhone]);
 
   // Build sample context from examples for preview
   const sampleContext = useMemo<PlaceholderContext>(() => {

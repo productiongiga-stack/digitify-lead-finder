@@ -9,7 +9,7 @@ import {
   redactSecretSettingValue,
   SECRET_REDACTION_MASK,
 } from "@digitify/db";
-import { router, publicProcedure, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
+import { router, publicRateLimitedProcedure, protectedProcedure, adminProcedure, ownerProcedure, mutationProcedure } from "../trpc";
 import { loadEmailSettings } from "../lib/email-sender";
 import { formatSmtpErrorMessage, normalizeTlsOptions } from "../lib/email-utils";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
@@ -197,7 +197,7 @@ export const settingsRouter = router({
     return { success: true };
   }),
 
-  getPublicSeo: publicProcedure.query(async ({ ctx }) => {
+  getPublicSeo: publicRateLimitedProcedure.query(async ({ ctx }) => {
     const { loadMarketingPublicSeoConfig } = await import("../lib/seo-settings");
     const fallbackCanonical =
       process.env.NEXT_PUBLIC_APP_URL?.trim() ||
@@ -205,7 +205,7 @@ export const settingsRouter = router({
     return loadMarketingPublicSeoConfig(ctx.db, { fallbackCanonical });
   }),
 
-  getPublicMarketingFooter: publicProcedure.query(async ({ ctx }) => {
+  getPublicMarketingFooter: publicRateLimitedProcedure.query(async ({ ctx }) => {
     const { resolveMarketingWorkspaceOwnerId } = await import("../lib/public-tenant");
     const ownerId = await resolveMarketingWorkspaceOwnerId(ctx.db);
     const owner = ownerId
@@ -306,6 +306,40 @@ export const settingsRouter = router({
       "company.niche",
       "email.from_name",
       "email.from_email",
+      "email.header_slogan",
+    ];
+    const rows = await loadWorkspaceSettingRows(ctx.db, scope, keys);
+    const map = settingsRowsToMap(rows);
+    return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
+  }),
+
+  /** Settings used on the bookings list page (avoids getAll). */
+  getBookingsPageSettings: protectedProcedure.query(async ({ ctx }) => {
+    const scope = workspaceScopeFromUser(ctx.user);
+    await ensureUserWorkspace(ctx.db, scope.workspaceId, ctx.user.name);
+    const keys = ["ui.bookings_compact", "chatbot.public_tenant_token"];
+    const rows = await loadWorkspaceSettingRows(ctx.db, scope, keys);
+    const map = settingsRowsToMap(rows);
+    return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
+  }),
+
+  /** Narrow settings bundle for outbound compose / email preview (avoids getAll). */
+  getEmailComposeSettings: protectedProcedure.query(async ({ ctx }) => {
+    const scope = workspaceScopeFromUser(ctx.user);
+    await ensureUserWorkspace(ctx.db, scope.workspaceId, ctx.user.name);
+    const keys = [
+      "branding.company_name",
+      "branding.primary_color",
+      "branding.website",
+      "company.website",
+      "company.phone",
+      "email.header_slogan",
+      "email.followup_days",
+      "email.default_layout",
+      "email.from_email",
+      "email.from_name",
+      "email.from_title",
+      "display.typography_mode",
     ];
     const rows = await loadWorkspaceSettingRows(ctx.db, scope, keys);
     const map = settingsRowsToMap(rows);
@@ -320,7 +354,7 @@ export const settingsRouter = router({
     return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
   }),
 
-  update: protectedProcedure
+  update: mutationProcedure
     .input(z.object({ key: z.string(), value: z.any() }))
     .mutation(async ({ ctx, input }) => {
       const key = normalizeSettingKey(input.key);
@@ -353,7 +387,7 @@ export const settingsRouter = router({
       return result;
     }),
 
-  batchUpdate: protectedProcedure
+  batchUpdate: mutationProcedure
     .input(z.array(z.object({ key: z.string(), value: z.any() })))
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
@@ -399,7 +433,7 @@ export const settingsRouter = router({
       return { success: true };
     }),
 
-  removeSettings: protectedProcedure
+  removeSettings: mutationProcedure
     .input(z.object({ keys: z.array(z.string().min(1)).min(1).max(32) }))
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);

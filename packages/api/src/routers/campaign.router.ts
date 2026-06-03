@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { OpenClawClient, type OpenClawContext } from "@digitify/openclaw";
 import { type PrismaClient } from "@digitify/db";
@@ -501,7 +501,7 @@ export const campaignRouter = router({
       };
     }),
 
-  create: protectedProcedure
+  create: mutationProcedure
     .input(
       z.object({
         name: z.string().min(1),
@@ -575,7 +575,7 @@ export const campaignRouter = router({
       }
     }),
 
-  update: protectedProcedure
+  update: mutationProcedure
     .input(
       z.object({
         id: z.string(),
@@ -599,7 +599,7 @@ export const campaignRouter = router({
       return ctx.db.campaign.update({ where: { id }, data: data as any });
     }),
 
-  delete: protectedProcedure
+  delete: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.campaign.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! }, select: { id: true } });
@@ -608,7 +608,7 @@ export const campaignRouter = router({
       return { success: true };
     }),
 
-  addLeads: protectedProcedure
+  addLeads: mutationProcedure
     .input(z.object({ campaignId: z.string(), leadIds: z.array(z.string()) }))
     .mutation(async ({ ctx, input }) => {
       const campaign = await ctx.db.campaign.findFirst({ where: { id: input.campaignId, createdById: ctx.user.workspaceId! }, select: { id: true } });
@@ -628,7 +628,7 @@ export const campaignRouter = router({
       return { added: result.count };
     }),
 
-  removeLeads: protectedProcedure
+  removeLeads: mutationProcedure
     .input(z.object({ campaignId: z.string(), leadIds: z.array(z.string()) }))
     .mutation(async ({ ctx, input }) => {
       const deleted = await ctx.db.campaignLead.deleteMany({
@@ -751,7 +751,7 @@ export const campaignRouter = router({
       };
     }),
 
-  saveDripConfig: protectedProcedure
+  saveDripConfig: mutationProcedure
     .input(
       z.object({
         campaignId: z.string(),
@@ -792,7 +792,7 @@ export const campaignRouter = router({
       return { steps: parseCampaignDripSteps(sorted) };
     }),
 
-  generateFullDrip: protectedProcedure
+  generateFullDrip: mutationProcedure
     .input(
       z.object({
         campaignId: z.string(),
@@ -951,7 +951,7 @@ export const campaignRouter = router({
       };
     }),
 
-  generateDrafts: protectedProcedure
+  generateDrafts: mutationProcedure
     .input(
       z.object({
         campaignId: z.string(),
@@ -1062,7 +1062,7 @@ export const campaignRouter = router({
       };
     }),
 
-  activateAll: protectedProcedure
+  activateAll: mutationProcedure
     .input(
       z.object({
         campaignId: z.string(),
@@ -1263,7 +1263,7 @@ export const campaignRouter = router({
       };
     }),
 
-  runDueDrip: protectedProcedure
+  runDueDrip: mutationProcedure
     .input(
       z.object({
         campaignId: z.string(),
@@ -1300,7 +1300,7 @@ export const campaignRouter = router({
       };
     }),
 
-  runAllDueDrip: protectedProcedure.mutation(async ({ ctx }) => {
+  runAllDueDrip: mutationProcedure.mutation(async ({ ctx }) => {
     return runAllDueDripsWorker(ctx.db, { workspaceId: ctx.user.workspaceId! });
   }),
 

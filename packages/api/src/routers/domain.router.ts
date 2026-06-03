@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { analyzeWebsite } from "@digitify/connectors";
 import { assertLeadAccess } from "../lib/tenant";
@@ -82,7 +82,7 @@ export const domainRouter = router({
       return domain;
     }),
 
-  create: protectedProcedure
+  create: mutationProcedure
     .input(
       z.object({
         domainName: z.string().min(1),
@@ -108,7 +108,7 @@ export const domainRouter = router({
       });
     }),
 
-  update: protectedProcedure
+  update: mutationProcedure
     .input(
       z.object({
         id: z.string(),
@@ -143,7 +143,7 @@ export const domainRouter = router({
       return ctx.db.domain.update({ where: { id }, data: updateData });
     }),
 
-  delete: protectedProcedure
+  delete: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.domain.findFirst({
@@ -154,7 +154,7 @@ export const domainRouter = router({
       return ctx.db.domain.delete({ where: { id: input.id } });
     }),
 
-  analyzeDomain: protectedProcedure
+  analyzeDomain: mutationProcedure
     .input(z.object({ domainName: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const analysis = await analyzeWebsite(input.domainName);

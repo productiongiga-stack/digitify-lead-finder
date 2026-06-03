@@ -4,6 +4,7 @@ import { replacePlaceholders } from "@digitify/email";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { REVIEW_PUBLIC_TEXT_FIELDS, getReviewTextDefault } from "@/lib/review-text";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
+import { safeExternalUrl } from "@/lib/utils";
 
 function userSettingKey(userId: string, key: string) {
   return `user:${userId}:${key.trim()}`;
@@ -107,10 +108,10 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
     companyName,
     companySlogan: getSetting(scopedSettings, "branding.company_slogan", ""),
     primaryColor: getSetting(scopedSettings, "branding.primary_color", "#6366f1"),
-    logoUrl: getSetting(scopedSettings, "branding.logo_url", ""),
+    logoUrl: safeExternalUrl(getSetting(scopedSettings, "branding.logo_url", "")) || "",
     platform: review.platform || "google",
     platformLabel,
-    reviewUrl: review.reviewUrl || "",
+    reviewUrl: safeExternalUrl(review.reviewUrl || "") || "",
     leadCompanyName: review.lead?.companyName || "",
     status: review.status,
     rating: review.rating,
@@ -193,7 +194,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     const response = NextResponse.json({
       success: true,
-      redirectUrl: saved?.reviewUrl || null,
+      redirectUrl: safeExternalUrl(saved?.reviewUrl || "") || null,
     });
     response.cookies.set(lockCookie, "1", {
       httpOnly: true,

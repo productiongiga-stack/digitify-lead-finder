@@ -1,3 +1,5 @@
+import { safeRelativeAppPath } from "./utils";
+
 const QUOTE_ID_MARKER_RE = /\[\[QUOTE_ID=([^\]]+)\]\]/;
 
 export function extractQuoteIdFromDraftBody(body: string) {
@@ -6,6 +8,7 @@ export function extractQuoteIdFromDraftBody(body: string) {
 
 export function getQuoteConfiguratorUrl(quoteId: string, returnTo?: string) {
   const params = new URLSearchParams({ quoteId });
-  if (returnTo) params.set("returnTo", returnTo);
+  const safeReturnTo = returnTo ? safeRelativeAppPath(returnTo) : null;
+  if (safeReturnTo) params.set("returnTo", safeReturnTo);
   return `/quotes/new?${params.toString()}`;
 }

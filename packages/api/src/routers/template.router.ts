@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { protectedProcedure, router } from "../trpc";
+import { protectedProcedure, router, mutationProcedure } from "../trpc";
 import {
   emailTemplateDataFromInput,
   listParsedEmailTemplates,
@@ -82,7 +82,7 @@ export const templateRouter = router({
     return parseTemplateRow(row);
   }),
 
-  save: protectedProcedure
+  save: mutationProcedure
     .input(
       z.object({
         id: z.string().optional(),
@@ -174,7 +174,7 @@ export const templateRouter = router({
       }
     }),
 
-  duplicate: protectedProcedure
+  duplicate: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const source = await ctx.db.emailTemplate.findFirst({
@@ -202,7 +202,7 @@ export const templateRouter = router({
       return parseTemplateRow(row);
     }),
 
-  remove: protectedProcedure
+  remove: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.emailTemplate.findFirst({
@@ -214,7 +214,7 @@ export const templateRouter = router({
       return { success: true };
     }),
 
-  seedStarterPack: protectedProcedure.mutation(async ({ ctx }) =>
+  seedStarterPack: mutationProcedure.mutation(async ({ ctx }) =>
     syncEmailTemplateStarterPack(ctx.db, ctx.user.workspaceId!),
   ),
 
@@ -225,7 +225,7 @@ export const templateRouter = router({
     return { pending, hasLegacy: pending > 0 };
   }),
 
-  migrateLegacyLibrary: protectedProcedure.mutation(async ({ ctx }) => {
+  migrateLegacyLibrary: mutationProcedure.mutation(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);
     return migrateLegacyTemplateLibrary(ctx.db, scope);
   }),

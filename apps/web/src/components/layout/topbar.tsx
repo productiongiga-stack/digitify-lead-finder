@@ -31,8 +31,8 @@ export function Topbar() {
   const { toggleOpenClaw, toggleMobileSidebar } = useUIStore();
   const { branding } = useBranding();
   const { data: attentionSummary } = trpc.dashboard.getAttentionSummary.useQuery(undefined, {
-    staleTime: 60_000,
-    refetchInterval: 60_000,
+    staleTime: 120_000,
+    refetchInterval: 120_000,
     refetchOnWindowFocus: false,
   });
   const { data: profile } = trpc.user.getProfile.useQuery(undefined, {

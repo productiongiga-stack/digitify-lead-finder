@@ -6,6 +6,16 @@ export type WorkspaceUser = {
   workspaceOwnerId?: string | null;
 };
 
+/** Resolve workspace owner id from an already-loaded user row (no DB). */
+export function resolveWorkspaceOwnerIdSync(user: WorkspaceUser): string {
+  if (user.workspaceOwnerId) return user.workspaceOwnerId;
+  if (user.role === "OWNER") return user.id;
+  return user.id;
+}
+
+const workspaceIdCache = new Map<string, { expiresAt: number; workspaceId: string }>();
+const WORKSPACE_ID_CACHE_TTL_MS = 5 * 60_000;
+
 /**
  * Returns the user id that owns shared workspace data (leads, templates, campaigns, …).
  * OWNER accounts use their own id; team members use their workspace owner's id.
@@ -14,14 +24,23 @@ export async function resolveWorkspaceOwnerId(
   db: PrismaClient,
   userId: string,
 ): Promise<string> {
+  const cached = workspaceIdCache.get(userId);
+  if (cached && Date.now() < cached.expiresAt) return cached.workspaceId;
+
   const user = await db.user.findUnique({
     where: { id: userId },
     select: { id: true, role: true, workspaceOwnerId: true },
   });
-  if (!user) return userId;
-  if (user.workspaceOwnerId) return user.workspaceOwnerId;
-  if (user.role === "OWNER") return user.id;
-  return user.id;
+  const workspaceId = user ? resolveWorkspaceOwnerIdSync(user) : userId;
+  workspaceIdCache.set(userId, {
+    workspaceId,
+    expiresAt: Date.now() + WORKSPACE_ID_CACHE_TTL_MS,
+  });
+  return workspaceId;
+}
+
+export function invalidateWorkspaceOwnerIdCache(userId: string) {
+  workspaceIdCache.delete(userId);
 }
 
 export function isWorkspaceOwner(user: WorkspaceUser, workspaceId: string) {

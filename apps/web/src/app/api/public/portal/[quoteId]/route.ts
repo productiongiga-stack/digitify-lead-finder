@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { verifyQuotePdfToken } from "@/lib/quote-pdf";
+import { enforceRateLimit } from "@/lib/http-security";
 
 function parseJson(value: unknown) {
   if (typeof value !== "string") return value;
@@ -23,6 +24,14 @@ async function loadPortalFiles(ownerId: string, quoteId: string) {
 
 export async function GET(request: Request, { params }: { params: Promise<{ quoteId: string }> }) {
   const { quoteId } = await params;
+  const limiter = await enforceRateLimit(request, {
+    key: `public-portal-get:${quoteId}`,
+    limit: 60,
+    windowMs: 60 * 60 * 1000,
+    message: "Te veel portal-verzoeken. Probeer later opnieuw.",
+  });
+  if (limiter) return limiter;
+
   const url = new URL(request.url);
   const token = url.searchParams.get("token");
   if (!verifyQuotePdfToken(quoteId, token)) {
@@ -50,15 +59,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ quot
   });
   const settings = await prisma.setting.findMany({
     where: {
-      key: {
-        in: [
-          `user:${quote.createdById}:chatbot.public_tenant_token`,
-          `user:${quote.createdById}:branding.company_name`,
-        ],
-      },
+      key: `user:${quote.createdById}:branding.company_name`,
     },
+    select: { value: true },
   });
-  const map = Object.fromEntries(settings.map((row) => [row.key.split(":").slice(2).join(":"), parseJson(row.value)]));
+  const companyNameSetting = settings[0]?.value;
+  const companyName =
+    typeof companyNameSetting === "string"
+      ? companyNameSetting.replace(/^"|"$/g, "")
+      : String(companyNameSetting || "Digitify");
+
+  const bookingEmbedUrl = token
+    ? `/embed/bookings?quotePortal=${encodeURIComponent(quoteId)}&portalToken=${encodeURIComponent(token)}`
+    : null;
 
   return NextResponse.json({
     quote: {
@@ -79,13 +92,28 @@ export async function GET(request: Request, { params }: { params: Promise<{ quot
     },
     files,
     bookings,
-    bookingEmbedUrl: `/embed/bookings${map["chatbot.public_tenant_token"] ? `?tenant=${encodeURIComponent(String(map["chatbot.public_tenant_token"]))}` : ""}`,
-    companyName: String(map["branding.company_name"] || "Digitify"),
+    bookingEmbedUrl,
+    companyName,
   });
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ quoteId: string }> }) {
   const { quoteId } = await params;
+  const burstLimiter = await enforceRateLimit(request, {
+    key: `public-portal-post-burst:${quoteId}`,
+    limit: 10,
+    windowMs: 60_000,
+    message: "Te veel portal-acties. Wacht even en probeer opnieuw.",
+  });
+  if (burstLimiter) return burstLimiter;
+  const hourlyLimiter = await enforceRateLimit(request, {
+    key: `public-portal-post:${quoteId}`,
+    limit: 30,
+    windowMs: 60 * 60 * 1000,
+    message: "Te veel portal-acties. Probeer later opnieuw.",
+  });
+  if (hourlyLimiter) return hourlyLimiter;
+
   const body = await request.json();
   const token = String(body.token || "");
   if (!verifyQuotePdfToken(quoteId, token)) {

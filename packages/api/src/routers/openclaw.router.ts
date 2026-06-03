@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc";
+import { router, aiRateLimitedProcedure } from "../trpc";
 import { OpenClawClient, type OpenClawContext } from "@digitify/openclaw";
 import { normalizeAiPlaceholderSyntax } from "../lib/email-utils";
 import { type PrismaClient } from "@digitify/db";
@@ -82,7 +82,7 @@ async function loadBusinessContext(db: PrismaClient, workspaceId: string) {
 }
 
 export const openclawRouter = router({
-  chat: protectedProcedure
+  chat: aiRateLimitedProcedure
     .input(
       z.object({
         messages: z.array(
@@ -199,7 +199,7 @@ export const openclawRouter = router({
       return { response, tokensUsed: Math.ceil(response.length / 4) };
     }),
 
-  draftEmail: protectedProcedure
+  draftEmail: aiRateLimitedProcedure
     .input(
       z.object({
         leadId: z.string(),
@@ -306,7 +306,7 @@ export const openclawRouter = router({
       return { draft, suggestion: normalizedSuggestion };
     }),
 
-  rewriteDraft: protectedProcedure
+  rewriteDraft: aiRateLimitedProcedure
     .input(z.object({
       draftId: z.string(),
       style: z.string(),
@@ -374,7 +374,7 @@ ONDERWERP: [nieuwe onderwerpregel]
       };
     }),
 
-  rewriteInboxMessage: protectedProcedure
+  rewriteInboxMessage: aiRateLimitedProcedure
     .input(
       z.object({
         purpose: z.enum(["reply", "follow_up", "compose"]),
@@ -402,7 +402,7 @@ ONDERWERP: [nieuwe onderwerpregel]
       }),
     ),
 
-  analyzeLead: protectedProcedure
+  analyzeLead: aiRateLimitedProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const { client } = await getClient(ctx.db, ctx.user.workspaceId!);

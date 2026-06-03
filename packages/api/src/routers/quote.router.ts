@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
 import {
@@ -246,7 +246,7 @@ export const quoteRouter = router({
       return buildQuoteEmailPreflight(quote, leadResolution);
     }),
 
-  create: protectedProcedure
+  create: mutationProcedure
     .input(
       z.object({
         leadId: z.string().optional(),
@@ -357,7 +357,7 @@ export const quoteRouter = router({
       return quote;
     }),
 
-  update: protectedProcedure
+  update: mutationProcedure
     .input(
       z.object({
         id: z.string(),
@@ -479,7 +479,7 @@ export const quoteRouter = router({
       return quote;
     }),
 
-  updateStatus: protectedProcedure
+  updateStatus: mutationProcedure
     .input(
       z.object({
         id: z.string(),
@@ -538,7 +538,7 @@ export const quoteRouter = router({
       return updated;
     }),
 
-  sendEmail: protectedProcedure
+  sendEmail: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const quote = await ctx.db.quote.findFirst({
@@ -655,7 +655,7 @@ export const quoteRouter = router({
       };
     }),
 
-  addNote: protectedProcedure
+  addNote: mutationProcedure
     .input(z.object({ id: z.string(), note: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const quote = await ctx.db.quote.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! } });
@@ -779,7 +779,7 @@ export const quoteRouter = router({
       );
     }),
 
-  delete: protectedProcedure
+  delete: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.quote.findFirst({
@@ -799,7 +799,7 @@ export const quoteRouter = router({
     });
   }),
 
-  upsertService: protectedProcedure
+  upsertService: mutationProcedure
     .input(
       z.object({
         id: z.string().optional(),
@@ -842,7 +842,7 @@ export const quoteRouter = router({
       });
     }),
 
-  deleteService: protectedProcedure
+  deleteService: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const deleted = await ctx.db.serviceCatalog.deleteMany({
@@ -891,7 +891,7 @@ export const quoteRouter = router({
   }),
 
   // Create from lead (pre-fill)
-  createFromLead: protectedProcedure
+  createFromLead: mutationProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const lead = await ctx.db.lead.findFirstOrThrow({

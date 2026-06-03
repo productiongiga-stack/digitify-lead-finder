@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { protectedProcedure, router } from "../trpc";
+import { protectedProcedure, router, mutationProcedure } from "../trpc";
 import { migrateLegacyWorkspaceInvoices } from "../lib/migrate-workspace-invoices";
 import { nextInvoiceNumber, serializeInvoice } from "../lib/invoice-serializer";
 import { buildInvoiceOutboundBody } from "../lib/invoice-outbound";
@@ -127,7 +127,7 @@ export const invoiceRouter = router({
       return serializeInvoice(row);
     }),
 
-  createFromQuote: protectedProcedure
+  createFromQuote: mutationProcedure
     .input(
       z.object({
         quoteId: z.string(),
@@ -215,7 +215,7 @@ export const invoiceRouter = router({
       return serializeInvoice(row);
     }),
 
-  update: protectedProcedure
+  update: mutationProcedure
     .input(
       z.object({
         id: z.string(),
@@ -292,7 +292,7 @@ export const invoiceRouter = router({
       return serializeInvoice(updated);
     }),
 
-  updateStatus: protectedProcedure
+  updateStatus: mutationProcedure
     .input(
       z.object({
         id: z.string(),
@@ -317,7 +317,7 @@ export const invoiceRouter = router({
       return serializeInvoice(updated);
     }),
 
-  createOutboundDraft: protectedProcedure
+  createOutboundDraft: mutationProcedure
     .input(z.object({ invoiceId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
@@ -386,7 +386,7 @@ export const invoiceRouter = router({
       return { draftId: draft.id };
     }),
 
-  sendReminder: protectedProcedure
+  sendReminder: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const row = await ctx.db.workspaceInvoice.findFirst({
@@ -443,7 +443,7 @@ export const invoiceRouter = router({
       return serializeInvoice(updated);
     }),
 
-  remove: protectedProcedure
+  remove: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const result = await ctx.db.workspaceInvoice.deleteMany({

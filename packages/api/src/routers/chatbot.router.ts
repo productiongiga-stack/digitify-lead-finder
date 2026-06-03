@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { router, protectedProcedure } from "../trpc";
+import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { assertLeadAccess, ownedChatSessionWhere } from "../lib/tenant";
 import { enforceRateLimit } from "../lib/rate-limit";
@@ -95,7 +95,7 @@ export const chatbotRouter = router({
     }),
 
   // Send agent message in a session
-  sendMessage: protectedProcedure
+  sendMessage: mutationProcedure
     .input(z.object({
       sessionId: z.string(),
       content: z.string().min(1),
@@ -135,7 +135,7 @@ export const chatbotRouter = router({
     }),
 
   // Update session (status, assignment, notes, tags)
-  updateSession: protectedProcedure
+  updateSession: mutationProcedure
     .input(z.object({
       id: z.string(),
       status: z.enum(["OPEN", "WAITING", "RESOLVED", "ARCHIVED"]).optional(),
@@ -155,7 +155,7 @@ export const chatbotRouter = router({
     }),
 
   // Convert chat to lead
-  convertToLead: protectedProcedure
+  convertToLead: mutationProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await enforceChatbotRateLimit({
@@ -204,7 +204,7 @@ export const chatbotRouter = router({
     }),
 
   // Convert chat to quote
-  convertToQuote: protectedProcedure
+  convertToQuote: mutationProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const session = await ctx.db.chatSession.findFirst({
@@ -267,7 +267,7 @@ export const chatbotRouter = router({
     }),
 
   // Convert chat to booking
-  convertToBooking: protectedProcedure
+  convertToBooking: mutationProcedure
     .input(
       z.object({
         sessionId: z.string(),
@@ -305,7 +305,7 @@ export const chatbotRouter = router({
     }),
 
   // Live takeover by admin/agent
-  startLiveTakeover: protectedProcedure
+  startLiveTakeover: mutationProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const session = await ctx.db.chatSession.findFirst({
@@ -338,7 +338,7 @@ export const chatbotRouter = router({
     }),
 
   // Link session to existing lead
-  linkToLead: protectedProcedure
+  linkToLead: mutationProcedure
     .input(z.object({ sessionId: z.string(), leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
@@ -355,7 +355,7 @@ export const chatbotRouter = router({
     }),
 
   // Generate AI summary of conversation
-  generateSummary: protectedProcedure
+  generateSummary: mutationProcedure
     .input(z.object({ sessionId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const session = await ctx.db.chatSession.findFirst({
@@ -485,7 +485,7 @@ export const chatbotRouter = router({
   }),
 
   // Bulk mark as read
-  bulkMarkRead: protectedProcedure
+  bulkMarkRead: mutationProcedure
     .input(z.object({ ids: z.array(z.string()) }))
     .mutation(async ({ ctx, input }) => {
       await ctx.db.chatSession.updateMany({
@@ -496,7 +496,7 @@ export const chatbotRouter = router({
     }),
 
   // Delete session
-  deleteSession: protectedProcedure
+  deleteSession: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const session = await ctx.db.chatSession.findFirst({
@@ -509,7 +509,7 @@ export const chatbotRouter = router({
     }),
 
   // Create a session (admin creates test sessions or incoming webhook proxy)
-  createSession: protectedProcedure
+  createSession: mutationProcedure
     .input(z.object({
       visitorName: z.string().optional(),
       visitorEmail: z.string().optional(),

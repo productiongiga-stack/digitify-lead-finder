@@ -9,6 +9,7 @@ import {
   parseIconLibrary,
   sanitizeNumber,
 } from "@/lib/quote-configurator-utils";
+import { safeRelativeAppPath } from "@/lib/utils";
 import {
   ConfiguratorIcon,
   QuoteEmbedHeader,
@@ -1062,8 +1063,8 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
 
     setStatus({ type: "success", message: `${data.message} Referentie: ${data.quoteNumber}.` });
     if (isInternalMode && data.quoteId) {
-      window.location.href =
-        returnToParam || `/quotes/${encodeURIComponent(data.quoteId)}`;
+      const fallbackPath = `/quotes/${encodeURIComponent(data.quoteId)}`;
+      window.location.href = safeRelativeAppPath(returnToParam) || fallbackPath;
     }
   }
 

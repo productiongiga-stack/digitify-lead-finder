@@ -26,6 +26,8 @@ jobs:
       SEED_ADMIN_PASSWORD: DigitifyCiSeed2026!
       SEED_RLS_OWNER_B_EMAIL: owner-b@digitify.ci
       SEED_RLS_OWNER_B_PASSWORD: DigitifyCiSeed2026!
+      SEED_VIEWER_EMAIL: viewer@digitify.ci
+      SEED_VIEWER_PASSWORD: DigitifyCiSeed2026!
       SETTINGS_ENCRYPTION_KEY: ci-settings-encryption-key-min-32-chars
       CRON_SECRET: ci-cron-secret-min-16
 
@@ -134,8 +136,8 @@ jobs:
       - name: Typecheck web app
         run: pnpm typecheck
 
-      - name: Lint web app
-        run: pnpm --filter @digitify/web lint
+      - name: Lint monorepo
+        run: pnpm lint
 
       - name: Production build
         run: pnpm build
@@ -155,10 +157,14 @@ jobs:
       SEED_ADMIN_PASSWORD: DigitifyCiSeed2026!
       SEED_RLS_OWNER_B_EMAIL: owner-b@digitify.ci
       SEED_RLS_OWNER_B_PASSWORD: DigitifyCiSeed2026!
+      SEED_VIEWER_EMAIL: viewer@digitify.ci
+      SEED_VIEWER_PASSWORD: DigitifyCiSeed2026!
       PLAYWRIGHT_LOGIN_EMAIL: admin@digitify.ci
       PLAYWRIGHT_LOGIN_PASSWORD: DigitifyCiSeed2026!
       PLAYWRIGHT_OWNER_B_EMAIL: owner-b@digitify.ci
       PLAYWRIGHT_OWNER_B_PASSWORD: DigitifyCiSeed2026!
+      PLAYWRIGHT_VIEWER_EMAIL: viewer@digitify.ci
+      PLAYWRIGHT_VIEWER_PASSWORD: DigitifyCiSeed2026!
       REDIS_URL: redis://localhost:6379
 
     services:

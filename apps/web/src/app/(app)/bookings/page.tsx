@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc/client";
-import { cn } from "@/lib/utils";
+import { cn, safeExternalUrl } from "@/lib/utils";
 import { readSettingBoolean, readSettingString } from "@/lib/settings";
 import { getAppUrl } from "@/lib/config";
 import {
@@ -235,7 +235,10 @@ export default function BookingsPage() {
     }
   );
   const { data: stats } = trpc.booking.getStats.useQuery();
-  const { data: settingsData } = trpc.settings.getAll.useQuery();
+  const { data: settingsData } = trpc.settings.getBookingsPageSettings.useQuery(undefined, {
+    staleTime: 5 * 60_000,
+    refetchOnMount: false,
+  });
   const { data: eventTypes } = trpc.booking.listEventTypes.useQuery();
   type EventType = NonNullable<NonNullable<typeof eventTypes>[number]>;
   const eventTypeItems = (eventTypes ?? []).filter((item): item is EventType => Boolean(item));
@@ -295,7 +298,7 @@ export default function BookingsPage() {
     onError: (error) => showToast({ title: "Verwijderen mislukt", description: error.message, variant: "error" }),
   });
   const settingsUpdateMutation = trpc.settings.update.useMutation({
-    onSuccess: () => utils.settings.getAll.invalidate(),
+    onSuccess: () => utils.settings.getBookingsPageSettings.invalidate(),
     onError: (error) => showToast({ title: "Compact modus opslaan mislukt", description: error.message, variant: "error" }),
   });
 
@@ -726,6 +729,8 @@ export default function BookingsPage() {
                             );
                           }
 
+                          const htmlLinkUrl = safeExternalUrl(item.htmlLink);
+
                           return (
                             <div
                               key={`google-${item.id}`}
@@ -745,9 +750,9 @@ export default function BookingsPage() {
                                   {formatAgendaTime(item.start, item.allDay)}
                                   {!item.allDay ? ` – ${formatAgendaTime(item.end)}` : ""}
                                 </p>
-                                {item.htmlLink ? (
+                                {htmlLinkUrl ? (
                                   <Button variant="ghost" size="sm" className="h-8 px-2" asChild>
-                                    <a href={item.htmlLink} target="_blank" rel="noreferrer">
+                                    <a href={htmlLinkUrl} target="_blank" rel="noreferrer">
                                       <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
                                       Open
                                     </a>

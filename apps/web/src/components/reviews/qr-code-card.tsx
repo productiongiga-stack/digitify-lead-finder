@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@digitify/ui";
 import { Check, Copy, Download, ExternalLink, QrCode } from "lucide-react";
+import { safeExternalUrl } from "@/lib/utils";
 
 type ReviewQrCodeCardProps = {
   title: string;
@@ -21,6 +22,7 @@ export function ReviewQrCodeCard({
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [copied, setCopied] = useState(false);
   const normalizedUrl = useMemo(() => url.trim(), [url]);
+  const openLinkUrl = useMemo(() => safeExternalUrl(normalizedUrl), [normalizedUrl]);
 
   useEffect(() => {
     if (!normalizedUrl) {
@@ -102,12 +104,19 @@ export function ReviewQrCodeCard({
             <Download className="mr-2 h-3.5 w-3.5" />
             Download PNG
           </Button>
-          <a href={normalizedUrl} target="_blank" rel="noopener noreferrer">
-            <Button type="button" variant="outline" size="sm" disabled={!normalizedUrl}>
+          {openLinkUrl ? (
+            <a href={openLinkUrl} target="_blank" rel="noopener noreferrer">
+              <Button type="button" variant="outline" size="sm">
+                <ExternalLink className="mr-2 h-3.5 w-3.5" />
+                Open link
+              </Button>
+            </a>
+          ) : (
+            <Button type="button" variant="outline" size="sm" disabled>
               <ExternalLink className="mr-2 h-3.5 w-3.5" />
               Open link
             </Button>
-          </a>
+          )}
         </div>
       </CardContent>
     </Card>

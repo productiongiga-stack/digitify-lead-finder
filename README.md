@@ -44,6 +44,26 @@ pnpm db:seed
 
 RLS-staging smoke: `ENABLE_WORKSPACE_RLS=true pnpm rls:smoke`
 
+Integration tests (RLS + cross-tenant IDOR):
+
+```bash
+export DATABASE_URL=postgresql://user:pass@localhost:5432/digitify
+export RUN_DB_INTEGRATION=1
+export ENABLE_WORKSPACE_RLS=true
+pnpm --filter @digitify/api test:integration
+# or a single file:
+RUN_DB_INTEGRATION=1 pnpm --filter @digitify/api exec vitest run src/__tests__/workspace-rls.integration.test.ts
+```
+
+Optional read-only E2E user:
+
+```bash
+export SEED_VIEWER_EMAIL=viewer@digitify.local
+export SEED_VIEWER_PASSWORD='minimaal-12-tekens'
+pnpm db:seed
+PLAYWRIGHT_VIEWER_EMAIL=$SEED_VIEWER_EMAIL PLAYWRIGHT_VIEWER_PASSWORD=$SEED_VIEWER_PASSWORD pnpm test:e2e
+```
+
 ### Productie / staging database
 
 ```bash
@@ -74,9 +94,10 @@ Zie [DEPLOYMENT.md](DEPLOYMENT.md) en [docs/VERCEL.md](docs/VERCEL.md).
 | Script | Doel |
 |--------|------|
 | `pnpm test` | Unit tests (api, email, scoring, web) |
-| `pnpm test:integration` | Postgres RLS |
+| `pnpm test:integration` | Postgres RLS + IDOR smoke (requires DB) |
 | `pnpm test:e2e` | Playwright smoke |
 | `pnpm typecheck` | TypeScript |
+| `pnpm lint` | ESLint (api, ui, web) |
 | `pnpm rls:smoke` | Cross-tenant RLS check |
 | `pnpm setup:db` | Productie DB migraties |
 
