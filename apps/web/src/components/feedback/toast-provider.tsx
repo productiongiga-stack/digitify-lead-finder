@@ -68,7 +68,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div className="pointer-events-none fixed right-4 top-4 z-[100] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
         {toasts.map((toast) => {
-          const Icon = variantIcon[toast.variant];
+          const Icon = variantIcon[toast.variant] ?? CheckCircle2;
           return (
             <div
               key={toast.id}

@@ -58,14 +58,23 @@ export const MAIN_NAV_ITEMS: NavItem[] = [
       return LEADS_WORKFLOW_ITEMS.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
     },
   },
+  {
+    href: "/meta-ads",
+    label: "Advertenties",
+    icon: Megaphone,
+    activeMatch: (pathname) =>
+      ADS_NAV_ITEMS.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`)),
+  },
+];
+
+export const ADS_NAV_ITEMS: QuickNavItem[] = [
+  { href: "/meta-ads", label: "Meta Ads", icon: Megaphone, moduleId: "metaAds" },
+  { href: "/google-ads", label: "Google Ads", icon: BarChart3, moduleId: "googleAds" },
 ];
 
 export const LEADS_WORKFLOW_ITEMS: QuickNavItem[] = [
   { href: "/leads/search", label: "Leads zoeken", icon: Search },
   { href: "/campaigns", label: "Campagneprofielen", icon: Target, moduleId: "campaigns" },
-  { href: "/social", label: "Social Planner", icon: Megaphone, moduleId: "social" },
-  { href: "/meta-ads", label: "Meta Ads", icon: Megaphone, moduleId: "metaAds" },
-  { href: "/google-ads", label: "Google Ads", icon: BarChart3, moduleId: "googleAds" },
   { href: "/contacts", label: "Outbound", icon: SendHorizonal, moduleId: "contacts" },
   { href: "/contacts/inbox", label: "Inbox", icon: Inbox, moduleId: "contacts" },
   { href: "/quotes", label: "Offertes", icon: Receipt, moduleId: "quotes" },
@@ -82,6 +91,7 @@ export const LEADS_MENU_ITEMS: QuickNavItem[] = [
 ];
 
 export const TOOL_NAV_ITEMS: NavItem[] = [
+  { href: "/social", label: "Social Planner", icon: Megaphone, moduleId: "social" },
   { href: "/bookings", label: "Boekingen", icon: Calendar, moduleId: "bookings" },
   { href: "/domains", label: "Domeinen", icon: Globe2, moduleId: "domains" },
   { href: "/reviews", label: "Reviews", icon: Star, moduleId: "reviews" },

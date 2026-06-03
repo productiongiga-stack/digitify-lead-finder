@@ -11,8 +11,22 @@ import {
   listGoogleCampaigns,
   loadGoogleAdsWorkspaceConfig,
   pushPausedGoogleAdPlan,
+  suggestBeneluxGeoTargets,
   validateBudgetGuard,
 } from "../lib/google-ads";
+import {
+  buildAudienceSignalsSystemPrompt,
+  buildAudienceSignalsUserPrompt,
+  buildSearchKeywordsSystemPrompt,
+  buildSearchKeywordsUserPrompt,
+  buildGoogleCampaignSystemPrompt,
+  buildGoogleCampaignUserPrompt,
+  extractJsonFromAiResponse,
+  loadGoogleAdsAiContext,
+  normalizeAudienceSignalsSuggestion,
+  normalizeGoogleCampaignSuggestion,
+  normalizeSearchKeywordsSuggestion,
+} from "../lib/google-ads-ai";
 import {
   normalizeGoogleCustomerId,
   resolveGoogleAdsDeveloperToken,
@@ -70,58 +84,191 @@ async function renderAdSuggestion(
   const fallback = {
     name: `${input.product.trim()} campagne`,
     campaignType,
-    primaryText: `Ontdek hoe ${input.product.trim()} je bedrijf helpt groeien.`,
-    headline: `Meer resultaat met ${input.product.trim()}`,
-    description: "Veilig voorbereid als gepauzeerde Google-campagne.",
     creatives: {
       finalUrl: "https://leads.digitify.be",
       headlines: ["Meer kwalitatieve leads", "Digitify lead generation", "Vraag vandaag een demo"],
       descriptions: ["Automatiseer leadgeneratie voor Belgische KMO's.", "Plan, keur goed en publiceer veilig als paused."],
+      longHeadlines: [`Ontdek hoe ${input.product.trim()} meer kwalitatieve leads vindt`],
+      path1: "offerte",
+      path2: "demo",
     },
     targeting: defaultSearchTargeting(undefined),
+    keywordBrief: "",
+    imageBrief: "",
   };
 
+  const aiContext = await loadGoogleAdsAiContext(db, workspaceId);
   const { provider, model, apiKey } = await loadAiProviderConfig(db, workspaceId);
-  if (!apiKey) return { ...fallback, provider: "fallback", model: "none" };
+  if (!apiKey) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Chatbot AI is niet gekoppeld. Stel een API-sleutel in via Instellingen → Integraties.",
+    });
+  }
+
+  const client = new OpenClawClient({ provider, model, apiKey, maxTokens: 1000 });
+  const response = await client.chat(
+    [
+      {
+        role: "user",
+        content: `${buildGoogleCampaignSystemPrompt({
+          trainingNotes: aiContext.trainingNotes,
+          responseStyle: aiContext.responseStyle,
+          companyName: aiContext.companyName,
+          campaignType,
+        })}\n\n${buildGoogleCampaignUserPrompt({
+          product: input.product,
+          audience: input.audience,
+          tone: input.tone,
+          campaignType,
+          website: aiContext.website,
+        })}`,
+      },
+    ],
+    {
+      currentPage: "/google-ads",
+      businessContext: aiContext.businessContext,
+      settings: {
+        aggressiveness: "balanced",
+        tone: input.tone || aiContext.responseStyle || "professioneel",
+        language: "nl",
+        companyName: aiContext.companyName,
+      },
+    },
+  );
+
+  const parsed = extractJsonFromAiResponse(response || "");
+  const normalized = normalizeGoogleCampaignSuggestion(parsed, fallback);
+  const payload = normalized.payload as typeof fallback & Record<string, unknown>;
+
+  return {
+    ...payload,
+    targeting: defaultSearchTargeting(payload.targeting ?? fallback.targeting),
+    aiUsed: normalized.aiUsed,
+    provider,
+    model,
+  };
+}
+
+async function renderAudienceSignalsSuggestion(
+  db: PrismaClient,
+  workspaceId: string,
+  input: { product: string; audience?: string; tone?: string; existingSignals?: string[] },
+) {
+  const existingSignals = (input.existingSignals || []).map((item) => item.trim()).filter(Boolean).slice(0, 25);
+  const aiContext = await loadGoogleAdsAiContext(db, workspaceId);
+  const { provider, model, apiKey } = await loadAiProviderConfig(db, workspaceId);
+  if (!apiKey) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Chatbot AI is niet gekoppeld. Stel een API-sleutel in via Instellingen → Integraties.",
+    });
+  }
+
+  const client = new OpenClawClient({ provider, model, apiKey, maxTokens: 500 });
+  const response = await client.chat(
+    [
+      {
+        role: "user",
+        content: `${buildAudienceSignalsSystemPrompt({
+          trainingNotes: aiContext.trainingNotes,
+          responseStyle: aiContext.responseStyle,
+          companyName: aiContext.companyName,
+        })}\n\n${buildAudienceSignalsUserPrompt({
+          product: input.product,
+          audience: input.audience,
+          tone: input.tone,
+          existingSignals,
+        })}`,
+      },
+    ],
+    {
+      currentPage: "/google-ads",
+      businessContext: aiContext.businessContext,
+      settings: {
+        aggressiveness: "balanced",
+        tone: input.tone || aiContext.responseStyle || "professioneel",
+        language: "nl",
+        companyName: aiContext.companyName,
+      },
+    },
+  );
+
+  const parsed = extractJsonFromAiResponse(response || "");
+  const normalized = normalizeAudienceSignalsSuggestion(parsed, existingSignals);
+  return {
+    audienceSignals: normalized.audienceSignals,
+    aiUsed: normalized.aiUsed,
+    provider,
+    model,
+  };
+}
+
+async function renderSearchKeywordsSuggestion(
+  db: PrismaClient,
+  workspaceId: string,
+  input: {
+    product: string;
+    audience?: string;
+    tone?: string;
+    existingKeywords?: string[];
+    existingNegativeKeywords?: string[];
+  },
+) {
+  const existingKeywords = (input.existingKeywords || []).map((item) => item.trim()).filter(Boolean).slice(0, 80);
+  const existingNegativeKeywords = (input.existingNegativeKeywords || [])
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 80);
+  const aiContext = await loadGoogleAdsAiContext(db, workspaceId);
+  const { provider, model, apiKey } = await loadAiProviderConfig(db, workspaceId);
+  if (!apiKey) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Chatbot AI is niet gekoppeld. Stel een API-sleutel in via Instellingen → Integraties.",
+    });
+  }
 
   const client = new OpenClawClient({ provider, model, apiKey, maxTokens: 700 });
   const response = await client.chat(
     [
       {
         role: "user",
-        content:
-          `Maak een compacte Google Ads draft in JSON voor een Belgische KMO. ` +
-          `Velden: name, campaignType (${campaignType}), creatives (finalUrl, headlines[], descriptions[]), targeting (keywords[], geoTargetConstants[]). ` +
-          `Geen markdown. Product: ${input.product}. Doelgroep: ${input.audience || "lokale ondernemers"}.`,
+        content: `${buildSearchKeywordsSystemPrompt({
+          trainingNotes: aiContext.trainingNotes,
+          responseStyle: aiContext.responseStyle,
+          companyName: aiContext.companyName,
+        })}\n\n${buildSearchKeywordsUserPrompt({
+          product: input.product,
+          audience: input.audience,
+          tone: input.tone,
+          existingKeywords,
+          existingNegativeKeywords,
+        })}`,
       },
     ],
     {
       currentPage: "/google-ads",
-      settings: { aggressiveness: "balanced", tone: input.tone || "professioneel", language: "nl", companyName: "Digitify" },
+      businessContext: aiContext.businessContext,
+      settings: {
+        aggressiveness: "balanced",
+        tone: input.tone || aiContext.responseStyle || "professioneel",
+        language: "nl",
+        companyName: aiContext.companyName,
+      },
     },
   );
 
-  try {
-    const parsed = JSON.parse(response || "{}");
-    const creatives = {
-      ...fallback.creatives,
-      ...(parsed.creatives && typeof parsed.creatives === "object" ? parsed.creatives : {}),
-    };
-    if (!String(creatives.finalUrl || creatives.linkUrl || "").trim()) {
-      creatives.finalUrl = fallback.creatives.finalUrl;
-    }
-    return {
-      ...fallback,
-      ...parsed,
-      campaignType: parsed.campaignType === "PERFORMANCE_MAX" ? "PERFORMANCE_MAX" : "SEARCH",
-      targeting: defaultSearchTargeting(parsed.targeting ?? fallback.targeting),
-      creatives,
-      provider,
-      model,
-    };
-  } catch {
-    return { ...fallback, provider, model };
-  }
+  const parsed = extractJsonFromAiResponse(response || "");
+  const normalized = normalizeSearchKeywordsSuggestion(parsed, existingKeywords, existingNegativeKeywords);
+  return {
+    keywords: normalized.keywords,
+    negativeKeywords: normalized.negativeKeywords,
+    adGroupName: normalized.adGroupName,
+    aiUsed: normalized.aiUsed,
+    provider,
+    model,
+  };
 }
 
 async function pushPlanToGoogle(
@@ -291,6 +438,27 @@ export const googleAdsRouter = router({
     return getGoogleAdsInsights(config);
   }),
 
+  searchGeoLocations: protectedProcedure
+    .input(z.object({ query: z.string().min(2).max(80) }))
+    .query(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      const config = await loadGoogleAdsWorkspaceConfig(ctx.db, scope);
+      if (!config.refreshToken) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Koppel Google Ads eerst via Integraties." });
+      }
+      if (!config.customerId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Selecteer eerst een Google Ads customer." });
+      }
+      try {
+        return await suggestBeneluxGeoTargets(config, input.query);
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: error instanceof Error ? error.message : "Locatiezoekopdracht mislukt.",
+        });
+      }
+    }),
+
   listDrafts: protectedProcedure
     .input(z.object({ status: planStatusEnum.optional() }).optional())
     .query(async ({ ctx, input }) => {
@@ -362,6 +530,44 @@ export const googleAdsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => renderAdSuggestion(ctx.db, ctx.user.workspaceId!, input)),
+
+  generateAudienceSignals: protectedProcedure
+    .input(
+      z.object({
+        product: z.string().min(2).max(400),
+        audience: z.string().max(400).optional(),
+        tone: z.string().max(80).optional(),
+        existingSignals: z.array(z.string().max(80)).max(25).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      renderAudienceSignalsSuggestion(ctx.db, ctx.user.workspaceId!, {
+        product: input.product,
+        audience: input.audience,
+        tone: input.tone,
+        existingSignals: input.existingSignals,
+      }),
+    ),
+
+  generateSearchKeywords: protectedProcedure
+    .input(
+      z.object({
+        product: z.string().min(2).max(400),
+        audience: z.string().max(400).optional(),
+        tone: z.string().max(80).optional(),
+        existingKeywords: z.array(z.string().max(80)).max(80).optional(),
+        existingNegativeKeywords: z.array(z.string().max(80)).max(80).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      renderSearchKeywordsSuggestion(ctx.db, ctx.user.workspaceId!, {
+        product: input.product,
+        audience: input.audience,
+        tone: input.tone,
+        existingKeywords: input.existingKeywords,
+        existingNegativeKeywords: input.existingNegativeKeywords,
+      }),
+    ),
 
   submitForApproval: protectedProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const adsDb = ctx.db as any;

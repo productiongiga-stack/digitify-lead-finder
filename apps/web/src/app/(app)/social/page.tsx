@@ -64,7 +64,8 @@ import {
   type PlacementAssets,
   type SocialPlacement,
 } from "@/components/social/social-placement-editor";
-import { SocialLivePreview } from "@/components/social/social-live-preview";
+import { persistPlacementAssets } from "@/lib/persist-social-assets";
+import { FacebookPageAvatar, InstagramPageAvatar } from "@/components/social/social-platform-avatars";
 
 type Platform = "FACEBOOK" | "INSTAGRAM";
 type RowStatus = "DRAFT" | "PENDING_APPROVAL" | "SCHEDULED" | "PUBLISHING" | "PUBLISHED" | "FAILED" | "CANCELLED";
@@ -90,6 +91,63 @@ const FORMAT_OPTIONS: Array<{ value: PostFormat; label: string; description: str
   { value: "LANDSCAPE", label: "Landscape", description: "1.91:1 · breed beeld", className: "aspect-[1.91/1]" },
   { value: "STORY", label: "Story", description: "9:16 · FB + IG Stories", className: "aspect-[9/16]" },
 ];
+
+const SOCIAL_TONE_OPTIONS = [
+  {
+    value: "warm en professioneel",
+    label: "Warm & professioneel",
+    description: "Vertrouwd en toegankelijk — ideaal voor B2B en KMO",
+  },
+  {
+    value: "kort en krachtig",
+    label: "Kort & krachtig",
+    description: "Punchy hooks, weinig woorden, sterke CTA",
+  },
+  {
+    value: "vriendelijk en toegankelijk",
+    label: "Vriendelijk & toegankelijk",
+    description: "Menselijk, laagdrempelig en conversationeel",
+  },
+  {
+    value: "zakelijk en betrouwbaar",
+    label: "Zakelijk & betrouwbaar",
+    description: "Formeel, geloofwaardig en resultaatgericht",
+  },
+  {
+    value: "inspirerend en motiverend",
+    label: "Inspirerend & motiverend",
+    description: "Energiek, positief en forward-looking",
+  },
+  {
+    value: "speels en creatief",
+    label: "Speels & creatief",
+    description: "Luchtig, onderscheidend en social-first",
+  },
+  {
+    value: "direct en actiegericht",
+    label: "Direct & actiegericht",
+    description: "Geen omwegen — focus op actie en conversie",
+  },
+  {
+    value: "premium en exclusief",
+    label: "Premium & exclusief",
+    description: "Verfijnd, high-end en selectief",
+  },
+  {
+    value: "educatief en informatief",
+    label: "Educatief & informatief",
+    description: "Tips, uitleg en thought leadership",
+  },
+  {
+    value: "lokaal en persoonlijk",
+    label: "Lokaal & persoonlijk",
+    description: "Belgisch, nabij en community-gevoel",
+  },
+] as const;
+
+type SocialTone = (typeof SOCIAL_TONE_OPTIONS)[number]["value"];
+
+const DEFAULT_SOCIAL_TONE: SocialTone = "warm en professioneel";
 
 function statusBadge(status: RowStatus) {
   if (status === "PUBLISHED") return <Badge variant="success">Gepubliceerd</Badge>;
@@ -409,9 +467,7 @@ function InstagramReelPreview({
         )}
         <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-black/75 to-transparent p-4">
           <div className="flex items-center gap-2">
-            <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-tr from-[#f58529] via-[#dd2a7b] to-[#515bd4] p-[2px]">
-              <div className="h-full w-full rounded-full bg-white" />
-            </div>
+            <InstagramPageAvatar size="sm" label="D" />
             <div>
               <p className="text-sm font-semibold">digitify.be</p>
               <p className="text-xs text-white/70">Reel</p>
@@ -446,7 +502,7 @@ function FacebookPreview({ caption, imageUrl, format }: { caption: string; image
           )}
           <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-black/75 to-transparent p-4">
             <div className="flex items-center gap-2">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#1877f2] text-base font-black">f</div>
+              <FacebookPageAvatar size="sm" />
               <div>
                 <p className="text-sm font-semibold">Digitify</p>
                 <p className="text-xs text-white/70">Story · 24 uur zichtbaar</p>
@@ -464,7 +520,7 @@ function FacebookPreview({ caption, imageUrl, format }: { caption: string; image
   return (
     <div className="overflow-hidden rounded-[1.6rem] border border-slate-200 bg-white text-slate-950 shadow-[0_22px_55px_rgba(15,23,42,0.12)]">
       <div className="flex items-center gap-3 px-4 py-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1877f2] text-lg font-black text-white">f</div>
+        <FacebookPageAvatar />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">Digitify</p>
           <p className="text-xs text-slate-500">Gesponsord · openbaar</p>
@@ -516,9 +572,7 @@ function InstagramPreview({ caption, imageUrl, firstComment, format }: { caption
               ))}
             </div>
             <div className="flex items-center gap-2">
-              <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-tr from-[#f58529] via-[#dd2a7b] to-[#515bd4] p-[2px]">
-                <div className="h-full w-full rounded-full bg-white" />
-              </div>
+              <InstagramPageAvatar size="sm" label="D" />
               <div>
                 <p className="text-sm font-semibold">digitify.be</p>
                 <p className="text-xs text-white/70">Instagram Story</p>
@@ -536,9 +590,7 @@ function InstagramPreview({ caption, imageUrl, firstComment, format }: { caption
   return (
     <div className="overflow-hidden rounded-[1.6rem] border border-zinc-200 bg-white text-zinc-950 shadow-[0_22px_55px_rgba(24,24,27,0.12)]">
       <div className="flex items-center gap-3 px-4 py-3">
-        <div className="grid h-10 w-10 place-items-center rounded-full bg-gradient-to-tr from-[#f58529] via-[#dd2a7b] to-[#515bd4] p-[2px]">
-          <div className="h-full w-full rounded-full bg-white" />
-        </div>
+        <InstagramPageAvatar />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">digitify.be</p>
           <p className="text-xs text-zinc-500">België</p>
@@ -574,7 +626,7 @@ export default function SocialPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
   const [template, setTemplate] = useState("");
-  const [tone, setTone] = useState("warm en professioneel");
+  const [tone, setTone] = useState<SocialTone>(DEFAULT_SOCIAL_TONE);
   const [scheduledFor, setScheduledFor] = useState("");
   const [targetFacebook, setTargetFacebook] = useState(true);
   const [targetInstagram, setTargetInstagram] = useState(true);
@@ -665,9 +717,12 @@ export default function SocialPage() {
       showToast({ title: "Draft aangemaakt" });
     },
     onError: (error) => {
-      const message = error.message.includes("social_posts")
+      const raw = error.message;
+      const message = raw.includes("social_posts")
         ? "Database mist de tabel social_posts. Voer packages/db/prisma/manual/social-posts-and-meta-ads.sql uit in Supabase SQL Editor (zie docs/VERCEL.md)."
-        : error.message;
+        : raw.includes("Unexpected token") || raw.includes("Request En")
+          ? "De draft bevat te grote afbeeldingen. Gebruik de upload-knop zodat bestanden apart worden opgeslagen."
+          : raw;
       showToast({ title: "Aanmaken mislukt", description: message, variant: "error" });
     },
   });
@@ -799,27 +854,47 @@ export default function SocialPage() {
     const targets = selectedTargets();
     if (!ensureEditorReady({ requireInstagramSafe: false })) return null;
 
-    if (!selected) {
-      return createDraft.mutateAsync({
+    try {
+      const persistedAssets = await persistPlacementAssets(placementAssets);
+      if (JSON.stringify(persistedAssets) !== JSON.stringify(placementAssets)) {
+        setPlacementAssets(persistedAssets);
+      }
+
+      const persistedImageUrl = resolvePrimaryImageFromAssets(persistedAssets);
+      const persistedMetadata: SocialMetadata = {
+        ...metadataPayload,
+        assets: persistedAssets,
+      };
+
+      if (!selected) {
+        return createDraft.mutateAsync({
+          caption: caption.trim(),
+          imageUrl: persistedImageUrl.trim(),
+          targetPlatforms: targets,
+          metadata: persistedMetadata,
+        });
+      }
+
+      if (!canEditSelected) {
+        showToast({ title: "Niet bewerkbaar", description: "Deze post is al ingediend of ingepland. Maak een nieuw draft voor wijzigingen.", variant: "error" });
+        return selected;
+      }
+
+      return updateDraft.mutateAsync({
+        id: selected.id,
         caption: caption.trim(),
-        imageUrl: imageUrl.trim(),
+        imageUrl: persistedImageUrl.trim(),
         targetPlatforms: targets,
-        metadata: metadataPayload,
+        metadata: persistedMetadata,
       });
+    } catch (error) {
+      showToast({
+        title: "Opslaan mislukt",
+        description: error instanceof Error ? error.message : "Onbekende fout",
+        variant: "error",
+      });
+      return null;
     }
-
-    if (!canEditSelected) {
-      showToast({ title: "Niet bewerkbaar", description: "Deze post is al ingediend of ingepland. Maak een nieuw draft voor wijzigingen.", variant: "error" });
-      return selected;
-    }
-
-    return updateDraft.mutateAsync({
-      id: selected.id,
-      caption: caption.trim(),
-      imageUrl: imageUrl.trim(),
-      targetPlatforms: targets,
-      metadata: metadataPayload,
-    });
   }
 
   async function handleCreateOrUpdate() {
@@ -873,7 +948,7 @@ export default function SocialPage() {
     setSelectedId(null);
     setCaption("");
     setTemplate("");
-    setTone("warm en professioneel");
+    setTone(DEFAULT_SOCIAL_TONE);
     setScheduledFor("");
     setTargetFacebook(true);
     setTargetInstagram(true);
@@ -980,13 +1055,27 @@ export default function SocialPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="social-tone">Tone of voice</Label>
-                  <Input id="social-tone" value={tone} onChange={(event) => setTone(event.target.value)} placeholder="warm en professioneel" />
+                  <Select value={tone} onValueChange={(value) => setTone(value as SocialTone)}>
+                    <SelectTrigger id="social-tone" className="h-8">
+                      <SelectValue placeholder="Kies tone of voice" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SOCIAL_TONE_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {SOCIAL_TONE_OPTIONS.find((option) => option.value === tone)?.description}
+                  </p>
                   <Button
                     size="sm"
                     variant="outline"
                     className="w-full"
                     disabled={generateSuggestion.isPending || !template.trim()}
-                    onClick={() => generateSuggestion.mutate({ template: template.trim(), tone: tone.trim() })}
+                    onClick={() => generateSuggestion.mutate({ template: template.trim(), tone })}
                   >
                     {generateSuggestion.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Megaphone className="mr-2 h-3 w-3" />}
                     AI caption

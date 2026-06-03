@@ -185,6 +185,7 @@ export function normalizeSearchCreatives(creatives: unknown) {
     squareImageUrl: String(creative.squareImageUrl || creative.squareMarketingImageUrl || "").trim(),
     portraitImageUrl: String(creative.portraitImageUrl || "").trim(),
     logoUrl: String(creative.logoUrl || "").trim(),
+    landscapeLogoUrl: String(creative.landscapeLogoUrl || "").trim(),
     callToAction: String(creative.callToAction || "").trim(),
     assetGroupName: String(creative.assetGroupName || "").trim(),
     brandGuidelinesEnabled: Boolean(creative.brandGuidelinesEnabled),
@@ -672,6 +673,9 @@ async function pushPerformanceMaxPaused(params: {
   if (creative.portraitImageUrl) {
     await addImageAsset(creative.portraitImageUrl, enums.AssetFieldType.PORTRAIT_MARKETING_IMAGE, "portrait image");
   }
+  if (creative.landscapeLogoUrl) {
+    await addImageAsset(creative.landscapeLogoUrl, enums.AssetFieldType.LANDSCAPE_LOGO, "landscape logo");
+  }
 
   const geoOps: MutateOperation<resources.ICampaignCriterion>[] = [];
   if (targeting.geoTargetConstants.length) {
@@ -732,6 +736,90 @@ export async function pushPausedGoogleAdPlan(params: {
     return pushPerformanceMaxPaused({ customer, customerId, plan });
   }
   return pushSearchPaused({ customer, customerId, plan });
+}
+
+export type GeoTargetSuggestion = {
+  id: string;
+  label: string;
+  canonicalName: string;
+  countryCode: string;
+  targetType: string;
+};
+
+const BENELUX_COUNTRY_CODES = ["BE", "NL", "LU"] as const;
+
+function formatGeoTargetType(targetType: unknown) {
+  const value = String(targetType || "").toUpperCase();
+  if (value.includes("CITY")) return "Stad";
+  if (value.includes("PROVINCE") || value.includes("REGION")) return "Regio";
+  if (value.includes("MUNICIPALITY")) return "Gemeente";
+  if (value.includes("POSTAL")) return "Postcode";
+  if (value.includes("COUNTRY")) return "Land";
+  if (value.includes("NEIGHBORHOOD")) return "Buurt";
+  return value ? value.replace(/_/g, " ").toLowerCase() : "Locatie";
+}
+
+export async function suggestBeneluxGeoTargets(
+  config: GoogleAdsWorkspaceConfig,
+  query: string,
+): Promise<GeoTargetSuggestion[]> {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const client = createAdsClient(config);
+  const customer = getGoogleAdsCustomer(client, config);
+
+  const responses = await Promise.all(
+    BENELUX_COUNTRY_CODES.map(async (countryCode) => {
+      try {
+        return await customer.geoTargetConstants.suggestGeoTargetConstants({
+          locale: "nl",
+          country_code: countryCode,
+          location_names: { names: [trimmed] },
+        });
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  const suggestions: GeoTargetSuggestion[] = [];
+  const seen = new Set<string>();
+
+  for (const response of responses) {
+    const items = (response as { geo_target_constant_suggestions?: Array<Record<string, unknown>> })
+      ?.geo_target_constant_suggestions;
+    if (!Array.isArray(items)) continue;
+
+    for (const item of items) {
+      const geo = (item.geo_target_constant || {}) as Record<string, unknown>;
+      const resourceName = String(geo.resource_name || "");
+      if (!resourceName || seen.has(resourceName)) continue;
+
+      const countryCode = String(geo.country_code || "").toUpperCase();
+      if (countryCode && !BENELUX_COUNTRY_CODES.includes(countryCode as (typeof BENELUX_COUNTRY_CODES)[number])) {
+        continue;
+      }
+
+      seen.add(resourceName);
+      suggestions.push({
+        id: resourceName,
+        label: String(geo.name || item.search_term || geo.canonical_name || resourceName),
+        canonicalName: String(geo.canonical_name || geo.name || ""),
+        countryCode,
+        targetType: formatGeoTargetType(geo.target_type),
+      });
+    }
+  }
+
+  return suggestions
+    .sort((a, b) => {
+      const rank = (item: GeoTargetSuggestion) => (item.targetType === "Stad" ? 0 : item.targetType === "Regio" ? 1 : 2);
+      const diff = rank(a) - rank(b);
+      if (diff !== 0) return diff;
+      return a.label.localeCompare(b.label, "nl");
+    })
+    .slice(0, 12);
 }
 
 export async function loadGoogleAdsWorkspaceConfigFromDb(db: PrismaClient, scope: WorkspaceScope) {

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 import { CheckCircle2 } from "lucide-react";
+import { AuthFormSkeleton } from "@/components/auth/auth-form-skeleton";
 import { AuthLogo } from "@/components/auth/auth-logo";
 import { NOINDEX_METADATA } from "@/lib/seo/build-metadata";
 
@@ -65,7 +67,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </div>
 
         {/* Bottom disclaimer */}
-        <p className="relative z-10 text-xs text-muted-foreground">
+        <p className="relative z-10 text-xs text-muted-foreground" suppressHydrationWarning>
           © {new Date().getFullYear()} Digitify · BTW BE0685.556.507
         </p>
       </div>
@@ -77,7 +79,9 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <AuthLogo size="sm" showText />
         </Link>
 
-        <div className="w-full max-w-md">{children}</div>
+        <div className="w-full max-w-md">
+          <Suspense fallback={<AuthFormSkeleton />}>{children}</Suspense>
+        </div>
 
         <p className="mt-8 text-center text-xs text-muted-foreground">
           Terug naar{" "}

@@ -2,8 +2,22 @@ import { describe, expect, it } from "vitest";
 import { defaultTargeting, resolveAdsetDestinationType, resolveAdsetOptimizationGoal, scoreMetaAdDraft } from "../lib/meta-ads";
 
 describe("meta ads push helpers", () => {
-  it("uses valid instagram_positions for default targeting", () => {
-    const targeting = defaultTargeting(undefined) as { instagram_positions?: string[] };
+  it("uses empty geo and placements for blank default targeting", () => {
+    const targeting = defaultTargeting(undefined) as {
+      geo_locations?: { countries?: string[] };
+      instagram_positions?: string[];
+      publisher_platforms?: string[];
+    };
+    expect(targeting.geo_locations?.countries).toEqual([]);
+    expect(targeting.instagram_positions).toEqual([]);
+    expect(targeting.publisher_platforms).toEqual([]);
+  });
+
+  it("uses valid instagram_positions when legacy defaults are omitted but positions provided", () => {
+    const targeting = defaultTargeting({
+      geo_locations: { countries: ["BE"] },
+      instagram_positions: ["stream", "story"],
+    }) as { instagram_positions?: string[] };
     expect(targeting.instagram_positions).toEqual(["stream", "story"]);
     expect(targeting.instagram_positions).not.toContain("feed");
   });

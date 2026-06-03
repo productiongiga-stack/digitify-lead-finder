@@ -4,13 +4,22 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { useUIStore } from "@/stores/ui-store";
+import { useSidebarLayout, useUIStore } from "@/stores/ui-store";
 import { useBranding } from "@/lib/branding";
-import { MAIN_NAV_ITEMS, TOOL_NAV_ITEMS, BOTTOM_NAV_ITEMS, LEADS_MENU_ITEMS, isNavItemActive } from "@/lib/navigation";
+import {
+  ADS_NAV_ITEMS,
+  MAIN_NAV_ITEMS,
+  TOOL_NAV_ITEMS,
+  BOTTOM_NAV_ITEMS,
+  LEADS_MENU_ITEMS,
+  isNavItemActive,
+  type QuickNavItem,
+} from "@/lib/navigation";
 import { Button } from "@digitify/ui";
 import { ScrollArea } from "@digitify/ui";
 import { Separator } from "@digitify/ui";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle } from "@digitify/ui";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@digitify/ui";
 import {
   ChevronLeft,
   ChevronRight,
@@ -28,18 +37,57 @@ type SidebarNavEntry = {
   icon: LucideIcon;
 };
 
-function sidebarItemClass(active?: boolean) {
+function sidebarItemClass(active?: boolean, collapsed?: boolean) {
+  if (collapsed) {
+    return cn(
+      "sidebar-nav-icon-btn",
+      active && "sidebar-nav-icon-btn-active",
+    );
+  }
+
   return cn(
-    "flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-sm font-medium transition-all",
-    active
-      ? "bg-primary/12 text-primary shadow-sm ring-1 ring-primary/15"
-      : "text-muted-foreground hover:bg-accent/75 hover:text-accent-foreground",
+    "sidebar-nav-link",
+    active && "sidebar-nav-link-active",
+  );
+}
+
+function SidebarTooltip({
+  label,
+  collapsed,
+  children,
+}: {
+  label: string;
+  collapsed: boolean;
+  children: React.ReactNode;
+}) {
+  if (!collapsed) return <>{children}</>;
+
+  return (
+    <Tooltip delayDuration={0}>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="right" sideOffset={10} className="border-0 font-medium shadow-lg">
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function SidebarDivider({ collapsed }: { collapsed: boolean }) {
+  return collapsed ? (
+    <div className="my-2 flex justify-center px-2" aria-hidden>
+      <span className="h-1 w-1 rounded-full bg-border/80" />
+    </div>
+  ) : (
+    <Separator className="my-2.5 mx-3 bg-border/50" />
   );
 }
 
 function NavSectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="px-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70">
+    <p
+      suppressHydrationWarning
+      className="px-5 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70"
+    >
       {children}
     </p>
   );
@@ -59,22 +107,39 @@ function BrandBlock({
   mobile: boolean;
 }) {
   return (
-    <div className="flex h-16 items-center justify-between border-b border-border/60 bg-gradient-to-b from-background/70 to-transparent px-3">
-      <Link href="/dashboard" className="flex items-center gap-2">
+    <div
+      className={cn(
+        "relative flex h-[4.25rem] shrink-0 items-center border-b border-border/40",
+        "bg-gradient-to-b from-primary/[0.06] via-background/40 to-transparent",
+        collapsed ? "justify-center px-0" : "justify-between px-3",
+      )}
+    >
+      <div
+        className="pointer-events-none absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-primary/25 to-transparent"
+        aria-hidden
+      />
+      <Link
+        href="/dashboard"
+        className={cn("flex items-center gap-2.5 transition-opacity hover:opacity-90", collapsed && "justify-center")}
+      >
         {logoUrl ? (
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/60 bg-background shadow-sm">
-            <img src={logoUrl} alt={brandName} className="h-8 w-8 object-contain" />
+          <div className="sidebar-brand-mark overflow-hidden border border-border/50 bg-background shadow-sm ring-1 ring-black/[0.04] dark:ring-white/[0.06]">
+            <img src={logoUrl} alt={brandName} className="h-full w-full object-contain p-1" />
           </div>
         ) : (
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-            <Zap className="h-4 w-4" />
+          <div className="sidebar-brand-mark bg-gradient-to-br from-primary via-primary to-primary/85 text-primary-foreground shadow-md shadow-primary/30">
+            <Zap className="h-[1.125rem] w-[1.125rem]" strokeWidth={2.25} />
           </div>
         )}
         {!collapsed && (
           <div className="min-w-0">
-            <p className="truncate text-base font-bold tracking-tight">{brandName}</p>
+            <p suppressHydrationWarning className="truncate text-base font-bold tracking-tight">
+              {brandName}
+            </p>
             {brandSlogan ? (
-              <p className="truncate text-[11px] text-muted-foreground">{brandSlogan}</p>
+              <p suppressHydrationWarning className="truncate text-[11px] text-muted-foreground">
+                {brandSlogan}
+              </p>
             ) : null}
           </div>
         )}
@@ -85,6 +150,107 @@ function BrandBlock({
             <X className="h-4 w-4" />
           </Button>
         </SheetClose>
+      ) : null}
+    </div>
+  );
+}
+
+function SidebarNavDropdown({
+  label,
+  icon: Icon,
+  items,
+  groupActive,
+  open,
+  onToggleOpen,
+  activeHref,
+  collapsed,
+  onNavigate,
+  onPrefetch,
+  expandSidebar,
+}: {
+  label: string;
+  icon: LucideIcon;
+  items: QuickNavItem[];
+  groupActive: boolean;
+  open: boolean;
+  onToggleOpen: () => void;
+  activeHref?: string;
+  collapsed: boolean;
+  onNavigate: () => void;
+  onPrefetch: (href: string) => void;
+  expandSidebar: () => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <SidebarTooltip label={label} collapsed={collapsed}>
+        <div
+          className={cn(
+            "flex items-center transition-all duration-200",
+            collapsed
+              ? cn("justify-center", groupActive ? "sidebar-nav-icon-btn sidebar-nav-icon-btn-active" : "sidebar-nav-icon-btn")
+              : cn(
+                  "gap-1 rounded-2xl pr-1",
+                  groupActive
+                    ? "bg-primary/12 text-primary shadow-sm ring-1 ring-primary/15"
+                    : "text-muted-foreground hover:bg-accent/75 hover:text-accent-foreground",
+                ),
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              if (collapsed) {
+                expandSidebar();
+                onToggleOpen();
+                return;
+              }
+              onToggleOpen();
+            }}
+            className={cn(
+              "flex min-w-0 items-center text-left text-sm font-medium",
+              collapsed ? "h-10 w-10 justify-center" : "flex-1 gap-2.5 px-3 py-2.5",
+            )}
+            aria-label={label}
+          >
+            <Icon className={cn("shrink-0", collapsed ? "h-[1.125rem] w-[1.125rem]" : "h-4 w-4")} strokeWidth={groupActive ? 2.25 : 2} />
+            {!collapsed && <span>{label}</span>}
+          </button>
+          {!collapsed ? (
+            <button
+              type="button"
+              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/80 hover:text-accent-foreground"
+              onClick={onToggleOpen}
+              aria-label={`${label} dropdown tonen`}
+              aria-expanded={open}
+            >
+              <ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
+            </button>
+          ) : null}
+        </div>
+      </SidebarTooltip>
+      {open && !collapsed ? (
+        <div className="ml-6 space-y-1 border-l pl-2">
+          {items.map((entry) => {
+            const entryActive = activeHref === entry.href;
+            return (
+              <Link
+                key={entry.href}
+                href={entry.href}
+                onClick={onNavigate}
+                onMouseEnter={() => onPrefetch(entry.href)}
+                className={cn(
+                  "flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-medium transition-colors",
+                  entryActive
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground",
+                )}
+              >
+                <entry.icon className="h-3.5 w-3.5 shrink-0" />
+                <span>{entry.label}</span>
+              </Link>
+            );
+          })}
+        </div>
       ) : null}
     </div>
   );
@@ -103,23 +269,31 @@ function SidebarNavLink({
   onNavigate: () => void;
   onPrefetch: (href: string) => void;
 }) {
-  return (
+  const link = (
     <Link
       href={item.href}
       onClick={onNavigate}
       onMouseEnter={() => onPrefetch(item.href)}
-      className={sidebarItemClass(active)}
+      className={sidebarItemClass(active, collapsed)}
+      aria-label={collapsed ? item.label : undefined}
     >
-      <item.icon className="h-4 w-4 shrink-0" />
+      <item.icon className={cn("shrink-0", collapsed ? "h-[1.125rem] w-[1.125rem]" : "h-4 w-4")} strokeWidth={active ? 2.25 : 2} />
       {!collapsed && <span>{item.label}</span>}
     </Link>
+  );
+
+  return (
+    <SidebarTooltip label={item.label} collapsed={collapsed}>
+      {link}
+    </SidebarTooltip>
   );
 }
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { sidebarCollapsed, toggleSidebar, mobileSidebarOpen, setMobileSidebarOpen } = useUIStore();
+  const { collapsed: sidebarCollapsed } = useSidebarLayout();
+  const { toggleSidebar, mobileSidebarOpen, setMobileSidebarOpen } = useUIStore();
   const { branding } = useBranding();
 
   // Load user's disabled modules (cached for 5 min)
@@ -131,21 +305,31 @@ export function Sidebar() {
 
   const visibleToolNav = TOOL_NAV_ITEMS.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId));
   const visibleLeadsMenu = LEADS_MENU_ITEMS.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId));
+  const visibleAdsMenu = ADS_NAV_ITEMS.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId));
 
   const hasLeadWorkflowMatch = visibleLeadsMenu.some(
-    (entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`)
+    (entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`),
   );
-  const [leadWorkflowOpen, setLeadWorkflowOpen] = useState(hasLeadWorkflowMatch);
+  const hasAdsNavMatch = visibleAdsMenu.some(
+    (entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`),
+  );
+  const [leadWorkflowOpen, setLeadWorkflowOpen] = useState(false);
+  const [adsNavOpen, setAdsNavOpen] = useState(false);
 
   useEffect(() => {
     if (hasLeadWorkflowMatch) setLeadWorkflowOpen(true);
   }, [hasLeadWorkflowMatch]);
 
   useEffect(() => {
+    if (hasAdsNavMatch) setAdsNavOpen(true);
+  }, [hasAdsNavMatch]);
+
+  useEffect(() => {
     // Warm common app routes so first navigation feels instant.
     const routes = [
       ...MAIN_NAV_ITEMS.map((item) => item.href),
       ...LEADS_MENU_ITEMS.map((item) => item.href),
+      ...ADS_NAV_ITEMS.map((item) => item.href),
       ...TOOL_NAV_ITEMS.map((item) => item.href),
       ...BOTTOM_NAV_ITEMS.map((item) => item.href),
     ];
@@ -180,9 +364,9 @@ export function Sidebar() {
     return (
     <aside
       className={cn(
-        "inset-y-0 left-0 z-30 flex h-full flex-col bg-card/90 shadow-xl shadow-slate-950/5 backdrop-blur-xl transition-all duration-300",
-        mobile ? "w-full border-r-0" : "border-r border-border/60",
-        !mobile && (collapsed ? "w-16" : "w-60")
+        "app-sidebar inset-y-0 left-0 z-30 flex h-full flex-col transition-[width,box-shadow] duration-300 ease-out",
+        mobile ? "w-full border-r-0" : "w-60",
+        !mobile && collapsed && "w-[4.25rem]",
       )}
     >
       <BrandBlock
@@ -196,82 +380,68 @@ export function Sidebar() {
       {/* Nav */}
       <ScrollArea className="flex-1 py-3">
         {!collapsed && <NavSectionLabel>Navigatie</NavSectionLabel>}
-        <nav className="space-y-1.5 px-2">
+        <nav className={cn("space-y-1", collapsed ? "px-2" : "space-y-1.5 px-2")}>
           {MAIN_NAV_ITEMS.map((item) => {
             const isLeadNavItem = item.href === "/leads";
+            const isAdsNavItem = item.label === "Advertenties";
             const activeLeadMenuHref = isLeadNavItem
               ? visibleLeadsMenu
                   .filter((entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`))
                   .sort((left, right) => right.href.length - left.href.length)[0]?.href
               : undefined;
+            const activeAdsMenuHref = isAdsNavItem
+              ? visibleAdsMenu
+                  .filter((entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`))
+                  .sort((left, right) => right.href.length - left.href.length)[0]?.href
+              : undefined;
             const isActive = isLeadNavItem
               ? activeLeadMenuHref === "/leads"
-              : isNavItemActive(item, pathname);
+              : isAdsNavItem
+                ? false
+                : isNavItemActive(item, pathname);
 
             if (isLeadNavItem) {
+              const leadActive = isActive || hasLeadWorkflowMatch;
+
               return (
-                <div key={item.href} className="space-y-1">
-                  <div
-                    className={cn(
-                      "flex items-center gap-1 rounded-2xl pr-1 transition-all",
-                      isActive
-                        ? "bg-primary/12 text-primary shadow-sm ring-1 ring-primary/15"
-                        : "text-muted-foreground hover:bg-accent/75 hover:text-accent-foreground"
-                    )}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (collapsed) {
-                          toggleSidebar();
-                          setLeadWorkflowOpen(true);
-                          return;
-                        }
-                        setLeadWorkflowOpen((prev) => !prev);
-                      }}
-                      className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium"
-                    >
-                      <item.icon className="h-4 w-4 shrink-0" />
-                      {!collapsed && <span>{item.label}</span>}
-                    </button>
-                    {!collapsed ? (
-                      <button
-                        type="button"
-                        className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/80 hover:text-accent-foreground"
-                        onClick={() => setLeadWorkflowOpen((prev) => !prev)}
-                        aria-label="Leads dropdown tonen"
-                        aria-expanded={leadWorkflowOpen}
-                      >
-                        <ChevronDown className={cn("h-4 w-4 transition-transform", leadWorkflowOpen && "rotate-180")} />
-                      </button>
-                    ) : null}
-                  </div>
-                  {leadWorkflowOpen && !collapsed ? (
-                    <div className="ml-6 space-y-1 border-l pl-2">
-                      {visibleLeadsMenu.map((entry) => {
-                        const workflowActive = activeLeadMenuHref === entry.href;
-                        return (
-                          <Link
-                            key={entry.href}
-                            href={entry.href}
-                            onClick={() => setMobileSidebarOpen(false)}
-                            onMouseEnter={() => router.prefetch(entry.href)}
-                            className={cn(
-                              "flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-medium transition-colors",
-                              workflowActive
-                                ? "bg-primary/10 text-primary"
-                                : "text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground"
-                            )}
-                          >
-                            <entry.icon className="h-3.5 w-3.5 shrink-0" />
-                            <span>{entry.label}</span>
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
+                <SidebarNavDropdown
+                  key={item.href}
+                  label={item.label}
+                  icon={item.icon}
+                  items={visibleLeadsMenu}
+                  groupActive={leadActive}
+                  open={leadWorkflowOpen}
+                  onToggleOpen={() => setLeadWorkflowOpen((prev) => !prev)}
+                  activeHref={activeLeadMenuHref}
+                  collapsed={collapsed}
+                  onNavigate={() => setMobileSidebarOpen(false)}
+                  onPrefetch={(href) => router.prefetch(href)}
+                  expandSidebar={toggleSidebar}
+                />
               );
+            }
+
+            if (isAdsNavItem && visibleAdsMenu.length > 0) {
+              return (
+                <SidebarNavDropdown
+                  key={item.href}
+                  label={item.label}
+                  icon={item.icon}
+                  items={visibleAdsMenu}
+                  groupActive={hasAdsNavMatch}
+                  open={adsNavOpen}
+                  onToggleOpen={() => setAdsNavOpen((prev) => !prev)}
+                  activeHref={activeAdsMenuHref}
+                  collapsed={collapsed}
+                  onNavigate={() => setMobileSidebarOpen(false)}
+                  onPrefetch={(href) => router.prefetch(href)}
+                  expandSidebar={toggleSidebar}
+                />
+              );
+            }
+
+            if (isAdsNavItem) {
+              return null;
             }
 
             return (
@@ -289,11 +459,11 @@ export function Sidebar() {
 
         {hasToolNav ? (
           <>
-            <Separator className="my-2 mx-2" />
+            <SidebarDivider collapsed={collapsed} />
 
             {!collapsed && <NavSectionLabel>Tools</NavSectionLabel>}
 
-            <nav className="space-y-1.5 px-2">
+            <nav className={cn("space-y-1", collapsed ? "px-2" : "space-y-1.5 px-2")}>
               {visibleToolNav.map((item) => {
                 const isActive = isNavItemActive(item, pathname);
                 return (
@@ -309,23 +479,32 @@ export function Sidebar() {
               })}
             </nav>
 
-            <Separator className="my-2 mx-2" />
+            <SidebarDivider collapsed={collapsed} />
           </>
         ) : null}
 
-        <nav className="space-y-1 px-2">
-          <button
-            onClick={() => useUIStore.getState().toggleOpenClaw()}
-          className="flex w-full items-center gap-2.5 rounded-2xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-all hover:bg-accent/75 hover:text-accent-foreground"
-        >
-          <Bot className="h-4 w-4 shrink-0" />
-            {!collapsed && <span>OpenClaw</span>}
-          </button>
+        <nav className={cn("space-y-1", collapsed ? "px-2" : "px-2")}>
+          <SidebarTooltip label="OpenClaw" collapsed={collapsed}>
+            <button
+              type="button"
+              onClick={() => useUIStore.getState().toggleOpenClaw()}
+              className={sidebarItemClass(false, collapsed)}
+              aria-label="OpenClaw"
+            >
+              <Bot className={cn("shrink-0", collapsed ? "h-[1.125rem] w-[1.125rem]" : "h-4 w-4")} />
+              {!collapsed && <span>OpenClaw</span>}
+            </button>
+          </SidebarTooltip>
         </nav>
       </ScrollArea>
 
       {/* Bottom */}
-      <div className="border-t border-border/60 bg-muted/20 px-2 py-3">
+      <div
+        className={cn(
+          "shrink-0 border-t border-border/40 bg-gradient-to-t from-muted/30 to-transparent",
+          collapsed ? "px-2 py-3" : "px-2 py-3",
+        )}
+      >
         {BOTTOM_NAV_ITEMS.map((item) => {
           const isActive = isNavItemActive(item, pathname);
           return (
@@ -341,21 +520,27 @@ export function Sidebar() {
         })}
 
         {!mobile ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="mt-2 w-full justify-center rounded-2xl text-muted-foreground"
-            onClick={toggleSidebar}
-          >
-            {collapsed ? (
-              <ChevronRight className="h-4 w-4" />
-            ) : (
-              <>
-                <ChevronLeft className="mr-1 h-4 w-4" />
-                Inklappen
-              </>
-            )}
-          </Button>
+          <SidebarTooltip label={collapsed ? "Sidebar uitklappen" : "Sidebar inklappen"} collapsed={collapsed}>
+            <Button
+              variant="ghost"
+              size={collapsed ? "icon" : "sm"}
+              className={cn(
+                "mt-2 text-muted-foreground transition-all hover:bg-accent/80 hover:text-foreground",
+                collapsed ? "sidebar-nav-icon-btn mx-auto h-9 w-9 rounded-xl" : "w-full justify-center rounded-2xl",
+              )}
+              onClick={toggleSidebar}
+              aria-label={collapsed ? "Sidebar uitklappen" : "Sidebar inklappen"}
+            >
+              {collapsed ? (
+                <ChevronRight className="h-4 w-4" />
+              ) : (
+                <>
+                  <ChevronLeft className="mr-1 h-4 w-4" />
+                  Inklappen
+                </>
+              )}
+            </Button>
+          </SidebarTooltip>
         ) : null}
       </div>
     </aside>
@@ -363,7 +548,7 @@ export function Sidebar() {
   };
 
   return (
-    <>
+    <TooltipProvider delayDuration={0}>
       <div className="fixed inset-y-0 left-0 z-30 hidden lg:block">{renderContent(false)}</div>
       <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
         <SheetContent side="left" className="w-[90vw] max-w-[340px] p-0 sm:max-w-[340px]">
@@ -372,6 +557,6 @@ export function Sidebar() {
           {renderContent(true)}
         </SheetContent>
       </Sheet>
-    </>
+    </TooltipProvider>
   );
 }

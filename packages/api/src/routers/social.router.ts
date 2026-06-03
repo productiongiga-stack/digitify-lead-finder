@@ -48,7 +48,10 @@ const socialImageUrlSchema = z
   .trim()
   .min(1)
   .refine(
-    (value) => value.startsWith("data:image/") || z.string().url().safeParse(value).success,
+    (value) =>
+      value.startsWith("data:image/") ||
+      value.startsWith("/uploads/") ||
+      z.string().url().safeParse(value).success,
     { message: "Gebruik een publieke https-URL of upload een JPG, PNG of WebP." },
   );
 

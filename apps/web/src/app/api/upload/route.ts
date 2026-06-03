@@ -52,15 +52,20 @@ export async function POST(req: NextRequest) {
   }
 
   const bytes = Buffer.from(await file.arrayBuffer());
-  const stored = await storeUploadedImage({ userId, file, bytes });
+  try {
+    const stored = await storeUploadedImage({ userId, file, bytes });
 
-  log.api.info("Image uploaded", {
-    userId,
-    name: file.name,
-    type: file.type,
-    size: file.size,
-    storage: stored.storage,
-  });
+    log.api.info("Image uploaded", {
+      userId,
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      storage: stored.storage,
+    });
 
-  return NextResponse.json(stored);
+    return NextResponse.json(stored);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Upload mislukt";
+    return NextResponse.json({ error: message }, { status: 503 });
+  }
 }

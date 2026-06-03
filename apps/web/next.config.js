@@ -14,6 +14,9 @@ function resolveAppUrl() {
 const nextConfig = {
   experimental: {
     instrumentationHook: true,
+    serverActions: {
+      bodySizeLimit: "10mb",
+    },
   },
   outputFileTracingRoot: workspaceRoot,
   turbopack: {

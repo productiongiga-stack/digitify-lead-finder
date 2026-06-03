@@ -4,7 +4,17 @@ import { OpenClawClient } from "@digitify/openclaw";
 import { z } from "zod";
 import { adminProcedure, protectedProcedure, router } from "../trpc";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
-import { upsertMetaSettings, workspaceScopeFromAuthenticatedUser } from "../lib/social-meta";
+import {
+  buildMetaCampaignSystemPrompt,
+  buildMetaCampaignUserPrompt,
+  buildMetaVariantSystemPrompt,
+  buildMetaVariantUserPrompt,
+  extractJsonFromAiResponse,
+  loadMetaAdsAiTrainingNotes,
+  META_ADS_AI_TRAINING_KEY,
+  normalizeMetaCampaignSuggestion,
+  normalizeMetaVariantSuggestion,
+} from "../lib/meta-ads-ai";
 import {
   defaultTargeting,
   getMetaCampaignDetails,
@@ -13,17 +23,20 @@ import {
   listMetaAdAccounts,
   listMetaCampaigns,
   loadMetaAdsWorkspaceConfig,
+  loadMetaPublisherIdentity,
   MetaAdsPushPartialError,
   MetaInsightLevel,
   normalizeAdAccountId,
   pushPausedMetaAdPlan,
   resolveConfiguredMarketingScopes,
+  searchMetaGeoLocations,
   scoreMetaAdDraft,
   syncMetaCampaigns,
   updateMetaCampaignStatus,
   validateBudgetGuard,
   META_ADS_REQUIRED_SCOPES,
 } from "../lib/meta-ads";
+import { upsertMetaSettings, workspaceScopeFromAuthenticatedUser } from "../lib/social-meta";
 
 const PLAN_STATUS = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "PUSHING", "PUSHED_PAUSED", "FAILED", "CANCELLED"] as const;
 const OBJECTIVES = [
@@ -97,44 +110,28 @@ async function renderAdSuggestion(
     description: "Veilig voorbereid als gepauzeerde Meta-campagne.",
     ctaType: "LEARN_MORE",
     ctaLabel: "Meer informatie",
+    linkUrl: "",
     imageBrief: "Gebruik een heldere brand visual met duidelijk productvoordeel en CTA.",
     targeting: {
-      geo_locations: { countries: ["BE"] },
-      age_min: 24,
-      age_max: 60,
-      publisher_platforms: ["facebook", "instagram"],
-      facebook_positions: ["feed"],
-      instagram_positions: ["stream", "story"],
+      geo_locations: { countries: [] },
+      publisher_platforms: [],
+      facebook_positions: [],
+      instagram_positions: [],
       targeting_automation: { advantage_audience: 0 },
-      adsets: [
-        {
-          name: "Belgie breed",
-          geo_locations: { countries: ["BE"] },
-          age_min: 24,
-          age_max: 60,
-          publisher_platforms: ["facebook", "instagram"],
-          facebook_positions: ["feed"],
-          instagram_positions: ["stream", "story"],
-          interestSignals: ["Leadgeneratie", "Digitalisering", "KMO-groei"],
-        },
-      ],
+      adsets: [],
     },
   };
 
   const { provider, model, apiKey } = await loadAiProviderConfig(db, workspaceId);
   if (!apiKey) return { ...fallback, provider: "fallback", model: "none" };
 
-  const client = new OpenClawClient({ provider, model, apiKey, maxTokens: 650 });
+  const trainingNotes = await loadMetaAdsAiTrainingNotes(db, workspaceId);
+  const client = new OpenClawClient({ provider, model, apiKey, maxTokens: 900 });
   const response = await client.chat(
     [
       {
         role: "user",
-        content:
-          `Maak een compacte Meta Ads draft in JSON voor een Belgische KMO-campagne. ` +
-          `Gebruik velden name, objective, primaryText, headline, description, ctaType, ctaLabel, imageBrief, targeting. ` +
-          `targeting mag geo_locations, age_min, age_max, publisher_platforms, facebook_positions, instagram_positions en adsets bevatten. ` +
-          `Elke adset mag name, geo_locations, age_min, age_max, publisher_platforms, facebook_positions, instagram_positions en interestSignals bevatten. ` +
-          `Geen markdown. Product/dienst: ${input.product}. Doelgroep: ${input.audience || "lokale ondernemers"}. Tone: ${input.tone || "professioneel en helder"}.`,
+        content: `${buildMetaCampaignSystemPrompt(trainingNotes)}\n\n${buildMetaCampaignUserPrompt(input)}`,
       },
     ],
     {
@@ -144,11 +141,10 @@ async function renderAdSuggestion(
   );
 
   try {
-    const parsed = JSON.parse(response || "{}");
+    const parsed = normalizeMetaCampaignSuggestion(extractJsonFromAiResponse(response || ""), fallback);
     const parsedTargeting = asRecord(parsed.targeting);
     const normalizedTargeting = defaultTargeting(parsedTargeting);
     return {
-      ...fallback,
       ...parsed,
       targeting: {
         ...normalizedTargeting,
@@ -165,7 +161,7 @@ async function renderAdSuggestion(
 async function renderVariantSuggestion(
   db: PrismaClient,
   workspaceId: string,
-  input: { product: string; audience?: string; tone?: string; angle?: string; landingUrl?: string },
+  input: { product: string; audience?: string; tone?: string; angle?: string; landingUrl?: string; adsetName?: string },
 ) {
   const fallback = {
     adName: `${input.product.trim()} variant`,
@@ -174,22 +170,20 @@ async function renderVariantSuggestion(
     description: "Variant voor Meta A/B testing.",
     ctaType: "LEARN_MORE",
     ctaLabel: "Meer informatie",
-    linkUrl: input.landingUrl || "https://leads.digitify.be",
+    linkUrl: input.landingUrl || "",
     publishAsset: "feed",
   };
 
   const { provider, model, apiKey } = await loadAiProviderConfig(db, workspaceId);
   if (!apiKey) return { ...fallback, provider: "fallback", model: "none" };
 
-  const client = new OpenClawClient({ provider, model, apiKey, maxTokens: 500 });
+  const trainingNotes = await loadMetaAdsAiTrainingNotes(db, workspaceId);
+  const client = new OpenClawClient({ provider, model, apiKey, maxTokens: 650 });
   const response = await client.chat(
     [
       {
         role: "user",
-        content:
-          `Maak een Meta creative variant in JSON met velden adName, primaryText, headline, description, ctaType, ctaLabel, linkUrl, publishAsset. ` +
-          `Geen markdown. Product/dienst: ${input.product}. Doelgroep: ${input.audience || "Belgische ondernemers"}. ` +
-          `Tone: ${input.tone || "professioneel"}. Invalshoek: ${input.angle || "sterke leadgeneratie en duidelijk voordeel"}.`,
+        content: `${buildMetaVariantSystemPrompt(trainingNotes)}\n\n${buildMetaVariantUserPrompt(input)}`,
       },
     ],
     {
@@ -199,7 +193,7 @@ async function renderVariantSuggestion(
   );
 
   try {
-    return { ...fallback, ...JSON.parse(response || "{}"), provider, model };
+    return { ...normalizeMetaVariantSuggestion(extractJsonFromAiResponse(response || ""), fallback), provider, model };
   } catch {
     return { ...fallback, provider, model };
   }
@@ -275,12 +269,26 @@ export const metaAdsRouter = router({
         }).catch(() => null)
       : null;
 
+    const adAccountName = selected?.name || null;
+    const publisherIdentity = config.accessToken
+      ? await loadMetaPublisherIdentity({ config, adAccountName }).catch(() =>
+          loadMetaPublisherIdentity({
+            config: { pageId: "", pageAccessToken: "", accessToken: "", instagramBusinessId: "" },
+            adAccountName,
+          }),
+        )
+      : await loadMetaPublisherIdentity({
+          config: { pageId: "", pageAccessToken: "", accessToken: "", instagramBusinessId: "" },
+          adAccountName: null,
+        });
+
     return {
       hasAppCredentials: Boolean(config.appId && config.appSecret),
       connected: Boolean(config.accessToken),
       socialConnected: Boolean(config.pageId && config.pageAccessToken),
       selectedAdAccountId: config.adAccountId || null,
-      selectedAdAccountName: selected?.name || null,
+      selectedAdAccountName: adAccountName,
+      publisherIdentity,
       businessId: config.businessId || null,
       autoadsEnabled: config.autoadsEnabled,
       defaultCurrency: config.defaultCurrency,
@@ -291,10 +299,12 @@ export const metaAdsRouter = router({
       adsScopesEnabled: resolveConfiguredMarketingScopes().length === META_ADS_REQUIRED_SCOPES.length,
       oauthIncludeAdsEnv: process.env.META_OAUTH_INCLUDE_ADS?.trim() || null,
       missingOperationalRequirements: [
-        !config.accessToken ? "META_SCOPE_MISSING" : null,
+        !config.accessToken ? "META_NOT_CONNECTED" : null,
         !config.pageId ? "META_PAGE_MISSING" : null,
         !config.adAccountId ? "META_ACCOUNT_NOT_SELECTED" : null,
-        resolveConfiguredMarketingScopes().length !== META_ADS_REQUIRED_SCOPES.length ? "META_SCOPE_MISSING" : null,
+        config.accessToken && resolveConfiguredMarketingScopes().length !== META_ADS_REQUIRED_SCOPES.length
+          ? "META_SCOPE_MISSING"
+          : null,
       ].filter(Boolean),
     };
   }),
@@ -549,6 +559,25 @@ export const metaAdsRouter = router({
     });
   }),
 
+  searchGeoLocations: protectedProcedure
+    .input(
+      z.object({
+        query: z.string().min(2).max(80),
+        countryCode: z.string().length(2).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
+      if (!config.accessToken) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Koppel Meta eerst via Integraties om locaties te zoeken.",
+        });
+      }
+      return searchMetaGeoLocations(config.accessToken, input.query, { countryCode: input.countryCode });
+    }),
+
   generateSuggestion: protectedProcedure
     .input(z.object({ product: z.string().min(2).max(400), audience: z.string().max(400).optional(), tone: z.string().max(80).optional() }))
     .mutation(async ({ ctx, input }) => renderAdSuggestion(ctx.db, ctx.user.workspaceId!, input)),
@@ -561,9 +590,22 @@ export const metaAdsRouter = router({
         tone: z.string().max(80).optional(),
         angle: z.string().max(200).optional(),
         landingUrl: z.string().max(500).optional(),
+        adsetName: z.string().max(160).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => renderVariantSuggestion(ctx.db, ctx.user.workspaceId!, input)),
+
+  getAiTrainingNotes: protectedProcedure.query(async ({ ctx }) => ({
+    notes: await loadMetaAdsAiTrainingNotes(ctx.db, ctx.user.workspaceId!),
+  })),
+
+  updateAiTrainingNotes: adminProcedure
+    .input(z.object({ notes: z.string().max(4000) }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      await upsertMetaSettings(ctx.db, scope, [{ key: META_ADS_AI_TRAINING_KEY, value: input.notes.trim() }]);
+      return { ok: true };
+    }),
 
   scoreDraft: protectedProcedure
     .input(scoreInputSchema)

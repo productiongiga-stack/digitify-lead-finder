@@ -25,7 +25,11 @@ export async function generateMetadata(): Promise<Metadata> {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="nl" suppressHydrationWarning className={poppins.variable}>
-      <body className="font-sans" style={{ fontFamily: "var(--font-poppins), system-ui, sans-serif" }}>
+      <body
+        suppressHydrationWarning
+        className="font-sans"
+        style={{ fontFamily: "var(--font-poppins), system-ui, sans-serif" }}
+      >
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
           <TRPCProvider>
             <ToastProvider>

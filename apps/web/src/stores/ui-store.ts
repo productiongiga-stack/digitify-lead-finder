@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { create } from "zustand";
 
 type OpenClawAssistLaunch = {
@@ -8,6 +9,9 @@ type OpenClawAssistLaunch = {
 
 interface UIStore {
   sidebarCollapsed: boolean;
+  /** False until client has read localStorage — avoids SSR hydration mismatch. */
+  sidebarPrefsReady: boolean;
+  hydrateSidebarPrefs: () => void;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   mobileSidebarOpen: boolean;
@@ -37,8 +41,14 @@ function saveSidebarState(collapsed: boolean) {
   } catch { /* ignore */ }
 }
 
-export const useUIStore = create<UIStore>((set) => ({
-  sidebarCollapsed: getSavedSidebarState(),
+export const useUIStore = create<UIStore>((set, get) => ({
+  sidebarCollapsed: false,
+  sidebarPrefsReady: false,
+  hydrateSidebarPrefs: () => {
+    if (get().sidebarPrefsReady) return;
+    const collapsed = getSavedSidebarState();
+    set({ sidebarCollapsed: collapsed, sidebarPrefsReady: true });
+  },
   toggleSidebar: () =>
     set((state) => {
       const next = !state.sidebarCollapsed;
@@ -63,3 +73,19 @@ export const useUIStore = create<UIStore>((set) => ({
     }),
   clearOpenClawAssistLaunch: () => set({ openClawAssistLaunch: null }),
 }));
+
+/** Sidebar width matches server HTML until prefs are hydrated (prevents hydration error). */
+export function useSidebarLayout() {
+  const sidebarCollapsed = useUIStore((state) => state.sidebarCollapsed);
+  const sidebarPrefsReady = useUIStore((state) => state.sidebarPrefsReady);
+  const hydrateSidebarPrefs = useUIStore((state) => state.hydrateSidebarPrefs);
+
+  useEffect(() => {
+    hydrateSidebarPrefs();
+  }, [hydrateSidebarPrefs]);
+
+  return {
+    collapsed: sidebarPrefsReady ? sidebarCollapsed : false,
+    prefsReady: sidebarPrefsReady,
+  };
+}

@@ -121,6 +121,59 @@ export async function loadMetaAdsWorkspaceConfig(db: PrismaClient, scope: Worksp
   };
 }
 
+export type MetaPublisherIdentity = {
+  adAccountName: string | null;
+  facebookPublisherName: string;
+  instagramPublisherName: string;
+  hasInstagram: boolean;
+};
+
+/** Names shown in ads preview: ad account for Facebook; Instagram when linked, else Facebook. */
+export async function loadMetaPublisherIdentity(params: {
+  config: Pick<MetaAdsWorkspaceConfig, "pageId" | "pageAccessToken" | "accessToken" | "instagramBusinessId">;
+  adAccountName?: string | null;
+}): Promise<MetaPublisherIdentity> {
+  const adAccountName = (params.adAccountName ?? "").trim() || null;
+  const fallback = adAccountName || "Facebook-pagina";
+
+  let facebookPageName = "";
+  let instagramUsername = "";
+  let hasInstagram = Boolean(params.config.instagramBusinessId?.trim());
+
+  const pageToken = params.config.pageAccessToken?.trim() || params.config.accessToken?.trim();
+  if (params.config.pageId?.trim() && pageToken) {
+    try {
+      const raw = (await metaGet(params.config.pageId.trim(), {
+        access_token: pageToken,
+        fields: "name,instagram_business_account{id,username}",
+      })) as {
+        name?: string;
+        instagram_business_account?: { id?: string; username?: string };
+      };
+      facebookPageName = (raw.name ?? "").trim();
+      const ig = raw.instagram_business_account;
+      if (ig?.id?.trim()) {
+        hasInstagram = true;
+        instagramUsername = (ig.username ?? "").trim();
+      }
+    } catch {
+      // Graph unavailable — fall back to ad account / page settings only.
+    }
+  }
+
+  const facebookPublisherName = (adAccountName || facebookPageName || fallback).trim();
+  const instagramPublisherName = hasInstagram
+    ? (adAccountName || (instagramUsername ? `@${instagramUsername.replace(/^@/, "")}` : "") || facebookPublisherName).trim()
+    : facebookPublisherName;
+
+  return {
+    adAccountName,
+    facebookPublisherName,
+    instagramPublisherName,
+    hasInstagram,
+  };
+}
+
 export async function listMetaAdAccounts(accessToken: string): Promise<MetaAdAccountSummary[]> {
   const raw = (await metaGet("me/adaccounts", {
     access_token: accessToken,
@@ -299,12 +352,99 @@ function normalizeIdObjectList(values: unknown, key = "id") {
     .filter(Boolean);
 }
 
+export type MetaGeoLocationSuggestion = {
+  key: string;
+  label: string;
+  canonicalName: string;
+  type: string;
+  typeLabel: string;
+  countryCode: string;
+};
+
+function formatMetaGeoType(type: unknown) {
+  const value = String(type || "").toLowerCase();
+  if (value === "city") return "Stad";
+  if (value === "region") return "Regio";
+  if (value === "country") return "Land";
+  if (value.includes("zip") || value.includes("postcode")) return "Postcode";
+  return value ? value.replace(/_/g, " ") : "Locatie";
+}
+
+export async function searchMetaGeoLocations(
+  accessToken: string,
+  query: string,
+  options?: { countryCode?: string },
+): Promise<MetaGeoLocationSuggestion[]> {
+  const trimmed = query.trim();
+  if (!accessToken || trimmed.length < 2) return [];
+
+  const params: Record<string, string | undefined> = {
+    access_token: accessToken,
+    type: "adgeolocation",
+    q: trimmed,
+    location_types: JSON.stringify(["city", "region"]),
+    limit: "25",
+  };
+  if (options?.countryCode?.trim()) {
+    params.country_code = options.countryCode.trim().toUpperCase();
+  }
+
+  try {
+    const raw = (await metaGet("search", params)) as {
+      data?: Array<{
+        key?: string | number;
+        name?: string;
+        type?: string;
+        country_code?: string;
+        country_name?: string;
+        region?: string;
+        primary_city?: string;
+      }>;
+    };
+
+    const suggestions: MetaGeoLocationSuggestion[] = [];
+    const seen = new Set<string>();
+
+    for (const item of raw.data || []) {
+      const key = String(item.key || "").trim();
+      if (!key || seen.has(key)) continue;
+      const type = String(item.type || "").toLowerCase();
+      if (type !== "city" && type !== "region") continue;
+
+      seen.add(key);
+      const label = String(item.name || key).trim();
+      const region = String(item.region || item.primary_city || "").trim();
+      const countryName = String(item.country_name || "").trim();
+      const countryCode = String(item.country_code || "").trim().toUpperCase();
+      const canonicalName = [label, region, countryName].filter(Boolean).join(", ");
+
+      suggestions.push({
+        key,
+        label,
+        canonicalName: canonicalName || label,
+        type,
+        typeLabel: formatMetaGeoType(type),
+        countryCode,
+      });
+    }
+
+    return suggestions.sort((a, b) => {
+      const rank = (item: MetaGeoLocationSuggestion) => (item.type === "city" ? 0 : 1);
+      const diff = rank(a) - rank(b);
+      if (diff !== 0) return diff;
+      return a.label.localeCompare(b.label, "nl");
+    });
+  } catch {
+    return [];
+  }
+}
+
 function normalizeGeoLocations(value: unknown) {
   const geo = asObject(value);
   const countries = uniqueStrings(geo.countries, { upper: true, max: 25 });
   return {
     ...geo,
-    countries: countries.length ? countries : ["BE"],
+    countries,
     regions: normalizeIdObjectList(geo.regions, "key"),
     cities: normalizeIdObjectList(geo.cities, "key"),
   };
@@ -312,9 +452,14 @@ function normalizeGeoLocations(value: unknown) {
 
 function sanitizeInstagramPositions(positions: unknown): string[] {
   const allowed = new Set<string>(META_INSTAGRAM_POSITIONS);
-  const source = Array.isArray(positions) ? positions : ["stream", "story"];
-  const normalized = source
-    .map((item) => LEGACY_INSTAGRAM_POSITION_ALIASES[String(item)] || String(item))
+  if (Array.isArray(positions)) {
+    const normalized = positions
+      .map((item) => LEGACY_INSTAGRAM_POSITION_ALIASES[String(item)] || String(item))
+      .filter((item) => allowed.has(item));
+    return [...new Set(normalized)];
+  }
+  const normalized = ["stream", "story"]
+    .map((item) => LEGACY_INSTAGRAM_POSITION_ALIASES[item] || item)
     .filter((item) => allowed.has(item));
   return normalized.length ? [...new Set(normalized)] : ["stream", "story"];
 }
@@ -345,14 +490,18 @@ function ensureTargetingAutomation(targeting: Record<string, unknown>): Record<s
 
 function sanitizeFacebookPositions(positions: unknown) {
   const allowed = new Set<string>(META_FACEBOOK_POSITIONS);
-  const normalized = uniqueStrings(positions).filter((item) => allowed.has(item));
-  return normalized.length ? normalized : ["feed"];
+  if (Array.isArray(positions)) {
+    return uniqueStrings(positions).filter((item) => allowed.has(item));
+  }
+  return ["feed"];
 }
 
 function sanitizePublisherPlatforms(platforms: unknown) {
   const allowed = new Set(["facebook", "instagram", "audience_network", "messenger"]);
-  const normalized = uniqueStrings(platforms).filter((item) => allowed.has(item));
-  return normalized.length ? normalized : ["facebook", "instagram"];
+  if (Array.isArray(platforms)) {
+    return uniqueStrings(platforms).filter((item) => allowed.has(item));
+  }
+  return ["facebook", "instagram"];
 }
 
 export function defaultTargeting(targeting: unknown): Record<string, unknown> {
@@ -360,12 +509,10 @@ export function defaultTargeting(targeting: unknown): Record<string, unknown> {
   const merged: Record<string, unknown> = Object.keys(custom).length
     ? { ...custom }
     : {
-        geo_locations: { countries: ["BE"] },
-        age_min: 18,
-        age_max: 65,
-        publisher_platforms: ["facebook", "instagram"],
-        facebook_positions: ["feed"],
-        instagram_positions: ["stream", "story"],
+        geo_locations: { countries: [] },
+        publisher_platforms: [],
+        facebook_positions: [],
+        instagram_positions: [],
         targeting_automation: { advantage_audience: resolveMetaAdvantageAudienceFlag() },
       };
 
@@ -373,6 +520,7 @@ export function defaultTargeting(targeting: unknown): Record<string, unknown> {
   delete merged.campaignSettings;
   delete merged.adsets;
   delete merged.interestSignals;
+  delete merged.geoLabels;
   delete merged.audienceNotes;
   delete merged.name;
   delete merged.label;
@@ -630,12 +778,42 @@ function resolveCreativeImageUrl(creatives: unknown) {
   return resolveCreativeVariantImageUrl(creative);
 }
 
+function validateTargetingForPush(targeting: unknown) {
+  const record = asObject(targeting);
+  const geo = asObject(record.geo_locations);
+  const countries = uniqueStrings(geo.countries, { upper: true, max: 25 });
+  const regions = normalizeIdObjectList(geo.regions, "key");
+  const cities = normalizeIdObjectList(geo.cities, "key");
+  if (!countries.length && !regions.length && !cities.length) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "META_TARGETING_INVALID · Kies minstens één land, regio of stad voor de advertentieset.",
+    });
+  }
+  const ageMin = Number(record.age_min || 0);
+  const ageMax = Number(record.age_max || 0);
+  if (!Number.isFinite(ageMin) || ageMin < 13 || !Number.isFinite(ageMax) || ageMax < ageMin) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "META_TARGETING_INVALID · Stel een geldige leeftijd in (min. 13, max ≥ min).",
+    });
+  }
+  const publisherPlatforms = uniqueStrings(record.publisher_platforms);
+  if (!publisherPlatforms.length) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "META_TARGETING_INVALID · Selecteer minstens één placement voor de advertentieset.",
+    });
+  }
+}
+
 function validateCreativeForPush(
   objective: string,
   targeting: unknown,
   creative: Record<string, unknown>,
   campaignSettings: Record<string, unknown>,
 ) {
+  validateTargetingForPush(targeting);
   const linkUrl = String(creative.linkUrl || creative.url || "").trim();
   if (!linkUrl.startsWith("https://")) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "META_DESTINATION_INVALID · Gebruik een volledige https-bestemmingslink." });

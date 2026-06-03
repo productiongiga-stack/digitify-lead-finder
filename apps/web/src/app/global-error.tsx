@@ -7,7 +7,7 @@ export default function GlobalError({
   reset,
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
+  reset?: () => void;
 }) {
   useEffect(() => {
     if (!process.env.NEXT_PUBLIC_SENTRY_DSN) return;
@@ -15,6 +15,14 @@ export default function GlobalError({
       Sentry.captureException(error);
     });
   }, [error]);
+
+  const tryAgain = () => {
+    if (typeof reset === "function") {
+      reset();
+      return;
+    }
+    window.location.reload();
+  };
 
   return (
     <html lang="nl">
@@ -25,7 +33,7 @@ export default function GlobalError({
         </p>
         <button
           type="button"
-          onClick={() => reset()}
+          onClick={tryAgain}
           className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
         >
           Opnieuw proberen

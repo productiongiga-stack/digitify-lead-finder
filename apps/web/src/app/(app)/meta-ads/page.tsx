@@ -1,8 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { MetaAdsPageFallback } from "@/components/ads/meta-ads-page-fallback";
 import { trpc } from "@/lib/trpc/client";
+import { cn } from "@/lib/utils";
+import { useBranding } from "@/lib/branding";
+import { AdsStudioStatsStrip, adsStudioStatIcons } from "@/components/ads/ads-studio-stats-strip";
+import { AdsStudioTabsNav } from "@/components/ads/ads-studio-tabs-nav";
+import { MetaAdsDashboardOverview } from "@/components/ads/meta-ads-dashboard-overview";
+import { MetaAdsDraftsPanel } from "@/components/ads/meta-ads-drafts-panel";
+import { MetaAdsStudioSummary } from "@/components/ads/meta-ads-studio-summary";
+import { FacebookPageAvatar, MetaAdsBrandMark } from "@/components/social/social-platform-avatars";
 import {
   Badge,
   Button,
@@ -30,30 +40,45 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@digitify/ui";
+import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
   BarChart3,
   CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Eye,
   HelpCircle,
   Image as ImageIcon,
+  FileText,
   Layers3,
   Loader2,
   Lock,
   Megaphone,
   PauseCircle,
+  PencilLine,
   Plus,
   RefreshCcw,
   Save,
+  Search,
   Send,
   Settings2,
+  MapPin,
   ShieldCheck,
   Sparkles,
   Target,
   Trash2,
   Upload,
   Wand2,
+  X,
   XCircle,
 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
@@ -73,7 +98,7 @@ type PlacementKey =
   | "instagram_reels"
   | "instagram_explore"
   | "audience_network";
-type BuilderStep = "setup" | "campaign" | "adsets" | "creatives" | "review";
+type BuilderStep = "campaign" | "adsets" | "ads" | "review";
 type BidStrategy = "LOWEST_COST_WITHOUT_CAP" | "LOWEST_COST_WITH_BID_CAP" | "COST_CAP";
 type OptimizationGoal = "AUTO" | "LINK_CLICKS" | "LANDING_PAGE_VIEWS" | "LEAD_GENERATION" | "OFFSITE_CONVERSIONS" | "REACH" | "IMPRESSIONS";
 type DestinationType = "AUTO" | "WEBSITE" | "MESSENGER" | "WHATSAPP" | "PHONE_CALL";
@@ -87,12 +112,22 @@ type ErrorExplanation = {
   actions: string[];
 };
 
+type MetaGeoKind = "country" | "region" | "city";
+
+type MetaGeoEntry = {
+  key: string;
+  label: string;
+  kind: MetaGeoKind;
+  countryCode?: string;
+};
+
 type AdsetDraft = {
   id: string;
   name: string;
   countries: string;
   regions: string;
   cities: string;
+  geoLabels: string;
   ageMin: string;
   ageMax: string;
   genders: string;
@@ -137,12 +172,63 @@ type ImageProbeState = {
   height: number;
 };
 
-const STEPS: Array<{ id: BuilderStep; label: string; description: string }> = [
-  { id: "setup", label: "1. Setup", description: "Objective, budget en AI-briefing" },
-  { id: "campaign", label: "2. Campaign", description: "Bidding, tracking en defaults" },
-  { id: "adsets", label: "3. Adsets", description: "Meerdere doelgroepen en delivery" },
-  { id: "creatives", label: "4. Creatives", description: "Varianten per adset" },
-  { id: "review", label: "5. Review", description: "Score, checks, advanced JSON en save" },
+const META_ADS_NAV_TABS: Array<{ value: string; label: string; icon: LucideIcon }> = [
+  { value: "campaigns", label: "Campagnes", icon: Megaphone },
+  { value: "dashboard", label: "Overzicht", icon: Eye },
+  { value: "builder", label: "Campagne-wizard", icon: Wand2 },
+  { value: "approval", label: "Goedkeuring", icon: ShieldCheck },
+  { value: "drafts", label: "Drafts", icon: FileText },
+  { value: "insights", label: "Prestaties", icon: BarChart3 },
+  { value: "settings", label: "Instellingen", icon: Settings2 },
+];
+
+const BUILDER_STEP_ORDER: BuilderStep[] = ["campaign", "adsets", "ads", "review"];
+
+const STEPS: Array<{ id: BuilderStep; label: string; description: string; metaLevel: "campaign" | "adset" | "ad" | "review" }> = [
+  { id: "campaign", label: "Campagne", description: "Naam, objective, budget en planning", metaLevel: "campaign" },
+  { id: "adsets", label: "Advertentieset", description: "Delivery, doelgroep en plaatsingen", metaLevel: "adset" },
+  { id: "ads", label: "Advertenties", description: "Pagina, copy, links en beelden per ad", metaLevel: "ad" },
+  { id: "review", label: "Controleren", description: "Score, checklist en opslaan", metaLevel: "review" },
+];
+
+const META_CURRENCY_OPTIONS = [
+  { value: "EUR", label: "Euro", symbol: "€" },
+  { value: "USD", label: "US dollar", symbol: "$" },
+  { value: "GBP", label: "Britse pond", symbol: "£" },
+] as const;
+
+const META_BUYING_TYPE_OPTIONS = [
+  { value: "AUCTION", label: "Auction", hint: "Standaard voor vrijwel alle campagnes." },
+  { value: "RESERVED", label: "Reserved", hint: "Vaste media-aankoop — zeldzaam in leadgen." },
+] as const;
+
+const META_BILLING_EVENT_OPTIONS = [
+  { value: "IMPRESSIONS", label: "Impressions (CPM)" },
+  { value: "LINK_CLICKS", label: "Link clicks (CPC)" },
+  { value: "APP_INSTALLS", label: "App installs" },
+  { value: "THRUPLAY", label: "ThruPlay (video)" },
+] as const;
+
+const META_CUSTOM_EVENT_OPTIONS = [
+  { value: "LEAD", label: "Lead" },
+  { value: "PURCHASE", label: "Purchase" },
+  { value: "COMPLETE_REGISTRATION", label: "Complete registration" },
+  { value: "ADD_TO_CART", label: "Add to cart" },
+] as const;
+
+const META_SPECIAL_AD_CATEGORY_OPTIONS = [
+  { value: "NONE", label: "Geen special category" },
+  { value: "HOUSING", label: "Housing" },
+  { value: "EMPLOYMENT", label: "Employment" },
+  { value: "CREDIT", label: "Credit" },
+] as const;
+
+const META_AI_TONES: Array<{ value: AiTone; label: string }> = [
+  { value: "professioneel", label: "Professioneel" },
+  { value: "vriendelijk", label: "Vriendelijk" },
+  { value: "direct", label: "Direct" },
+  { value: "speels", label: "Speels" },
+  { value: "luxueus", label: "Luxueus" },
 ];
 
 const PLACEMENTS: Array<{ key: PlacementKey; label: string; hint: string }> = [
@@ -155,6 +241,33 @@ const PLACEMENTS: Array<{ key: PlacementKey; label: string; hint: string }> = [
   { key: "instagram_explore", label: "Instagram explore", hint: "extra bereik" },
   { key: "audience_network", label: "Audience Network", hint: "let op leadkwaliteit" },
 ];
+
+const META_LOCATION_PRESETS = [
+  { value: "BE", label: "Belgie", countries: "BE", description: "Alle Meta-delivery in Belgie." },
+  { value: "NL", label: "Nederland", countries: "NL", description: "Alle Meta-delivery in Nederland." },
+  { value: "BE_NL", label: "Belgie + Nederland", countries: "BE, NL", description: "Breed Benelux-startpunt voor Nederlandstalige campagnes." },
+  { value: "CUSTOM", label: "Aangepast", countries: "", description: "Gebruik eigen landcodes, regio keys of city keys." },
+] as const;
+
+const META_COUNTRY_LABELS: Record<string, string> = {
+  BE: "België",
+  NL: "Nederland",
+  FR: "Frankrijk",
+  DE: "Duitsland",
+  LU: "Luxemburg",
+};
+
+const META_COUNTRY_PICKS = [
+  { code: "BE", label: "België" },
+  { code: "NL", label: "Nederland" },
+  { code: "LU", label: "Luxemburg" },
+  { code: "FR", label: "Frankrijk" },
+  { code: "DE", label: "Duitsland" },
+] as const;
+
+const META_GEO_MAX_LOCATIONS = 25;
+const META_DEFAULT_AGE_MIN = "30";
+const META_DEFAULT_AGE_MAX = "65";
 
 function eur(cents?: number | null, currency = "EUR") {
   return new Intl.NumberFormat("nl-BE", { style: "currency", currency }).format(Number(cents || 0) / 100);
@@ -213,6 +326,305 @@ function listToLines(value: unknown, fallback: string[]) {
     .join("\n");
 }
 
+function metaCountryLabel(code: string) {
+  const normalized = code.trim().toUpperCase();
+  return META_COUNTRY_LABELS[normalized] ? `${META_COUNTRY_LABELS[normalized]} (${normalized})` : normalized;
+}
+
+function resolveMetaLocationPreset(adset: AdsetDraft) {
+  if (linesToList(adset.regions).length || linesToList(adset.cities).length) return "CUSTOM";
+  const countries = csvToList(adset.countries).map((item) => item.toUpperCase()).join(", ");
+  return META_LOCATION_PRESETS.find((preset) => preset.value !== "CUSTOM" && preset.countries === countries)?.value || "CUSTOM";
+}
+
+function parseGeoLabels(raw: string) {
+  try {
+    const parsed = JSON.parse(raw || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function adsetGeoEntries(adset: AdsetDraft): MetaGeoEntry[] {
+  const labels = parseGeoLabels(adset.geoLabels);
+  const entries: MetaGeoEntry[] = [];
+  for (const code of csvToList(adset.countries)) {
+    const key = code.toUpperCase();
+    entries.push({ key, label: labels[key] || metaCountryLabel(key), kind: "country", countryCode: key });
+  }
+  for (const key of linesToList(adset.regions, META_GEO_MAX_LOCATIONS)) {
+    entries.push({ key, label: labels[key] || `Regio ${key}`, kind: "region" });
+  }
+  for (const key of linesToList(adset.cities, META_GEO_MAX_LOCATIONS)) {
+    entries.push({ key, label: labels[key] || `Stad ${key}`, kind: "city" });
+  }
+  return entries;
+}
+
+function applyGeoEntries(entries: MetaGeoEntry[]): Pick<AdsetDraft, "countries" | "regions" | "cities" | "geoLabels"> {
+  const labels: Record<string, string> = {};
+  const countryKeys: string[] = [];
+  const regionKeys: string[] = [];
+  const cityKeys: string[] = [];
+  for (const entry of entries) {
+    labels[entry.key] = entry.label;
+    if (entry.kind === "country") countryKeys.push(entry.key.toUpperCase());
+    else if (entry.kind === "region") regionKeys.push(entry.key);
+    else cityKeys.push(entry.key);
+  }
+  return {
+    countries: countryKeys.join(", "),
+    regions: regionKeys.join("\n"),
+    cities: cityKeys.join("\n"),
+    geoLabels: JSON.stringify(labels),
+  };
+}
+
+function adsetHasGeoTargeting(adset: AdsetDraft) {
+  return Boolean(csvToList(adset.countries).length || linesToList(adset.regions).length || linesToList(adset.cities).length);
+}
+
+function metaLocationSummary(adset: AdsetDraft) {
+  const entries = adsetGeoEntries(adset);
+  if (!entries.length) return "Nog geen locaties gekozen";
+  const countries = entries.filter((item) => item.kind === "country").map((item) => item.label);
+  const regions = entries.filter((item) => item.kind === "region");
+  const cities = entries.filter((item) => item.kind === "city");
+  const parts: string[] = [];
+  if (countries.length) parts.push(`Landen: ${countries.join(", ")}`);
+  if (regions.length) parts.push(`${regions.length} regio${regions.length === 1 ? "" : "'s"}`);
+  if (cities.length) parts.push(`${cities.length} stad${cities.length === 1 ? "" : "en"}`);
+  return parts.join(" · ");
+}
+
+function adsetsSectionPreview(adsets: AdsetDraft[]) {
+  if (!adsets.length) return "Nog geen advertentiesets — voeg er één toe";
+  const labels = adsets.map((adset, index) => adset.name.trim() || `Set ${index + 1}`);
+  if (adsets.length === 1) {
+    return `${labels[0]} · ${adsetAccordionPreview(adsets[0])}`;
+  }
+  return `${adsets.length} sets · ${labels.slice(0, 3).join(", ")}${labels.length > 3 ? "…" : ""}`;
+}
+
+function adsetAccordionPreview(adset: AdsetDraft) {
+  const gender =
+    adset.genders === "1" ? "Mannen" : adset.genders === "2" ? "Vrouwen" : "Alle genders";
+  const ageMin = adset.ageMin.trim() || META_DEFAULT_AGE_MIN;
+  const ageMax = adset.ageMax.trim() || META_DEFAULT_AGE_MAX;
+  const placements =
+    adset.placements.length > 0
+      ? `${adset.placements.length} plaatsing${adset.placements.length === 1 ? "" : "en"}`
+      : "Geen plaatsingen";
+  return [gender, `${ageMin}–${ageMax} jaar`, metaLocationSummary(adset), placements].join(" · ");
+}
+
+function adsPerAdsetSectionPreview(adsets: AdsetDraft[]) {
+  const totalVariants = adsets.reduce((sum, adset) => sum + adset.variants.length, 0);
+  if (!adsets.length) return "Nog geen advertentiesets";
+  const names = adsets.map((adset, index) => adset.name.trim() || `Set ${index + 1}`);
+  return `${adsets.length} ad set(s) · ${totalVariants} advertentie(s) · ${names.slice(0, 2).join(", ")}${names.length > 2 ? "…" : ""}`;
+}
+
+function adsetCreativePreview(adset: AdsetDraft) {
+  const first = adset.variants[0];
+  const copyHint = first?.headline?.trim() || first?.name?.trim();
+  return `${adset.variants.length} advertentie(s) · ${adset.placements.length} placement(s)${copyHint ? ` · ${copyHint}` : ""}`;
+}
+
+function variantCreativePreview(variant: CreativeVariantDraft) {
+  const parts = [variant.headline?.trim(), variant.linkUrl?.trim()].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "Nog geen headline of link";
+}
+
+function AdsetCreativeAccordionCard({
+  adset,
+  index,
+  defaultOpen = false,
+  onAddVariant,
+  children,
+}: {
+  adset: AdsetDraft;
+  index: number;
+  defaultOpen?: boolean;
+  onAddVariant: () => void;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="overflow-hidden rounded-2xl border bg-muted/20">
+      <div className="flex items-center gap-2 px-3 py-2.5 sm:px-4">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          className="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg py-0.5 text-left transition hover:bg-muted/30"
+        >
+          <ChevronDown className={cn("mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition", open && "rotate-180")} />
+          <Layers3 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Campagne → Adset</p>
+            <p className="font-medium leading-snug">{adset.name.trim() || `Advertentieset ${index + 1}`}</p>
+            {!open ? <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{adsetCreativePreview(adset)}</p> : null}
+          </div>
+        </button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={(event) => {
+            event.stopPropagation();
+            onAddVariant();
+          }}
+        >
+          <Plus className="mr-2 h-4 w-4" />
+          Advertentie
+        </Button>
+      </div>
+      {open ? <div className="space-y-2 border-t border-border/40 p-2.5">{children}</div> : null}
+    </div>
+  );
+}
+
+function VariantAccordionCard({
+  campaignName,
+  adsetName,
+  variantIndex,
+  variant,
+  defaultOpen = false,
+  active,
+  onSelect,
+  onAiSuggest,
+  onRemove,
+  canRemove,
+  aiBriefingReady = true,
+  children,
+}: {
+  campaignName: string;
+  adsetName: string;
+  variantIndex: number;
+  variant: CreativeVariantDraft;
+  defaultOpen?: boolean;
+  active: boolean;
+  onSelect: () => void;
+  onAiSuggest: () => void;
+  onRemove: () => void;
+  canRemove: boolean;
+  aiBriefingReady?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const title = variant.name.trim() || `Advertentie ${variantIndex + 1}`;
+
+  return (
+    <div className={cn("overflow-hidden rounded-xl border", active ? "border-primary bg-primary/5" : "bg-card")}>
+      <div className="flex items-start gap-1.5 px-2.5 py-2">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => {
+            setOpen((value) => !value);
+            onSelect();
+          }}
+          className="flex min-w-0 flex-1 items-start gap-2 rounded-lg text-left transition hover:bg-muted/20"
+        >
+          <ChevronDown className={cn("mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition", open && "rotate-180")} />
+          <div className="min-w-0 flex-1">
+            <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {campaignName || "Campagne"} → {adsetName} · Ad {variantIndex + 1}
+            </p>
+            <p className="text-sm font-medium leading-snug">{title}</p>
+            {!open ? <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{variantCreativePreview(variant)}</p> : null}
+          </div>
+        </button>
+        <div className="flex shrink-0 flex-wrap gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            disabled={!aiBriefingReady}
+            title={aiBriefingReady ? undefined : "Vul eerst product of aanbod in (min. 2 tekens)"}
+            onClick={(event) => {
+              event.stopPropagation();
+              onAiSuggest();
+            }}
+          >
+            <Sparkles className="mr-1 h-3 w-3" />
+            AI
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 px-0"
+            disabled={!canRemove}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove();
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+      {open ? <div className="space-y-2 border-t border-border/40 px-2.5 pb-2.5 pt-2">{children}</div> : null}
+    </div>
+  );
+}
+
+function AdsetAccordionCard({
+  adset,
+  index,
+  defaultOpen = false,
+  onRemove,
+  children,
+}: {
+  adset: AdsetDraft;
+  index: number;
+  defaultOpen?: boolean;
+  onRemove: () => void;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const title = adset.name.trim() || `Advertentieset ${index + 1}`;
+
+  return (
+    <div className="overflow-hidden rounded-2xl border bg-muted/20">
+      <div className="flex items-center gap-2 px-3 py-2.5 sm:px-4">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          className="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg py-0.5 text-left transition hover:bg-muted/30"
+        >
+          <ChevronDown className={cn("mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition", open && "rotate-180")} />
+          <Layers3 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <p className="font-medium leading-snug">{title}</p>
+            {!open ? <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{adsetAccordionPreview(adset)}</p> : null}
+            {open && !adset.name.trim() ? (
+              <p className="mt-0.5 text-xs text-muted-foreground">Advertentieset {index + 1}</p>
+            ) : null}
+          </div>
+        </button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0"
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove();
+          }}
+        >
+          <Trash2 className="mr-2 h-4 w-4" />
+          Verwijderen
+        </Button>
+      </div>
+      {open ? <div className="space-y-3 border-t border-border/40 p-4">{children}</div> : null}
+    </div>
+  );
+}
+
 function parseJson(value: string, label: string) {
   if (!value.trim()) return {};
   try {
@@ -222,22 +634,23 @@ function parseJson(value: string, label: string) {
   }
 }
 
-function createAdset(name = "Nieuwe doelgroep", id = `adset-${Date.now()}`): AdsetDraft {
+function createAdset(name = "Nieuwe advertentieset", id = `adset-${Date.now()}`): AdsetDraft {
   return {
     id,
     name,
-    countries: "BE",
+    countries: "",
     regions: "",
     cities: "",
-    ageMin: "24",
-    ageMax: "60",
+    ageMin: META_DEFAULT_AGE_MIN,
+    ageMax: META_DEFAULT_AGE_MAX,
     genders: "ALL",
-    placements: ["facebook_feed", "instagram_feed", "instagram_story"],
+    placements: [],
     customAudiencesText: "",
     excludedCustomAudiencesText: "",
-    interestSignalsText: "Leadgeneratie\nOnline marketing\nKMO",
+    interestSignalsText: "",
     advantageAudience: false,
     notes: "",
+    geoLabels: "{}",
     variants: [createCreativeVariant("Variant 1")],
   };
 }
@@ -257,8 +670,8 @@ function createCreativeVariant(name = "Nieuwe variant", id = `variant-${Date.now
     storyImageUrl: "",
     publishAsset: "feed",
     ctaType: "LEARN_MORE",
-    ctaLabel: "Meer informatie",
-    urlTags: "utm_source=meta&utm_medium=paid_social&utm_campaign={{campaign.name}}",
+    ctaLabel: "",
+    urlTags: "",
     angle: "",
   };
 }
@@ -277,22 +690,24 @@ function mergeVariantWithBase(base: {
   ctaType: string;
   ctaLabel: string;
   urlTags: string;
-}, variant?: Partial<CreativeVariantDraft> | null) {
+}, variant?: Partial<CreativeVariantDraft> | null, options: { inheritAssets?: boolean; inheritCopy?: boolean } = {}) {
   const next = variant || {};
+  const inheritCopy = options.inheritCopy !== false;
+  const inheritAssets = options.inheritAssets === true;
   return {
     adName: next.adName || next.name || base.adName,
-    primaryText: next.primaryText || base.primaryText,
-    headline: next.headline || base.headline,
-    description: next.description || base.description,
-    linkUrl: next.linkUrl || base.linkUrl,
-    displayUrl: next.displayUrl || base.displayUrl,
-    feedImageUrl: next.feedImageUrl || base.feedImageUrl,
-    squareImageUrl: next.squareImageUrl || base.squareImageUrl,
-    storyImageUrl: next.storyImageUrl || base.storyImageUrl,
+    primaryText: next.primaryText || (inheritCopy ? base.primaryText : ""),
+    headline: next.headline || (inheritCopy ? base.headline : ""),
+    description: next.description || (inheritCopy ? base.description : ""),
+    linkUrl: next.linkUrl || (inheritCopy ? base.linkUrl : ""),
+    displayUrl: next.displayUrl || (inheritCopy ? base.displayUrl : ""),
+    feedImageUrl: next.feedImageUrl || (inheritAssets ? base.feedImageUrl : ""),
+    squareImageUrl: next.squareImageUrl || (inheritAssets ? base.squareImageUrl : ""),
+    storyImageUrl: next.storyImageUrl || (inheritAssets ? base.storyImageUrl : ""),
     publishAsset: next.publishAsset || base.publishAsset,
     ctaType: next.ctaType || base.ctaType,
-    ctaLabel: next.ctaLabel || base.ctaLabel,
-    urlTags: next.urlTags || base.urlTags,
+    ctaLabel: next.ctaLabel || (inheritCopy ? base.ctaLabel : ""),
+    urlTags: next.urlTags || (inheritCopy ? base.urlTags : ""),
   };
 }
 
@@ -309,7 +724,7 @@ function placementKeysFromTargeting(targeting: Record<string, any>): PlacementKe
   if (instagramPositions.includes("reels")) next.push("instagram_reels");
   if (instagramPositions.includes("explore")) next.push("instagram_explore");
   if (publishers.includes("audience_network")) next.push("audience_network");
-  return next.length ? next : ["facebook_feed", "instagram_feed"];
+  return next;
 }
 
 function targetingToAdset(targeting: Record<string, any>, fallbackName: string, id = `adset-${Date.now()}`): AdsetDraft {
@@ -318,20 +733,160 @@ function targetingToAdset(targeting: Record<string, any>, fallbackName: string, 
   return {
     id,
     name: String(targeting.name || fallbackName),
-    countries: Array.isArray(geo.countries) ? geo.countries.join(", ") : "BE",
+    countries: Array.isArray(geo.countries) ? geo.countries.join(", ") : "",
     regions: listToLines(geo.regions, []),
     cities: listToLines(geo.cities, []),
-    ageMin: String(targeting.age_min || 24),
-    ageMax: String(targeting.age_max || 60),
+    ageMin: targeting.age_min != null && targeting.age_min !== "" ? String(targeting.age_min) : META_DEFAULT_AGE_MIN,
+    ageMax: targeting.age_max != null && targeting.age_max !== "" ? String(targeting.age_max) : META_DEFAULT_AGE_MAX,
     genders: Array.isArray(targeting.genders) && targeting.genders.length === 1 ? String(targeting.genders[0]) : "ALL",
     placements: placementKeysFromTargeting(targeting),
     customAudiencesText: listToLines(targeting.custom_audiences, []),
     excludedCustomAudiencesText: listToLines(asRecord(targeting.exclusions).custom_audiences, []),
-    interestSignalsText: listToLines(targeting.interestSignals, ["Leadgeneratie", "Online marketing", "KMO"]),
+    interestSignalsText: listToLines(targeting.interestSignals, []),
     advantageAudience: automation.advantage_audience === 1 || automation.advantage_audience === "1",
     notes: String(targeting.audienceNotes || ""),
+    geoLabels:
+      typeof targeting.geoLabels === "string"
+        ? targeting.geoLabels
+        : targeting.geoLabels && typeof targeting.geoLabels === "object"
+          ? JSON.stringify(targeting.geoLabels)
+          : "{}",
     variants: [createCreativeVariant("Variant 1", `${id}-variant-1`)],
   };
+}
+
+/** Meta call_to_action types met Nederlandse knoptekst (zoals in Ads Manager). */
+const META_CTA_LABEL_OPTIONS = [
+  { type: "LEARN_MORE", label: "Meer informatie", shortLabel: "Meer info" },
+  { type: "SHOP_NOW", label: "Shop nu", shortLabel: "Shop nu" },
+  { type: "SIGN_UP", label: "Aanmelden", shortLabel: "Aanmelden" },
+  { type: "CONTACT_US", label: "Contact opnemen", shortLabel: "Contact" },
+  { type: "APPLY_NOW", label: "Solliciteren", shortLabel: "Solliciteren" },
+  { type: "GET_QUOTE", label: "Offerte aanvragen", shortLabel: "Offerte" },
+  { type: "BOOK_TRAVEL", label: "Boeken", shortLabel: "Boeken" },
+  { type: "DOWNLOAD", label: "Downloaden", shortLabel: "Downloaden" },
+  { type: "WATCH_MORE", label: "Meer bekijken", shortLabel: "Meer bekijken" },
+  { type: "GET_OFFER", label: "Aanbieding bekijken", shortLabel: "Aanbieding" },
+  { type: "SUBSCRIBE", label: "Abonneren", shortLabel: "Abonneren" },
+  { type: "ORDER_NOW", label: "Nu bestellen", shortLabel: "Bestellen" },
+  { type: "GET_SHOWTIMES", label: "Tijden bekijken", shortLabel: "Tijden" },
+  { type: "LISTEN_NOW", label: "Nu luisteren", shortLabel: "Luisteren" },
+  { type: "REQUEST_TIME", label: "Tijd aanvragen", shortLabel: "Tijd aanvragen" },
+  { type: "SEE_MENU", label: "Menu bekijken", shortLabel: "Menu" },
+] as const;
+
+function ctaLabelFromType(type: string) {
+  const normalized = type.trim().toUpperCase();
+  const match = META_CTA_LABEL_OPTIONS.find((option) => option.type === normalized);
+  if (match) return match.label;
+  if (normalized === "CONTACT_NOW") return "Contact opnemen";
+  if (normalized === "BOOK_NOW") return "Boeken";
+  return "Meer informatie";
+}
+
+function resolveVariantCtaSelectType(variant: Pick<CreativeVariantDraft, "ctaType" | "ctaLabel">) {
+  const label = variant.ctaLabel.trim();
+  const byLabel = META_CTA_LABEL_OPTIONS.find((option) => option.label === label);
+  if (byLabel) return byLabel.type;
+  const byType = META_CTA_LABEL_OPTIONS.find((option) => option.type === variant.ctaType);
+  if (byType) return byType.type;
+  return variant.ctaType || "LEARN_MORE";
+}
+
+function resolveMetaPreviewCtaLabel(ctaLabel: string, ctaType?: string) {
+  const trimmed = ctaLabel.trim();
+  if (trimmed) return trimmed;
+  if (ctaType?.trim()) return ctaLabelFromType(ctaType);
+  return "Meer informatie";
+}
+
+function MetaPreviewFeedCtaButton({ label }: { label: string }) {
+  const text = resolveMetaPreviewCtaLabel(label);
+  const long = text.length > 16;
+  const medium = text.length > 12;
+
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center justify-center rounded-md bg-slate-200 px-2 py-1 text-center font-semibold leading-tight text-slate-800 dark:bg-slate-800 dark:text-slate-100",
+        long ? "max-w-[10rem] text-[8px]" : medium ? "max-w-[8.5rem] text-[9px]" : "max-w-[7rem] text-[10px]",
+      )}
+      title={text}
+    >
+      <span className="line-clamp-2 break-words hyphens-auto">{text}</span>
+    </span>
+  );
+}
+
+function liveAdToVariant(ad: Record<string, any>, fallbackName: string, id: string): CreativeVariantDraft {
+  const creative = asRecord(ad.creative);
+  const storySpec = asRecord(creative.object_story_spec);
+  const linkData = asRecord(storySpec.link_data);
+  const photoData = asRecord(storySpec.photo_data);
+  const templateData = asRecord(asRecord(storySpec.template_data).link_data);
+  const creativeData = Object.keys(linkData).length ? linkData : Object.keys(templateData).length ? templateData : photoData;
+  const callToAction = asRecord(creativeData.call_to_action);
+  const ctaType = String(callToAction.type || "LEARN_MORE");
+  const ctaValue = asRecord(callToAction.value);
+  const imageUrl = String(creativeData.picture || creativeData.image_url || photoData.url || "");
+  const linkUrl = String(creativeData.link || ctaValue.link || "");
+  const headline = String(creativeData.name || creative.name || ad.name || fallbackName);
+  const primaryText = String(creativeData.message || creativeData.text || "");
+  const description = String(creativeData.description || creativeData.caption || "");
+
+  return {
+    ...createCreativeVariant(fallbackName, id),
+    name: String(ad.name || fallbackName),
+    adName: String(ad.name || fallbackName),
+    primaryText,
+    headline,
+    description,
+    linkUrl,
+    displayUrl: linkUrl ? linkUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : "",
+    feedImageUrl: imageUrl,
+    squareImageUrl: "",
+    storyImageUrl: "",
+    publishAsset: "feed",
+    ctaType,
+    ctaLabel: ctaLabelFromType(ctaType),
+    urlTags: String(creativeData.url_tags || ""),
+    angle: "",
+  };
+}
+
+function liveAdsetToDraft(adset: Record<string, any>, index: number): AdsetDraft {
+  const adsetId = String(adset.id || `live-adset-${index + 1}`);
+  const draft = targetingToAdset(asRecord(adset.targeting), String(adset.name || `Adset ${index + 1}`), `live-${adsetId}`);
+  const ads = Array.isArray(adset.ads) ? adset.ads : [];
+  const variants = ads.length
+    ? ads.map((ad: any, adIndex: number) =>
+        liveAdToVariant(asRecord(ad), `Ad ${adIndex + 1}`, `live-${adsetId}-ad-${String(ad?.id || adIndex + 1)}`),
+      )
+    : draft.variants;
+
+  return {
+    ...draft,
+    name: String(adset.name || draft.name),
+    variants,
+  };
+}
+
+function formatTrpcValidationError(message: string): string | null {
+  try {
+    const issues = JSON.parse(message) as Array<{ path?: Array<string | number>; message?: string }>;
+    if (!Array.isArray(issues) || !issues.length) return null;
+    const first = issues[0];
+    if (first.path?.includes("product")) {
+      return "Vul product of aanbod in op de Campagne-stap (minstens 2 tekens).";
+    }
+    return first.message || null;
+  } catch {
+    return null;
+  }
+}
+
+function trpcErrorDescription(message: string) {
+  return formatTrpcValidationError(message) || explainMetaError(message)?.message || message;
 }
 
 function explainMetaError(raw?: string | null): ErrorExplanation | null {
@@ -474,7 +1029,29 @@ function resolvePublishImage(slot: AssetSlot, images: { feedImageUrl: string; sq
   return images.feedImageUrl || images.squareImageUrl || images.storyImageUrl;
 }
 
+function previewAssetForSlot(
+  slot: AssetSlot,
+  images: { feedImageUrl: string; squareImageUrl: string; storyImageUrl: string },
+) {
+  const trimmed = {
+    feed: images.feedImageUrl.trim(),
+    square: images.squareImageUrl.trim(),
+    story: images.storyImageUrl.trim(),
+  };
+  if (trimmed[slot]) return { url: trimmed[slot], usesFallback: false };
+  const fallback = resolvePublishImage(slot, images).trim();
+  return { url: fallback, usesFallback: Boolean(fallback) };
+}
+
 function describeOperationalRequirement(code: string): OperationalRequirement {
+  if (code === "META_NOT_CONNECTED") {
+    return {
+      code,
+      title: "Meta nog niet gekoppeld",
+      description: "Deze workspace heeft nog geen geldige Meta OAuth-token.",
+      nextStep: "Koppel Meta via Integraties voordat je ads kunt publiceren.",
+    };
+  }
   if (code === "META_SCOPE_MISSING") {
     return {
       code,
@@ -533,7 +1110,7 @@ function buildMergedVariantPayload(
   },
   variant: CreativeVariantDraft,
 ) {
-  const merged = mergeVariantWithBase(base, variant);
+  const merged = mergeVariantWithBase(base, variant, { inheritAssets: false, inheritCopy: false });
   return {
     id: variant.id,
     name: variant.name.trim() || merged.adName.trim(),
@@ -554,8 +1131,8 @@ function buildMergedVariantPayload(
     }),
     publishAsset: merged.publishAsset,
     ctaType: merged.ctaType,
-    cta: merged.ctaLabel.trim(),
-    ctaLabel: merged.ctaLabel.trim(),
+    cta: merged.ctaLabel.trim() || ctaLabelFromType(merged.ctaType),
+    ctaLabel: merged.ctaLabel.trim() || ctaLabelFromType(merged.ctaType),
     urlTags: merged.urlTags.trim(),
     angle: variant.angle.trim(),
   };
@@ -625,24 +1202,27 @@ function buildTargetingFromAdset(adset: AdsetDraft) {
   ].filter(Boolean);
   const gendersPayload = adset.genders === "ALL" ? [] : [Number(adset.genders)];
 
+  const ageMin = numberValue(adset.ageMin);
+  const ageMax = numberValue(adset.ageMax);
   return {
     name: adset.name.trim(),
     geo_locations: {
-      countries: csvToList(adset.countries).length ? csvToList(adset.countries) : ["BE"],
+      countries: csvToList(adset.countries),
       regions: linesToList(adset.regions),
       cities: linesToList(adset.cities),
     },
-    age_min: numberValue(adset.ageMin) || 18,
-    age_max: numberValue(adset.ageMax) || 65,
+    ...(ageMin >= 13 ? { age_min: ageMin } : {}),
+    ...(ageMax >= Math.max(13, ageMin || 13) ? { age_max: ageMax } : {}),
     genders: gendersPayload,
-    publisher_platforms: publisherPlatforms.length ? publisherPlatforms : ["facebook", "instagram"],
+    publisher_platforms: publisherPlatforms,
     facebook_positions: facebookPositions,
-    instagram_positions: instagramPositions.length ? instagramPositions : ["stream"],
+    instagram_positions: instagramPositions,
     custom_audiences: linesToList(adset.customAudiencesText, 25),
     exclusions: { custom_audiences: linesToList(adset.excludedCustomAudiencesText, 25) },
     interestSignals: linesToList(adset.interestSignalsText, 25),
     targeting_automation: { advantage_audience: adset.advantageAudience ? 1 : 0 },
     audienceNotes: adset.notes.trim() || null,
+    geoLabels: parseGeoLabels(adset.geoLabels),
   };
 }
 
@@ -700,6 +1280,735 @@ function HelpLabel({ label, help }: { label: string; help: string }) {
   );
 }
 
+function adsetAudienceSummary(adset: AdsetDraft) {
+  const parts: string[] = [];
+  const interests = linesToList(adset.interestSignalsText, 25).length;
+  const includeCount = linesToList(adset.customAudiencesText, 25).length;
+  const excludeCount = linesToList(adset.excludedCustomAudiencesText, 25).length;
+  if (interests) parts.push(`${interests} signaal${interests === 1 ? "" : "en"}`);
+  if (includeCount) parts.push(`${includeCount} audience${includeCount === 1 ? "" : "s"}`);
+  if (excludeCount) parts.push(`${excludeCount} uitgesloten`);
+  if (adset.notes.trim()) parts.push("notities");
+  return parts.join(" · ");
+}
+
+function LinesChipField({
+  label,
+  help,
+  value,
+  onChange,
+  placeholder,
+  maxItems = 25,
+  mono = false,
+  emptyHint,
+}: {
+  label: string;
+  help: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  maxItems?: number;
+  mono?: boolean;
+  emptyHint?: string;
+}) {
+  const [draft, setDraft] = useState("");
+  const items = linesToList(value, maxItems);
+
+  function commitDraft(raw = draft) {
+    const parts = raw
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!parts.length) return;
+    const merged = [...items];
+    for (const part of parts) {
+      if (merged.length >= maxItems) break;
+      const duplicate = merged.some((existing) => existing.toLowerCase() === part.toLowerCase());
+      if (!duplicate) merged.push(part);
+    }
+    onChange(merged.join("\n"));
+    setDraft("");
+  }
+
+  function removeAt(index: number) {
+    onChange(items.filter((_, itemIndex) => itemIndex !== index).join("\n"));
+  }
+
+  return (
+    <div className="space-y-2">
+      <HelpLabel label={label} help={help} />
+      <div
+        className={cn(
+          "rounded-xl border border-border/60 bg-background shadow-sm transition focus-within:ring-2 focus-within:ring-primary/15",
+          items.length === 0 && "border-dashed",
+        )}
+      >
+        <div className="flex min-h-9 flex-wrap items-center gap-1.5 p-2">
+          {items.map((item, index) => (
+            <span
+              key={`${item}-${index}`}
+              className={cn(
+                "inline-flex max-w-full items-center gap-1 rounded-md bg-secondary px-2 py-0.5 text-xs text-secondary-foreground",
+                mono && "font-mono text-[10px]",
+              )}
+            >
+              <span className="truncate">{item}</span>
+              <button
+                type="button"
+                className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-background/80 hover:text-foreground"
+                aria-label={`Verwijder ${item}`}
+                onClick={() => removeAt(index)}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+          {items.length < maxItems ? (
+            <input
+              type="text"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === ",") {
+                  event.preventDefault();
+                  commitDraft();
+                } else if (event.key === "Backspace" && !draft && items.length) {
+                  removeAt(items.length - 1);
+                }
+              }}
+              onBlur={() => {
+                if (draft.trim()) commitDraft();
+              }}
+              placeholder={items.length ? "Nog toevoegen…" : placeholder}
+              className={cn(
+                "min-w-[8rem] flex-1 border-0 bg-transparent px-1 py-0.5 text-sm outline-none placeholder:text-muted-foreground/70",
+                mono && "font-mono text-xs",
+              )}
+            />
+          ) : null}
+        </div>
+        <div className="flex items-center justify-between border-t border-border/40 px-2 py-1 text-[10px] text-muted-foreground">
+          <span>{emptyHint || "Enter of komma om toe te voegen"}</span>
+          <span className="tabular-nums">
+            {items.length}/{maxItems}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdsetAudienceOptionalSection({
+  adset,
+  onUpdate,
+}: {
+  adset: AdsetDraft;
+  onUpdate: (patch: Partial<AdsetDraft>) => void;
+}) {
+  const summary = adsetAudienceSummary(adset);
+
+  return (
+    <details className="rounded-xl border border-dashed border-border/70 bg-background/50">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 marker:content-none [&::-webkit-details-marker]:hidden">
+        <span className="flex items-center gap-2 text-sm font-medium">
+          <Target className="h-4 w-4 shrink-0 text-violet-600 dark:text-violet-400" />
+          Doelgroep &amp; audiences (optioneel)
+        </span>
+        {summary ? <span className="truncate text-xs text-muted-foreground">{summary}</span> : null}
+      </summary>
+      <div className="space-y-4 border-t border-border/50 px-3 pb-3 pt-3">
+        <p className="rounded-lg border border-violet-200/50 bg-violet-50/40 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground dark:border-violet-900/40 dark:bg-violet-950/20">
+          <span className="font-medium text-foreground">Interest signalen</span> helpen AI en interne notities — ze worden niet automatisch als Meta-interests gepusht.
+          Custom audience IDs worden wél meegestuurd bij push (vind je in Meta Ads Manager → Doelgroepen).
+        </p>
+
+        <LinesChipField
+          label="Interest signalen"
+          help="Thema’s of interesses voor deze set (AI-briefing). Niet hetzelfde als Meta targeting interests."
+          value={adset.interestSignalsText}
+          onChange={(next) => onUpdate({ interestSignalsText: next })}
+          placeholder="Bijv. Vlaamse ondernemers"
+          emptyHint="Typ en druk Enter — één signaal per chip"
+        />
+
+        <div className="space-y-3 rounded-xl border border-border/50 bg-muted/15 p-3">
+          <p className="text-xs font-semibold text-foreground">Meta custom audiences</p>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Plak audience-ID’s uit Ads Manager. Insluiten = remarketing/warm traffic · Uitsluiten = bestaande klanten of converters.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <LinesChipField
+              label="Insluiten"
+              help="Meta custom audience ID, één per chip. Alleen cijfers."
+              value={adset.customAudiencesText}
+              onChange={(next) => onUpdate({ customAudiencesText: next })}
+              placeholder="Audience-ID"
+              mono
+              maxItems={25}
+              emptyHint="ID plakken + Enter"
+            />
+            <LinesChipField
+              label="Uitsluiten"
+              help="Audiences die je wilt uitsluiten van deze set."
+              value={adset.excludedCustomAudiencesText}
+              onChange={(next) => onUpdate({ excludedCustomAudiencesText: next })}
+              placeholder="Audience-ID"
+              mono
+              maxItems={25}
+              emptyHint="ID plakken + Enter"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <HelpLabel label="Interne notities" help="Waarom bestaat deze advertentieset? Alleen zichtbaar in jullie studio." />
+          <Textarea
+            className="min-h-[4.5rem] resize-y text-sm"
+            rows={2}
+            value={adset.notes}
+            onChange={(event) => onUpdate({ notes: event.target.value })}
+            placeholder="Bijv. warm remarketing, focus op demo-aanvragen"
+          />
+        </div>
+      </div>
+    </details>
+  );
+}
+
+const META_DEFAULT_URL_TAGS = "utm_source=meta&utm_medium=paid_social&utm_campaign={{campaign.name}}";
+
+function resolveMetaUrlTagsPreview(tags: string, campaignName: string) {
+  const raw = tags.trim() || META_DEFAULT_URL_TAGS;
+  const slug = campaignName.trim()
+    ? campaignName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+    : "mijn-campagne";
+  return raw.replace(/\{\{campaign\.name\}\}/gi, slug);
+}
+
+function MetaCampaignUrlTagsField({
+  value,
+  onChange,
+  campaignName,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  campaignName: string;
+}) {
+  const resolvedTags = resolveMetaUrlTagsPreview(value, campaignName);
+  const exampleLanding = "https://jouwsite.be/landing";
+  const exampleUrl = `${exampleLanding}${exampleLanding.includes("?") ? "&" : "?"}${resolvedTags}`;
+  const campaignLabel = campaignName.trim() || "je campagnenaam";
+  const summaryPreview = value.trim()
+    ? value.trim().length > 52
+      ? `${value.trim().slice(0, 52)}…`
+      : value.trim()
+    : "Niet ingesteld — optioneel";
+
+  return (
+    <details className="group rounded-xl border border-dashed border-border/70 bg-background/50 sm:col-span-2">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 marker:content-none [&::-webkit-details-marker]:hidden">
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="text-sm font-medium">Standaard URL-parameters (UTM)</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="rounded-full text-muted-foreground transition hover:text-foreground"
+                aria-label="Uitleg URL-parameters"
+                onClick={(event) => event.preventDefault()}
+              >
+                <HelpCircle className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs text-xs leading-5">
+              Tracking die Meta aan je landingspagina plakt bij live ads. Geldt voor alle advertenties, tenzij je per variant iets anders
+              invult onder Tracking &amp; publicatie.
+            </TooltipContent>
+          </Tooltip>
+        </span>
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="hidden max-w-[14rem] truncate font-mono text-[10px] text-muted-foreground sm:inline">{summaryPreview}</span>
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition group-open:rotate-180" />
+        </span>
+      </summary>
+      <div className="space-y-2 border-t border-border/50 px-3 pb-3 pt-2">
+        <p className="truncate font-mono text-[10px] text-muted-foreground sm:hidden">{summaryPreview}</p>
+        <Input
+          className="h-8 font-mono text-xs"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={META_DEFAULT_URL_TAGS}
+        />
+        <div className="rounded-lg border border-slate-200/80 bg-slate-50/80 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground dark:border-slate-800 dark:bg-slate-900/40">
+          <p>
+            <span className="font-medium text-foreground">Wat is dit?</span> Extra tekst achter je bestemmingslink zodat Analytics of je CRM
+            kan zien dat bezoekers via deze Meta-campagne binnenkomen.
+          </p>
+          <ul className="mt-1.5 list-inside list-disc space-y-0.5">
+            <li>
+              <span className="font-medium text-foreground/90">utm_source / utm_medium</span> — welk kanaal (bijv. meta, paid_social)
+            </li>
+            <li>
+              <span className="font-medium text-foreground/90">utm_campaign</span> — campagnenaam in je rapportages
+            </li>
+            <li>
+              <span className="font-medium text-foreground/90">{`{{campaign.name}}`}</span> — wordt bij push vervangen door &quot;{campaignLabel}&quot;
+            </li>
+          </ul>
+          <p className="mt-1.5">
+            Alleen invullen als je UTM&apos;s wilt meesturen. Formaat:{" "}
+            <span className="font-mono text-[10px]">sleutel=waarde&amp;sleutel2=waarde2</span> (zonder <span className="font-mono">?</span> of{" "}
+            <span className="font-mono">&amp;</span> aan het begin).
+          </p>
+        </div>
+        <details className="rounded-lg border border-dashed border-border/60 bg-background/50 px-2.5 py-1.5">
+          <summary className="cursor-pointer text-[11px] font-medium text-foreground">Voorbeeld na publicatie</summary>
+          <p className="mt-1.5 break-all font-mono text-[10px] leading-snug text-muted-foreground">{exampleUrl}</p>
+        </details>
+        {!value.trim() ? (
+          <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => onChange(META_DEFAULT_URL_TAGS)}>
+            Standaard UTM invullen
+          </Button>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+const META_AD_COPY_LIMITS = {
+  primaryText: 125,
+  headline: 40,
+  description: 30,
+} as const;
+
+function metaCopyCounter(length: number, max: number) {
+  const over = length > max;
+  return (
+    <span className={cn("shrink-0 text-[10px] tabular-nums", over ? "font-medium text-destructive" : "text-muted-foreground")}>
+      {length}/{max}
+    </span>
+  );
+}
+
+function CompactHelpLabel({ label, help, counter }: { label: string; help: string; counter?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <div className="flex min-w-0 items-center gap-1">
+        <Label className="text-[11px] font-medium leading-none text-muted-foreground">{label}</Label>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              className="rounded-full text-muted-foreground/80 transition hover:text-foreground"
+              aria-label={`Uitleg voor ${label}`}
+            >
+              <HelpCircle className="h-3 w-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-xs text-xs leading-5">
+            {help}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+      {counter}
+    </div>
+  );
+}
+
+function VariantDenseField({
+  label,
+  help,
+  counter,
+  className,
+  invalid,
+  children,
+}: {
+  label: string;
+  help: string;
+  counter?: React.ReactNode;
+  className?: string;
+  invalid?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={cn("min-w-0", className)}>
+      <div className="mb-1 flex items-center justify-between gap-1 leading-none">
+        <div className="flex min-w-0 items-center gap-0.5">
+          <span className={cn("truncate text-[11px] font-medium", invalid ? "text-destructive" : "text-muted-foreground")}>{label}</span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="shrink-0 text-muted-foreground/70 hover:text-foreground" aria-label={`Uitleg ${label}`}>
+                <HelpCircle className="h-3 w-3" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs text-xs leading-5">
+              {help}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+        {counter}
+      </div>
+      <div className={cn(invalid && "[&_input]:border-destructive/60 [&_textarea]:border-destructive/60")}>{children}</div>
+    </div>
+  );
+}
+
+function VariantFormAccordionSection({
+  title,
+  description,
+  issues,
+  defaultOpen,
+  optional,
+  children,
+}: {
+  title: string;
+  description?: string;
+  issues: string[];
+  defaultOpen?: boolean;
+  optional?: boolean;
+  children: React.ReactNode;
+}) {
+  const hasIssues = issues.length > 0;
+
+  return (
+    <details
+      className={cn(
+        "group overflow-hidden rounded-lg border shadow-sm",
+        hasIssues ? "border-destructive/30 bg-destructive/[0.02]" : "border-border/50 bg-background/70",
+      )}
+      open={defaultOpen || hasIssues || undefined}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-2.5 py-2 marker:content-none [&::-webkit-details-marker]:hidden">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <p className="text-xs font-semibold text-foreground">{title}</p>
+            {hasIssues ? (
+              <span className="inline-flex items-center gap-0.5 rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                {issues.length}
+              </span>
+            ) : optional ? (
+              <span className="text-[10px] font-normal text-muted-foreground">Optioneel</span>
+            ) : (
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+                <CheckCircle2 className="h-3 w-3 shrink-0" />
+                OK
+              </span>
+            )}
+          </div>
+          {hasIssues ? (
+            <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-destructive">{issues.join(" · ")}</p>
+          ) : description ? (
+            <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
+        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition group-open:rotate-180" />
+      </summary>
+      <div className="space-y-2.5 border-t border-border/50 px-2.5 pb-2.5 pt-2">{children}</div>
+    </details>
+  );
+}
+
+function variantCopyLengthIssues(variant: CreativeVariantDraft) {
+  const issues: Array<{ label: string; over: number; max: number }> = [];
+  if (variant.primaryText.length > META_AD_COPY_LIMITS.primaryText) {
+    issues.push({
+      label: "Primaire tekst",
+      over: variant.primaryText.length - META_AD_COPY_LIMITS.primaryText,
+      max: META_AD_COPY_LIMITS.primaryText,
+    });
+  }
+  if (variant.headline.length > META_AD_COPY_LIMITS.headline) {
+    issues.push({
+      label: "Headline",
+      over: variant.headline.length - META_AD_COPY_LIMITS.headline,
+      max: META_AD_COPY_LIMITS.headline,
+    });
+  }
+  if (variant.description.length > META_AD_COPY_LIMITS.description) {
+    issues.push({
+      label: "Beschrijving",
+      over: variant.description.length - META_AD_COPY_LIMITS.description,
+      max: META_AD_COPY_LIMITS.description,
+    });
+  }
+  return issues;
+}
+
+function variantBasisIssues(variant: CreativeVariantDraft, merged: ReturnType<typeof mergeVariantWithBase>) {
+  const issues: string[] = [];
+  if (!variant.name.trim()) issues.push("Advertentienaam ontbreekt");
+  const link = merged.linkUrl.trim();
+  if (!link) issues.push("Landingspagina (https) ontbreekt");
+  else if (!link.startsWith("https://")) issues.push("Link moet met https:// beginnen");
+  return issues;
+}
+
+function variantCopyIssues(variant: CreativeVariantDraft, merged: ReturnType<typeof mergeVariantWithBase>) {
+  const issues: string[] = [];
+  if (!merged.primaryText.trim()) issues.push("Primaire tekst ontbreekt");
+  if (!merged.headline.trim()) issues.push("Headline ontbreekt");
+  for (const issue of variantCopyLengthIssues(variant)) {
+    issues.push(`${issue.label}: ${issue.over} tekens te lang (max ${issue.max})`);
+  }
+  return issues;
+}
+
+function variantAssetIssues(
+  variant: CreativeVariantDraft,
+  merged: ReturnType<typeof mergeVariantWithBase>,
+  storyPlacementWarning: boolean,
+) {
+  const issues: string[] = [];
+  const resolvedImage = resolvePublishImage(merged.publishAsset, {
+    feedImageUrl: merged.feedImageUrl,
+    squareImageUrl: merged.squareImageUrl,
+    storyImageUrl: merged.storyImageUrl,
+  });
+  if (!resolvedImage.trim()) issues.push("Upload minstens één beeld");
+  if (storyPlacementWarning && !merged.storyImageUrl.trim()) issues.push("Story/Reels-beeld (9:16) ontbreekt");
+  return issues;
+}
+
+function VariantCreativeForm({
+  adsetId,
+  variant,
+  merged,
+  campaignUrlTags,
+  uploadingVariantAsset,
+  storyPlacementWarning,
+  onUpdate,
+  onUploadAsset,
+}: {
+  adsetId: string;
+  variant: CreativeVariantDraft;
+  merged: ReturnType<typeof mergeVariantWithBase>;
+  campaignUrlTags: string;
+  uploadingVariantAsset: string | null;
+  storyPlacementWarning: boolean;
+  onUpdate: (patch: Partial<CreativeVariantDraft>) => void;
+  onUploadAsset: (slot: AssetSlot, file: File) => Promise<void>;
+}) {
+  const uploadKey = (slot: AssetSlot) => `${adsetId}:${variant.id}:${slot}`;
+  const effectiveUrlTags = variant.urlTags.trim() || campaignUrlTags.trim();
+  const basisIssues = variantBasisIssues(variant, merged);
+  const copyIssues = variantCopyIssues(variant, merged);
+  const assetIssues = variantAssetIssues(variant, merged, storyPlacementWarning);
+  const assetCount = [variant.feedImageUrl, variant.squareImageUrl, variant.storyImageUrl].filter((url) => url.trim()).length;
+
+  const inputClass = "h-8 min-h-8 py-0 text-xs";
+
+  return (
+    <div className="space-y-2">
+      <VariantFormAccordionSection
+        title="Basis"
+        description="Naam, invalshoek, landingspagina en knop."
+        issues={basisIssues}
+        defaultOpen
+      >
+        <div className="grid gap-2 sm:grid-cols-2">
+          <VariantDenseField label="Advertentienaam" help="Interne naam in Meta Ads Manager.">
+            <Input className={inputClass} value={variant.name} onChange={(e) => onUpdate({ name: e.target.value, adName: e.target.value })} />
+          </VariantDenseField>
+          <VariantDenseField label="Hoek / hook" help="Invalshoek voor A/B-test (alleen intern).">
+            <Input className={inputClass} value={variant.angle} onChange={(e) => onUpdate({ angle: e.target.value })} placeholder="Bijv. social proof" />
+          </VariantDenseField>
+          <VariantDenseField className="sm:col-span-2" label="Landingspagina (URL)" help="https-link, verplicht bij publiceren naar Meta.">
+            <Input
+              className={inputClass}
+              value={variant.linkUrl}
+              onChange={(e) => onUpdate({ linkUrl: e.target.value })}
+              placeholder="https://jouwsite.be/landing"
+            />
+          </VariantDenseField>
+          <VariantDenseField
+            className="sm:col-span-2"
+            label="Knop (CTA)"
+            help="Eén keuze voor Meta (call_to_action) én de tekst op de knop in de preview — zoals in Ads Manager."
+          >
+            <Select
+              value={resolveVariantCtaSelectType(variant)}
+              onValueChange={(value) => onUpdate({ ctaType: value, ctaLabel: ctaLabelFromType(value) })}
+            >
+              <SelectTrigger className={inputClass}>
+                <SelectValue placeholder="Kies een actie" />
+              </SelectTrigger>
+              <SelectContent>
+                {META_CTA_LABEL_OPTIONS.map((option) => (
+                  <SelectItem key={option.type} value={option.type}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Preview-knop:{" "}
+              <span className="font-medium text-foreground">
+                {variant.ctaLabel.trim() || ctaLabelFromType(variant.ctaType)}
+              </span>
+              <span className="mx-1 text-border">·</span>
+              Meta-type: <span className="font-mono text-[10px]">{variant.ctaType}</span>
+            </p>
+          </VariantDenseField>
+        </div>
+      </VariantFormAccordionSection>
+
+      <VariantFormAccordionSection
+        title="Advertentietekst"
+        description="Tekst in feed, story en reels."
+        issues={copyIssues}
+      >
+        <div className="grid gap-2">
+          <VariantDenseField
+            label="Primaire tekst"
+            help={`Hoofdtekst boven het beeld. Max ${META_AD_COPY_LIMITS.primaryText} tekens.`}
+            counter={metaCopyCounter(variant.primaryText.length, META_AD_COPY_LIMITS.primaryText)}
+            invalid={variant.primaryText.length > META_AD_COPY_LIMITS.primaryText}
+          >
+            <Textarea
+              rows={3}
+              className="min-h-[3.25rem] resize-y py-1.5 text-xs leading-relaxed"
+              value={variant.primaryText}
+              onChange={(e) => onUpdate({ primaryText: e.target.value })}
+              placeholder="Beschrijf je aanbod in 1–2 zinnen."
+            />
+          </VariantDenseField>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <VariantDenseField
+              label="Headline"
+              help={`Titel onder het beeld. Max ${META_AD_COPY_LIMITS.headline} tekens — korter werkt vaak beter.`}
+              counter={metaCopyCounter(variant.headline.length, META_AD_COPY_LIMITS.headline)}
+              invalid={variant.headline.length > META_AD_COPY_LIMITS.headline}
+            >
+              <Input className={inputClass} value={variant.headline} onChange={(e) => onUpdate({ headline: e.target.value })} />
+            </VariantDenseField>
+            <VariantDenseField
+              label="Beschrijving"
+              help={`Korte regel onder de headline. Max ${META_AD_COPY_LIMITS.description} tekens.`}
+              counter={metaCopyCounter(variant.description.length, META_AD_COPY_LIMITS.description)}
+              invalid={variant.description.length > META_AD_COPY_LIMITS.description}
+            >
+              <Input className={inputClass} value={variant.description} onChange={(e) => onUpdate({ description: e.target.value })} />
+            </VariantDenseField>
+          </div>
+        </div>
+      </VariantFormAccordionSection>
+
+      <VariantFormAccordionSection
+        title="Creatieve beelden"
+        description={`${assetCount}/3 geüpload · feed · vierkant · story`}
+        issues={assetIssues}
+      >
+        <div className="grid gap-2 sm:grid-cols-3">
+          <VariantAssetField
+            compact
+            slot="feed"
+            title="Feed"
+            help="1200×628 of 1:1."
+            ratio="1.91:1"
+            recommended="1200×628"
+            value={variant.feedImageUrl}
+            uploading={uploadingVariantAsset === uploadKey("feed")}
+            onUpload={(file) => onUploadAsset("feed", file)}
+          />
+          <VariantAssetField
+            compact
+            slot="square"
+            title="Vierkant"
+            help="1:1 voor Instagram feed."
+            ratio="1:1"
+            recommended="1200×1200"
+            value={variant.squareImageUrl}
+            uploading={uploadingVariantAsset === uploadKey("square")}
+            onUpload={(file) => onUploadAsset("square", file)}
+          />
+          <VariantAssetField
+            compact
+            slot="story"
+            title="Story & Reels"
+            help="Verticaal 9:16."
+            ratio="9:16"
+            recommended="1080×1920"
+            value={variant.storyImageUrl}
+            uploading={uploadingVariantAsset === uploadKey("story")}
+            onUpload={(file) => onUploadAsset("story", file)}
+          />
+        </div>
+        {storyPlacementWarning ? (
+          <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-950 dark:text-amber-100">
+            Deze ad set heeft story/reels-placements — upload een 9:16-beeld.
+          </p>
+        ) : null}
+      </VariantFormAccordionSection>
+
+      <VariantFormAccordionSection
+        title="Tracking & publicatie"
+        optional
+        description={[
+          variant.urlTags.trim() ? "Eigen UTM" : effectiveUrlTags ? "Campagne-UTM" : "Geen UTM",
+          variant.publishAsset === "feed" ? "Feed bij push" : variant.publishAsset === "square" ? "Vierkant bij push" : "Story bij push",
+        ].join(" · ")}
+        issues={[]}
+      >
+        <p className="rounded-lg border border-border/50 bg-muted/20 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
+          <span className="font-medium text-foreground">UTM</span> = tracking achter je landingslink bij live ads.{" "}
+          <span className="font-medium text-foreground">Weergave-URL</span> = alleen wat je in de preview ziet (niet de echte klik-link).{" "}
+          <span className="font-medium text-foreground">Primair beeld</span> = welk geüpload formaat we als hoofdvisual meesturen bij push.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <VariantDenseField
+            className="sm:col-span-2"
+            label="UTM-tracking (url_tags)"
+            help="Wordt door Meta aan je landings-URL geplakt. Leeg laten = de standaard UTM van de campagne (Advertenties-stap). Alleen invullen als deze advertentie afwijkt."
+          >
+            <Input
+              className="h-8 font-mono text-[10px]"
+              value={variant.urlTags}
+              onChange={(e) => onUpdate({ urlTags: e.target.value })}
+              placeholder={campaignUrlTags.trim() || META_DEFAULT_URL_TAGS}
+            />
+            {!variant.urlTags.trim() && effectiveUrlTags ? (
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Bij push: campagne-UTM · <span className="font-mono">{effectiveUrlTags}</span>
+              </p>
+            ) : null}
+          </VariantDenseField>
+          <VariantDenseField
+            label="Weergave-URL (preview)"
+            help="Korte domeinnaam onder de advertentie in onze preview. Bezoekers klikken nog steeds op je echte landingspagina-URL hierboven."
+          >
+            <Input
+              className={inputClass}
+              value={variant.displayUrl}
+              onChange={(e) => onUpdate({ displayUrl: e.target.value })}
+              placeholder={merged.linkUrl ? merged.linkUrl.replace(/^https?:\/\//, "").split("/")[0] : "jouwsite.be"}
+            />
+          </VariantDenseField>
+          <VariantDenseField
+            label="Primair beeld bij push"
+            help="Welk geüpload beeld (feed / vierkant / story) als hoofdvisual in object_story_spec. Kies het formaat dat past bij je belangrijkste placement."
+          >
+            <Select value={variant.publishAsset} onValueChange={(value) => onUpdate({ publishAsset: value as AssetSlot })}>
+              <SelectTrigger className={inputClass}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="feed">Feed — landschap 1.91:1</SelectItem>
+                <SelectItem value="square">Vierkant — Instagram feed 1:1</SelectItem>
+                <SelectItem value="story">Story & Reels — verticaal 9:16</SelectItem>
+              </SelectContent>
+            </Select>
+          </VariantDenseField>
+        </div>
+      </VariantFormAccordionSection>
+    </div>
+  );
+}
+
 function ErrorHint({ raw }: { raw?: string | null }) {
   const explanation = explainMetaError(raw);
   if (!explanation) return null;
@@ -716,14 +2025,747 @@ function ErrorHint({ raw }: { raw?: string | null }) {
   );
 }
 
+const META_OPTIMIZATION_GOAL_LABELS: Record<OptimizationGoal, string> = {
+  AUTO: "Auto per objective",
+  LINK_CLICKS: "Link clicks",
+  LANDING_PAGE_VIEWS: "Landing page views",
+  LEAD_GENERATION: "Lead generation",
+  OFFSITE_CONVERSIONS: "Offsite conversions",
+  REACH: "Reach",
+  IMPRESSIONS: "Impressions",
+};
+
+const META_DESTINATION_LABELS: Record<DestinationType, string> = {
+  AUTO: "Auto",
+  WEBSITE: "Website",
+  MESSENGER: "Messenger",
+  WHATSAPP: "WhatsApp",
+  PHONE_CALL: "Phone call",
+};
+
+const META_BID_STRATEGY_LABELS: Record<BidStrategy, string> = {
+  LOWEST_COST_WITHOUT_CAP: "Lowest cost without cap",
+  LOWEST_COST_WITH_BID_CAP: "Lowest cost with bid cap",
+  COST_CAP: "Cost cap",
+};
+
+function metaDeliveryPreview(params: {
+  optimizationGoal: OptimizationGoal;
+  destinationType: DestinationType;
+  bidStrategy: BidStrategy;
+  billingEvent: string;
+}) {
+  const billing =
+    META_BILLING_EVENT_OPTIONS.find((option) => option.value === params.billingEvent)?.label || params.billingEvent;
+  return [
+    META_OPTIMIZATION_GOAL_LABELS[params.optimizationGoal],
+    META_DESTINATION_LABELS[params.destinationType],
+    META_BID_STRATEGY_LABELS[params.bidStrategy],
+    billing,
+  ].join(" · ");
+}
+
+const META_OBJECTIVE_LABELS: Record<string, string> = {
+  OUTCOME_TRAFFIC: "Traffic",
+  OUTCOME_LEADS: "Leads",
+  OUTCOME_SALES: "Sales",
+  OUTCOME_ENGAGEMENT: "Engagement",
+  OUTCOME_AWARENESS: "Awareness",
+  LINK_CLICKS: "Link clicks",
+  LEAD_GENERATION: "Lead generation",
+};
+
+function metaCampaignPreview(params: {
+  name: string;
+  objective: string;
+  buyingType: string;
+  currency: string;
+  dailyBudget: string;
+  lifetimeBudget: string;
+}) {
+  const objectiveLabel = META_OBJECTIVE_LABELS[params.objective] || params.objective;
+  const buyingLabel = META_BUYING_TYPE_OPTIONS.find((item) => item.value === params.buyingType)?.label || params.buyingType;
+  const parts: string[] = [];
+  parts.push(params.name.trim() || "Nog geen campagnenaam");
+  parts.push(objectiveLabel);
+  parts.push(buyingLabel);
+  if (params.dailyBudget.trim()) {
+    parts.push(`≈ ${eur(numberValue(params.dailyBudget), params.currency)}/dag`);
+  } else if (params.lifetimeBudget.trim()) {
+    parts.push(`≈ ${eur(numberValue(params.lifetimeBudget), params.currency)} totaal`);
+  } else {
+    parts.push("Budget nog niet ingesteld");
+  }
+  return parts.join(" · ");
+}
+
+function metaAdvertentiesPreview(params: {
+  facebookPublisherName: string;
+  instagramPublisherName: string;
+  product: string;
+  audience: string;
+  aiTone: AiTone;
+}) {
+  const parts: string[] = [];
+  if (params.facebookPublisherName.trim()) parts.push(`Facebook: ${params.facebookPublisherName.trim()}`);
+  if (params.instagramPublisherName.trim() && params.instagramPublisherName !== params.facebookPublisherName) {
+    parts.push(`Instagram: ${params.instagramPublisherName.trim()}`);
+  }
+  if (params.product.trim()) parts.push(params.product.trim());
+  if (params.audience.trim()) parts.push(params.audience.trim());
+  const tone = META_AI_TONES.find((item) => item.value === params.aiTone)?.label;
+  if (tone) parts.push(tone);
+  return parts.length ? parts.join(" · ") : "Meta-identiteit en AI-briefing";
+}
+
+function previewPublisherName(slot: AssetSlot, facebookPublisherName: string, instagramPublisherName: string) {
+  return slot === "feed" ? facebookPublisherName : instagramPublisherName;
+}
+
+function BuilderSection({
+  icon: Icon,
+  title,
+  description,
+  children,
+  accent = "default",
+  collapsible = false,
+  defaultOpen,
+  preview,
+  headerAction,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+  accent?: "default" | "ai";
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+  preview?: React.ReactNode;
+  headerAction?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(() => (collapsible ? Boolean(defaultOpen) : true));
+  const accentClass =
+    accent === "ai"
+      ? "border-violet-200/70 bg-gradient-to-br from-violet-50/70 via-white to-fuchsia-50/40 dark:border-violet-900/40 dark:from-violet-950/25 dark:via-slate-950 dark:to-fuchsia-950/15"
+      : "border-border/70 bg-gradient-to-br from-slate-50/70 via-white to-slate-50/30 dark:border-border/60 dark:from-slate-900/40 dark:via-slate-950 dark:to-slate-900/20";
+
+  const headerBody = (
+    <>
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-background/90 shadow-sm ring-1 ring-border/50">
+        <Icon className="h-4 w-4 text-foreground/80" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
+        {(!collapsible || open) && description ? (
+          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
+        ) : null}
+        {collapsible && !open ? (
+          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{preview || description}</p>
+        ) : null}
+      </div>
+    </>
+  );
+
+  if (collapsible) {
+    return (
+      <section className={cn("overflow-hidden rounded-2xl border shadow-sm", accentClass)}>
+        <div className="flex items-start gap-2 px-3 py-2 sm:gap-3 sm:px-4 sm:py-3">
+          <details
+            open={open}
+            className="group min-w-0 flex-1"
+            onToggle={(event) => setOpen(event.currentTarget.open)}
+          >
+            <summary className="flex cursor-pointer list-none items-start gap-2.5 rounded-lg py-1 transition hover:bg-muted/15 marker:content-none [&::-webkit-details-marker]:hidden">
+              <ChevronDown
+                className={cn("mt-2 h-4 w-4 shrink-0 text-muted-foreground transition", open && "rotate-180")}
+                aria-hidden
+              />
+              {headerBody}
+            </summary>
+            <div className="space-y-4 border-t border-border/50 px-1 pb-4 pt-4 sm:px-2">{children}</div>
+          </details>
+          {headerAction ? <div className="shrink-0 pt-1">{headerAction}</div> : null}
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className={cn("overflow-hidden rounded-2xl border shadow-sm", accentClass)}>
+      <div className="flex items-start gap-3 border-b border-border/50 px-4 py-3 sm:px-5">
+        {headerBody}
+        {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
+      </div>
+      <div className="space-y-4 p-4 sm:p-5">{children}</div>
+    </section>
+  );
+}
+
+const META_BUILDER_CHECKLIST_STEPS = [
+  {
+    id: "campaign" as const,
+    step: "campaign" as BuilderStep,
+    label: "Campagne",
+    ok: (p: { campaignComplete: boolean }) => p.campaignComplete,
+    hint: "Naam, objective, buying type en budget (min. €1,00).",
+  },
+  {
+    id: "adset" as const,
+    step: "adsets" as BuilderStep,
+    label: "Adset",
+    ok: (p: { adsetsComplete: boolean }) => p.adsetsComplete,
+    hint: "Locatie, leeftijd (13+) en minstens één placement.",
+  },
+  {
+    id: "ads" as const,
+    step: "ads" as BuilderStep,
+    label: "Ads",
+    ok: (p: { adsComplete: boolean }) => p.adsComplete,
+    hint: "Meta-account, copy, https-link en beeld (9:16 bij stories/reels).",
+  },
+] as const;
+
+type MetaChecklistFocus = (typeof META_BUILDER_CHECKLIST_STEPS)[number]["id"];
+
+function MetaBuilderChecklist(props: {
+  campaignComplete: boolean;
+  adsetsComplete: boolean;
+  adsComplete: boolean;
+  readyToSave: boolean;
+  adsetCount: number;
+  variantCount: number;
+  onStepClick?: (step: BuilderStep) => void;
+}) {
+  const [focus, setFocus] = useState<MetaChecklistFocus | null>(null);
+  const status = {
+    campaignComplete: props.campaignComplete,
+    adsetsComplete: props.adsetsComplete,
+    adsComplete: props.adsComplete,
+  };
+
+  const focused = focus ? META_BUILDER_CHECKLIST_STEPS.find((item) => item.id === focus) : null;
+  const focusedOk = focused ? focused.ok(status) : false;
+
+  return (
+    <div className="rounded-lg border bg-muted/25 px-2.5 py-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <p className="text-xs font-semibold">Meta-checklist</p>
+        <span className="text-[10px] text-muted-foreground">
+          {props.adsetCount} set{props.adsetCount === 1 ? "" : "s"} · {props.variantCount} ad{props.variantCount === 1 ? "" : "s"}
+        </span>
+        <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Checklist stappen">
+          {META_BUILDER_CHECKLIST_STEPS.map((item) => {
+            const ok = item.ok(status);
+            const active = focus === item.id;
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => {
+                  const next = active ? null : item.id;
+                  setFocus(next);
+                  if (next && props.onStepClick) props.onStepClick(item.step);
+                }}
+                className={cn(
+                  "inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] leading-none transition",
+                  ok
+                    ? "border-emerald-500/35 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
+                    : "border-border/80 bg-background/60 text-muted-foreground hover:border-amber-500/40 hover:bg-amber-500/5",
+                  active && (ok ? "ring-1 ring-emerald-500/40" : "ring-1 ring-amber-500/45"),
+                )}
+              >
+                {ok ? (
+                  <CheckCircle2 className="h-3 w-3 shrink-0" />
+                ) : (
+                  <AlertTriangle className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
+                )}
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+        <Badge variant={props.readyToSave ? "success" : "warning"} className="ml-auto py-0 text-[10px] font-normal">
+          {props.readyToSave ? "Klaar" : "Nog niet compleet"}
+        </Badge>
+      </div>
+      {focused ? (
+        <p
+          className={cn(
+            "mt-1.5 rounded-md px-2 py-1 text-[10px] leading-snug",
+            focusedOk
+              ? "bg-emerald-500/10 text-emerald-900 dark:text-emerald-100"
+              : "bg-amber-500/10 text-amber-950 dark:text-amber-100",
+          )}
+        >
+          <span className="font-medium">{focused.label}:</span> {focusedOk ? "Compleet." : focused.hint}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function FieldGroup({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-3 rounded-xl border border-dashed border-border/60 bg-background/60 p-3 sm:p-4">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
+        {description ? <p className="mt-1 text-xs text-muted-foreground">{description}</p> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function MetaAiBriefingFields({
+  product,
+  setProduct,
+  audience,
+  setAudience,
+  aiTone,
+  setAiTone,
+  layout = "dialog",
+}: {
+  product: string;
+  setProduct: (value: string) => void;
+  audience: string;
+  setAudience: (value: string) => void;
+  aiTone: AiTone;
+  setAiTone: (value: AiTone) => void;
+  layout?: "dialog" | "compact";
+}) {
+  const LabelRow = layout === "dialog" ? CompactHelpLabel : HelpLabel;
+
+  return (
+    <div className={cn("grid gap-3", layout === "dialog" ? "gap-4" : "sm:grid-cols-2 xl:grid-cols-3")}>
+      <div className={cn("space-y-1.5", layout === "compact" && "sm:col-span-2 xl:col-span-1")}>
+        <LabelRow label="Product of aanbod" help="Input voor AI — wordt niet rechtstreeks naar Meta gepusht." />
+        <Input
+          className={layout === "dialog" ? "h-9" : undefined}
+          value={product}
+          onChange={(e) => setProduct(e.target.value)}
+          placeholder="Bijv. webdesign voor KMO's"
+          autoFocus={layout === "dialog"}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <LabelRow label="Tone of voice" help="Stijl van AI-gegenereerde campagne- en advertentieteksten." />
+        <Select value={aiTone} onValueChange={(value) => setAiTone(value as AiTone)}>
+          <SelectTrigger className={layout === "dialog" ? "h-9" : undefined}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {META_AI_TONES.map((tone) => (
+              <SelectItem key={tone.value} value={tone.value}>
+                {tone.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className={cn("space-y-1.5", layout === "compact" ? "sm:col-span-2 xl:col-span-3" : "")}>
+        <LabelRow label="Doelgroep" help="Wie wil je bereiken? Gebruikt door AI, niet als harde Meta-targeting." />
+        <Input
+          className={layout === "dialog" ? "h-9" : undefined}
+          value={audience}
+          onChange={(e) => setAudience(e.target.value)}
+          placeholder="Bijv. zaakvoerders in Vlaanderen"
+        />
+      </div>
+    </div>
+  );
+}
+
+type MetaAiBriefingInput = {
+  product: string;
+  audience: string;
+  tone: AiTone;
+};
+
+function MetaAiCampaignBriefingDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+  pending,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (brief: MetaAiBriefingInput) => void;
+  pending: boolean;
+}) {
+  const [draftProduct, setDraftProduct] = useState("");
+  const [draftAudience, setDraftAudience] = useState("");
+  const [draftTone, setDraftTone] = useState<AiTone>("professioneel");
+
+  useEffect(() => {
+    if (!open) return;
+    setDraftProduct("");
+    setDraftAudience("");
+    setDraftTone("professioneel");
+  }, [open]);
+
+  const productReady = draftProduct.trim().length >= 2;
+
+  function handleConfirm() {
+    if (!productReady || pending) return;
+    onConfirm({
+      product: draftProduct.trim(),
+      audience: draftAudience.trim(),
+      tone: draftTone,
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-emerald-600" />
+            AI campagnevoorstel
+          </DialogTitle>
+          <DialogDescription>
+            Beantwoord drie korte vragen. Daarna vullen we campagnenaam, objective, advertentieset(s) en eerste advertentie-copy in. Afbeeldingen
+            voeg je daarna zelf toe.
+          </DialogDescription>
+        </DialogHeader>
+        <MetaAiBriefingFields
+          layout="dialog"
+          product={draftProduct}
+          setProduct={setDraftProduct}
+          audience={draftAudience}
+          setAudience={setDraftAudience}
+          aiTone={draftTone}
+          setAiTone={setDraftTone}
+        />
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+            Annuleren
+          </Button>
+          <Button type="button" onClick={handleConfirm} disabled={pending || !productReady}>
+            {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+            Genereer en ga verder
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MetaAiBriefingHint({ onOpenDialog }: { onOpenDialog: () => void }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-dashed border-violet-200/70 bg-violet-50/40 px-4 py-3 dark:border-violet-900/50 dark:bg-violet-950/20 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <p className="flex items-center gap-2 text-sm font-medium">
+          <Sparkles className="h-4 w-4 shrink-0 text-emerald-600" />
+          AI-briefing
+        </p>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          Start via <span className="font-medium text-foreground">AI campagnevoorstel</span> onderaan. Je vult product, tone en doelgroep in en gaat daarna door naar de
+          volgende stappen.
+        </p>
+      </div>
+      <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={onOpenDialog}>
+        <Sparkles className="mr-2 h-4 w-4" />
+        Briefing starten
+      </Button>
+    </div>
+  );
+}
+
+function MetaGeoEntryBadge({
+  entry,
+  onRemove,
+}: {
+  entry: MetaGeoEntry;
+  onRemove: () => void;
+}) {
+  const kindLabel = entry.kind === "country" ? "Land" : entry.kind === "region" ? "Regio" : "Stad";
+  return (
+    <Badge variant="secondary" className="gap-1 py-1 pl-2 pr-1 text-xs font-normal">
+      <MapPin className="h-3 w-3 shrink-0 opacity-70" />
+      <span>
+        {kindLabel}: {entry.label}
+      </span>
+      <button
+        type="button"
+        className="rounded-full p-0.5 text-muted-foreground transition hover:bg-background hover:text-foreground"
+        onClick={onRemove}
+        aria-label={`${entry.label} verwijderen`}
+      >
+        <XCircle className="h-3.5 w-3.5" />
+      </button>
+    </Badge>
+  );
+}
+
+function MetaLocationEditor({
+  adset,
+  onChange,
+  metaSearchEnabled,
+}: {
+  adset: AdsetDraft;
+  onChange: (patch: Partial<AdsetDraft>) => void;
+  metaSearchEnabled: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const entries = useMemo(() => adsetGeoEntries(adset), [adset]);
+  const [panelOpen, setPanelOpen] = useState(() => entries.length === 0);
+  const primaryCountry = csvToList(adset.countries)[0]?.toUpperCase();
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 320);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  const search = trpc.metaAds.searchGeoLocations.useQuery(
+    { query: debouncedQuery, countryCode: primaryCountry || undefined },
+    { enabled: metaSearchEnabled && debouncedQuery.length >= 2, retry: false },
+  );
+
+  function setEntries(next: MetaGeoEntry[]) {
+    onChange(applyGeoEntries(next.slice(0, META_GEO_MAX_LOCATIONS)));
+  }
+
+  function addEntry(entry: MetaGeoEntry) {
+    if (entries.length >= META_GEO_MAX_LOCATIONS) return;
+    if (entries.some((item) => item.key === entry.key && item.kind === entry.kind)) return;
+    setEntries([...entries, entry]);
+  }
+
+  function removeEntry(key: string, kind: MetaGeoKind) {
+    setEntries(entries.filter((item) => !(item.key === key && item.kind === kind)));
+  }
+
+  function applyPreset(presetValue: string) {
+    const preset = META_LOCATION_PRESETS.find((item) => item.value === presetValue);
+    if (!preset || preset.value === "CUSTOM" || !preset.countries.trim()) return;
+    const next: MetaGeoEntry[] = preset.countries
+      .split(",")
+      .map((code) => code.trim().toUpperCase())
+      .filter(Boolean)
+      .map((code) => ({ key: code, label: metaCountryLabel(code), kind: "country", countryCode: code }));
+    setEntries(next);
+  }
+
+  const searchResults = (search.data || []).filter(
+    (item) => !entries.some((entry) => entry.key === item.key && entry.kind === item.type),
+  );
+
+  const locationPicker = (
+    <>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {META_LOCATION_PRESETS.filter((preset) => preset.value !== "CUSTOM").map((preset) => {
+          const active =
+            preset.countries &&
+            preset.countries.split(",").every((code) => entries.some((entry) => entry.kind === "country" && entry.key === code.trim().toUpperCase()));
+          return (
+            <button
+              key={preset.value}
+              type="button"
+              onClick={() => applyPreset(preset.value)}
+              className={cn(
+                "rounded-lg border px-2.5 py-2 text-left text-xs transition",
+                active
+                  ? "border-primary/40 bg-primary/10 ring-1 ring-primary/20"
+                  : "border-border/70 bg-background/80 hover:border-primary/25 hover:bg-muted/30",
+              )}
+            >
+              <p className="font-semibold">{preset.label}</p>
+              <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-muted-foreground">{preset.description}</p>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {META_COUNTRY_PICKS.map((country) => {
+          const active = entries.some((entry) => entry.kind === "country" && entry.key === country.code);
+          return (
+            <button
+              key={country.code}
+              type="button"
+              onClick={() =>
+                active
+                  ? removeEntry(country.code, "country")
+                  : addEntry({ key: country.code, label: country.label, kind: "country", countryCode: country.code })
+              }
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-xs transition",
+                active ? "border-primary bg-primary/10 text-primary" : "border-border/70 bg-background hover:bg-muted/40",
+              )}
+            >
+              {country.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setSearchOpen(true);
+          }}
+          onFocus={() => setSearchOpen(true)}
+          onBlur={() => window.setTimeout(() => setSearchOpen(false), 150)}
+          disabled={!metaSearchEnabled}
+          placeholder={metaSearchEnabled ? "Zoek stad of regio (zoals Meta Ads)…" : "Koppel Meta om locaties te zoeken"}
+          className="bg-background/90 pl-8"
+        />
+        {search.isFetching ? (
+          <Loader2 className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-muted-foreground" />
+        ) : null}
+      </div>
+      {metaSearchEnabled && query.length > 0 && query.length < 2 ? (
+        <p className="text-[11px] text-muted-foreground">Typ minstens 2 tekens om te zoeken.</p>
+      ) : null}
+      {searchOpen && metaSearchEnabled && debouncedQuery.length >= 2 ? (
+        <div className="max-h-48 overflow-auto rounded-md border bg-popover text-popover-foreground shadow-sm">
+          {search.error ? <p className="p-3 text-xs text-amber-800 dark:text-amber-200">{search.error.message}</p> : null}
+          {!search.isFetching && !search.error && searchResults.length === 0 ? (
+            <p className="p-3 text-xs text-muted-foreground">Geen locaties gevonden voor &quot;{debouncedQuery}&quot;.</p>
+          ) : null}
+          {searchResults.map((item) => (
+            <button
+              key={`${item.type}-${item.key}`}
+              type="button"
+              className="flex w-full flex-col gap-0.5 border-b border-border/40 px-3 py-2 text-left text-sm last:border-0 hover:bg-muted/60"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                addEntry({
+                  key: item.key,
+                  label: item.label,
+                  kind: item.type === "region" ? "region" : "city",
+                  countryCode: item.countryCode,
+                });
+                setQuery("");
+                setSearchOpen(false);
+              }}
+            >
+              <span className="font-medium">{item.label}</span>
+              <span className="text-xs text-muted-foreground">
+                {item.typeLabel}
+                {item.canonicalName ? ` · ${item.canonicalName}` : ""}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-border/60 bg-muted/10">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          aria-expanded={panelOpen}
+          onClick={() => setPanelOpen((value) => !value)}
+          className="flex min-w-0 flex-1 items-start gap-2 rounded-lg text-left transition hover:bg-muted/20"
+        >
+          <ChevronDown className={cn("mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition", panelOpen && "rotate-180")} />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">Locaties</p>
+            {!panelOpen ? (
+              <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{metaLocationSummary(adset)}</p>
+            ) : (
+              <p className="mt-0.5 text-xs text-muted-foreground">Land, regio of stad — zoals in Meta Ads Manager</p>
+            )}
+          </div>
+        </button>
+        <Badge variant={entries.length > 0 ? "success" : "warning"} className="shrink-0 text-[10px] font-normal">
+          {entries.length}/{META_GEO_MAX_LOCATIONS}
+        </Badge>
+      </div>
+
+      {!panelOpen && entries.length ? (
+        <div className="flex flex-wrap gap-1.5 border-t border-border/40 px-3 pb-2.5 pt-2">
+          {entries.map((entry) => (
+            <MetaGeoEntryBadge
+              key={`${entry.kind}-${entry.key}`}
+              entry={entry}
+              onRemove={() => removeEntry(entry.key, entry.kind)}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {panelOpen ? (
+        <div className="space-y-3 border-t border-border/40 p-3">
+          {locationPicker}
+          {entries.length ? (
+            <div className="flex flex-wrap gap-1.5">
+              {entries.map((entry) => (
+                <MetaGeoEntryBadge
+                  key={`${entry.kind}-${entry.key}`}
+                  entry={entry}
+                  onRemove={() => removeEntry(entry.key, entry.kind)}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">Kies een preset, een land of zoek een stad/regio via Meta.</p>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CollapsibleCard({
+  title,
+  description,
+  preview,
+  children,
+  defaultOpen = false,
+}: {
+  title: string;
+  description?: string;
+  preview?: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <Card>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className={cn(
+          "flex w-full items-start gap-3 px-4 py-4 text-left transition hover:bg-muted/20 sm:px-5",
+          open && "border-b border-border/50",
+        )}
+      >
+        <div className="min-w-0 flex-1">
+          <CardTitle className="text-base">{title}</CardTitle>
+          {open && description ? <CardDescription className="mt-1">{description}</CardDescription> : null}
+          {!open && preview ? <p className="mt-1 truncate text-sm text-muted-foreground">{preview}</p> : null}
+          {!open && !preview && description ? <p className="mt-1 truncate text-sm text-muted-foreground">{description}</p> : null}
+        </div>
+        <ChevronDown className={cn("mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition", open && "rotate-180")} />
+      </button>
+      {open ? <CardContent className="space-y-3 pt-0 sm:pt-0">{children}</CardContent> : null}
+    </Card>
+  );
+}
+
 function StepButton({
   step,
+  stepNumber,
   activeStep,
   complete,
   locked,
   onClick,
 }: {
   step: (typeof STEPS)[number];
+  stepNumber: number;
   activeStep: BuilderStep;
   complete: boolean;
   locked: boolean;
@@ -735,14 +2777,82 @@ function StepButton({
       type="button"
       disabled={locked}
       onClick={onClick}
-      className={`rounded-2xl border p-3 text-left transition ${active ? "border-blue-700 bg-blue-700 text-white shadow-sm" : complete ? "border-blue-500/40 bg-blue-500/10" : locked ? "cursor-not-allowed bg-muted/50 opacity-60" : "bg-card hover:bg-muted"}`}
+      className={cn(
+        "group flex min-w-[132px] shrink-0 flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-left transition sm:min-w-0",
+        active && "border-primary bg-primary text-primary-foreground shadow-md shadow-primary/15",
+        !active && complete && "border-primary/30 bg-primary/5 hover:border-primary/40 hover:bg-primary/10",
+        !active && !complete && !locked && "border-border/70 bg-background hover:border-primary/25 hover:bg-muted/40",
+        locked && "cursor-not-allowed border-border/50 bg-muted/30 opacity-55",
+      )}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="font-semibold">{step.label}</span>
-        {locked ? <Lock className="h-4 w-4" /> : complete ? <CheckCircle2 className={`h-4 w-4 ${active ? "text-white" : "text-blue-600"}`} /> : null}
+        <span
+          className={cn(
+            "flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold",
+            active
+              ? "bg-primary-foreground/20 text-primary-foreground"
+              : complete
+                ? "bg-primary/15 text-primary"
+                : "bg-muted text-muted-foreground",
+          )}
+        >
+          {locked ? <Lock className="h-3 w-3" /> : complete && !active ? <CheckCircle2 className="h-3.5 w-3.5" /> : stepNumber}
+        </span>
+        {complete && !active ? <span className="text-[10px] font-medium text-primary">Klaar</span> : null}
       </div>
-      <p className={`mt-1 text-xs ${active ? "text-white/75" : "text-muted-foreground"}`}>{step.description}</p>
+      <span className="text-xs font-semibold leading-tight">{step.label}</span>
+      <p className={cn("line-clamp-2 text-[10px] leading-snug", active ? "text-primary-foreground/75" : "text-muted-foreground")}>
+        {step.description}
+      </p>
     </button>
+  );
+}
+
+function BuilderStepper({
+  activeStep,
+  onStepClick,
+  stepComplete,
+  canOpenStep,
+  compact = false,
+}: {
+  activeStep: BuilderStep;
+  onStepClick: (step: BuilderStep) => void;
+  stepComplete: (step: BuilderStep) => boolean;
+  canOpenStep: (step: BuilderStep) => boolean;
+  compact?: boolean;
+}) {
+  const activeIndex = BUILDER_STEP_ORDER.indexOf(activeStep);
+  const progress = ((activeIndex + 1) / BUILDER_STEP_ORDER.length) * 100;
+
+  return (
+    <div className={cn("space-y-3", compact ? "" : "rounded-2xl border border-border/60 bg-muted/20 p-3 sm:p-4")}>
+      {!compact ? (
+        <>
+          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span>
+              Stap <span className="font-semibold text-foreground">{activeIndex + 1}</span> van {BUILDER_STEP_ORDER.length}
+            </span>
+            <span>{Math.round(progress)}% voltooid</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${progress}%` }} />
+          </div>
+        </>
+      ) : null}
+      <div className="flex gap-2 overflow-x-auto pb-0.5 sm:grid sm:grid-cols-4 sm:overflow-visible">
+        {STEPS.map((step, index) => (
+          <StepButton
+            key={step.id}
+            step={step}
+            stepNumber={index + 1}
+            activeStep={activeStep}
+            complete={stepComplete(step.id)}
+            locked={!canOpenStep(step.id)}
+            onClick={() => onStepClick(step.id)}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -771,57 +2881,20 @@ function CheckRow({ ok, label, hint }: { ok: boolean; label: string; hint: strin
   );
 }
 
-function AssetUploadCard(props: {
-  title: string;
-  help: string;
-  ratio: string;
-  recommended: string;
-  value: string;
-  placeholder: string;
-  probe: ImageProbeState;
-  uploading: boolean;
-  onChange: (value: string) => void;
-  onUpload: (file: File) => Promise<void>;
-}) {
-  return (
-    <div className="rounded-2xl border p-3">
-      <div className="mb-2 flex items-start justify-between gap-3">
-        <div>
-          <HelpLabel label={props.title} help={props.help} />
-          <p className="mt-1 text-xs text-muted-foreground">Ratio: {props.ratio} · Aanbevolen: {props.recommended}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Gedetecteerd: {probeLabel(props.probe)}</p>
-        </div>
-        <label className="inline-flex cursor-pointer items-center">
-          <input
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void props.onUpload(file);
-              event.currentTarget.value = "";
-            }}
-          />
-          <span className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-xs font-medium hover:bg-muted">
-            {props.uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-            Upload
-          </span>
-        </label>
-      </div>
-      <Input value={props.value} onChange={(event) => props.onChange(event.target.value)} placeholder={props.placeholder} />
-      <div className="mt-3 overflow-hidden rounded-2xl border bg-muted/30">
-        {props.value ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={props.value} alt={props.title} className="aspect-[16/9] w-full object-cover" />
-        ) : (
-          <div className="flex aspect-[16/9] items-center justify-center text-xs text-muted-foreground">
-            <ImageIcon className="mr-2 h-4 w-4" /> Preview verschijnt hier
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+const VARIANT_ASSET_SLOT_META: Record<
+  "feed" | "square" | "story",
+  { label: string; ratioHint: string; thumbClass: string }
+> = {
+  feed: { label: "Feed", ratioHint: "1:1 · 1.91:1", thumbClass: "h-[4.5rem] w-[7.25rem]" },
+  square: { label: "Vierkant", ratioHint: "1:1", thumbClass: "h-[4.5rem] w-[4.5rem]" },
+  story: { label: "Story / Reels", ratioHint: "9:16", thumbClass: "h-[4.75rem] w-[2.65rem]" },
+};
+
+const VARIANT_ASSET_COMPACT_THUMB: Record<"feed" | "square" | "story", string> = {
+  feed: "h-11 w-[4.25rem]",
+  square: "h-11 w-11",
+  story: "h-11 w-[1.85rem]",
+};
 
 function VariantAssetField(props: {
   title: string;
@@ -829,39 +2902,234 @@ function VariantAssetField(props: {
   ratio: string;
   recommended: string;
   value: string;
-  placeholder: string;
   uploading: boolean;
-  onChange: (value: string) => void;
+  slot?: "feed" | "square" | "story";
+  compact?: boolean;
   onUpload: (file: File) => Promise<void>;
 }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const probe = useImageProbe(props.value);
+  const hasValue = Boolean(props.value.trim());
+  const slot =
+    props.slot ??
+    (props.title.toLowerCase().includes("story") ? "story" : props.title.toLowerCase().includes("square") ? "square" : "feed");
+  const meta = VARIANT_ASSET_SLOT_META[slot];
+  const statusLabel = probeLabel(probe);
+  const statusVariant =
+    probe.status === "ready" ? "success" : probe.status === "error" ? "destructive" : hasValue ? "warning" : "secondary";
+
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (file) void props.onUpload(file);
+    event.currentTarget.value = "";
+  }
+
+  const thumbFrame = (
+    <div
+      className={cn(
+        "shrink-0 overflow-hidden rounded-md border bg-background",
+        props.compact ? VARIANT_ASSET_COMPACT_THUMB[slot] : meta.thumbClass,
+        !hasValue && "border-dashed border-muted-foreground/25 bg-muted/20",
+      )}
+    >
+      {hasValue ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={props.value} alt={meta.label} className="h-full w-full object-cover" />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+          <ImageIcon className={cn(props.compact ? "h-3.5 w-3.5" : "h-5 w-5", "opacity-60")} />
+        </div>
+      )}
+    </div>
+  );
+
+  const fileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept="image/png,image/jpeg,image/webp"
+      className="hidden"
+      onChange={handleFileChange}
+    />
+  );
+
+  const uploadButton = (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className={cn(props.compact ? "h-7 w-full px-2 text-[10px]" : "w-full")}
+      disabled={props.uploading}
+      onClick={() => fileInputRef.current?.click()}
+    >
+      {props.uploading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Upload className="mr-1 h-3 w-3" />}
+      {hasValue ? "Wijzig" : "Upload"}
+    </Button>
+  );
+
+  if (props.compact) {
+    return (
+      <div
+        className={cn(
+          "flex gap-2 rounded-lg border bg-card/80 p-1.5",
+          hasValue ? "border-emerald-500/30" : "border-border/60",
+        )}
+      >
+        {thumbFrame}
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex items-start justify-between gap-1">
+            <div className="min-w-0 leading-none">
+              <p className="text-[11px] font-semibold">{meta.label}</p>
+              <p className="mt-0.5 text-[9px] text-muted-foreground">
+                {props.recommended}
+              </p>
+            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="shrink-0 text-muted-foreground" aria-label={`Uitleg ${meta.label}`}>
+                  <HelpCircle className="h-3 w-3" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs text-xs">
+                {props.help}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          <Badge variant={statusVariant} className="h-4 w-fit px-1 text-[9px] font-normal">
+            {statusLabel}
+          </Badge>
+          {fileInput}
+          {uploadButton}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="rounded-xl border bg-muted/20 p-3">
-      <div className="mb-2 flex items-start justify-between gap-3">
-        <div>
-          <HelpLabel label={props.title} help={props.help} />
-          <p className="mt-1 text-xs text-muted-foreground">Ratio: {props.ratio} · Aanbevolen: {props.recommended}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Gedetecteerd: {probeLabel(probe)}</p>
-        </div>
-        <label className="inline-flex cursor-pointer items-center">
-          <input
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void props.onUpload(file);
-              event.currentTarget.value = "";
-            }}
-          />
-          <span className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-xs font-medium hover:bg-muted">
-            {props.uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-            Upload
-          </span>
-        </label>
+    <div
+      className={cn(
+        "flex flex-col overflow-hidden rounded-xl border bg-gradient-to-b from-card to-muted/15 shadow-sm transition-shadow hover:shadow-md",
+        hasValue ? "border-emerald-500/30 ring-1 ring-emerald-500/10" : "border-border/60",
+      )}
+    >
+      <div className="border-b border-border/40 bg-gradient-to-br from-muted/25 via-background to-muted/10 px-2 py-2">
+        <div className="flex h-[5rem] items-center justify-center">{thumbFrame}</div>
       </div>
-      <Input value={props.value} onChange={(event) => props.onChange(event.target.value)} placeholder={props.placeholder} />
+      <div className="flex flex-col gap-2 p-2.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold leading-tight">{meta.label}</p>
+            <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
+              {meta.ratioHint} · {props.recommended}
+            </p>
+          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="shrink-0 rounded-full p-0.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                aria-label={`Uitleg voor ${meta.label}`}
+              >
+                <HelpCircle className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs text-xs leading-5">
+              {props.help}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+        <Badge variant={statusVariant} className="w-fit text-[10px] font-normal">
+          {statusLabel}
+        </Badge>
+        {fileInput}
+        {uploadButton}
+      </div>
+    </div>
+  );
+}
+
+function StoryReelsPhonePreview(props: {
+  imageUrl: string;
+  headline: string;
+  primaryText: string;
+  ctaLabel: string;
+  pageName: string;
+  pageAvatarUrl?: string;
+  displayUrl: string;
+}) {
+  const hasImage = Boolean(props.imageUrl.trim());
+  const headline = props.headline.trim() || "Headline";
+  const displayLine = (props.displayUrl || "jouwsite.be").replace(/^https?:\/\//, "").toUpperCase();
+  const ctaLabel = resolveMetaPreviewCtaLabel(props.ctaLabel);
+
+  return (
+    <div className="mx-auto w-full max-w-[min(300px,88vw)]">
+      {/* 9:16 = 1080×1920 */}
+      <div
+        className="relative rounded-[2.35rem] border-[6px] border-slate-900 bg-slate-900 p-[3px] shadow-[0_28px_64px_-16px_rgba(15,23,42,0.5)] dark:border-slate-700"
+        role="img"
+        aria-label="Story / Reels preview 1080 bij 1920"
+      >
+        <div className="pointer-events-none absolute -left-[3px] top-[24%] z-30 h-11 w-[3px] rounded-l-sm bg-slate-800" />
+        <div className="pointer-events-none absolute -right-[3px] top-[30%] z-30 h-14 w-[3px] rounded-r-sm bg-slate-800" />
+
+        <div className="relative aspect-[9/16] w-full overflow-hidden rounded-[1.9rem] bg-black">
+          <div className="absolute left-1/2 top-2.5 z-30 h-5 w-[88px] -translate-x-1/2 rounded-full bg-black ring-1 ring-white/12" />
+
+          {hasImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={props.imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover object-center" />
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-gradient-to-b from-slate-800 via-slate-950 to-black text-white/55">
+              <ImageIcon className="h-8 w-8" />
+              <span className="text-xs font-medium">Story / Reels</span>
+              <span className="text-[10px] text-white/45">1080 × 1920</span>
+            </div>
+          )}
+
+          {/* Boven: story-balken + gesponsord (Meta) */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
+            <div className="bg-gradient-to-b from-black/80 via-black/45 to-transparent px-3.5 pb-14 pt-10">
+              <div className="flex gap-1">
+                <div className="h-[2px] flex-1 rounded-full bg-white" />
+                <div className="h-[2px] flex-1 rounded-full bg-white/35" />
+                <div className="h-[2px] flex-1 rounded-full bg-white/35" />
+              </div>
+              <div className="mt-3 flex items-center gap-2.5">
+                <FacebookPageAvatar size="sm" imageUrl={props.pageAvatarUrl} alt={props.pageName} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[12px] font-semibold leading-tight text-white drop-shadow-sm">{props.pageName}</p>
+                  <p className="text-[10px] text-white/80">Gesponsord · Story / Reels</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Onder: Meta link-ad overlay (headline, URL, CTA-knop) */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20">
+            <div className="min-h-[42%] bg-gradient-to-t from-black via-black/85 to-transparent px-3.5 pb-4 pt-24">
+              <div className="flex min-h-[7.5rem] flex-col justify-end">
+                {props.primaryText.trim() ? (
+                  <p className="mb-2.5 line-clamp-2 text-[11px] leading-relaxed text-white/92 drop-shadow-md">{props.primaryText}</p>
+                ) : null}
+                <p className="line-clamp-2 text-[13px] font-semibold leading-snug text-white drop-shadow-sm">{headline}</p>
+                <p className="mt-1 truncate text-[10px] font-medium uppercase tracking-wide text-white/65">{displayLine}</p>
+                <span
+                  className={cn(
+                    "mt-3 flex w-full items-center justify-center rounded-xl bg-white px-3 py-2.5 text-center font-semibold leading-tight text-slate-900 shadow-lg shadow-black/25",
+                    ctaLabel.length > 18 ? "text-[11px]" : "text-[12px]",
+                  )}
+                >
+                  {ctaLabel}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="absolute bottom-1.5 left-1/2 z-30 h-[4px] w-24 -translate-x-1/2 rounded-full bg-white/35" />
+        </div>
+      </div>
+      <p className="mt-2 text-center text-[10px] tabular-nums text-muted-foreground">Mobiel · 9:16 · 1080 × 1920 px</p>
     </div>
   );
 }
@@ -872,77 +3140,298 @@ function MetaPreview(props: {
   description: string;
   linkUrl: string;
   feedImageUrl: string;
+  squareImageUrl: string;
   storyImageUrl: string;
   ctaLabel: string;
-  pageName: string;
+  facebookPublisherName: string;
+  instagramPublisherName: string;
+  pageAvatarUrl?: string;
   placements: PlacementKey[];
+  publishAsset?: AssetSlot;
 }) {
-  const displayUrl = props.linkUrl.replace(/^https?:\/\//, "").replace(/\/$/, "") || "leads.digitify.be";
-  return (
-    <Card className="overflow-hidden border-slate-200 bg-gradient-to-br from-blue-50 via-white to-fuchsia-50 shadow-sm dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Eye className="h-4 w-4" /> Meta preview
-        </CardTitle>
-        <CardDescription>Indicatief voorbeeld. Meta kan tekst, CTA en plaatsing automatisch aanpassen.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="rounded-3xl border bg-white p-4 shadow-sm dark:bg-slate-950">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">D</div>
-            <div>
-              <p className="text-sm font-semibold">{props.pageName || "Digitify"}</p>
-              <p className="text-xs text-muted-foreground">Gesponsord · Facebook feed</p>
+  const imageBundle = {
+    feedImageUrl: props.feedImageUrl,
+    squareImageUrl: props.squareImageUrl,
+    storyImageUrl: props.storyImageUrl,
+  };
+
+  const assets: Record<AssetSlot, string> = {
+    feed: props.feedImageUrl.trim(),
+    square: props.squareImageUrl.trim(),
+    story: props.storyImageUrl.trim(),
+  };
+
+  const assetSlots: Array<{ id: AssetSlot; label: string; format: string; hint: string }> = [
+    { id: "feed", label: "Feed", format: "1.91:1", hint: "Facebook / IG feed · landschap" },
+    { id: "square", label: "Vierkant", format: "1:1", hint: "Instagram feed · vierkant" },
+    { id: "story", label: "Story & Reels", format: "9:16", hint: "Story & Reels · verticaal" },
+  ];
+
+  const defaultSlot: AssetSlot =
+    props.publishAsset && assets[props.publishAsset]
+      ? props.publishAsset
+      : assets.feed
+        ? "feed"
+        : assets.square
+          ? "square"
+          : assets.story
+            ? "story"
+            : "feed";
+
+  const [activeSlot, setActiveSlot] = useState<AssetSlot>(defaultSlot);
+  const [previewOpen, setPreviewOpen] = useState(true);
+
+  useEffect(() => {
+    if (props.publishAsset && (assets[props.publishAsset] || resolvePublishImage(props.publishAsset, imageBundle).trim())) {
+      setActiveSlot(props.publishAsset);
+    }
+  }, [props.publishAsset, props.feedImageUrl, props.squareImageUrl, props.storyImageUrl]);
+
+  const displayUrl = props.linkUrl.replace(/^https?:\/\//, "").replace(/\/$/, "") || "jouwsite.be";
+  const facebookPublisherName = props.facebookPublisherName.trim() || "Facebook-pagina";
+  const instagramPublisherName = props.instagramPublisherName.trim() || facebookPublisherName;
+  const previewPageName = previewPublisherName(activeSlot, facebookPublisherName, instagramPublisherName);
+  const pageAvatarUrl = props.pageAvatarUrl?.trim() || "";
+  const feedPreview = previewAssetForSlot("feed", imageBundle);
+  const squarePreview = previewAssetForSlot("square", imageBundle);
+  const storyPreview = previewAssetForSlot("story", imageBundle);
+
+  const slotPreviews: Record<AssetSlot, { url: string; usesFallback: boolean }> = {
+    feed: feedPreview,
+    square: squarePreview,
+    story: storyPreview,
+  };
+
+  function formatTabThumbFrame(slot: AssetSlot) {
+    if (slot === "story") return "aspect-[9/16] h-7 w-[1.05rem]";
+    if (slot === "square") return "aspect-square h-7 w-7";
+    return "aspect-[1.91/1] h-7 w-[2.65rem]";
+  }
+
+  function renderFormatThumb(slot: AssetSlot, emphasized?: boolean) {
+    const thumbUrl = slotPreviews[slot].url;
+    return (
+      <span
+        className={cn(
+          "relative shrink-0 overflow-hidden rounded border bg-gradient-to-br from-slate-100 to-slate-200/80 dark:from-slate-800 dark:to-slate-900/80",
+          formatTabThumbFrame(slot),
+          emphasized ? "border-primary/30" : "border-border/60",
+        )}
+      >
+        {thumbUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={thumbUrl} alt="" className="absolute inset-0 h-full w-full object-cover object-center" />
+        ) : (
+          <span className="absolute inset-0 flex items-center justify-center">
+            <ImageIcon className="h-2.5 w-2.5 opacity-35" />
+          </span>
+        )}
+      </span>
+    );
+  }
+
+  function renderAspectMedia(url: string, format: "feed" | "square", emptyLabel: string) {
+    const frameClass = format === "square" ? "aspect-square w-full" : "aspect-[1.91/1] w-full";
+    return (
+      <div className={cn("relative w-full overflow-hidden bg-slate-200/70 dark:bg-slate-800/70", frameClass)}>
+        {url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={url} alt="" className="absolute inset-0 h-full w-full object-cover object-center" />
+        ) : (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-muted-foreground">
+            <ImageIcon className="h-5 w-5 opacity-50" />
+            <span className="px-2 text-center text-[10px]">{emptyLabel}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function FeedStylePreview({
+    title,
+    placementLabel,
+    imageUrl,
+    format,
+    usesFallback,
+    emptyLabel,
+  }: {
+    title: string;
+    placementLabel: string;
+    imageUrl: string;
+    format: "feed" | "square";
+    usesFallback: boolean;
+    emptyLabel: string;
+  }) {
+    return (
+      <div className="min-w-0 space-y-1.5">
+        {title ? (
+          <div className="flex items-center justify-between gap-2 px-0.5">
+            <p className="text-xs font-semibold">{title}</p>
+            <Badge variant="outline" className="text-[10px] font-normal">
+              {placementLabel}
+            </Badge>
+          </div>
+        ) : null}
+        <div className="mx-auto w-full max-w-[min(500px,100%)] min-w-0 rounded-xl border bg-white p-4 shadow-sm dark:bg-slate-950">
+          <div className="flex items-center gap-2">
+            <FacebookPageAvatar size="sm" imageUrl={pageAvatarUrl} alt={previewPageName} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold">{previewPageName}</p>
+              <p className="truncate text-[10px] text-muted-foreground">Gesponsord · {placementLabel}</p>
             </div>
           </div>
-          <p className="mt-3 whitespace-pre-line text-sm leading-6">{props.primaryText || "Je advertentietekst verschijnt hier."}</p>
-          <div className="mt-3 overflow-hidden rounded-2xl border bg-slate-100 dark:bg-slate-900">
-            {props.feedImageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={props.feedImageUrl} alt="Advertentie preview" className="aspect-[1.91/1] w-full object-cover" />
-            ) : (
-              <div className="flex aspect-[1.91/1] items-center justify-center text-muted-foreground">
-                <ImageIcon className="mr-2 h-5 w-5" /> Afbeelding preview
-              </div>
-            )}
-            <div className="bg-slate-50 p-3 dark:bg-slate-900">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">{displayUrl}</p>
-              <div className="mt-1 flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold leading-tight">{props.headline || "Headline"}</p>
-                  <p className="text-xs text-muted-foreground">{props.description || "Beschrijving"}</p>
+          <p className="mt-2 line-clamp-3 break-words text-xs leading-5 text-foreground/90">
+            {props.primaryText || "Je advertentietekst verschijnt hier."}
+          </p>
+          {usesFallback ? (
+            <p className="mt-1.5 text-[10px] text-amber-800 dark:text-amber-200">
+              Geen eigen {format === "square" ? "vierkant" : "feed"}-beeld — voorbeeld met ander formaat.
+            </p>
+          ) : null}
+          <div className="mt-2 overflow-hidden rounded-lg border bg-slate-100 dark:bg-slate-900">
+            {renderAspectMedia(imageUrl, format, emptyLabel)}
+            <div className="bg-slate-50 px-2.5 py-2 dark:bg-slate-900">
+              <p className="truncate text-[10px] uppercase tracking-wide text-muted-foreground">{displayUrl}</p>
+              <div className="mt-1.5 flex flex-wrap items-end justify-between gap-x-2 gap-y-1.5">
+                <div className="min-w-0 flex-1 basis-[8rem]">
+                  <p className="line-clamp-2 text-xs font-semibold leading-snug">{props.headline || "Headline"}</p>
+                  <p className="line-clamp-1 text-[10px] text-muted-foreground">{props.description || "Beschrijving"}</p>
                 </div>
-                <span className="rounded-lg bg-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-800 dark:bg-slate-800 dark:text-slate-100">{props.ctaLabel}</span>
+                <MetaPreviewFeedCtaButton label={props.ctaLabel} />
               </div>
             </div>
           </div>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-[2rem] border bg-gradient-to-b from-fuchsia-50 to-orange-50 p-3 dark:from-slate-950 dark:to-slate-900">
-            <div className="mx-auto max-w-[190px] rounded-[1.7rem] border-4 border-slate-900 bg-white p-2 shadow-xl dark:bg-slate-950">
-              <div className="overflow-hidden rounded-[1.25rem] border bg-slate-100 dark:bg-slate-900">
-                {props.storyImageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={props.storyImageUrl} alt="Story preview" className="aspect-[9/16] w-full object-cover" />
-                ) : (
-                  <div className="flex aspect-[9/16] items-center justify-center px-4 text-center text-xs text-muted-foreground">Story/Reels preview</div>
+      </div>
+    );
+  }
+
+  const activeFormatSlot = assetSlots.find((slot) => slot.id === activeSlot) ?? assetSlots[0];
+  const collapsedPreview = `${activeFormatSlot.label} · ${activeFormatSlot.format}`;
+
+  return (
+    <Card className="min-w-0 overflow-hidden border-slate-200 bg-gradient-to-br from-blue-50 via-white to-fuchsia-50 shadow-sm dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
+      <button
+        type="button"
+        aria-expanded={previewOpen}
+        onClick={() => setPreviewOpen((value) => !value)}
+        className={cn(
+          "flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-white/40 dark:hover:bg-slate-900/40 sm:px-5 sm:py-4",
+          previewOpen && "border-b border-border/40",
+        )}
+      >
+        <div className="min-w-0 flex-1">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Eye className="h-4 w-4 shrink-0" /> Meta preview
+          </CardTitle>
+          {previewOpen ? (
+            <CardDescription className="mt-1 text-xs">
+              Indicatief — Meta kan plaatsing en CTA aanpassen.
+            </CardDescription>
+          ) : (
+            <p className="mt-1 truncate text-xs text-muted-foreground">{collapsedPreview}</p>
+          )}
+        </div>
+        <ChevronDown
+          className={cn("mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition", previewOpen && "rotate-180")}
+        />
+      </button>
+      {previewOpen ? (
+      <CardContent className="space-y-3 pt-0 sm:pt-0">
+        <div
+          className="flex gap-0.5 rounded-xl border border-border/50 bg-muted/30 p-0.5 shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)]"
+          role="tablist"
+          aria-label="Advertentieformaat"
+        >
+          {assetSlots.map((slot) => {
+            const active = activeSlot === slot.id;
+            const hasAsset = Boolean(assets[slot.id]);
+
+            return (
+              <button
+                key={slot.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setActiveSlot(slot.id)}
+                className={cn(
+                  "relative flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-1.5 py-1 text-left transition sm:gap-2 sm:px-2 sm:py-1.5",
+                  active
+                    ? "bg-background text-foreground shadow-sm ring-1 ring-primary/25"
+                    : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
                 )}
-              </div>
-              <p className="mt-2 line-clamp-2 text-xs font-medium">{props.headline || "Instagram headline"}</p>
+              >
+                {renderFormatThumb(slot.id, active)}
+                <span className="min-w-0 flex-1 truncate text-[10px] leading-tight sm:text-[11px]">
+                  <span className="font-semibold">{slot.label}</span>
+                  <span className="text-muted-foreground"> · {slot.format}</span>
+                </span>
+                {hasAsset ? (
+                  <span
+                    className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.2)] sm:static sm:shrink-0"
+                    aria-hidden
+                  />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+
+        {activeSlot === "story" ? (
+          <div className="min-w-0 space-y-2">
+            {storyPreview.usesFallback ? (
+              <p className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-950 dark:text-amber-100">
+                Geen story-beeld — voorbeeld met ander formaat. Upload 9:16 voor een realistische preview.
+              </p>
+            ) : null}
+            <div className="flex justify-center rounded-xl border border-border/40 bg-gradient-to-b from-slate-100/80 via-background to-slate-50/50 py-4 dark:from-slate-900/50 dark:via-slate-950 dark:to-slate-900/30">
+              <StoryReelsPhonePreview
+                imageUrl={storyPreview.url}
+                headline={props.headline}
+                primaryText={props.primaryText}
+                ctaLabel={props.ctaLabel}
+                pageName={previewPublisherName("story", facebookPublisherName, instagramPublisherName)}
+                pageAvatarUrl={pageAvatarUrl}
+                displayUrl={displayUrl}
+              />
             </div>
           </div>
-          <div className="rounded-3xl border bg-white p-4 dark:bg-slate-950">
-            <p className="text-sm font-semibold">Plaatsingen in deze builder</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {props.placements.map((placement) => (
+        ) : activeSlot === "square" ? (
+          <FeedStylePreview
+            title=""
+            placementLabel="Instagram feed · 1:1"
+            imageUrl={squarePreview.url}
+            format="square"
+            usesFallback={squarePreview.usesFallback}
+            emptyLabel="Geen vierkant beeld"
+          />
+        ) : (
+          <FeedStylePreview
+            title=""
+            placementLabel="Facebook feed · 1.91:1"
+            imageUrl={feedPreview.url}
+            format="feed"
+            usesFallback={feedPreview.usesFallback}
+            emptyLabel="Geen feed-beeld"
+          />
+        )}
+
+        <div className="rounded-2xl border bg-white p-3 dark:bg-slate-950 sm:p-4">
+          <p className="text-sm font-semibold">Plaatsingen in deze builder</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {props.placements.length ? (
+              props.placements.map((placement) => (
                 <Badge key={placement} variant="secondary">
                   {PLACEMENTS.find((item) => item.key === placement)?.label}
                 </Badge>
-              ))}
-            </div>
+              ))
+            ) : (
+              <p className="text-xs text-muted-foreground">Nog geen placements geselecteerd in adsets.</p>
+            )}
           </div>
         </div>
       </CardContent>
+      ) : null}
     </Card>
   );
 }
@@ -952,6 +3441,7 @@ function ApprovalQueue(props: {
   selectedPlanId: string | null;
   loading: boolean;
   onSelect: (id: string) => void;
+  onEdit: (id: string) => void;
   onSubmit: (id: string) => void;
   onApprove: (id: string) => void;
   onPush: (id: string) => void;
@@ -987,6 +3477,10 @@ function ApprovalQueue(props: {
             <ErrorHint raw={row.lastError} />
           </button>
           <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => props.onEdit(row.id)}>
+              <PencilLine className="mr-2 h-3 w-3" />
+              Bewerken
+            </Button>
             {["DRAFT", "FAILED", "CANCELLED"].includes(row.status) ? (
               <Button size="sm" variant="outline" onClick={() => props.onSubmit(row.id)}>
                 Indienen
@@ -1026,23 +3520,99 @@ function ApprovalQueue(props: {
   );
 }
 
-export default function MetaAdsPage() {
+function MetaOAuthScopesAlert({ scopes }: { scopes: string[] }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div
+      role="alert"
+      className="overflow-hidden rounded-2xl border border-amber-300/70 bg-gradient-to-r from-amber-50/90 via-amber-50/50 to-orange-50/30 shadow-sm dark:border-amber-800/50 dark:from-amber-950/35 dark:via-amber-950/20 dark:to-orange-950/15"
+    >
+      <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:gap-4">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 space-y-0.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-semibold tracking-tight text-amber-950 dark:text-amber-50">Meta ads-rechten ontbreken</p>
+              <Badge className="border-amber-400/40 bg-amber-500/15 py-0 text-[10px] font-medium text-amber-900 hover:bg-amber-500/15 dark:text-amber-100">
+                Waarschuwing
+              </Badge>
+            </div>
+            <p className="text-xs leading-relaxed text-amber-900/80 dark:text-amber-100/80">
+              {scopes.length} scope{scopes.length === 1 ? "" : "s"} ontbreken — koppel Meta opnieuw via Integraties om campagnes te
+              publiceren.
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9 border-amber-300/60 bg-amber-50/80 text-xs text-amber-950 hover:bg-amber-100/80 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-50 dark:hover:bg-amber-950/50"
+            onClick={() => setOpen((current) => !current)}
+            aria-expanded={open}
+          >
+            {open ? "Verberg" : "Details"}
+            <ChevronDown className={cn("ml-1.5 h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+          </Button>
+          <Button
+            className="h-9 bg-[#1877F2] px-4 text-xs font-medium text-white shadow-md shadow-[#1877F2]/25 hover:bg-[#166fe5]"
+            size="sm"
+            asChild
+          >
+            <Link href="/settings/integrations">Naar integraties</Link>
+          </Button>
+        </div>
+      </div>
+
+      {open ? (
+        <div className="border-t border-amber-200/60 bg-amber-50/40 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-950/25">
+          <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Ontbrekende scopes</p>
+          <div className="flex flex-wrap gap-1.5">
+            {scopes.map((scope) => (
+              <span
+                key={scope}
+                className="inline-flex rounded-md border border-border/60 bg-background/90 px-2 py-0.5 font-mono text-[10px] text-foreground/90"
+              >
+                {scope}
+              </span>
+            ))}
+          </div>
+          <p className="mt-2.5 text-[11px] leading-relaxed text-muted-foreground">
+            Beheerder: zet{" "}
+            <code className="rounded-md border border-border/50 bg-background px-1.5 py-0.5 font-mono text-[10px]">
+              META_OAUTH_INCLUDE_ADS=true
+            </code>
+            , deploy opnieuw en koppel Meta via Integraties.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MetaAdsPageInner() {
   const { showToast } = useToast();
   const utils = trpc.useUtils();
+  const { branding } = useBranding();
+  const pageAvatarUrl = branding.faviconUrl.trim() || branding.logoUrl.trim();
 
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [loadedPlanId, setLoadedPlanId] = useState<string | null>(null);
-  const [activeStep, setActiveStep] = useState<BuilderStep>("setup");
-  const [adsTab, setAdsTab] = useState("dashboard");
+  const [activeStep, setActiveStep] = useState<BuilderStep>("campaign");
+  const [adsTab, setAdsTab] = useState("campaigns");
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [insightLevel, setInsightLevel] = useState<"campaign" | "adset" | "ad">("campaign");
   const [approvalFilter, setApprovalFilter] = useState<"ALL" | PlanStatus>("ALL");
   const [activeCreativeRef, setActiveCreativeRef] = useState<{ adsetId: string; variantId: string } | null>(null);
 
-  const [name, setName] = useState("Digitify Meta campagne");
+  const [name, setName] = useState("");
   const [objective, setObjective] = useState("OUTCOME_TRAFFIC");
   const [currency, setCurrency] = useState("EUR");
-  const [dailyBudget, setDailyBudget] = useState("2500");
+  const [dailyBudget, setDailyBudget] = useState("");
   const [lifetimeBudget, setLifetimeBudget] = useState("");
   const [campaignSpendCap, setCampaignSpendCap] = useState("");
   const [startTime, setStartTime] = useState("");
@@ -1051,40 +3621,61 @@ export default function MetaAdsPage() {
   const [bidAmount, setBidAmount] = useState("");
   const [buyingType, setBuyingType] = useState("AUCTION");
   const [specialAdCategories, setSpecialAdCategories] = useState("");
-  const [product, setProduct] = useState("Lead generation voor lokale bedrijven");
-  const [audience, setAudience] = useState("Belgische KMO-eigenaars en zaakvoerders");
+  const [advertiserName, setAdvertiserName] = useState("");
+  const [advertiserPayerDifferent, setAdvertiserPayerDifferent] = useState(false);
+  const [product, setProduct] = useState("");
+  const [audience, setAudience] = useState("");
   const [aiTone, setAiTone] = useState<AiTone>("professioneel");
+  const [aiCampaignDialogOpen, setAiCampaignDialogOpen] = useState(false);
 
-  const [pageName, setPageName] = useState("Digitify");
-  const [adName, setAdName] = useState("Digitify Meta Ad");
-  const [primaryText, setPrimaryText] = useState("Ontdek hoe Digitify meer kwalitatieve leads kan vinden voor je bedrijf.");
-  const [headline, setHeadline] = useState("Meer leads, minder giswerk");
-  const [description, setDescription] = useState("Campagne wordt veilig als gepauzeerd aangemaakt.");
-  const [linkUrl, setLinkUrl] = useState("https://leads.digitify.be");
-  const [displayUrl, setDisplayUrl] = useState("leads.digitify.be");
+  const [adName, setAdName] = useState("");
+  const [primaryText, setPrimaryText] = useState("");
+  const [headline, setHeadline] = useState("");
+  const [description, setDescription] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [displayUrl, setDisplayUrl] = useState("");
   const [feedImageUrl, setFeedImageUrl] = useState("");
   const [squareImageUrl, setSquareImageUrl] = useState("");
   const [storyImageUrl, setStoryImageUrl] = useState("");
   const [publishAsset, setPublishAsset] = useState<AssetSlot>("feed");
   const [ctaType, setCtaType] = useState("LEARN_MORE");
-  const [ctaLabel, setCtaLabel] = useState("Meer informatie");
-  const [urlTags, setUrlTags] = useState("utm_source=meta&utm_medium=paid_social&utm_campaign={{campaign.name}}");
+  const [ctaLabel, setCtaLabel] = useState("");
+  const [urlTags, setUrlTags] = useState("");
   const [optimizationGoal, setOptimizationGoal] = useState<OptimizationGoal>("AUTO");
   const [destinationType, setDestinationType] = useState<DestinationType>("AUTO");
   const [billingEvent, setBillingEvent] = useState("IMPRESSIONS");
   const [pixelId, setPixelId] = useState("");
   const [customEventType, setCustomEventType] = useState("LEAD");
-  const [adsets, setAdsets] = useState<AdsetDraft[]>([createAdset("Belgie breed", "adset-1")]);
+  const [adsets, setAdsets] = useState<AdsetDraft[]>([]);
   const [advancedCreativeJson, setAdvancedCreativeJson] = useState("{}");
   const [advancedTargetingJson, setAdvancedTargetingJson] = useState("{}");
-  const [uploadingAsset, setUploadingAsset] = useState<AssetSlot | null>(null);
   const [uploadingVariantAsset, setUploadingVariantAsset] = useState<string | null>(null);
-
-  const feedProbe = useImageProbe(feedImageUrl);
-  const squareProbe = useImageProbe(squareImageUrl);
-  const storyProbe = useImageProbe(storyImageUrl);
+  const [aiTrainingNotes, setAiTrainingNotes] = useState("");
 
   const connection = trpc.metaAds.connectionStatus.useQuery(undefined, { refetchInterval: 30_000 });
+  const metaAdAccountName = (connection.data?.selectedAdAccountName ?? "").trim();
+  const metaPublisher = connection.data?.publisherIdentity;
+  const facebookPublisherName = useMemo(
+    () =>
+      (metaPublisher?.facebookPublisherName ?? "").trim() ||
+      metaAdAccountName ||
+      branding.companyName.trim() ||
+      "Facebook-pagina",
+    [metaPublisher?.facebookPublisherName, metaAdAccountName, branding.companyName],
+  );
+  const instagramPublisherName = useMemo(
+    () => (metaPublisher?.instagramPublisherName ?? "").trim() || facebookPublisherName,
+    [metaPublisher?.instagramPublisherName, facebookPublisherName],
+  );
+  const metaHasInstagram = Boolean(metaPublisher?.hasInstagram);
+  const aiTrainingNotesQuery = trpc.metaAds.getAiTrainingNotes.useQuery();
+  const updateAiTrainingNotes = trpc.metaAds.updateAiTrainingNotes.useMutation({
+    onSuccess: async () => {
+      await aiTrainingNotesQuery.refetch();
+      showToast({ title: "AI-training opgeslagen" });
+    },
+    onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
+  });
   const adAccounts = trpc.metaAds.listAdAccounts.useQuery(undefined, { enabled: Boolean(connection.data?.connected) });
   const campaigns = trpc.metaAds.listCampaigns.useQuery(undefined, {
     enabled: Boolean(connection.data?.selectedAdAccountId),
@@ -1101,8 +3692,12 @@ export default function MetaAdsPage() {
   const drafts = trpc.metaAds.listDrafts.useQuery(undefined, { refetchInterval: 20_000 });
 
   const rows = drafts.data ?? [];
+  const pendingApprovalCount = useMemo(
+    () => rows.filter((row: { status: string }) => row.status === "PENDING_APPROVAL").length,
+    [rows],
+  );
   const filteredRows = approvalFilter === "ALL" ? rows : rows.filter((row: any) => row.status === approvalFilter);
-  const selectedPlan = rows.find((row: any) => row.id === selectedPlanId) || (selectedPlanId ? null : rows[0]) || null;
+  const selectedPlan = selectedPlanId ? rows.find((row: any) => row.id === selectedPlanId) || null : null;
   const totalSpend = useMemo(() => (insights.data || []).reduce((sum: number, row: any) => sum + Number(row.spend || 0), 0), [insights.data]);
   const totalClicks = useMemo(() => (insights.data || []).reduce((sum: number, row: any) => sum + Number(row.clicks || 0), 0), [insights.data]);
 
@@ -1138,21 +3733,26 @@ export default function MetaAdsPage() {
           urlTags,
         },
         activeVariant,
+        { inheritAssets: false, inheritCopy: false },
       ),
     [adName, primaryText, headline, description, linkUrl, displayUrl, feedImageUrl, squareImageUrl, storyImageUrl, publishAsset, ctaType, ctaLabel, urlTags, activeVariant],
   );
   const primaryPublishImage = resolvePublishImage(publishAsset, { feedImageUrl, squareImageUrl, storyImageUrl });
-  const requiresStoryImage = adsets.some((adset) => adset.placements.some((placement) => ["facebook_story", "facebook_reels", "instagram_story", "instagram_reels"].includes(placement)));
-  const hasAnyImage = Boolean(feedImageUrl.trim() || squareImageUrl.trim() || storyImageUrl.trim());
   const canSaveDraft = Boolean(name.trim().length >= 2);
-  const setupComplete = Boolean(name.trim() && objective && (numberValue(dailyBudget) >= 100 || numberValue(lifetimeBudget) >= 100));
-  const campaignComplete = Boolean(product.trim() && audience.trim());
+  const campaignComplete = Boolean(name.trim() && objective && buyingType.trim() && (numberValue(dailyBudget) >= 100 || numberValue(lifetimeBudget) >= 100));
   const adsetsComplete = Boolean(
     adsets.length &&
-      adsets.every((adset) => csvToList(adset.countries).length && numberValue(adset.ageMin) >= 13 && numberValue(adset.ageMax) >= numberValue(adset.ageMin) && adset.placements.length),
+      adsets.every(
+        (adset) =>
+          adsetHasGeoTargeting(adset) &&
+          numberValue(adset.ageMin) >= 13 &&
+          numberValue(adset.ageMax) >= numberValue(adset.ageMin) &&
+          adset.placements.length,
+      ),
   );
-  const creativesComplete = Boolean(
-    adsets.length &&
+  const adsComplete = Boolean(
+    Boolean(metaAdAccountName || connection.data?.socialConnected) &&
+      adsets.length &&
       adsets.every((adset) =>
         adset.variants.length &&
         adset.variants.every((variant) => {
@@ -1173,19 +3773,148 @@ export default function MetaAdsPage() {
               urlTags,
             },
             variant,
+            { inheritAssets: false, inheritCopy: false },
           );
           const resolvedImage = resolvePublishImage(merged.publishAsset, {
             feedImageUrl: merged.feedImageUrl,
             squareImageUrl: merged.squareImageUrl,
             storyImageUrl: merged.storyImageUrl,
           });
-          return Boolean(merged.primaryText.trim() && merged.headline.trim() && merged.linkUrl.trim().startsWith("https://") && resolvedImage.trim());
+          const adsetNeedsStoryImage = adset.placements.some((placement) => ["facebook_story", "facebook_reels", "instagram_story", "instagram_reels"].includes(placement));
+          return Boolean(
+            merged.primaryText.trim() &&
+              merged.headline.trim() &&
+              merged.linkUrl.trim().startsWith("https://") &&
+              resolvedImage.trim() &&
+              (!adsetNeedsStoryImage || merged.storyImageUrl.trim()),
+          );
         }),
       ),
   );
-  const readyToSave = setupComplete && campaignComplete && adsetsComplete && creativesComplete;
+  const readyToSave = campaignComplete && adsetsComplete && adsComplete;
+  const activeStepIndex = BUILDER_STEP_ORDER.indexOf(activeStep);
+  const activeStepMeta = STEPS[activeStepIndex];
+  const builderCompletionPercent = useMemo(() => {
+    let completed = 0;
+    if (campaignComplete) completed += 1;
+    if (adsetsComplete) completed += 1;
+    if (adsComplete) completed += 1;
+    if (readyToSave) completed += 1;
+    return Math.round((completed / BUILDER_STEP_ORDER.length) * 100);
+  }, [campaignComplete, adsetsComplete, adsComplete, readyToSave]);
+  const dailyBudgetEur = eur(numberValue(dailyBudget), currency);
+  const lifetimeBudgetEur = lifetimeBudget.trim() ? eur(numberValue(lifetimeBudget), currency) : null;
+
+  function isStepComplete(step: BuilderStep) {
+    if (step === "campaign") return campaignComplete;
+    if (step === "adsets") return adsetsComplete;
+    if (step === "ads") return adsComplete;
+    if (step === "review") return readyToSave;
+    return false;
+  }
+
+  const studioStepTodos = useMemo(() => {
+    const campaign: string[] = [];
+    if (!name.trim()) campaign.push("Vul een campagnenaam in.");
+    if (!objective) campaign.push("Kies een campagne-doelstelling (objective).");
+    if (!buyingType.trim()) campaign.push("Stel het buying type in.");
+    if (numberValue(dailyBudget) < 100 && numberValue(lifetimeBudget) < 100) {
+      campaign.push("Budget: minimaal €1,00 dagbudget of lifetime budget.");
+    }
+
+    const adsetTodos: string[] = [];
+    if (!adsets.length) {
+      adsetTodos.push("Voeg minstens één advertentieset toe.");
+    } else {
+      adsets.forEach((adset, index) => {
+        const label = adset.name.trim() || `Ad set ${index + 1}`;
+        if (!adsetHasGeoTargeting(adset)) adsetTodos.push(`${label}: kies land, regio of stad.`);
+        if (numberValue(adset.ageMin) < 13) adsetTodos.push(`${label}: minimumleeftijd minstens 13.`);
+        if (numberValue(adset.ageMax) < numberValue(adset.ageMin)) {
+          adsetTodos.push(`${label}: max. leeftijd moet ≥ min. leeftijd zijn.`);
+        }
+        if (!adset.placements.length) adsetTodos.push(`${label}: selecteer minstens één placement.`);
+        if (!adset.variants.length) adsetTodos.push(`${label}: voeg minstens één advertentievariant toe.`);
+      });
+    }
+
+    const adsTodos: string[] = [];
+    if (!metaAdAccountName && !connection.data?.socialConnected) {
+      adsTodos.push("Koppel een Meta-ad account of pagina (Instellingen).");
+    }
+    if (!adsets.length) {
+      adsTodos.push("Maak eerst een advertentieset aan.");
+    } else {
+      adsets.forEach((adset, adsetIndex) => {
+        const adsetLabel = adset.name.trim() || `Ad set ${adsetIndex + 1}`;
+        const needsStory = adset.placements.some((placement) =>
+          ["facebook_story", "facebook_reels", "instagram_story", "instagram_reels"].includes(placement),
+        );
+        adset.variants.forEach((variant, variantIndex) => {
+          const variantLabel = variant.name.trim() || variant.adName.trim() || `Variant ${variantIndex + 1}`;
+          const prefix = `${adsetLabel} · ${variantLabel}`;
+          const merged = mergeVariantWithBase(
+            {
+              adName,
+              primaryText,
+              headline,
+              description,
+              linkUrl,
+              displayUrl,
+              feedImageUrl,
+              squareImageUrl,
+              storyImageUrl,
+              publishAsset,
+              ctaType,
+              ctaLabel,
+              urlTags,
+            },
+            variant,
+            { inheritAssets: false, inheritCopy: false },
+          );
+          if (!merged.primaryText.trim()) adsTodos.push(`${prefix}: primaire tekst ontbreekt.`);
+          if (!merged.headline.trim()) adsTodos.push(`${prefix}: headline ontbreekt.`);
+          if (!merged.linkUrl.trim().startsWith("https://")) adsTodos.push(`${prefix}: link moet met https:// beginnen.`);
+          const image = resolvePublishImage(merged.publishAsset, {
+            feedImageUrl: merged.feedImageUrl,
+            squareImageUrl: merged.squareImageUrl,
+            storyImageUrl: merged.storyImageUrl,
+          });
+          if (!image.trim()) adsTodos.push(`${prefix}: upload een publish-beeld.`);
+          if (needsStory && !merged.storyImageUrl.trim()) {
+            adsTodos.push(`${prefix}: story/reels-plaatsing vereist 9:16-beeld.`);
+          }
+        });
+      });
+    }
+
+    return { campaign, adsets: adsetTodos, ads: adsTodos };
+  }, [
+    adName,
+    adsets,
+    buyingType,
+    connection.data?.socialConnected,
+    ctaLabel,
+    ctaType,
+    dailyBudget,
+    description,
+    displayUrl,
+    feedImageUrl,
+    headline,
+    lifetimeBudget,
+    linkUrl,
+    metaAdAccountName,
+    name,
+    objective,
+    primaryText,
+    publishAsset,
+    squareImageUrl,
+    storyImageUrl,
+    urlTags,
+  ]);
   const operationalRequirements = useMemo(
-    () => ((connection.data?.missingOperationalRequirements || []) as string[]).map(describeOperationalRequirement),
+    () =>
+      [...new Set((connection.data?.missingOperationalRequirements || []) as string[])].map(describeOperationalRequirement),
     [connection.data?.missingOperationalRequirements],
   );
   const insightCoach = useMemo(
@@ -1208,25 +3937,28 @@ export default function MetaAdsPage() {
       ctaLabel,
       urlTags,
     };
+    const firstVariantForScore = adsets[0]?.variants[0]
+      ? mergeVariantWithBase(variantBase, adsets[0].variants[0], { inheritAssets: false, inheritCopy: false })
+      : variantBase;
     return {
       name,
       dailyBudget,
       lifetimeBudget,
-      primaryText,
-      headline,
-      description,
-      linkUrl,
-      feedImageUrl,
-      squareImageUrl,
-      storyImageUrl,
-      publishAsset,
+      primaryText: firstVariantForScore.primaryText,
+      headline: firstVariantForScore.headline,
+      description: firstVariantForScore.description,
+      linkUrl: firstVariantForScore.linkUrl,
+      feedImageUrl: firstVariantForScore.feedImageUrl,
+      squareImageUrl: firstVariantForScore.squareImageUrl,
+      storyImageUrl: firstVariantForScore.storyImageUrl,
+      publishAsset: firstVariantForScore.publishAsset,
       pixelId,
       objective,
       adsets: adsets.map((adset) => ({
         customAudiencesText: adset.customAudiencesText,
         notes: adset.notes,
         variants: adset.variants.map((variant) => {
-          const merged = mergeVariantWithBase(variantBase, variant);
+          const merged = mergeVariantWithBase(variantBase, variant, { inheritAssets: false, inheritCopy: false });
           return {
             primaryText: merged.primaryText,
             headline: merged.headline,
@@ -1278,19 +4010,90 @@ export default function MetaAdsPage() {
     setActiveStep("review");
   }
 
+  function openDraftForEditing(planId: string, step: BuilderStep = "campaign") {
+    setSelectedPlanId(planId);
+    setLoadedPlanId(null);
+    setAdsTab("builder");
+    setActiveStep(step);
+    showToast({ title: "Draft geopend in Studio" });
+  }
+
   function openLiveCampaign(campaignId: string) {
     setSelectedCampaignId(campaignId);
     setAdsTab("campaigns");
   }
 
+  function openLiveCampaignAsDraft() {
+    const details = asRecord(campaignDetails.data);
+    const campaign = asRecord(details.campaign);
+    if (!campaign.id && !campaign.name) {
+      showToast({ title: "Geen campagne geselecteerd", description: "Selecteer eerst een live Meta campagne.", variant: "error" });
+      return;
+    }
+
+    const importedAdsets = Array.isArray(details.adsets) && details.adsets.length
+      ? details.adsets.map((adset: any, index: number) => liveAdsetToDraft(asRecord(adset), index))
+      : [createAdset("Geimporteerde doelgroep", `live-${String(campaign.id || Date.now())}-adset-1`)];
+    const firstVariant = importedAdsets[0]?.variants[0];
+
+    setSelectedPlanId(`__meta_live_import_${String(campaign.id || Date.now())}`);
+    setLoadedPlanId(null);
+    setName(`${String(campaign.name || "Meta campagne")} (bewerking)`);
+    setObjective(String(campaign.objective || "OUTCOME_TRAFFIC"));
+    setCurrency(connection.data?.defaultCurrency || currency || "EUR");
+    setDailyBudget(campaign.daily_budget ? String(campaign.daily_budget) : "");
+    setLifetimeBudget(String(campaign.lifetime_budget || ""));
+    setStartTime("");
+    setEndTime("");
+    setBuyingType(String(campaign.buying_type || "AUCTION"));
+    setCampaignSpendCap("");
+    setSpecialAdCategories("");
+    setAdvertiserName(advertiserName || facebookPublisherName || "");
+    setAdvertiserPayerDifferent(false);
+    setOptimizationGoal("AUTO");
+    setDestinationType("AUTO");
+    setBillingEvent("IMPRESSIONS");
+    setAdsets(importedAdsets);
+    setActiveCreativeRef(firstVariant ? { adsetId: importedAdsets[0].id, variantId: firstVariant.id } : null);
+    if (firstVariant) {
+      setAdName(firstVariant.adName);
+      setPrimaryText(firstVariant.primaryText);
+      setHeadline(firstVariant.headline);
+      setDescription(firstVariant.description);
+      setLinkUrl(firstVariant.linkUrl || "");
+      setDisplayUrl(firstVariant.displayUrl || "");
+      setCtaType(firstVariant.ctaType || "LEARN_MORE");
+      setCtaLabel(firstVariant.ctaLabel || "");
+      setUrlTags(firstVariant.urlTags || "");
+      setPublishAsset(firstVariant.publishAsset || "feed");
+      setFeedImageUrl("");
+      setSquareImageUrl("");
+      setStoryImageUrl("");
+    }
+    setAdvancedCreativeJson("{}");
+    setAdvancedTargetingJson("{}");
+    setAdsTab("builder");
+    setActiveStep("campaign");
+    showToast({ title: "Live Meta campagne als draft geopend", description: "Controleer vooral afbeeldingen per Ad voordat je opslaat." });
+  }
+
   function canOpenStep(step: BuilderStep) {
-    if (step === "setup") return true;
-    if (step === "campaign") return setupComplete;
-    if (step === "adsets") return setupComplete && campaignComplete;
-    if (step === "creatives") return setupComplete && campaignComplete && adsetsComplete;
-    if (step === "review") return setupComplete && campaignComplete && adsetsComplete && creativesComplete;
+    if (step === "campaign") return true;
+    if (step === "adsets") return campaignComplete;
+    if (step === "ads") return campaignComplete && adsetsComplete;
+    if (step === "review") return campaignComplete && adsetsComplete && adsComplete;
     return false;
   }
+
+  useEffect(() => {
+    if (aiTrainingNotesQuery.data?.notes !== undefined) setAiTrainingNotes(aiTrainingNotesQuery.data.notes);
+  }, [aiTrainingNotesQuery.data?.notes]);
+
+  useEffect(() => {
+    if (selectedPlanId || loadedPlanId) return;
+    const accountCurrency = connection.data?.defaultCurrency;
+    if (accountCurrency) setCurrency(accountCurrency);
+  }, [connection.data?.defaultCurrency, selectedPlanId, loadedPlanId]);
 
   useEffect(() => {
     if (!selectedPlan || selectedPlan.id === loadedPlanId) return;
@@ -1299,10 +4102,10 @@ export default function MetaAdsPage() {
     const targeting = asRecord(selectedPlan.targeting);
     const campaignSettings = asRecord(targeting.campaignSettings);
 
-    setName(selectedPlan.name || "Digitify Meta campagne");
+    setName(selectedPlan.name || "");
     setObjective(selectedPlan.objective || "OUTCOME_TRAFFIC");
-    setCurrency(selectedPlan.currency || "EUR");
-    setDailyBudget(String(selectedPlan.dailyBudgetCents || 2500));
+    setCurrency(selectedPlan.currency || connection.data?.defaultCurrency || "EUR");
+    setDailyBudget(selectedPlan.dailyBudgetCents ? String(selectedPlan.dailyBudgetCents) : "");
     setLifetimeBudget(String(selectedPlan.lifetimeBudgetCents || ""));
     setStartTime(selectedPlan.startTime ? new Date(selectedPlan.startTime).toISOString().slice(0, 16) : "");
     setEndTime(selectedPlan.endTime ? new Date(selectedPlan.endTime).toISOString().slice(0, 16) : "");
@@ -1311,22 +4114,26 @@ export default function MetaAdsPage() {
     setBuyingType(String(campaignSettings.buyingType || "AUCTION"));
     setCampaignSpendCap(String(campaignSettings.campaignSpendCap || ""));
     setSpecialAdCategories(Array.isArray(campaignSettings.specialAdCategories) ? campaignSettings.specialAdCategories.join(", ") : "");
+    setAdvertiserName(String(campaignSettings.advertiserName || creative.pageName || ""));
+    setAdvertiserPayerDifferent(Boolean(campaignSettings.advertiserPayerDifferent));
     setAiTone((creative.aiTone || "professioneel") as AiTone);
+    const aiBrief = asRecord(creative.aiBrief);
+    if (aiBrief.product) setProduct(String(aiBrief.product));
+    if (aiBrief.audience) setAudience(String(aiBrief.audience));
 
-    setPageName(String(creative.pageName || "Digitify"));
-    setAdName(String(creative.adName || "Digitify Meta Ad"));
+    setAdName(String(creative.adName || ""));
     setPrimaryText(String(creative.message || creative.primaryText || ""));
     setHeadline(String(creative.headline || creative.name || ""));
     setDescription(String(creative.description || ""));
-    setLinkUrl(String(creative.linkUrl || creative.url || "https://leads.digitify.be"));
-    setDisplayUrl(String(creative.displayUrl || "leads.digitify.be"));
+    setLinkUrl(String(creative.linkUrl || creative.url || ""));
+    setDisplayUrl(String(creative.displayUrl || ""));
     setFeedImageUrl(String(creative.feedImageUrl || creative.imageUrl || ""));
     setSquareImageUrl(String(creative.squareImageUrl || ""));
     setStoryImageUrl(String(creative.storyImageUrl || ""));
     setPublishAsset((creative.publishAsset || "feed") as AssetSlot);
     setCtaType(String(creative.ctaType || "LEARN_MORE"));
-    setCtaLabel(String(creative.cta || creative.ctaLabel || "Meer informatie"));
-    setUrlTags(String(creative.urlTags || "utm_source=meta&utm_medium=paid_social&utm_campaign={{campaign.name}}"));
+    setCtaLabel(String(creative.cta || creative.ctaLabel || ""));
+    setUrlTags(String(creative.urlTags || ""));
 
     setOptimizationGoal((campaignSettings.optimizationGoal || "AUTO") as OptimizationGoal);
     setDestinationType((campaignSettings.destinationType || "AUTO") as DestinationType);
@@ -1334,37 +4141,56 @@ export default function MetaAdsPage() {
     setPixelId(String(campaignSettings.pixelId || ""));
     setCustomEventType(String(campaignSettings.customEventType || "LEAD"));
 
+    const rootVariantFallback = {
+      adName: String(creative.adName || ""),
+      primaryText: String(creative.message || creative.primaryText || ""),
+      headline: String(creative.headline || creative.name || ""),
+      description: String(creative.description || ""),
+      linkUrl: String(creative.linkUrl || creative.url || ""),
+      displayUrl: String(creative.displayUrl || ""),
+      feedImageUrl: String(creative.feedImageUrl || creative.imageUrl || ""),
+      squareImageUrl: String(creative.squareImageUrl || ""),
+      storyImageUrl: String(creative.storyImageUrl || ""),
+      publishAsset: (creative.publishAsset || "feed") as AssetSlot,
+      ctaType: String(creative.ctaType || "LEARN_MORE"),
+      ctaLabel: String(creative.cta || creative.ctaLabel || ""),
+      urlTags: String(creative.urlTags || ""),
+      angle: "",
+    };
     const creativeGroups = Array.isArray(creative.adsets) ? creative.adsets : [];
     const adsetRows = (Array.isArray(targeting.adsets) && targeting.adsets.length
       ? targeting.adsets.map((item: any, index: number) => {
           const adsetId = String(asRecord(item).id || `loaded-adset-${index + 1}`);
           const group = creativeGroups.find((entry: any) => String(asRecord(entry).adsetId || "") === adsetId) || creativeGroups[index];
           const variants = Array.isArray(asRecord(group).variants) && asRecord(group).variants.length
-            ? asRecord(group).variants.map((variant: any, variantIndex: number) => ({
-                ...createCreativeVariant(`Variant ${variantIndex + 1}`, String(asRecord(variant).id || `${adsetId}-variant-${variantIndex + 1}`)),
-                name: String(asRecord(variant).name || asRecord(variant).adName || `Variant ${variantIndex + 1}`),
-                adName: String(asRecord(variant).adName || asRecord(variant).name || `Variant ${variantIndex + 1}`),
-                primaryText: String(asRecord(variant).primaryText || asRecord(variant).message || ""),
-                headline: String(asRecord(variant).headline || ""),
-                description: String(asRecord(variant).description || ""),
-                linkUrl: String(asRecord(variant).linkUrl || ""),
-                displayUrl: String(asRecord(variant).displayUrl || ""),
-                feedImageUrl: String(asRecord(variant).feedImageUrl || asRecord(variant).imageUrl || ""),
-                squareImageUrl: String(asRecord(variant).squareImageUrl || ""),
-                storyImageUrl: String(asRecord(variant).storyImageUrl || ""),
-                publishAsset: (asRecord(variant).publishAsset || "feed") as AssetSlot,
-                ctaType: String(asRecord(variant).ctaType || "LEARN_MORE"),
-                ctaLabel: String(asRecord(variant).ctaLabel || asRecord(variant).cta || "Meer informatie"),
-                urlTags: String(asRecord(variant).urlTags || urlTags),
-                angle: String(asRecord(variant).angle || ""),
-              }))
-            : [createCreativeVariant("Variant 1", `${adsetId}-variant-1`)];
+            ? asRecord(group).variants.map((variant: any, variantIndex: number) => {
+                const variantRecord = asRecord(variant);
+                return {
+                  ...createCreativeVariant(`Variant ${variantIndex + 1}`, String(variantRecord.id || `${adsetId}-variant-${variantIndex + 1}`)),
+                  name: String(variantRecord.name || variantRecord.adName || `Variant ${variantIndex + 1}`),
+                  adName: String(variantRecord.adName || variantRecord.name || rootVariantFallback.adName || `Variant ${variantIndex + 1}`),
+                  primaryText: String(variantRecord.primaryText || variantRecord.message || rootVariantFallback.primaryText),
+                  headline: String(variantRecord.headline || rootVariantFallback.headline),
+                  description: String(variantRecord.description || rootVariantFallback.description),
+                  linkUrl: String(variantRecord.linkUrl || variantRecord.url || rootVariantFallback.linkUrl),
+                  displayUrl: String(variantRecord.displayUrl || rootVariantFallback.displayUrl),
+                  feedImageUrl: String(variantRecord.feedImageUrl || variantRecord.imageUrl || rootVariantFallback.feedImageUrl),
+                  squareImageUrl: String(variantRecord.squareImageUrl || rootVariantFallback.squareImageUrl),
+                  storyImageUrl: String(variantRecord.storyImageUrl || rootVariantFallback.storyImageUrl),
+                  publishAsset: (variantRecord.publishAsset || rootVariantFallback.publishAsset) as AssetSlot,
+                  ctaType: String(variantRecord.ctaType || rootVariantFallback.ctaType),
+                  ctaLabel: String(variantRecord.ctaLabel || variantRecord.cta || rootVariantFallback.ctaLabel),
+                  urlTags: String(variantRecord.urlTags || rootVariantFallback.urlTags),
+                  angle: String(variantRecord.angle || ""),
+                };
+              })
+            : [{ ...createCreativeVariant("Variant 1", `${adsetId}-variant-1`), ...rootVariantFallback, name: rootVariantFallback.adName || "Variant 1" }];
           return {
             ...targetingToAdset(asRecord(item), String(asRecord(item).name || `Doelgroep ${index + 1}`), adsetId),
             variants,
           };
         })
-      : [{ ...targetingToAdset(targeting, String(campaignSettings.adsetName || "Belgie breed"), "loaded-adset-1"), variants: [createCreativeVariant("Variant 1", "loaded-adset-1-variant-1")] }]) as AdsetDraft[];
+      : []) as AdsetDraft[];
     setAdsets(adsetRows);
     setActiveCreativeRef(adsetRows[0]?.variants[0] ? { adsetId: adsetRows[0].id, variantId: adsetRows[0].variants[0].id } : null);
 
@@ -1391,43 +4217,165 @@ export default function MetaAdsPage() {
     ]);
   };
 
+  function resetBuilderForNewCampaign() {
+    setSelectedPlanId(null);
+    setLoadedPlanId(null);
+    setActiveStep("campaign");
+    setActiveCreativeRef(null);
+    setName("");
+    setObjective("OUTCOME_TRAFFIC");
+    setCurrency(connection.data?.defaultCurrency || "EUR");
+    setDailyBudget("");
+    setLifetimeBudget("");
+    setCampaignSpendCap("");
+    setStartTime("");
+    setEndTime("");
+    setBidStrategy("LOWEST_COST_WITHOUT_CAP");
+    setBidAmount("");
+    setBuyingType("AUCTION");
+    setSpecialAdCategories("");
+    setAdvertiserName("");
+    setAdvertiserPayerDifferent(false);
+    setProduct("");
+    setAudience("");
+    setAiTone("professioneel");
+    setAdName("");
+    setPrimaryText("");
+    setHeadline("");
+    setDescription("");
+    setLinkUrl("");
+    setDisplayUrl("");
+    setFeedImageUrl("");
+    setSquareImageUrl("");
+    setStoryImageUrl("");
+    setPublishAsset("feed");
+    setCtaType("LEARN_MORE");
+    setCtaLabel("");
+    setUrlTags("");
+    setOptimizationGoal("AUTO");
+    setDestinationType("AUTO");
+    setBillingEvent("IMPRESSIONS");
+    setPixelId("");
+    setCustomEventType("LEAD");
+    setAdsets([]);
+    setAdvancedCreativeJson("{}");
+    setAdvancedTargetingJson("{}");
+  }
+
+  function startNewCampaign() {
+    resetBuilderForNewCampaign();
+    setAdsTab("builder");
+    showToast({ title: "Nieuwe campagne", description: "Vul campagne, advertentieset en advertenties stap voor stap in." });
+  }
+
+  function getMetaAiProductInput(): string | null {
+    const trimmedProduct = product.trim();
+    if (trimmedProduct.length >= 2) return trimmedProduct;
+    setAiCampaignDialogOpen(true);
+    showToast({
+      title: "Beschrijf je aanbod eerst",
+      description: "Vul product of aanbod in de AI-briefing (min. 2 tekens).",
+      variant: "error",
+    });
+    return null;
+  }
+
+  function handleMetaAiSuggestion(brief?: MetaAiBriefingInput) {
+    const trimmedProduct = brief?.product.trim() || getMetaAiProductInput();
+    if (!trimmedProduct) return;
+    if (brief) {
+      setProduct(brief.product);
+      setAudience(brief.audience);
+      setAiTone(brief.tone);
+    }
+    generateSuggestion.mutate({
+      product: trimmedProduct,
+      audience: (brief?.audience ?? audience).trim() || undefined,
+      tone: brief?.tone ?? aiTone,
+    });
+  }
+
+  function openAiCampaignDialog() {
+    setAiCampaignDialogOpen(true);
+  }
+
   const createDraft = trpc.metaAds.createDraft.useMutation({
-    onSuccess: async (row: any) => {
-      setSelectedPlanId(row.id);
-      setLoadedPlanId(null);
+    onSuccess: async () => {
       await invalidate();
-      showToast({ title: "Meta Ads draft aangemaakt" });
+      resetBuilderForNewCampaign();
+      showToast({
+        title: "Meta Ads draft aangemaakt",
+        description: "De wizard staat leeg — je kunt meteen een volgende campagne opbouwen.",
+      });
     },
     onError: (error) => showToast({ title: "Draft mislukt", description: explainMetaError(error.message)?.message || error.message, variant: "error" }),
   });
   const updateDraft = trpc.metaAds.updateDraft.useMutation({
     onSuccess: async () => {
       await invalidate();
-      showToast({ title: "Draft opgeslagen" });
+      resetBuilderForNewCampaign();
+      showToast({
+        title: "Draft opgeslagen",
+        description: "De wizard staat leeg — je kunt meteen een volgende campagne opbouwen.",
+      });
     },
     onError: (error) => showToast({ title: "Opslaan mislukt", description: explainMetaError(error.message)?.message || error.message, variant: "error" }),
   });
   const generateSuggestion = trpc.metaAds.generateSuggestion.useMutation({
     onSuccess: (payload: any) => {
+      setAiCampaignDialogOpen(false);
       setName(payload.name || name);
       setObjective(payload.objective || objective);
       setPrimaryText(payload.primaryText || primaryText);
       setHeadline(payload.headline || headline);
       setDescription(payload.description || description);
       setCtaType(payload.ctaType || "LEARN_MORE");
-      setCtaLabel(payload.ctaLabel || "Meer informatie");
+      setCtaLabel(String(payload.ctaLabel || ""));
+      if (payload.linkUrl) setLinkUrl(String(payload.linkUrl));
       const targeting = asRecord(payload.targeting);
+      const firstAiAd = {
+        ...createCreativeVariant("AI advertentie 1", "ai-adset-1-variant-1"),
+        name: String(payload.headline || payload.adName || "AI advertentie 1"),
+        adName: String(payload.adName || payload.headline || "AI advertentie 1"),
+        primaryText: String(payload.primaryText || ""),
+        headline: String(payload.headline || ""),
+        description: String(payload.description || ""),
+        linkUrl: String(payload.linkUrl || ""),
+        displayUrl: String(payload.displayUrl || ""),
+        ctaType: String(payload.ctaType || "LEARN_MORE"),
+        ctaLabel: String(payload.ctaLabel || ctaLabelFromType(String(payload.ctaType || "LEARN_MORE"))),
+        urlTags,
+      };
       const aiAdsets = Array.isArray(targeting.adsets) && targeting.adsets.length
-        ? targeting.adsets.map((item: any, index: number) => targetingToAdset(asRecord(item), String(asRecord(item).name || `AI doelgroep ${index + 1}`), `ai-adset-${index + 1}`))
-        : [targetingToAdset(targeting, "AI doelgroep 1", "ai-adset-1")];
+        ? targeting.adsets.map((item: any, index: number) => ({
+            ...targetingToAdset(asRecord(item), String(asRecord(item).name || `AI doelgroep ${index + 1}`), `ai-adset-${index + 1}`),
+            variants: [{ ...firstAiAd, id: `ai-adset-${index + 1}-variant-1` }],
+          }))
+        : [{ ...targetingToAdset(targeting, "AI doelgroep 1", "ai-adset-1"), variants: [firstAiAd] }];
       setAdsets(aiAdsets);
-      setActiveStep("campaign");
-      showToast({ title: "AI draftvoorstel gegenereerd" });
+      setActiveCreativeRef(aiAdsets[0]?.variants[0] ? { adsetId: aiAdsets[0].id, variantId: aiAdsets[0].variants[0].id } : null);
+      if (payload.linkUrl) {
+        const host = String(payload.linkUrl).replace(/^https?:\/\//, "").split("/")[0] || "";
+        if (host && !displayUrl.trim()) setDisplayUrl(host);
+      }
+      setActiveStep(aiAdsets.length ? "adsets" : "campaign");
+      const aiUsed = payload.provider !== "fallback" && payload.model !== "none";
+      showToast({
+        title: aiUsed ? "AI campagnevoorstel gegenereerd" : "Basisvoorstel geladen",
+        description: payload.imageBrief
+          ? `Visual tip: ${String(payload.imageBrief).slice(0, 120)}`
+          : aiUsed
+            ? "Controleer campagne, advertentiesets en vul daarna beelden in bij Advertenties."
+            : "AI was niet beschikbaar — controleer en vul velden handmatig aan.",
+        variant: aiUsed ? "success" : "error",
+      });
     },
-    onError: (error) => showToast({ title: "Suggestie mislukt", description: error.message, variant: "error" }),
+    onError: (error) =>
+      showToast({ title: "Suggestie mislukt", description: trpcErrorDescription(error.message), variant: "error" }),
   });
   const generateVariantSuggestion = trpc.metaAds.generateVariantSuggestion.useMutation({
-    onError: (error) => showToast({ title: "Variant suggestie mislukt", description: error.message, variant: "error" }),
+    onError: (error) =>
+      showToast({ title: "Variant suggestie mislukt", description: trpcErrorDescription(error.message), variant: "error" }),
   });
   const submitForApproval = trpc.metaAds.submitForApproval.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Indienen mislukt", description: e.message, variant: "error" }) });
   const approveDraft = trpc.metaAds.approveDraft.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Goedkeuren mislukt", description: e.message, variant: "error" }) });
@@ -1490,31 +4438,13 @@ export default function MetaAdsPage() {
   }
 
   function removeAdset(id: string) {
-    setAdsets((current) => (current.length > 1 ? current.filter((item) => item.id !== id) : current));
+    setAdsets((current) => current.filter((item) => item.id !== id));
+    setActiveCreativeRef(null);
   }
 
   function addVariant(adsetId: string) {
-    const template = mergeVariantWithBase(
-      {
-        adName,
-        primaryText,
-        headline,
-        description,
-        linkUrl,
-        displayUrl,
-        feedImageUrl,
-        squareImageUrl,
-        storyImageUrl,
-        publishAsset,
-        ctaType,
-        ctaLabel,
-        urlTags,
-      },
-      null,
-    );
     const variant = {
       ...createCreativeVariant(`Variant ${Date.now()}`),
-      ...template,
       name: `Variant ${Math.max(2, (adsets.find((item) => item.id === adsetId)?.variants.length || 0) + 1)}`,
       adName: `Variant ${Math.max(2, (adsets.find((item) => item.id === adsetId)?.variants.length || 0) + 1)}`,
     };
@@ -1543,50 +4473,34 @@ export default function MetaAdsPage() {
   }
 
   async function aiSuggestVariant(adsetId: string, variantId: string, adsetName: string, angle: string) {
-    const payload = await generateVariantSuggestion.mutateAsync({
-      product,
-      audience,
-      tone: aiTone,
-      angle: angle || `${adsetName} doelgroep met duidelijke hook`,
-      landingUrl: linkUrl,
-    });
-    updateVariant(adsetId, variantId, {
-      name: String(payload.adName || payload.headline || "AI variant"),
-      adName: String(payload.adName || payload.headline || "AI variant"),
-      primaryText: String(payload.primaryText || ""),
-      headline: String(payload.headline || ""),
-      description: String(payload.description || ""),
-      linkUrl: String(payload.linkUrl || linkUrl),
-      ctaType: String(payload.ctaType || "LEARN_MORE"),
-      ctaLabel: String(payload.ctaLabel || "Meer informatie"),
-      publishAsset: (payload.publishAsset || "feed") as AssetSlot,
-      angle,
-    });
-    showToast({ title: "AI variantvoorstel gegenereerd" });
-  }
-
-  async function uploadAsset(slot: AssetSlot, file: File) {
-    setUploadingAsset(slot);
+    const trimmedProduct = getMetaAiProductInput();
+    if (!trimmedProduct) return;
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const response = await fetch("/api/upload", { method: "POST", body: form });
-      const payload = await response.json();
-      if (!response.ok || !payload.url) {
-        throw new Error(payload.error || "Upload mislukt");
-      }
-      if (slot === "feed") setFeedImageUrl(payload.url);
-      if (slot === "square") setSquareImageUrl(payload.url);
-      if (slot === "story") setStoryImageUrl(payload.url);
-      showToast({ title: "Afbeelding geüpload" });
-    } catch (error) {
-      showToast({
-        title: "Upload mislukt",
-        description: error instanceof Error ? error.message : "Onbekende fout",
-        variant: "error",
+      const rawPayload = await generateVariantSuggestion.mutateAsync({
+        product: trimmedProduct,
+        audience: audience.trim() || undefined,
+        tone: aiTone,
+        angle: angle.trim() || `${adsetName} doelgroep met duidelijke hook`,
+        landingUrl: linkUrl.trim() || undefined,
+        adsetName,
       });
-    } finally {
-      setUploadingAsset(null);
+      const payload = asRecord(rawPayload);
+      updateVariant(adsetId, variantId, {
+        name: String(payload.adName || payload.headline || "AI variant"),
+        adName: String(payload.adName || payload.headline || "AI variant"),
+        primaryText: String(payload.primaryText || ""),
+        headline: String(payload.headline || ""),
+        description: String(payload.description || ""),
+        linkUrl: String(payload.linkUrl || linkUrl),
+        ctaType: String(payload.ctaType || "LEARN_MORE"),
+        ctaLabel: String(payload.ctaLabel || ctaLabelFromType(String(payload.ctaType || "LEARN_MORE"))),
+        publishAsset: (payload.publishAsset || "feed") as AssetSlot,
+        angle: String(payload.angle || angle || ""),
+      });
+      showToast({ title: "AI advertentie-variant gegenereerd" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Onbekende fout";
+      showToast({ title: "Variant suggestie mislukt", description: trpcErrorDescription(message), variant: "error" });
     }
   }
 
@@ -1617,10 +4531,9 @@ export default function MetaAdsPage() {
   }
 
   function buildPayload(strict = true) {
-    if (strict && !setupComplete) throw new Error("Vul eerst stap 1 volledig in.");
-    if (strict && !campaignComplete) throw new Error("Vul eerst stap 2 volledig in.");
-    if (strict && !adsetsComplete) throw new Error("Vul eerst stap 3 volledig in.");
-    if (strict && !creativesComplete) throw new Error("Vul eerst stap 4 volledig in.");
+    if (strict && !campaignComplete) throw new Error("Vul eerst Campaign volledig in.");
+    if (strict && !adsetsComplete) throw new Error("Vul eerst Ad set volledig in.");
+    if (strict && !adsComplete) throw new Error("Vul eerst Ads volledig in.");
     const advancedCreative = parseJson(advancedCreativeJson, "Advanced creative");
     const advancedTargeting = parseJson(advancedTargetingJson, "Advanced targeting");
     const campaignSettings = {
@@ -1634,6 +4547,8 @@ export default function MetaAdsPage() {
       billingEvent,
       pixelId: pixelId.trim() || null,
       customEventType: customEventType.trim() || null,
+      advertiserName: advertiserName.trim() || null,
+      advertiserPayerDifferent,
     };
     const adsetPayloads = adsets.map((adset) => ({
       ...buildTargetingFromAdset(adset),
@@ -1665,6 +4580,7 @@ export default function MetaAdsPage() {
         ),
       ),
     }));
+    const firstCreative = asRecord(creativeGroups[0]?.variants[0]);
 
     return {
       name,
@@ -1681,23 +4597,28 @@ export default function MetaAdsPage() {
         ...advancedTargeting,
       },
       creatives: {
-        adName: adName.trim(),
-        pageName: pageName.trim(),
-        linkUrl: linkUrl.trim(),
-        displayUrl: displayUrl.trim(),
-        message: primaryText.trim(),
-        headline: headline.trim(),
-        description: description.trim(),
-        imageUrl: primaryPublishImage.trim(),
-        feedImageUrl: feedImageUrl.trim(),
-        squareImageUrl: squareImageUrl.trim(),
-        storyImageUrl: storyImageUrl.trim(),
-        publishAsset,
-        ctaType,
-        cta: ctaLabel.trim(),
-        ctaLabel: ctaLabel.trim(),
-        urlTags: urlTags.trim(),
+        adName: String(firstCreative.adName || adName).trim(),
+        pageName: facebookPublisherName,
+        linkUrl: String(firstCreative.linkUrl || linkUrl).trim(),
+        displayUrl: String(firstCreative.displayUrl || displayUrl).trim(),
+        message: String(firstCreative.message || firstCreative.primaryText || primaryText).trim(),
+        headline: String(firstCreative.headline || headline).trim(),
+        description: String(firstCreative.description || description).trim(),
+        imageUrl: String(firstCreative.imageUrl || primaryPublishImage).trim(),
+        feedImageUrl: String(firstCreative.feedImageUrl || feedImageUrl).trim(),
+        squareImageUrl: String(firstCreative.squareImageUrl || squareImageUrl).trim(),
+        storyImageUrl: String(firstCreative.storyImageUrl || storyImageUrl).trim(),
+        publishAsset: (firstCreative.publishAsset as AssetSlot) || publishAsset,
+        ctaType: String(firstCreative.ctaType || ctaType),
+        cta: String(firstCreative.cta || firstCreative.ctaLabel || ctaLabel).trim(),
+        ctaLabel: String(firstCreative.ctaLabel || ctaLabel).trim(),
+        urlTags: String(firstCreative.urlTags || urlTags).trim(),
         aiTone,
+        aiBrief: {
+          product: product.trim(),
+          audience: audience.trim(),
+          tone: aiTone,
+        },
         adsets: creativeGroups,
         ...advancedCreative,
       },
@@ -1717,27 +4638,64 @@ export default function MetaAdsPage() {
   return (
     <TooltipProvider delayDuration={200}>
       <div className="space-y-6">
-        <div className="overflow-hidden rounded-[2rem] border bg-[radial-gradient(circle_at_top_left,#dbeafe,transparent_36%),radial-gradient(circle_at_80%_0,#f5d0fe,transparent_30%),linear-gradient(135deg,#fff,#f8fafc_55%,#eef2ff)] p-6 shadow-sm dark:bg-[radial-gradient(circle_at_top_left,#1d4ed8,transparent_32%),linear-gradient(135deg,#020617,#0f172a)]">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="relative overflow-hidden rounded-[2rem] border border-[#1877F2]/15 bg-gradient-to-br from-[#1877F2]/[0.07] via-white to-[#E1306C]/[0.05] p-6 shadow-sm dark:border-[#1877F2]/25 dark:from-[#1877F2]/15 dark:via-slate-950 dark:to-[#833AB4]/10">
+          <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-[#1877F2]/15 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-16 left-1/4 h-44 w-44 rounded-full bg-[#E1306C]/10 blur-3xl" />
+          <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="max-w-3xl">
-              <Badge variant="secondary" className="mb-3">Meta wizard · campagnes blijven standaard PAUSED</Badge>
-              <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950">
-                  <Megaphone className="h-5 w-5" />
-                </div>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <Badge className="border-0 bg-[#1877F2]/10 font-medium text-[#1877F2] hover:bg-[#1877F2]/10 dark:bg-[#1877F2]/20 dark:text-[#6ba3ff]">
+                  Meta Ads
+                </Badge>
+                <Badge variant="secondary" className="font-normal">
+                  Campagnes starten als PAUSED
+                </Badge>
+              </div>
+              <div className="flex items-start gap-4">
+                <MetaAdsBrandMark />
                 <div>
-                  <h1 className="text-3xl font-semibold tracking-tight">Meta Ads studio</h1>
-                  <p className="text-sm text-muted-foreground">
-                    Bouw Facebook en Instagram campagnes stap voor stap, met meerdere adsets, AI-voorstellen, format checks en veilige paused push.
+                  <h1 className="text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">Meta Ads Studio</h1>
+                  <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                    Campaign → Ad set → Ads, zoals in Ads Manager. Met AI-voorstellen, formaatchecks en veilige paused push naar
+                    Facebook &amp; Instagram.
                   </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm ring-1 ring-black/5 dark:bg-slate-900/80 dark:text-slate-200 dark:ring-white/10">
+                      <span className="h-2 w-2 rounded-full bg-[#1877F2]" />
+                      Facebook
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-slate-700 shadow-sm ring-1 ring-black/5 dark:bg-slate-900/80 dark:text-slate-200 dark:ring-white/10">
+                      <span className="h-2 w-2 rounded-full bg-gradient-to-tr from-[#f9ce34] via-[#ee2a7b] to-[#6228d7]" />
+                      Instagram
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" asChild>
+            <div className="flex shrink-0 flex-wrap gap-2 lg:flex-col xl:flex-row">
+              <Button className="bg-[#1877F2] text-white shadow-md shadow-[#1877F2]/20 hover:bg-[#166fe5]" asChild>
                 <Link href="/settings/integrations">Meta koppeling beheren</Link>
               </Button>
-              <Button variant="secondary" disabled={!canOpenStep("review")} onClick={() => setActiveStep("review")}>
+              <Button variant="outline" className="border-slate-200 bg-white/80 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/60" onClick={startNewCampaign}>
+                <Plus className="mr-2 h-4 w-4" />
+                Nieuwe campagne
+              </Button>
+              <Button
+                variant="outline"
+                className="border-slate-200 bg-white/80 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/60"
+                onClick={() => setAdsTab("campaigns")}
+              >
+                Live campagnes
+              </Button>
+              <Button
+                variant="outline"
+                className="border-[#1877F2]/25 bg-white/80 hover:bg-[#1877F2]/5 dark:border-[#1877F2]/30 dark:bg-slate-900/60"
+                disabled={!canOpenStep("review")}
+                onClick={() => {
+                  setAdsTab("builder");
+                  setActiveStep("review");
+                }}
+              >
                 Naar review
               </Button>
             </div>
@@ -1777,63 +4735,81 @@ export default function MetaAdsPage() {
         ) : null}
 
         {connection.data?.missingConfiguredScopes?.length ? (
-          <Card className="border-amber-500/30 bg-amber-500/10">
-            <CardContent className="p-4 text-sm text-amber-950 dark:text-amber-100">
-              <AlertTriangle className="mr-2 inline h-4 w-4" />
-              OAuth mist ads-scopes: <span className="font-mono">{connection.data.missingConfiguredScopes.join(", ")}</span>. Zet <span className="font-mono">META_OAUTH_INCLUDE_ADS=true</span>, redeploy, en koppel Meta opnieuw.
-            </CardContent>
-          </Card>
+          <MetaOAuthScopesAlert scopes={connection.data.missingConfiguredScopes} />
         ) : null}
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Koppeling</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              <div className="flex items-center gap-2">{connection.data?.connected ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <XCircle className="h-4 w-4 text-muted-foreground" />} Meta OAuth</div>
-              <div className="font-mono text-xs text-muted-foreground">{connection.data?.selectedAdAccountName || connection.data?.selectedAdAccountId || "Geen account geselecteerd"}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Budget guard</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm">Max per campagne: <span className="font-semibold">{eur(connection.data?.maxDailyBudgetCents, connection.data?.defaultCurrency || "EUR")}</span></CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Laatste 30 dagen</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm">Spend: <span className="font-semibold">{new Intl.NumberFormat("nl-BE", { style: "currency", currency: "EUR" }).format(totalSpend)}</span> · Clicks: <span className="font-semibold">{totalClicks}</span></CardContent>
-          </Card>
-        </div>
+        <AdsStudioStatsStrip
+          studio="meta"
+          items={[
+            {
+              id: "connection",
+              label: "Koppeling",
+              icon: adsStudioStatIcons.connection,
+              primary: "Meta OAuth",
+              secondary:
+                connection.data?.selectedAdAccountName ||
+                connection.data?.selectedAdAccountId ||
+                "Geen account geselecteerd",
+              connected: Boolean(connection.data?.connected),
+            },
+            {
+              id: "performance",
+              label: "CTR (30d)",
+              icon: adsStudioStatIcons.performance,
+              primary:
+                insightCoach.impressions > 0 ? `${insightCoach.ctr.toFixed(2)}%` : "—",
+              secondary:
+                insightCoach.clicks > 0
+                  ? `CPC ${new Intl.NumberFormat("nl-BE", { style: "currency", currency: "EUR" }).format(insightCoach.cpc)}`
+                  : insightCoach.impressions > 0
+                    ? `${insightCoach.impressions.toLocaleString("nl-BE")} impressies`
+                    : "Geen data in periode",
+            },
+            {
+              id: "insights",
+              label: "30 dagen",
+              icon: adsStudioStatIcons.insights,
+              primary: new Intl.NumberFormat("nl-BE", { style: "currency", currency: "EUR" }).format(totalSpend),
+              secondary: `${totalClicks} klik${totalClicks === 1 ? "" : "s"}`,
+            },
+          ]}
+        />
 
         <Tabs value={adsTab} onValueChange={setAdsTab} className="space-y-4">
-          <TabsList className="flex h-auto flex-wrap justify-start gap-2 rounded-2xl bg-transparent p-0">
-            <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-            <TabsTrigger value="builder">Studio</TabsTrigger>
-            <TabsTrigger value="approval">Approval queue</TabsTrigger>
-            <TabsTrigger value="campaigns">Campagnes</TabsTrigger>
-            <TabsTrigger value="drafts">Drafts</TabsTrigger>
-            <TabsTrigger value="insights">Insights</TabsTrigger>
-            <TabsTrigger value="settings">Instellingen</TabsTrigger>
-          </TabsList>
+          <AdsStudioTabsNav
+            value={adsTab}
+            onValueChange={setAdsTab}
+            tabs={META_ADS_NAV_TABS}
+            studio="meta"
+            mobileNavLabel="Meta Ads Studio navigatie"
+            getBadgeCount={(tabValue) =>
+              tabValue === "approval" ? pendingApprovalCount : tabValue === "drafts" ? rows.length : 0
+            }
+          />
 
           <TabsContent value="dashboard" className="space-y-4">
             <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" /> Wat is nu beter?</CardTitle>
-                  <CardDescription>Deze studio is nu strakker gemaakt rond de echte Meta-structuur: campagne → meerdere adsets → creatives → paused push.</CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-3 md:grid-cols-2">
-                  <CheckRow ok label="Meerdere adsets" hint="Je kunt nu verschillende doelgroepen apart plannen en pushen binnen één campagne." />
-                  <CheckRow ok label="Formaatbewuste visuals" hint="Feed, square en story assets zijn los in te vullen of te uploaden." />
-                  <CheckRow ok label="AI voorstel met doelgroepideeën" hint="AI vult nu ook objective en adset-suggesties mee in." />
-                  <CheckRow ok label="Approval queue apart" hint="Builder en goedkeuringsflow zijn gescheiden zodat het rustiger werkt." />
-                </CardContent>
-              </Card>
+              <MetaAdsDashboardOverview
+                drafts={rows as Array<Record<string, unknown>>}
+                liveCampaigns={(campaigns.data || []) as Array<Record<string, unknown>>}
+                insightsRows={(insights.data || []) as Array<Record<string, unknown>>}
+                insightsLoading={insights.isLoading}
+                insightCoach={insightCoach}
+                pendingApprovalCount={pendingApprovalCount}
+                operationalRequirements={operationalRequirements}
+                connected={Boolean(connection.data?.connected)}
+                accountSelected={Boolean(connection.data?.selectedAdAccountId)}
+                topScoreEntry={campaignScoreEntries[0]}
+                onNavigate={setAdsTab}
+                onOpenDraft={(planId) => openDraftForEditing(planId, "campaign")}
+                onOpenCampaign={openLiveCampaign}
+                onOpenTopScore={() => {
+                  const entry = campaignScoreEntries[0];
+                  if (!entry) return;
+                  if (entry.planId) openScoredPlan(entry.planId);
+                  else if (entry.campaignId) openLiveCampaign(entry.campaignId);
+                }}
+              />
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2"><Wand2 className="h-5 w-5" /> AI campagne scores</CardTitle>
@@ -1863,7 +4839,7 @@ export default function MetaAdsPage() {
                     <div className="rounded-2xl border border-dashed bg-muted/15 px-4 py-8 text-center text-sm text-muted-foreground">
                       <p className="font-medium text-foreground">Nog geen campagnes om te scoren</p>
                       <p className="mt-2 text-xs leading-5">
-                        Sla een voltooide draft op in Studio, of activeer een campagne in Meta. Minimaal nodig: naam, budget, https-link en creatives per adset.
+                        Sla een voltooide draft op in Studio, of activeer een campagne in Meta. Minimaal nodig: Campaign, Ad set en Ads met copy, link en visual.
                       </p>
                       <Button size="sm" className="mt-4" variant="outline" onClick={() => setAdsTab("builder")}>
                         Naar studio
@@ -1877,136 +4853,222 @@ export default function MetaAdsPage() {
 
           <TabsContent value="builder" className="space-y-4">
             <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-              <Card className="overflow-hidden">
-                <CardHeader className="border-b bg-muted/30">
-                  <CardTitle>Meta Ads studio</CardTitle>
-                  <CardDescription>Werk de stappen van links naar rechts af. Teruggaan kan altijd, vooruit alleen als de basis klopt.</CardDescription>
+              <Card className="order-2 min-w-0 overflow-hidden xl:order-1">
+                <CardHeader className="gap-0 space-y-0 border-b p-0">
+                  <div className="flex items-start gap-3 px-5 py-4">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white shadow-sm dark:bg-white dark:text-slate-950">
+                      {activeStepIndex + 1}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CardTitle className="text-base">{activeStepMeta.label}</CardTitle>
+                        <Badge variant="secondary" className="h-5 px-2 text-[10px] font-normal">
+                          Stap {activeStepIndex + 1} van {BUILDER_STEP_ORDER.length}
+                        </Badge>
+                      </div>
+                      <CardDescription className="mt-1 text-xs leading-relaxed">{activeStepMeta.description}</CardDescription>
+                    </div>
+                    <div className="hidden shrink-0 text-right sm:block">
+                      <p className="text-lg font-semibold tabular-nums leading-none">{builderCompletionPercent}%</p>
+                      <p className="mt-1 text-[10px] text-muted-foreground">checklist</p>
+                    </div>
+                  </div>
+                  <div className="h-1 bg-muted">
+                    <div
+                      className="h-full bg-primary transition-all duration-300"
+                      style={{ width: `${builderCompletionPercent}%` }}
+                    />
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-5 p-5">
-                  <div className="grid gap-3 md:grid-cols-5">
-                    {STEPS.map((step) => (
-                      <StepButton
-                        key={step.id}
-                        step={step}
-                        activeStep={activeStep}
-                        complete={
-                          step.id === "setup"
-                            ? setupComplete
-                            : step.id === "campaign"
-                              ? campaignComplete
-                              : step.id === "adsets"
-                                ? adsetsComplete
-                                : step.id === "creatives"
-                                  ? creativesComplete
-                                  : readyToSave
-                        }
-                        locked={!canOpenStep(step.id)}
-                        onClick={() => setActiveStep(step.id)}
-                      />
-                    ))}
-                  </div>
+                  <BuilderStepper
+                    activeStep={activeStep}
+                    onStepClick={setActiveStep}
+                    stepComplete={isStepComplete}
+                    canOpenStep={canOpenStep}
+                    compact
+                  />
 
-                  {activeStep === "setup" ? (
-                    <div className="space-y-5">
-                      <div className="rounded-2xl border p-4">
-                        <div className="mb-3 flex items-center gap-2">
-                          <Megaphone className="h-4 w-4" />
-                          <p className="font-medium">Campagne setup</p>
-                        </div>
-                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                          <div className="space-y-2">
-                            <HelpLabel label="Campagnenaam" help="Interne naam voor de draft en de Meta-campagne. Houd dit leesbaar voor je team." />
-                            <Input value={name} onChange={(e) => setName(e.target.value)} />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Objective" help="Dit bepaalt waar Meta op optimaliseert. Verkeerde objective zorgt vaak voor zwakke delivery." />
-                            <Select value={objective} onValueChange={setObjective}>
-                              <SelectTrigger><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="OUTCOME_TRAFFIC">Traffic</SelectItem>
-                                <SelectItem value="OUTCOME_LEADS">Leads</SelectItem>
-                                <SelectItem value="OUTCOME_SALES">Sales</SelectItem>
-                                <SelectItem value="OUTCOME_ENGAGEMENT">Engagement</SelectItem>
-                                <SelectItem value="OUTCOME_AWARENESS">Awareness</SelectItem>
-                                <SelectItem value="LINK_CLICKS">Link clicks</SelectItem>
-                                <SelectItem value="LEAD_GENERATION">Lead generation</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Valuta" help="Best gelijk houden aan je geselecteerde Ad Account." />
-                            <Input value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} maxLength={3} />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Dagbudget in cent" help="Voorbeeld: 2500 = €25,00. De workspace budget guard blokkeert te hoge bedragen." />
-                            <Input type="number" min="100" value={dailyBudget} onChange={(e) => setDailyBudget(e.target.value)} />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Lifetime budget in cent" help="Gebruik dit alleen als je geen dagbudget wil. Laat leeg als dagbudget volstaat." />
-                            <Input type="number" min="100" value={lifetimeBudget} onChange={(e) => setLifetimeBudget(e.target.value)} placeholder="Optioneel" />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Campaign spend cap" help="Bovenlimiet voor totale spend van de campagne. Alleen invullen als je dat echt wil forceren." />
-                            <Input type="number" value={campaignSpendCap} onChange={(e) => setCampaignSpendCap(e.target.value)} placeholder="Optioneel" />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Start" help="Laat leeg voor meteen na push. V1 pusht altijd als PAUSED, maar bewaart wel deze planning." />
-                            <Input type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Einde" help="Optioneel eindmoment van de campagne." />
-                            <Input type="datetime-local" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
-                          </div>
-                        </div>
-                      </div>
+                  <MetaBuilderChecklist
+                    campaignComplete={campaignComplete}
+                    adsetsComplete={adsetsComplete}
+                    adsComplete={adsComplete}
+                    readyToSave={readyToSave}
+                    adsetCount={adsets.length}
+                    variantCount={totalVariants}
+                    onStepClick={setActiveStep}
+                  />
 
-                      <div className="rounded-2xl border p-4">
-                        <div className="mb-3 flex items-center gap-2">
-                          <Sparkles className="h-4 w-4" />
-                          <p className="font-medium">AI briefing</p>
-                        </div>
-                        <div className="grid gap-3 sm:grid-cols-3">
-                          <div className="space-y-2">
-                            <HelpLabel label="Product of aanbod" help="AI gebruikt dit om copy en doelgroepideeën te schrijven." />
-                            <Input value={product} onChange={(e) => setProduct(e.target.value)} />
+                  {activeStep === "campaign" ? (
+                    <div className="space-y-4">
+                      <BuilderSection
+                        icon={Megaphone}
+                        title="Campagne"
+                        description="Meta-niveau 1: naam, buying type, objective, budget en planning."
+                        collapsible
+                        defaultOpen={false}
+                        preview={metaCampaignPreview({
+                          name,
+                          objective,
+                          buyingType,
+                          currency,
+                          dailyBudget,
+                          lifetimeBudget,
+                        })}
+                      >
+                        <FieldGroup title="Campagnedetails" description="Naam, buying type en doelstelling van de campagne.">
+                          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                            <div className="space-y-2 sm:col-span-2 xl:col-span-1">
+                              <HelpLabel label="Campagnenaam" help="Interne naam voor de draft en de Meta-campagne. Houd dit leesbaar voor je team." />
+                              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Bijv. Q2 leadgen — website" />
+                            </div>
+                            <div className="space-y-2">
+                              <HelpLabel label="Buying type" help="Voor de meeste campagnes blijft Auction correct." />
+                              <Select value={buyingType} onValueChange={setBuyingType}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {META_BUYING_TYPE_OPTIONS.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <HelpLabel label="Objective" help="Dit bepaalt waar Meta op optimaliseert. Verkeerde objective zorgt vaak voor zwakke delivery." />
+                              <Select value={objective} onValueChange={setObjective}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="OUTCOME_TRAFFIC">Traffic</SelectItem>
+                                  <SelectItem value="OUTCOME_LEADS">Leads</SelectItem>
+                                  <SelectItem value="OUTCOME_SALES">Sales</SelectItem>
+                                  <SelectItem value="OUTCOME_ENGAGEMENT">Engagement</SelectItem>
+                                  <SelectItem value="OUTCOME_AWARENESS">Awareness</SelectItem>
+                                  <SelectItem value="LINK_CLICKS">Link clicks</SelectItem>
+                                  <SelectItem value="LEAD_GENERATION">Lead generation</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <HelpLabel label="Valuta" help="Best gelijk houden aan je geselecteerde Ad Account." />
+                              <Select value={currency} onValueChange={setCurrency}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {META_CURRENCY_OPTIONS.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>
+                                      {option.symbol} {option.label} ({option.value})
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <HelpLabel label="Special ad categories" help="Alleen bij gereguleerde sectoren (housing, employment, credit)." />
+                              <Select
+                                value={
+                                  specialAdCategories.trim()
+                                    ? META_SPECIAL_AD_CATEGORY_OPTIONS.find((item) => item.value === specialAdCategories.split(",")[0]?.trim().toUpperCase())?.value ||
+                                      "NONE"
+                                    : "NONE"
+                                }
+                                onValueChange={(value) => setSpecialAdCategories(value === "NONE" ? "" : value)}
+                              >
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {META_SPECIAL_AD_CATEGORY_OPTIONS.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
                           </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Doelgroep voor AI" help="Beschrijf wie je wil bereiken. Dit is briefingtekst, geen echte Meta targeting." />
-                            <Input value={audience} onChange={(e) => setAudience(e.target.value)} />
+                        </FieldGroup>
+
+                        <FieldGroup title="Budget & planning" description="Dagbudget in centen (100 = €1,00). Vul dag- of lifetimebudget in — minimaal €1,00.">
+                          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                            <div className="space-y-2">
+                              <HelpLabel label="Dagbudget in cent" help="Voorbeeld: 2500 = €25,00. De workspace budget guard blokkeert te hoge bedragen." />
+                              <Input type="number" min="100" value={dailyBudget} onChange={(e) => setDailyBudget(e.target.value)} placeholder="Bijv. 2500" />
+                              {dailyBudget.trim() ? <p className="text-[11px] text-muted-foreground">≈ {dailyBudgetEur} per dag</p> : null}
+                            </div>
+                            <div className="space-y-2">
+                              <HelpLabel label="Lifetime budget in cent" help="Gebruik dit alleen als je geen dagbudget wil. Laat leeg als dagbudget volstaat." />
+                              <Input type="number" min="100" value={lifetimeBudget} onChange={(e) => setLifetimeBudget(e.target.value)} placeholder="Optioneel" />
+                              {lifetimeBudgetEur ? <p className="text-[11px] text-muted-foreground">≈ {lifetimeBudgetEur} totaal</p> : null}
+                            </div>
+                            <div className="space-y-2">
+                              <HelpLabel label="Campaign spend cap" help="Bovenlimiet voor totale spend van de campagne. Alleen invullen als je dat echt wil forceren." />
+                              <Input type="number" value={campaignSpendCap} onChange={(e) => setCampaignSpendCap(e.target.value)} placeholder="Optioneel" />
+                            </div>
+                            <div className="space-y-2">
+                              <HelpLabel label="Start" help="Laat leeg voor meteen na push. V1 pusht altijd als PAUSED, maar bewaart wel deze planning." />
+                              <Input type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+                            </div>
+                            <div className="space-y-2">
+                              <HelpLabel label="Einde" help="Optioneel eindmoment van de campagne." />
+                              <Input type="datetime-local" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+                            </div>
                           </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Tone of voice" help="Stuurt de stijl van headline, copy en CTA." />
-                            <Select value={aiTone} onValueChange={(value) => setAiTone(value as AiTone)}>
-                              <SelectTrigger><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="professioneel">Professioneel</SelectItem>
-                                <SelectItem value="vriendelijk">Vriendelijk</SelectItem>
-                                <SelectItem value="direct">Direct</SelectItem>
-                                <SelectItem value="speels">Speels</SelectItem>
-                                <SelectItem value="luxueus">Luxueus</SelectItem>
-                              </SelectContent>
-                            </Select>
+                        </FieldGroup>
+
+                        <FieldGroup title="EU transparency" description="Optioneel, maar handig voor Europese advertentievereisten.">
+                          <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                            <div className="space-y-2">
+                              <HelpLabel label="Advertiser" help="Naam die intern wordt bewaard voor EU advertiser/payer context." />
+                              <Input value={advertiserName} onChange={(e) => setAdvertiserName(e.target.value)} placeholder="Naam adverteerder (EU)" />
+                            </div>
+                            <div className="flex items-end">
+                              <div className="flex min-h-10 items-center gap-3 rounded-xl border px-3">
+                                <Switch checked={advertiserPayerDifferent} onCheckedChange={setAdvertiserPayerDifferent} />
+                                <span className="text-sm">Advertiser en payer verschillen</span>
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          <Button onClick={() => generateSuggestion.mutate({ product, audience, tone: aiTone })} variant="outline" disabled={generateSuggestion.isPending}>
-                            {generateSuggestion.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                            AI voorstel
-                          </Button>
-                          <p className="text-xs text-muted-foreground">AI vult copy en doelgroepsuggesties in, maar laat de campagne nog steeds in review bij jouw team.</p>
-                        </div>
-                      </div>
+                        </FieldGroup>
+
+                        <MetaAiBriefingHint onOpenDialog={openAiCampaignDialog} />
+                      </BuilderSection>
                     </div>
                   ) : null}
 
-                  {activeStep === "campaign" ? (
-                    <div className="space-y-5">
-                      <div className="rounded-2xl border p-4">
-                        <div className="mb-3 flex items-center gap-2">
-                          <ShieldCheck className="h-4 w-4" />
-                          <p className="font-medium">Bidding, tracking en basisinstellingen</p>
-                        </div>
+                  {activeStep === "adsets" ? (
+                    <div className="space-y-4">
+                      <BuilderSection
+                        icon={ShieldCheck}
+                        title="Ad set delivery"
+                        description="Performance goal, destination en biedstrategie voor de ad sets."
+                        collapsible
+                        defaultOpen={false}
+                        preview={metaDeliveryPreview({ optimizationGoal, destinationType, bidStrategy, billingEvent })}
+                      >
                         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                          <div className="space-y-2">
+                            <HelpLabel label="Performance goal" help="Laat meestal op Auto staan; we mappen dit veilig naar de objective." />
+                            <Select value={optimizationGoal} onValueChange={(value) => setOptimizationGoal(value as OptimizationGoal)}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="AUTO">Auto per objective</SelectItem>
+                                <SelectItem value="LINK_CLICKS">Link clicks</SelectItem>
+                                <SelectItem value="LANDING_PAGE_VIEWS">Landing page views</SelectItem>
+                                <SelectItem value="LEAD_GENERATION">Lead generation</SelectItem>
+                                <SelectItem value="OFFSITE_CONVERSIONS">Offsite conversions</SelectItem>
+                                <SelectItem value="REACH">Reach</SelectItem>
+                                <SelectItem value="IMPRESSIONS">Impressions</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <HelpLabel label="Destination" help="Niet elke objective laat elke destination toe. Auto is het veiligst." />
+                            <Select value={destinationType} onValueChange={(value) => setDestinationType(value as DestinationType)}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="AUTO">Auto</SelectItem>
+                                <SelectItem value="WEBSITE">Website</SelectItem>
+                                <SelectItem value="MESSENGER">Messenger</SelectItem>
+                                <SelectItem value="WHATSAPP">WhatsApp</SelectItem>
+                                <SelectItem value="PHONE_CALL">Phone call</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                           <div className="space-y-2">
                             <HelpLabel label="Bid strategy" help="Gebruik meestal lowest cost. Caps zijn pas zinvol als je al historische data hebt." />
                             <Select value={bidStrategy} onValueChange={(value) => setBidStrategy(value as BidStrategy)}>
@@ -2023,223 +5085,82 @@ export default function MetaAdsPage() {
                             <Input type="number" value={bidAmount} onChange={(e) => setBidAmount(e.target.value)} placeholder="Alleen bij cap strategies" />
                           </div>
                           <div className="space-y-2">
-                            <HelpLabel label="Buying type" help="Voor de meeste campagnes blijft AUCTION correct." />
-                            <Input value={buyingType} onChange={(e) => setBuyingType(e.target.value.toUpperCase())} />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Special ad categories" help="Alleen invullen bij gereguleerde sectoren zoals housing, employment of credit." />
-                            <Input value={specialAdCategories} onChange={(e) => setSpecialAdCategories(e.target.value)} placeholder="HOUSING, EMPLOYMENT, CREDIT..." />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Optimization goal" help="Laat meestal op Auto staan tenzij je precies weet welke delivery-optimalisatie je nodig hebt." />
-                            <Select value={optimizationGoal} onValueChange={(value) => setOptimizationGoal(value as OptimizationGoal)}>
+                            <HelpLabel label="Billing event" help="Voor de meeste gevallen blijft Impressions (CPM) prima." />
+                            <Select value={billingEvent} onValueChange={setBillingEvent}>
                               <SelectTrigger><SelectValue /></SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="AUTO">Auto per objective</SelectItem>
-                                <SelectItem value="LINK_CLICKS">Link clicks</SelectItem>
-                                <SelectItem value="LANDING_PAGE_VIEWS">Landing page views</SelectItem>
-                                <SelectItem value="LEAD_GENERATION">Lead generation</SelectItem>
-                                <SelectItem value="OFFSITE_CONVERSIONS">Offsite conversions</SelectItem>
-                                <SelectItem value="REACH">Reach</SelectItem>
-                                <SelectItem value="IMPRESSIONS">Impressions</SelectItem>
+                                {META_BILLING_EVENT_OPTIONS.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </div>
                           <div className="space-y-2">
-                            <HelpLabel label="Destination type" help="Niet elke objective laat elke destination toe. Auto is het veiligst." />
-                            <Select value={destinationType} onValueChange={(value) => setDestinationType(value as DestinationType)}>
+                            <HelpLabel label="Pixel ID" help="Optioneel. Nodig voor offsite conversions." />
+                            <Input value={pixelId} onChange={(e) => setPixelId(e.target.value)} placeholder="Meta pixel ID" />
+                          </div>
+                          <div className="space-y-2">
+                            <HelpLabel label="Custom event" help="Alleen relevant bij conversion-objectives met pixel." />
+                            <Select value={customEventType} onValueChange={setCustomEventType}>
                               <SelectTrigger><SelectValue /></SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="AUTO">Auto</SelectItem>
-                                <SelectItem value="WEBSITE">Website</SelectItem>
-                                <SelectItem value="MESSENGER">Messenger</SelectItem>
-                                <SelectItem value="WHATSAPP">WhatsApp</SelectItem>
-                                <SelectItem value="PHONE_CALL">Phone call</SelectItem>
+                                {META_CUSTOM_EVENT_OPTIONS.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Billing event" help="Voor de meeste gevallen blijft IMPRESSIONS prima." />
-                            <Input value={billingEvent} onChange={(e) => setBillingEvent(e.target.value.toUpperCase())} />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Pixel ID" help="Belangrijk voor sales/conversion campagnes. Zonder Pixel stuur je Meta minder goed aan." />
-                            <Input value={pixelId} onChange={(e) => setPixelId(e.target.value)} placeholder="Voor Sales/Conversions" />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Custom event type" help="Bijvoorbeeld LEAD, PURCHASE of COMPLETE_REGISTRATION." />
-                            <Input value={customEventType} onChange={(e) => setCustomEventType(e.target.value.toUpperCase())} />
                           </div>
                         </div>
-                      </div>
+                      </BuilderSection>
 
-                      <div className="rounded-2xl border p-4">
-                        <div className="mb-3 flex items-center gap-2">
-                          <Sparkles className="h-4 w-4" />
-                          <p className="font-medium">Campaign creative defaults</p>
-                        </div>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <div className="space-y-2">
-                            <HelpLabel label="Page/brand naam" help="Alleen voor preview en interne context in de builder." />
-                            <Input value={pageName} onChange={(e) => setPageName(e.target.value)} />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Default ad naam" help="Nieuwe varianten starten van deze basis." />
-                            <Input value={adName} onChange={(e) => setAdName(e.target.value)} />
-                          </div>
-                        </div>
-                        <div className="mt-3 space-y-2">
-                          <HelpLabel label="Default primaire tekst" help="Nieuwe varianten erven deze tekst tot je ze per variant overschrijft." />
-                          <Textarea className="min-h-24" value={primaryText} onChange={(e) => setPrimaryText(e.target.value)} />
-                        </div>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                          <div className="space-y-2">
-                            <HelpLabel label="Default headline" help="Wordt gebruikt als basis voor varianten." />
-                            <Input value={headline} onChange={(e) => setHeadline(e.target.value)} />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Default beschrijving" help="Wordt gebruikt als basis voor varianten." />
-                            <Input value={description} onChange={(e) => setDescription(e.target.value)} />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Default bestemmingslink" help="Volledige https-link. Variants kunnen dit overschrijven." />
-                            <Input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Display URL" help="Cosmetische URL in de preview." />
-                            <Input value={displayUrl} onChange={(e) => setDisplayUrl(e.target.value)} />
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Default CTA type" help="Nieuwe varianten nemen dit mee als startpunt." />
-                            <Select value={ctaType} onValueChange={setCtaType}>
-                              <SelectTrigger><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="LEARN_MORE">Learn more</SelectItem>
-                                <SelectItem value="SIGN_UP">Sign up</SelectItem>
-                                <SelectItem value="CONTACT_US">Contact us</SelectItem>
-                                <SelectItem value="BOOK_TRAVEL">Book now</SelectItem>
-                                <SelectItem value="SHOP_NOW">Shop now</SelectItem>
-                                <SelectItem value="APPLY_NOW">Apply now</SelectItem>
-                                <SelectItem value="GET_QUOTE">Get quote</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-2">
-                            <HelpLabel label="Default CTA label" help="Voor lokale preview en variantbasis." />
-                            <Input value={ctaLabel} onChange={(e) => setCtaLabel(e.target.value)} />
-                          </div>
-                        </div>
-                        <div className="mt-3 space-y-2">
-                          <HelpLabel label="Default URL tags" help="UTM-tags of andere tracking parameters. Nieuwe varianten erven dit." />
-                          <Input value={urlTags} onChange={(e) => setUrlTags(e.target.value)} />
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl border p-4">
-                        <div className="mb-3 flex items-center gap-2">
-                          <ImageIcon className="h-4 w-4" />
-                          <p className="font-medium">Visuals en formaten</p>
-                        </div>
-                        <div className="grid gap-4 xl:grid-cols-3">
-                          <AssetUploadCard
-                            title="Feed image"
-                            help="Belangrijkste beeld voor klassieke feed placements. Meta accepteert hier het liefst 1:1 of 1.91:1."
-                            ratio="1:1 of 1.91:1"
-                            recommended="1200x1200 of 1200x628"
-                            value={feedImageUrl}
-                            placeholder="https://... of upload bestand"
-                            probe={feedProbe}
-                            uploading={uploadingAsset === "feed"}
-                            onChange={setFeedImageUrl}
-                            onUpload={(file) => uploadAsset("feed", file)}
-                          />
-                          <AssetUploadCard
-                            title="Square image"
-                            help="Nuttig voor placements waar vierkante visuals beter renderen."
-                            ratio="1:1"
-                            recommended="1200x1200"
-                            value={squareImageUrl}
-                            placeholder="https://... of upload bestand"
-                            probe={squareProbe}
-                            uploading={uploadingAsset === "square"}
-                            onChange={setSquareImageUrl}
-                            onUpload={(file) => uploadAsset("square", file)}
-                          />
-                          <AssetUploadCard
-                            title="Story/Reels image"
-                            help="Gebruik hiervoor echt een 9:16 visual. Dat voorkomt de bekende Meta aspect ratio fout."
-                            ratio="9:16"
-                            recommended="1080x1920"
-                            value={storyImageUrl}
-                            placeholder="https://... of upload bestand"
-                            probe={storyProbe}
-                            uploading={uploadingAsset === "story"}
-                            onChange={setStoryImageUrl}
-                            onUpload={(file) => uploadAsset("story", file)}
-                          />
-                        </div>
-                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                          <div className="space-y-2">
-                            <HelpLabel label="Primair publish beeld" help="Dit is de asset die we standaard meegeven aan de Meta push. Kies bewust het formaat dat het best past bij je belangrijkste placements." />
-                            <Select value={publishAsset} onValueChange={(value) => setPublishAsset(value as AssetSlot)}>
-                              <SelectTrigger><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="feed">Feed image</SelectItem>
-                                <SelectItem value="square">Square image</SelectItem>
-                                <SelectItem value="story">Story/Reels image</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="rounded-2xl border bg-muted/30 p-3 text-xs text-muted-foreground">
-                            <p className="font-medium text-foreground">Format checks</p>
-                            <p className="mt-1">Feed ratio: {probeLabel(feedProbe)} {roughlyMatches(aspectRatio(feedProbe), 1) || roughlyMatches(aspectRatio(feedProbe), 1.91, 0.12) ? "· goed voor feed" : feedProbe.status === "ready" ? "· check ratio" : ""}</p>
-                            <p>Square ratio: {probeLabel(squareProbe)} {roughlyMatches(aspectRatio(squareProbe), 1) ? "· goed voor 1:1" : squareProbe.status === "ready" ? "· check ratio" : ""}</p>
-                            <p>Story ratio: {probeLabel(storyProbe)} {roughlyMatches(aspectRatio(storyProbe), 9 / 16, 0.08) ? "· goed voor story/reels" : storyProbe.status === "ready" ? "· check ratio" : ""}</p>
-                          </div>
-                        </div>
-                        {requiresStoryImage && !storyImageUrl.trim() ? (
-                          <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-950 dark:text-amber-100">
-                            Stories of Reels zijn geselecteerd in minstens één adset, maar er is nog geen aparte 9:16 visual toegevoegd. Dat verhoogt de kans op Meta aspect ratio fouten.
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {activeStep === "adsets" ? (
-                    <div className="space-y-5">
-                      <div className="rounded-2xl border p-4">
-                        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <p className="font-medium">Adsets</p>
-                            <p className="text-xs text-muted-foreground">Splits doelgroepen op per hook, regio, funnel of remarketingdoel. Dat werkt duidelijker dan alles in één adset proppen.</p>
-                          </div>
-                          <Button variant="outline" onClick={addAdset}>
+                      <BuilderSection
+                        icon={Target}
+                        title="Advertentiesets"
+                        description="Splits doelgroepen op per hook, regio, funnel of remarketingdoel."
+                        accent="ai"
+                        collapsible
+                        defaultOpen={false}
+                        preview={adsetsSectionPreview(adsets)}
+                        headerAction={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              addAdset();
+                            }}
+                          >
                             <Plus className="mr-2 h-4 w-4" />
-                            Adset toevoegen
+                            Toevoegen
                           </Button>
-                        </div>
-                        <div className="space-y-4">
+                        }
+                      >
+                        {!adsets.length ? (
+                          <EmptyState
+                            icon={<Target className="h-8 w-8" />}
+                            title="Nog geen advertentieset"
+                            description="Voeg minstens één advertentieset toe met land, leeftijd en placements voordat je advertenties maakt."
+                            action={
+                              <Button onClick={addAdset}>
+                                <Plus className="mr-2 h-4 w-4" />
+                                Eerste advertentieset
+                              </Button>
+                            }
+                          />
+                        ) : null}
+                        <div className="space-y-3">
                           {adsets.map((adset, index) => (
-                            <div key={adset.id} className="rounded-2xl border bg-muted/20 p-4">
-                              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                  <Layers3 className="h-4 w-4" />
-                                  <p className="font-medium">Adset {index + 1}</p>
-                                </div>
-                                <Button variant="ghost" size="sm" disabled={adsets.length === 1} onClick={() => removeAdset(adset.id)}>
-                                  <Trash2 className="mr-2 h-4 w-4" />
-                                  Verwijderen
-                                </Button>
-                              </div>
-                              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                                <div className="space-y-2">
-                                  <HelpLabel label="Adset naam" help="Gebruik een naam die doelgroep of testhoek meteen duidelijk maakt." />
+                            <AdsetAccordionCard
+                              key={adset.id}
+                              adset={adset}
+                              index={index}
+                              defaultOpen={false}
+                              onRemove={() => removeAdset(adset.id)}
+                            >
+                              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                                <div className="space-y-2 sm:col-span-2">
+                                  <HelpLabel label="Advertentieset naam" help="Gebruik een naam die doelgroep of testhoek meteen duidelijk maakt." />
                                   <Input value={adset.name} onChange={(e) => updateAdset(adset.id, { name: e.target.value })} />
-                                </div>
-                                <div className="space-y-2">
-                                  <HelpLabel label="Landen" help="Landcodes, bijvoorbeeld BE of NL. Meerdere codes scheiden met komma." />
-                                  <Input value={adset.countries} onChange={(e) => updateAdset(adset.id, { countries: e.target.value })} placeholder="BE, NL" />
                                 </div>
                                 <div className="space-y-2">
                                   <HelpLabel label="Gender" help="Laat dit meestal open, tenzij je aanbod echt gender-specifiek is." />
@@ -2253,42 +5174,21 @@ export default function MetaAdsPage() {
                                   </Select>
                                 </div>
                                 <div className="space-y-2">
-                                  <HelpLabel label="Min leeftijd" help="Meta accepteert geen te lage leeftijden voor alle sectoren. 24-60 is vaak een prima start." />
-                                  <Input type="number" value={adset.ageMin} onChange={(e) => updateAdset(adset.id, { ageMin: e.target.value })} />
-                                </div>
-                                <div className="space-y-2">
-                                  <HelpLabel label="Max leeftijd" help="Laat breed genoeg om delivery niet onnodig dicht te knijpen." />
-                                  <Input type="number" value={adset.ageMax} onChange={(e) => updateAdset(adset.id, { ageMax: e.target.value })} />
-                                </div>
-                              </div>
-                              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                                <div className="space-y-2">
-                                  <HelpLabel label="Regio IDs" help="Geavanceerde Meta regio keys. Alleen invullen als je ze echt nodig hebt." />
-                                  <Textarea className="min-h-24 font-mono text-xs" value={adset.regions} onChange={(e) => updateAdset(adset.id, { regions: e.target.value })} />
-                                </div>
-                                <div className="space-y-2">
-                                  <HelpLabel label="City IDs" help="Geavanceerde Meta city keys. Laat leeg als landen targeting volstaat." />
-                                  <Textarea className="min-h-24 font-mono text-xs" value={adset.cities} onChange={(e) => updateAdset(adset.id, { cities: e.target.value })} />
+                                  <HelpLabel label="Leeftijd" help="Min. 13 · max ≥ min" />
+                                  <div className="flex gap-2">
+                                    <Input type="number" min={13} value={adset.ageMin} onChange={(e) => updateAdset(adset.id, { ageMin: e.target.value })} placeholder={META_DEFAULT_AGE_MIN} />
+                                    <Input type="number" min={13} value={adset.ageMax} onChange={(e) => updateAdset(adset.id, { ageMax: e.target.value })} placeholder={META_DEFAULT_AGE_MAX} />
+                                  </div>
                                 </div>
                               </div>
-                              <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                                <div className="space-y-2">
-                                  <HelpLabel label="Interest signalen" help="Dit zijn interne AI/notitie-signalen. Ze worden niet blind als Meta interests gepusht, zodat we geen ongeldige targeting meesturen." />
-                                  <Textarea className="min-h-28" value={adset.interestSignalsText} onChange={(e) => updateAdset(adset.id, { interestSignalsText: e.target.value })} />
-                                </div>
-                                <div className="space-y-2">
-                                  <HelpLabel label="Custom audience IDs" help="Echte Meta audience IDs. Eén per lijn." />
-                                  <Textarea className="min-h-28 font-mono text-xs" value={adset.customAudiencesText} onChange={(e) => updateAdset(adset.id, { customAudiencesText: e.target.value })} />
-                                </div>
-                                <div className="space-y-2">
-                                  <HelpLabel label="Exclude custom audience IDs" help="Handig om bestaande klanten of converters uit te sluiten." />
-                                  <Textarea className="min-h-28 font-mono text-xs" value={adset.excludedCustomAudiencesText} onChange={(e) => updateAdset(adset.id, { excludedCustomAudiencesText: e.target.value })} />
-                                </div>
-                              </div>
-                              <div className="mt-3 space-y-2">
-                                <HelpLabel label="Interne adset-notities" help="Leg vast waarom deze doelgroep bestaat, zodat approval en iteratie sneller gaan." />
-                                <Textarea className="min-h-20" value={adset.notes} onChange={(e) => updateAdset(adset.id, { notes: e.target.value })} placeholder="Bijvoorbeeld: warm remarketing publiek, focus op demo aanvraag." />
-                              </div>
+
+                              <MetaLocationEditor
+                                adset={adset}
+                                metaSearchEnabled={Boolean(connection.data?.connected)}
+                                onChange={(patch) => updateAdset(adset.id, patch)}
+                              />
+
+                              <AdsetAudienceOptionalSection adset={adset} onUpdate={(patch) => updateAdset(adset.id, patch)} />
                               <div className="mt-3 flex items-center justify-between rounded-xl border p-3">
                                 <div>
                                   <p className="text-sm font-medium">Advantage+ audience</p>
@@ -2310,34 +5210,74 @@ export default function MetaAdsPage() {
                                   ))}
                                 </div>
                               </div>
-                            </div>
+                            </AdsetAccordionCard>
                           ))}
                         </div>
-                      </div>
+                      </BuilderSection>
                     </div>
                   ) : null}
 
-                  {activeStep === "creatives" ? (
-                    <div className="space-y-5">
-                      <div className="rounded-2xl border p-4">
-                        <div className="mb-3 flex items-center gap-2">
-                          <Layers3 className="h-4 w-4" />
-                          <p className="font-medium">Creative varianten per adset</p>
+                  {activeStep === "ads" ? (
+                    <div className="space-y-4">
+                      <BuilderSection
+                        icon={ImageIcon}
+                        title="Advertenties"
+                        description="Meta-niveau 3: pagina-identiteit, AI-briefing en creatieve invoer per variant."
+                        collapsible
+                        defaultOpen={false}
+                        preview={metaAdvertentiesPreview({
+                          facebookPublisherName,
+                          instagramPublisherName,
+                          product,
+                          audience,
+                          aiTone,
+                        })}
+                      >
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="space-y-1">
+                            <CompactHelpLabel
+                              label="Facebook"
+                              help="Naam uit je geselecteerde Meta advertentieaccount (en gekoppelde pagina)."
+                            />
+                            <div className="flex h-8 items-center rounded-md border bg-muted/25 px-3 text-sm">
+                              <span className="truncate font-medium">{facebookPublisherName}</span>
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <CompactHelpLabel
+                              label="Instagram"
+                              help={
+                                metaHasInstagram
+                                  ? "Zelfde advertentieaccount; bij gekoppeld Instagram-profiel ook de @-naam."
+                                  : "Geen Instagram gekoppeld — preview gebruikt de Facebook-naam."
+                              }
+                            />
+                            <div className="flex h-8 items-center rounded-md border bg-muted/25 px-3 text-sm">
+                              <span className="truncate font-medium">{instagramPublisherName}</span>
+                            </div>
+                          </div>
+                          <MetaCampaignUrlTagsField value={urlTags} onChange={setUrlTags} campaignName={name} />
                         </div>
-                        <div className="space-y-4">
-                          {adsets.map((adset) => (
-                            <div key={`creative-${adset.id}`} className="rounded-2xl border bg-muted/20 p-4">
-                              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                                <div>
-                                  <p className="font-medium">{adset.name}</p>
-                                  <p className="text-xs text-muted-foreground">{adset.variants.length} variant(en) · {adset.placements.length} placement(s)</p>
-                                </div>
-                                <Button variant="outline" size="sm" onClick={() => addVariant(adset.id)}>
-                                  <Plus className="mr-2 h-4 w-4" />
-                                  Variant toevoegen
-                                </Button>
-                              </div>
-                              <div className="space-y-3">
+                      </BuilderSection>
+
+                      <BuilderSection
+                        icon={Layers3}
+                        title="Ads per ad set"
+                        description="Elke ad set krijgt één of meerdere advertenties voor copy-, hook- en visualtests."
+                        collapsible
+                        defaultOpen={false}
+                        preview={adsPerAdsetSectionPreview(adsets)}
+                      >
+                        <div className="space-y-2">
+                          {adsets.map((adset, adsetIndex) => (
+                            <AdsetCreativeAccordionCard
+                              key={`creative-${adset.id}`}
+                              adset={adset}
+                              index={adsetIndex}
+                              defaultOpen={false}
+                              onAddVariant={() => addVariant(adset.id)}
+                            >
+                              <div className="space-y-2">
                                 {adset.variants.map((variant, variantIndex) => {
                                   const merged = mergeVariantWithBase(
                                     {
@@ -2356,135 +5296,50 @@ export default function MetaAdsPage() {
                                       urlTags,
                                     },
                                     variant,
+                                    { inheritAssets: false, inheritCopy: false },
                                   );
                                   return (
-                                    <div key={variant.id} className={`rounded-2xl border p-4 ${activeCreativeRef?.variantId === variant.id ? "border-primary bg-primary/5" : "bg-card"}`}>
-                                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                                        <button type="button" className="text-left" onClick={() => setActiveCreativeRef({ adsetId: adset.id, variantId: variant.id })}>
-                                          <p className="font-medium">{variant.name || `Variant ${variantIndex + 1}`}</p>
-                                          <p className="text-xs text-muted-foreground">{merged.headline || "Nog geen headline"} · {merged.linkUrl || "Nog geen link"}</p>
-                                        </button>
-                                        <div className="flex flex-wrap gap-2">
-                                          <Button variant="outline" size="sm" onClick={() => aiSuggestVariant(adset.id, variant.id, adset.name, variant.angle)}>
-                                            <Sparkles className="mr-2 h-3.5 w-3.5" />
-                                            AI voorstel
-                                          </Button>
-                                          <Button variant="ghost" size="sm" disabled={adset.variants.length === 1} onClick={() => removeVariant(adset.id, variant.id)}>
-                                            <Trash2 className="mr-2 h-3.5 w-3.5" />
-                                            Verwijderen
-                                          </Button>
-                                        </div>
-                                      </div>
-                                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                                        <div className="space-y-2">
-                                          <HelpLabel label="Variant naam" help="Interne naam voor je team en approval flow." />
-                                          <Input value={variant.name} onChange={(e) => updateVariant(adset.id, variant.id, { name: e.target.value, adName: e.target.value })} />
-                                        </div>
-                                        <div className="space-y-2">
-                                          <HelpLabel label="Hoek / angle" help="Welke hook test deze variant? Bijvoorbeeld snelheid, prijs, vertrouwen of demo." />
-                                          <Input value={variant.angle} onChange={(e) => updateVariant(adset.id, variant.id, { angle: e.target.value })} />
-                                        </div>
-                                        <div className="space-y-2">
-                                          <HelpLabel label="CTA type" help="Kan afwijken van de campaign default." />
-                                          <Select value={variant.ctaType} onValueChange={(value) => updateVariant(adset.id, variant.id, { ctaType: value })}>
-                                            <SelectTrigger><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                              <SelectItem value="LEARN_MORE">Learn more</SelectItem>
-                                              <SelectItem value="SIGN_UP">Sign up</SelectItem>
-                                              <SelectItem value="CONTACT_US">Contact us</SelectItem>
-                                              <SelectItem value="BOOK_TRAVEL">Book now</SelectItem>
-                                              <SelectItem value="SHOP_NOW">Shop now</SelectItem>
-                                              <SelectItem value="APPLY_NOW">Apply now</SelectItem>
-                                              <SelectItem value="GET_QUOTE">Get quote</SelectItem>
-                                            </SelectContent>
-                                          </Select>
-                                        </div>
-                                      </div>
-                                      <div className="mt-3 space-y-2">
-                                        <HelpLabel label="Primaire tekst" help="Laat leeg om de campaign default te gebruiken, of overschrijf deze variant bewust." />
-                                        <Textarea className="min-h-24" value={variant.primaryText} onChange={(e) => updateVariant(adset.id, variant.id, { primaryText: e.target.value })} />
-                                      </div>
-                                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                                        <div className="space-y-2">
-                                          <HelpLabel label="Headline" help="Laat leeg om de campaign default te gebruiken." />
-                                          <Input value={variant.headline} onChange={(e) => updateVariant(adset.id, variant.id, { headline: e.target.value })} />
-                                        </div>
-                                        <div className="space-y-2">
-                                          <HelpLabel label="Beschrijving" help="Laat leeg om de campaign default te gebruiken." />
-                                          <Input value={variant.description} onChange={(e) => updateVariant(adset.id, variant.id, { description: e.target.value })} />
-                                        </div>
-                                        <div className="space-y-2">
-                                          <HelpLabel label="Link" help="Kan per variant verschillen." />
-                                          <Input value={variant.linkUrl} onChange={(e) => updateVariant(adset.id, variant.id, { linkUrl: e.target.value })} placeholder={linkUrl} />
-                                        </div>
-                                        <div className="space-y-2">
-                                          <HelpLabel label="Display URL" help="Optionele override voor preview/context." />
-                                          <Input value={variant.displayUrl} onChange={(e) => updateVariant(adset.id, variant.id, { displayUrl: e.target.value })} placeholder={displayUrl} />
-                                        </div>
-                                        <div className="space-y-2">
-                                          <HelpLabel label="CTA label" help="Laat leeg om de campaign default te gebruiken." />
-                                          <Input value={variant.ctaLabel} onChange={(e) => updateVariant(adset.id, variant.id, { ctaLabel: e.target.value })} placeholder={ctaLabel} />
-                                        </div>
-                                        <div className="space-y-2">
-                                          <HelpLabel label="Publish asset" help="Welke asset standaard naar Meta gepusht wordt voor deze variant." />
-                                          <Select value={variant.publishAsset} onValueChange={(value) => updateVariant(adset.id, variant.id, { publishAsset: value as AssetSlot })}>
-                                            <SelectTrigger><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                              <SelectItem value="feed">Feed image</SelectItem>
-                                              <SelectItem value="square">Square image</SelectItem>
-                                              <SelectItem value="story">Story/Reels image</SelectItem>
-                                            </SelectContent>
-                                          </Select>
-                                        </div>
-                                      </div>
-                                      <div className="mt-3 grid gap-3 xl:grid-cols-3">
-                                        <VariantAssetField
-                                          title="Feed image"
-                                          help="Gebruik per variant een eigen feed-beeld als je de hook visueel wil testen."
-                                          ratio="1:1 of 1.91:1"
-                                          recommended="1200x1200 of 1200x628"
-                                          value={variant.feedImageUrl}
-                                          placeholder={feedImageUrl || "Campaign default"}
-                                          uploading={uploadingVariantAsset === `${adset.id}:${variant.id}:feed`}
-                                          onChange={(value) => updateVariant(adset.id, variant.id, { feedImageUrl: value })}
-                                          onUpload={(file) => uploadVariantAsset(adset.id, variant.id, "feed", file)}
-                                        />
-                                        <VariantAssetField
-                                          title="Square image"
-                                          help="Handig wanneer deze variant vooral op Instagram feed moet renderen."
-                                          ratio="1:1"
-                                          recommended="1200x1200"
-                                          value={variant.squareImageUrl}
-                                          placeholder={squareImageUrl || "Campaign default"}
-                                          uploading={uploadingVariantAsset === `${adset.id}:${variant.id}:square`}
-                                          onChange={(value) => updateVariant(adset.id, variant.id, { squareImageUrl: value })}
-                                          onUpload={(file) => uploadVariantAsset(adset.id, variant.id, "square", file)}
-                                        />
-                                        <VariantAssetField
-                                          title="Story/Reels image"
-                                          help="Gebruik hier echt een 9:16 asset om Meta ratio-fouten te vermijden."
-                                          ratio="9:16"
-                                          recommended="1080x1920"
-                                          value={variant.storyImageUrl}
-                                          placeholder={storyImageUrl || "Campaign default"}
-                                          uploading={uploadingVariantAsset === `${adset.id}:${variant.id}:story`}
-                                          onChange={(value) => updateVariant(adset.id, variant.id, { storyImageUrl: value })}
-                                          onUpload={(file) => uploadVariantAsset(adset.id, variant.id, "story", file)}
-                                        />
-                                      </div>
-                                    </div>
+                                    <VariantAccordionCard
+                                      key={variant.id}
+                                      campaignName={name.trim() || "Campagne"}
+                                      adsetName={adset.name}
+                                      variantIndex={variantIndex}
+                                      variant={variant}
+                                      defaultOpen={false}
+                                      active={activeCreativeRef?.variantId === variant.id}
+                                      onSelect={() => setActiveCreativeRef({ adsetId: adset.id, variantId: variant.id })}
+                                      onAiSuggest={() => aiSuggestVariant(adset.id, variant.id, adset.name, variant.angle)}
+                                      onRemove={() => removeVariant(adset.id, variant.id)}
+                                      canRemove={adset.variants.length > 1}
+                                      aiBriefingReady={product.trim().length >= 2}
+                                    >
+                                      <VariantCreativeForm
+                                        adsetId={adset.id}
+                                        variant={variant}
+                                        merged={merged}
+                                        campaignUrlTags={urlTags}
+                                        uploadingVariantAsset={uploadingVariantAsset}
+                                        storyPlacementWarning={
+                                          adset.placements.some((placement) =>
+                                            ["facebook_story", "facebook_reels", "instagram_story", "instagram_reels"].includes(placement),
+                                          ) && !merged.storyImageUrl.trim()
+                                        }
+                                        onUpdate={(patch) => updateVariant(adset.id, variant.id, patch)}
+                                        onUploadAsset={(slot, file) => uploadVariantAsset(adset.id, variant.id, slot, file)}
+                                      />
+                                    </VariantAccordionCard>
                                   );
                                 })}
                               </div>
-                            </div>
+                            </AdsetCreativeAccordionCard>
                           ))}
                         </div>
-                      </div>
+                      </BuilderSection>
                     </div>
                   ) : null}
 
                   {activeStep === "review" ? (
-                    <div className="space-y-5">
+                    <div className="space-y-4">
                       <Card className="border-amber-500/30 bg-amber-500/10">
                         <CardContent className="flex gap-3 p-4 text-sm">
                           <ShieldCheck className="mt-0.5 h-5 w-5 text-amber-700" />
@@ -2496,10 +5351,13 @@ export default function MetaAdsPage() {
                       </Card>
 
                       <div className="grid gap-3 md:grid-cols-2">
-                        <CheckRow ok={setupComplete} label="Setup compleet" hint="Naam, objective en budget zijn ingevuld." />
-                        <CheckRow ok={campaignComplete} label="Campaign compleet" hint="Bidding, AI briefing en campaign defaults staan klaar." />
-                        <CheckRow ok={adsetsComplete} label="Adsets compleet" hint="Elke adset heeft landen, leeftijd en minstens één plaatsing." />
-                        <CheckRow ok={creativesComplete} label="Creatives compleet" hint="Elke adset heeft minstens één variant met geldige link en visual." />
+                        <CheckRow ok={campaignComplete} label="Campagne compleet" hint="Naam, buying type, objective en budget zijn ingevuld." />
+                        <CheckRow ok={adsetsComplete} label="Advertentieset compleet" hint="Elke set heeft landen, leeftijd en minstens één placement." />
+                        <CheckRow
+                          ok={adsComplete}
+                          label="Advertenties compleet"
+                          hint="Meta advertentieaccount gekoppeld + per variant copy, https-link en beeld."
+                        />
                         <CheckRow ok={Boolean(connection.data?.selectedAdAccountId)} label="Ad Account geselecteerd" hint="Kies exact 1 Meta Ad Account per workspace." />
                       </div>
 
@@ -2539,68 +5397,98 @@ export default function MetaAdsPage() {
                     </div>
                   ) : null}
 
-                  <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-                    <Button onClick={saveDraft} disabled={createDraft.isPending || updateDraft.isPending || !canSaveDraft}>
-                      {createDraft.isPending || updateDraft.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                      Draft opslaan
-                    </Button>
-                    {readyToSave ? (
-                      <Badge variant="success">Klaar voor approval</Badge>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">Je kunt al tussentijds opslaan. Voor approval en push moeten alle stappen volledig zijn.</p>
-                    )}
+                  <div className="-mx-5 -mb-5 mt-6 flex flex-col gap-4 border-t bg-muted/25 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-wrap gap-2">
+                      {activeStepIndex > 0 ? (
+                        <Button variant="outline" onClick={() => setActiveStep(BUILDER_STEP_ORDER[activeStepIndex - 1])}>
+                          <ChevronLeft className="mr-2 h-4 w-4" />
+                          Vorige
+                        </Button>
+                      ) : null}
+                      {activeStepIndex < BUILDER_STEP_ORDER.length - 1 ? (
+                        <Button
+                          variant="secondary"
+                          disabled={!canOpenStep(BUILDER_STEP_ORDER[activeStepIndex + 1])}
+                          onClick={() => setActiveStep(BUILDER_STEP_ORDER[activeStepIndex + 1])}
+                        >
+                          Volgende
+                          <ChevronRight className="ml-2 h-4 w-4" />
+                        </Button>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={openAiCampaignDialog}
+                        disabled={generateSuggestion.isPending}
+                      >
+                        {generateSuggestion.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                        AI campagnevoorstel
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={startNewCampaign}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Nieuwe campagne
+                      </Button>
+                      <Button onClick={saveDraft} disabled={createDraft.isPending || updateDraft.isPending || !canSaveDraft}>
+                        {createDraft.isPending || updateDraft.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                        Draft opslaan
+                      </Button>
+                      {readyToSave ? (
+                        <Badge variant="success">Klaar voor approval</Badge>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Tussentijds opslaan kan altijd. Approval vereist volledige stappen.</p>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <div className="space-y-4">
-                <MetaPreview
-                  primaryText={previewCreative.primaryText}
-                  headline={previewCreative.headline}
-                  description={previewCreative.description}
-                  linkUrl={previewCreative.linkUrl}
-                  feedImageUrl={previewCreative.feedImageUrl || previewCreative.squareImageUrl || previewCreative.storyImageUrl}
-                  storyImageUrl={previewCreative.storyImageUrl || previewCreative.feedImageUrl || previewCreative.squareImageUrl}
-                  ctaLabel={previewCreative.ctaLabel}
-                  pageName={pageName}
-                  placements={selectedPlacements}
-                />
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Studio samenvatting</CardTitle>
-                    <CardDescription>Snelle check terwijl je bouwt.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3 text-sm">
-                    <div className="rounded-xl border bg-muted/30 p-3">
-                      <p className="font-medium">Adsets</p>
-                      <p className="mt-1 text-muted-foreground">{adsets.length} doelgroep(en) · {selectedPlacements.length} unieke placements</p>
-                    </div>
-                    <div className="rounded-xl border bg-muted/30 p-3">
-                      <p className="font-medium">Creative varianten</p>
-                      <p className="mt-1 text-muted-foreground">{totalVariants} varianten over {adsets.length} adsets</p>
-                    </div>
-                    <div className="rounded-xl border bg-muted/30 p-3">
-                      <p className="font-medium">AI score</p>
-                      <p className="mt-1 text-muted-foreground">{score.score}/100 · {score.label}</p>
-                    </div>
-                    <div className="rounded-xl border bg-muted/30 p-3">
-                      <p className="font-medium">Operationele checks</p>
-                      {(operationalRequirements || []).length ? (
-                        <div className="mt-2 space-y-2">
-                          {operationalRequirements.map((requirement) => (
-                            <div key={requirement.code} className="rounded-xl border bg-card p-3">
-                              <p className="font-medium">{requirement.title}</p>
-                              <p className="mt-1 text-xs text-muted-foreground">{requirement.description}</p>
-                              <p className="mt-2 text-xs font-medium text-foreground">{requirement.nextStep}</p>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="mt-1 text-muted-foreground">Geen blokkades gedetecteerd</p>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
+              <div className="order-1 min-w-0 space-y-4 xl:order-2">
+                {activeStep === "ads" || activeStep === "review" ? (
+                  <MetaPreview
+                    primaryText={previewCreative.primaryText}
+                    headline={previewCreative.headline}
+                    description={previewCreative.description}
+                    linkUrl={previewCreative.linkUrl}
+                    feedImageUrl={previewCreative.feedImageUrl}
+                    squareImageUrl={previewCreative.squareImageUrl}
+                    storyImageUrl={previewCreative.storyImageUrl}
+                    ctaLabel={previewCreative.ctaLabel.trim() || ctaLabelFromType(previewCreative.ctaType)}
+                    facebookPublisherName={facebookPublisherName}
+                    instagramPublisherName={instagramPublisherName}
+                    pageAvatarUrl={pageAvatarUrl}
+                    placements={selectedPlacements}
+                    publishAsset={previewCreative.publishAsset}
+                  />
+                ) : null}
+                <CollapsibleCard
+                  title="Studio samenvatting"
+                  description="Voortgang, score en blokkades terwijl je bouwt."
+                  defaultOpen={operationalRequirements.length > 0 || !readyToSave}
+                  preview={
+                    readyToSave
+                      ? `Klaar · ${score.score}/100 · ${adsets.length} set(s) · ${totalVariants} ad(s)`
+                      : `${builderCompletionPercent}% · ${score.score}/100 · ${operationalRequirements.length} blokkade${operationalRequirements.length === 1 ? "" : "s"}`
+                  }
+                >
+                  <MetaAdsStudioSummary
+                    adsetCount={adsets.length}
+                    variantCount={totalVariants}
+                    placementCount={selectedPlacements.length}
+                    score={score}
+                    builderCompletionPercent={builderCompletionPercent}
+                    readyToSave={readyToSave}
+                    campaignComplete={campaignComplete}
+                    adsetsComplete={adsetsComplete}
+                    adsComplete={adsComplete}
+                    stepTodos={studioStepTodos}
+                    operationalRequirements={operationalRequirements}
+                    onStepClick={setActiveStep}
+                    onOpenSettings={() => setAdsTab("settings")}
+                  />
+                </CollapsibleCard>
               </div>
             </div>
           </TabsContent>
@@ -2627,6 +5515,7 @@ export default function MetaAdsPage() {
                     setSelectedPlanId(id);
                     setLoadedPlanId(null);
                   }}
+                  onEdit={(id) => openDraftForEditing(id, "campaign")}
                   onSubmit={(id) => submitForApproval.mutate({ id })}
                   onApprove={(id) => approveDraft.mutate({ id })}
                   onPush={(id) => pushPaused.mutate({ id })}
@@ -2681,6 +5570,10 @@ export default function MetaAdsPage() {
                           <p className="text-xs text-muted-foreground">{String((campaignDetails.data as any).campaign?.objective || "-")} · {String((campaignDetails.data as any).campaign?.effective_status || (campaignDetails.data as any).campaign?.status || "-")}</p>
                         </div>
                         <div className="flex flex-wrap gap-2">
+                          <Button size="sm" variant="outline" onClick={openLiveCampaignAsDraft}>
+                            <PencilLine className="mr-2 h-3.5 w-3.5" />
+                            Bewerk als draft
+                          </Button>
                           <Button size="sm" variant="outline" onClick={() => pauseCampaign.mutate({ campaignId: selectedCampaignId || "" })}>Pause</Button>
                           <Button size="sm" onClick={() => resumeCampaign.mutate({ campaignId: selectedCampaignId || "" })}>Resume</Button>
                         </div>
@@ -2714,29 +5607,27 @@ export default function MetaAdsPage() {
           </TabsContent>
 
           <TabsContent value="drafts">
-            <Card>
-              <CardHeader>
-                <CardTitle>Alle drafts</CardTitle>
-                <CardDescription>Interne plannen met approval- en push-status.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {rows.map((row: any) => (
-                  <div key={row.id} className="rounded-xl border p-4">
-                    <div className="flex items-center justify-between">
-                      <p className="font-medium">{row.name}</p>
-                      {statusBadge(row.status)}
-                    </div>
-                    <p className="mt-1 text-sm text-muted-foreground">{row.objective} · {eur(row.dailyBudgetCents, row.currency)} · {prettyDate(row.createdAt)}</p>
-                    <ErrorHint raw={row.lastError} />
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button size="sm" variant="outline" onClick={() => duplicateDraft.mutate({ id: row.id })}>Dupliceren</Button>
-                      <Button size="sm" variant="outline" onClick={() => archiveDraft.mutate({ id: row.id })}>Archiveren</Button>
-                    </div>
-                  </div>
-                ))}
-                {!rows.length ? <EmptyState title="Geen drafts" description="Je drafts verschijnen hier zodra je er een opslaat." icon={<Save className="h-8 w-8" />} /> : null}
-              </CardContent>
-            </Card>
+            <MetaAdsDraftsPanel
+              rows={rows as Array<{
+                id: string;
+                name: string;
+                status: string;
+                objective?: string | null;
+                dailyBudgetCents?: number | null;
+                currency?: string | null;
+                createdAt?: string | Date | null;
+                lastError?: string | null;
+              }>}
+              formatBudget={(row) => eur(row.dailyBudgetCents, row.currency || "EUR")}
+              formatDate={(row) => prettyDate(row.createdAt)}
+              renderErrorHint={(raw) => <ErrorHint raw={raw} />}
+              onEdit={(id) => openDraftForEditing(id, "campaign")}
+              onDuplicate={(id) => duplicateDraft.mutate({ id })}
+              onArchive={(id) => archiveDraft.mutate({ id })}
+              onStartNew={startNewCampaign}
+              duplicatePending={duplicateDraft.isPending}
+              archivePending={archiveDraft.isPending}
+            />
           </TabsContent>
 
           <TabsContent value="insights">
@@ -2837,6 +5728,26 @@ export default function MetaAdsPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
+                  <Label>AI-training voor Meta Ads</Label>
+                  <Textarea
+                    className="min-h-32"
+                    value={aiTrainingNotes}
+                    onChange={(event) => setAiTrainingNotes(event.target.value)}
+                    placeholder="Beschrijf je merk, tone of voice, verboden claims, voorkeurs-CTA's, doelgroepen en voorbeeldcopy. De AI gebruikt dit bij campagne- en advertentievoorstellen."
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      disabled={updateAiTrainingNotes.isPending}
+                      onClick={() => updateAiTrainingNotes.mutate({ notes: aiTrainingNotes })}
+                    >
+                      {updateAiTrainingNotes.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                      AI-training opslaan
+                    </Button>
+                    <p className="text-xs text-muted-foreground">Workspace-breed. Geldt voor alle Meta Ads AI-voorstellen in deze studio.</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
                   <Label>Beschikbare Meta Ad Accounts</Label>
                   {adAccounts.isLoading ? <Skeleton className="h-20 w-full" /> : (adAccounts.data || []).map((account: any) => (
                     <div key={account.id} className="flex flex-col gap-2 rounded-xl border p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2860,6 +5771,22 @@ export default function MetaAdsPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      <MetaAiCampaignBriefingDialog
+        open={aiCampaignDialogOpen}
+        onOpenChange={setAiCampaignDialogOpen}
+        onConfirm={handleMetaAiSuggestion}
+        pending={generateSuggestion.isPending}
+      />
     </TooltipProvider>
   );
+}
+
+const MetaAdsPageView = dynamic(() => Promise.resolve(MetaAdsPageInner), {
+  ssr: false,
+  loading: () => <MetaAdsPageFallback />,
+});
+
+export default function MetaAdsPage() {
+  return <MetaAdsPageView />;
 }

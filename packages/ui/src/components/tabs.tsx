@@ -14,7 +14,9 @@ const TabsList = React.forwardRef<
   const useCustomTabsList =
     mergedClassName.includes("settings-domain-tabs") ||
     mergedClassName.includes("page-view-tabs") ||
-    mergedClassName.includes("bookings-view-tabs");
+    mergedClassName.includes("bookings-view-tabs") ||
+    mergedClassName.includes("meta-ads-tabs") ||
+    mergedClassName.includes("ads-studio-tabs");
 
   return (
     <TabsPrimitive.List
@@ -38,7 +40,9 @@ const TabsTrigger = React.forwardRef<
   const useCustomTabTrigger =
     mergedTriggerClass.includes("settings-domain-tab") ||
     mergedTriggerClass.includes("page-view-tabs-trigger") ||
-    mergedTriggerClass.includes("bookings-view-tab-trigger");
+    mergedTriggerClass.includes("bookings-view-tab-trigger") ||
+    mergedTriggerClass.includes("meta-ads-tabs-trigger") ||
+    mergedTriggerClass.includes("ads-studio-tabs-trigger");
 
   return (
     <TabsPrimitive.Trigger

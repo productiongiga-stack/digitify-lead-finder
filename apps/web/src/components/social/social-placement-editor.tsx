@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { friendlySocialProbeError, probeDataUrlImage } from "@/lib/social-image-client";
+import { uploadSocialAssetFile } from "@/lib/persist-social-assets";
 import { trpc } from "@/lib/trpc/client";
 import { cn } from "@/lib/utils";
 import { Badge, Button, Input, Label } from "@digitify/ui";
@@ -189,15 +190,9 @@ function PlacementAssetField({
   async function uploadFile(file: File, kind: "image" | "video") {
     setUploading(kind);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const response = await fetch("/api/upload", { method: "POST", body: form });
-      const payload = await response.json();
-      if (!response.ok || !payload.url) {
-        throw new Error(payload.error || "Upload mislukt");
-      }
-      if (kind === "image") onImageChange(payload.url);
-      else onVideoChange?.(payload.url);
+      const url = await uploadSocialAssetFile(file);
+      if (kind === "image") onImageChange(url);
+      else onVideoChange?.(url);
       showToast({ title: kind === "image" ? "Afbeelding geüpload" : "Video geüpload" });
     } catch (error) {
       showToast({

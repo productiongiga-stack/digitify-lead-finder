@@ -86,6 +86,60 @@ describe("meta-ads-campaign-score", () => {
     expect(result.label).toBeTruthy();
   });
 
+  it("keeps old root-level creative image fallback working", () => {
+    const legacyPlan = {
+      ...readyPlan,
+      creatives: {
+        message: readyPlan.creatives.message,
+        headline: readyPlan.creatives.headline,
+        description: readyPlan.creatives.description,
+        linkUrl: readyPlan.creatives.linkUrl,
+        feedImageUrl: "https://cdn.example.com/legacy-root-feed.jpg",
+      },
+      targeting: {
+        adsets: [{ id: "legacy-a1", name: "Legacy ad set", audienceNotes: "Root creative fallback" }],
+        campaignSettings: { pixelId: "" },
+      },
+    };
+
+    const input = planToCampaignScoreInput(legacyPlan);
+    expect(input?.adsets[0]?.variants[0]?.feedImageUrl).toBe("https://cdn.example.com/legacy-root-feed.jpg");
+    expect(evaluateMetaPlanReady(legacyPlan)).toBe(true);
+  });
+
+  it("scores new per-ad images without root-level creative images", () => {
+    const perAdPlan = {
+      ...readyPlan,
+      creatives: {
+        pageName: "Digitify",
+        adsets: [
+          {
+            adsetId: "a1",
+            variants: [
+              {
+                primaryText: readyPlan.creatives.message,
+                headline: readyPlan.creatives.headline,
+                description: readyPlan.creatives.description,
+                linkUrl: readyPlan.creatives.linkUrl,
+                feedImageUrl: "https://cdn.example.com/per-ad-feed.jpg",
+                storyImageUrl: "https://cdn.example.com/per-ad-story.jpg",
+              },
+            ],
+          },
+        ],
+      },
+      targeting: {
+        adsets: [{ id: "a1", name: "Per-ad media", audienceNotes: "Explicit ad media" }],
+        campaignSettings: { pixelId: "" },
+      },
+    };
+
+    const input = planToCampaignScoreInput(perAdPlan);
+    expect(input?.feedImageUrl).toBe("");
+    expect(input?.adsets[0]?.variants[0]?.feedImageUrl).toBe("https://cdn.example.com/per-ad-feed.jpg");
+    expect(evaluateMetaPlanReady(perAdPlan)).toBe(true);
+  });
+
   it("lists ready drafts and active live campaigns without duplicates", () => {
     const linkedDraft = {
       ...readyPlan,

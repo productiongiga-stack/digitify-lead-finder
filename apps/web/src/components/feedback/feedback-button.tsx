@@ -24,6 +24,7 @@ export function FeedbackButton() {
     <>
       <button
         type="button"
+        suppressHydrationWarning
         onClick={() => setOpen(true)}
         className="fixed bottom-4 right-4 z-50 inline-flex h-11 items-center gap-2 rounded-md bg-[#f9ae5a] px-4 text-sm font-semibold text-[#14100b] shadow-[0_18px_36px_rgba(249,174,90,0.32)] transition hover:bg-[#eca04e]"
       >

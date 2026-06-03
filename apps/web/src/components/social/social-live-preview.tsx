@@ -17,6 +17,7 @@ import {
   ThumbsUp,
 } from "lucide-react";
 import type { FeedAspectFormat, PlacementAssets, SocialPlacement } from "./social-placement-editor";
+import { FacebookPageAvatar, InstagramPageAvatar } from "./social-platform-avatars";
 
 type PostFormat = FeedAspectFormat | "STORY";
 
@@ -162,7 +163,7 @@ function FacebookPreview({
           />
           <div className="pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-black/75 to-transparent p-4">
             <div className="flex items-center gap-2">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#1877f2] text-base font-black">f</div>
+              <FacebookPageAvatar size="sm" />
               <div>
                 <p className="text-sm font-semibold">Digitify</p>
                 <p className="text-xs text-white/70">{slide.placement === "REEL" ? "Reel preview" : "Story · 24 uur"}</p>
@@ -177,7 +178,7 @@ function FacebookPreview({
   return (
     <div className="overflow-hidden rounded-[1.6rem] border border-slate-200 bg-white text-slate-950 shadow-[0_22px_55px_rgba(15,23,42,0.12)]">
       <div className="flex items-center gap-3 px-4 py-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1877f2] text-lg font-black text-white">f</div>
+        <FacebookPageAvatar />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">Digitify</p>
           <p className="text-xs text-slate-500">Gesponsord · openbaar</p>
@@ -229,9 +230,7 @@ function InstagramPreview({
               ))}
             </div>
             <div className="flex items-center gap-2">
-              <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-tr from-[#f58529] via-[#dd2a7b] to-[#515bd4] p-[2px]">
-                <div className="h-full w-full rounded-full bg-white" />
-              </div>
+              <InstagramPageAvatar size="sm" />
               <div>
                 <p className="text-sm font-semibold">digitify.be</p>
                 <p className="text-xs text-white/70">{slide.placement === "REEL" ? "Reel" : "Story"}</p>
@@ -246,9 +245,7 @@ function InstagramPreview({
   return (
     <div className="overflow-hidden rounded-[1.6rem] border border-zinc-200 bg-white text-zinc-950 shadow-[0_22px_55px_rgba(24,24,27,0.12)]">
       <div className="flex items-center gap-3 px-4 py-3">
-        <div className="grid h-10 w-10 place-items-center rounded-full bg-gradient-to-tr from-[#f58529] via-[#dd2a7b] to-[#515bd4] p-[2px]">
-          <div className="h-full w-full rounded-full bg-white" />
-        </div>
+        <InstagramPageAvatar />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">digitify.be</p>
           <p className="text-xs text-zinc-500">België</p>
