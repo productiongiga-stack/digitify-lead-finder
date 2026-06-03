@@ -29,6 +29,7 @@ import {
   UserCircle,
   Megaphone,
   BarChart3,
+  Share2,
 } from "lucide-react";
 import type { AppRole } from "@/lib/permissions";
 
@@ -47,24 +48,77 @@ export type QuickNavItem = {
   moduleId?: string;
 };
 
+export type NavDropdown = {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  items: QuickNavItem[];
+  activeMatch: (pathname: string) => boolean;
+};
+
 export const MAIN_NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  {
-    href: "/leads",
-    label: "Leads",
-    icon: Users,
-    activeMatch: (pathname) => {
-      if (pathname === "/leads" || (pathname.startsWith("/leads/") && !pathname.startsWith("/leads/search"))) return true;
-      return LEADS_WORKFLOW_ITEMS.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
-    },
-  },
-  {
-    href: "/meta-ads",
-    label: "Advertenties",
-    icon: Megaphone,
-    activeMatch: (pathname) =>
-      ADS_NAV_ITEMS.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`)),
-  },
+];
+
+function pathMatches(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function pathMatchesAny(pathname: string, hrefs: string[]) {
+  return hrefs.some((href) => pathMatches(pathname, href));
+}
+
+/** Pipeline: list, search, campaigns, CRM, tasks */
+export const PIPELINE_NAV_ITEMS: QuickNavItem[] = [
+  { href: "/leads", label: "Leadlijst", icon: Users },
+  { href: "/leads/search", label: "Leads zoeken", icon: Search },
+  { href: "/campaigns", label: "Campagneprofielen", icon: Target, moduleId: "campaigns" },
+  { href: "/crm", label: "CRM", icon: Building2, moduleId: "crm" },
+  { href: "/tasks", label: "Taken", icon: CheckSquare, moduleId: "tasks" },
+];
+
+export const PIPELINE_NAV_DROPDOWN: NavDropdown = {
+  id: "pipeline",
+  label: "Leads & pipeline",
+  icon: Users,
+  items: PIPELINE_NAV_ITEMS,
+  activeMatch: (pathname) =>
+    pathMatchesAny(pathname, ["/leads", "/campaigns", "/crm", "/tasks"]),
+};
+
+/** E-mail outreach */
+export const OUTBOUND_NAV_ITEMS: QuickNavItem[] = [
+  { href: "/contacts", label: "Outbound center", icon: SendHorizonal, moduleId: "contacts" },
+  { href: "/contacts/inbox", label: "Inbox", icon: Inbox, moduleId: "contacts" },
+  { href: "/templates", label: "E-mailtemplates", icon: Library, moduleId: "templates" },
+];
+
+export const OUTBOUND_NAV_DROPDOWN: NavDropdown = {
+  id: "outbound",
+  label: "Outbound",
+  icon: SendHorizonal,
+  items: OUTBOUND_NAV_ITEMS,
+  activeMatch: (pathname) => pathMatchesAny(pathname, ["/contacts", "/templates"]),
+};
+
+/** Quotes & invoices */
+export const SALES_NAV_ITEMS: QuickNavItem[] = [
+  { href: "/quotes", label: "Offertes", icon: Receipt, moduleId: "quotes" },
+  { href: "/invoices", label: "Facturen", icon: Banknote, moduleId: "invoices" },
+];
+
+export const SALES_NAV_DROPDOWN: NavDropdown = {
+  id: "sales",
+  label: "Verkoop",
+  icon: Receipt,
+  items: SALES_NAV_ITEMS,
+  activeMatch: (pathname) => pathMatchesAny(pathname, ["/quotes", "/invoices"]),
+};
+
+export const LEADS_SALES_DROPDOWNS: NavDropdown[] = [
+  PIPELINE_NAV_DROPDOWN,
+  OUTBOUND_NAV_DROPDOWN,
+  SALES_NAV_DROPDOWN,
 ];
 
 export const ADS_NAV_ITEMS: QuickNavItem[] = [
@@ -72,30 +126,54 @@ export const ADS_NAV_ITEMS: QuickNavItem[] = [
   { href: "/google-ads", label: "Google Ads", icon: BarChart3, moduleId: "googleAds" },
 ];
 
+/** Paid ads dropdown in the Marketing section */
+export const ADS_NAV_DROPDOWN: NavDropdown = {
+  id: "ads",
+  label: "Advertenties",
+  icon: Megaphone,
+  items: ADS_NAV_ITEMS,
+  activeMatch: (pathname) =>
+    ADS_NAV_ITEMS.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`)),
+};
+
+/** Flat list for in-app workflow menus (e.g. leads page) */
 export const LEADS_WORKFLOW_ITEMS: QuickNavItem[] = [
-  { href: "/leads/search", label: "Leads zoeken", icon: Search },
-  { href: "/campaigns", label: "Campagneprofielen", icon: Target, moduleId: "campaigns" },
-  { href: "/contacts", label: "Outbound", icon: SendHorizonal, moduleId: "contacts" },
-  { href: "/contacts/inbox", label: "Inbox", icon: Inbox, moduleId: "contacts" },
-  { href: "/quotes", label: "Offertes", icon: Receipt, moduleId: "quotes" },
-  { href: "/invoices", label: "Facturen", icon: Banknote, moduleId: "invoices" },
+  ...PIPELINE_NAV_ITEMS,
+  ...OUTBOUND_NAV_ITEMS,
+  ...SALES_NAV_ITEMS,
+];
+
+/** Organic, paid & site quality */
+export const MARKETING_NAV_ITEMS: NavItem[] = [
+  { href: "/social", label: "Social Planner", icon: Share2, moduleId: "social" },
   { href: "/reports", label: "Website auditor", icon: ScanSearch, moduleId: "reports" },
-  { href: "/crm", label: "CRM", icon: Building2, moduleId: "crm" },
-  { href: "/tasks", label: "Taken", icon: CheckSquare, moduleId: "tasks" },
-  { href: "/templates", label: "E-mailtemplates", icon: Library, moduleId: "templates" },
 ];
 
-export const LEADS_MENU_ITEMS: QuickNavItem[] = [
-  { href: "/leads", label: "Leads", icon: Users },
-  ...LEADS_WORKFLOW_ITEMS,
-];
-
-export const TOOL_NAV_ITEMS: NavItem[] = [
-  { href: "/social", label: "Social Planner", icon: Megaphone, moduleId: "social" },
+/** Appointments, reputation & on-site chat */
+export const CLIENT_NAV_ITEMS: NavItem[] = [
   { href: "/bookings", label: "Boekingen", icon: Calendar, moduleId: "bookings" },
-  { href: "/domains", label: "Domeinen", icon: Globe2, moduleId: "domains" },
   { href: "/reviews", label: "Reviews", icon: Star, moduleId: "reviews" },
   { href: "/chatbot", label: "Chatbot", icon: MessageSquare, moduleId: "chatbot" },
+];
+
+/** Domains & technical assets */
+export const WEBSITE_NAV_ITEMS: NavItem[] = [
+  { href: "/domains", label: "Domeinen", icon: Globe2, moduleId: "domains" },
+];
+
+export type SidebarSectionConfig = {
+  id: string;
+  label: string;
+  links?: NavItem[];
+  dropdowns?: NavDropdown[];
+};
+
+export const SIDEBAR_SECTIONS: SidebarSectionConfig[] = [
+  { id: "nav", label: "Navigatie", links: MAIN_NAV_ITEMS },
+  { id: "leads-sales", label: "Leads & verkoop", dropdowns: LEADS_SALES_DROPDOWNS },
+  { id: "marketing", label: "Marketing", dropdowns: [ADS_NAV_DROPDOWN], links: MARKETING_NAV_ITEMS },
+  { id: "client", label: "Klantcontact", links: CLIENT_NAV_ITEMS },
+  { id: "website", label: "Website", links: WEBSITE_NAV_ITEMS },
 ];
 
 // All toggleable modules available for owner management

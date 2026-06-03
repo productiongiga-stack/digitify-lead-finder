@@ -1,19 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useSidebarLayout, useUIStore } from "@/stores/ui-store";
 import { useBranding } from "@/lib/branding";
 import {
-  ADS_NAV_ITEMS,
-  MAIN_NAV_ITEMS,
-  TOOL_NAV_ITEMS,
   BOTTOM_NAV_ITEMS,
-  LEADS_MENU_ITEMS,
+  SIDEBAR_SECTIONS,
   isNavItemActive,
+  type NavDropdown,
+  type NavItem,
   type QuickNavItem,
+  type SidebarSectionConfig,
 } from "@/lib/navigation";
 import { Button } from "@digitify/ui";
 import { ScrollArea } from "@digitify/ui";
@@ -303,34 +303,45 @@ export function Sidebar() {
   });
   const disabledModules = new Set(moduleAccess?.disabled || []);
 
-  const visibleToolNav = TOOL_NAV_ITEMS.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId));
-  const visibleLeadsMenu = LEADS_MENU_ITEMS.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId));
-  const visibleAdsMenu = ADS_NAV_ITEMS.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId));
+  const filterByModule = <T extends { moduleId?: string }>(items: T[]) =>
+    items.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId));
 
-  const hasLeadWorkflowMatch = visibleLeadsMenu.some(
-    (entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`),
+  const visibleDropdown = (dropdown: NavDropdown): NavDropdown | null => {
+    const items = filterByModule(dropdown.items);
+    return items.length > 0 ? { ...dropdown, items } : null;
+  };
+
+  const visibleSections = useMemo(
+    () =>
+      SIDEBAR_SECTIONS.map((section) => {
+        const links = filterByModule(section.links ?? []);
+        const dropdowns = (section.dropdowns ?? [])
+          .map(visibleDropdown)
+          .filter((dropdown): dropdown is NavDropdown => dropdown !== null);
+        return { ...section, links, dropdowns };
+      }).filter((section) => section.links.length > 0 || section.dropdowns.length > 0),
+    [(moduleAccess?.disabled ?? []).join(",")],
   );
-  const hasAdsNavMatch = visibleAdsMenu.some(
-    (entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`),
-  );
-  const [leadWorkflowOpen, setLeadWorkflowOpen] = useState(false);
-  const [adsNavOpen, setAdsNavOpen] = useState(false);
+
+  const [openDropdowns, setOpenDropdowns] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    if (hasLeadWorkflowMatch) setLeadWorkflowOpen(true);
-  }, [hasLeadWorkflowMatch]);
-
-  useEffect(() => {
-    if (hasAdsNavMatch) setAdsNavOpen(true);
-  }, [hasAdsNavMatch]);
+    visibleSections.forEach((section) => {
+      section.dropdowns.forEach((dropdown) => {
+        if (dropdown.activeMatch(pathname)) {
+          setOpenDropdowns((prev) => (prev[dropdown.id] ? prev : { ...prev, [dropdown.id]: true }));
+        }
+      });
+    });
+  }, [pathname, visibleSections]);
 
   useEffect(() => {
     // Warm common app routes so first navigation feels instant.
     const routes = [
-      ...MAIN_NAV_ITEMS.map((item) => item.href),
-      ...LEADS_MENU_ITEMS.map((item) => item.href),
-      ...ADS_NAV_ITEMS.map((item) => item.href),
-      ...TOOL_NAV_ITEMS.map((item) => item.href),
+      ...visibleSections.flatMap((section) => [
+        ...section.links.map((item) => item.href),
+        ...section.dropdowns.flatMap((dropdown) => dropdown.items.map((item) => item.href)),
+      ]),
       ...BOTTOM_NAV_ITEMS.map((item) => item.href),
     ];
     let cancelled = false;
@@ -356,10 +367,85 @@ export function Sidebar() {
   const logoUrl = branding.logoUrl;
   const brandName = branding.companyName || process.env.NEXT_PUBLIC_APP_NAME || "Lead Finder";
   const brandSlogan = branding.companySlogan;
-  const hasToolNav = visibleToolNav.length > 0;
-
   const renderContent = (mobile: boolean) => {
     const collapsed = mobile ? false : sidebarCollapsed;
+
+    const renderNavLinks = (items: NavItem[]) =>
+      items.map((item) => {
+        const isActive = isNavItemActive(item, pathname);
+        return (
+          <SidebarNavLink
+            key={item.href}
+            item={item}
+            active={isActive}
+            collapsed={collapsed}
+            onNavigate={() => setMobileSidebarOpen(false)}
+            onPrefetch={(href) => router.prefetch(href)}
+          />
+        );
+      });
+
+    const renderDropdown = (dropdown: NavDropdown) => {
+      const groupActive = dropdown.activeMatch(pathname);
+      const activeHref = dropdown.items
+        .filter((entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`))
+        .sort((left, right) => right.href.length - left.href.length)[0]?.href;
+
+      return (
+        <SidebarNavDropdown
+          key={dropdown.id}
+          label={dropdown.label}
+          icon={dropdown.icon}
+          items={dropdown.items}
+          groupActive={groupActive}
+          open={openDropdowns[dropdown.id] ?? false}
+          onToggleOpen={() =>
+            setOpenDropdowns((prev) => ({ ...prev, [dropdown.id]: !prev[dropdown.id] }))
+          }
+          activeHref={activeHref}
+          collapsed={collapsed}
+          onNavigate={() => setMobileSidebarOpen(false)}
+          onPrefetch={(href) => router.prefetch(href)}
+          expandSidebar={toggleSidebar}
+        />
+      );
+    };
+
+    const renderSidebarSection = (section: SidebarSectionConfig, index: number) => {
+      const links = section.links ?? [];
+      const dropdowns = section.dropdowns ?? [];
+      const content = (
+        <>
+          {dropdowns.map(renderDropdown)}
+          {renderNavLinks(links)}
+        </>
+      );
+
+      if (index === 0) {
+        return (
+          <div key={section.id}>
+            {!collapsed && <NavSectionLabel>{section.label}</NavSectionLabel>}
+            <nav className={cn("space-y-1", collapsed ? "px-2" : "space-y-1.5 px-2")}>{content}</nav>
+          </div>
+        );
+      }
+
+      return (
+        <div key={section.id}>
+          <SidebarDivider collapsed={collapsed} />
+          {!collapsed && <NavSectionLabel>{section.label}</NavSectionLabel>}
+          <nav className={cn("space-y-1", collapsed ? "px-2" : "space-y-1.5 px-2")}>{content}</nav>
+        </div>
+      );
+    };
+
+    const renderSection = (label: string, children: ReactNode) => (
+      <>
+        <SidebarDivider collapsed={collapsed} />
+        {!collapsed && <NavSectionLabel>{label}</NavSectionLabel>}
+        <nav className={cn("space-y-1", collapsed ? "px-2" : "space-y-1.5 px-2")}>{children}</nav>
+      </>
+    );
 
     return (
     <aside
@@ -379,111 +465,10 @@ export function Sidebar() {
 
       {/* Nav */}
       <ScrollArea className="flex-1 py-3">
-        {!collapsed && <NavSectionLabel>Navigatie</NavSectionLabel>}
-        <nav className={cn("space-y-1", collapsed ? "px-2" : "space-y-1.5 px-2")}>
-          {MAIN_NAV_ITEMS.map((item) => {
-            const isLeadNavItem = item.href === "/leads";
-            const isAdsNavItem = item.label === "Advertenties";
-            const activeLeadMenuHref = isLeadNavItem
-              ? visibleLeadsMenu
-                  .filter((entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`))
-                  .sort((left, right) => right.href.length - left.href.length)[0]?.href
-              : undefined;
-            const activeAdsMenuHref = isAdsNavItem
-              ? visibleAdsMenu
-                  .filter((entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`))
-                  .sort((left, right) => right.href.length - left.href.length)[0]?.href
-              : undefined;
-            const isActive = isLeadNavItem
-              ? activeLeadMenuHref === "/leads"
-              : isAdsNavItem
-                ? false
-                : isNavItemActive(item, pathname);
+        {visibleSections.map(renderSidebarSection)}
 
-            if (isLeadNavItem) {
-              const leadActive = isActive || hasLeadWorkflowMatch;
-
-              return (
-                <SidebarNavDropdown
-                  key={item.href}
-                  label={item.label}
-                  icon={item.icon}
-                  items={visibleLeadsMenu}
-                  groupActive={leadActive}
-                  open={leadWorkflowOpen}
-                  onToggleOpen={() => setLeadWorkflowOpen((prev) => !prev)}
-                  activeHref={activeLeadMenuHref}
-                  collapsed={collapsed}
-                  onNavigate={() => setMobileSidebarOpen(false)}
-                  onPrefetch={(href) => router.prefetch(href)}
-                  expandSidebar={toggleSidebar}
-                />
-              );
-            }
-
-            if (isAdsNavItem && visibleAdsMenu.length > 0) {
-              return (
-                <SidebarNavDropdown
-                  key={item.href}
-                  label={item.label}
-                  icon={item.icon}
-                  items={visibleAdsMenu}
-                  groupActive={hasAdsNavMatch}
-                  open={adsNavOpen}
-                  onToggleOpen={() => setAdsNavOpen((prev) => !prev)}
-                  activeHref={activeAdsMenuHref}
-                  collapsed={collapsed}
-                  onNavigate={() => setMobileSidebarOpen(false)}
-                  onPrefetch={(href) => router.prefetch(href)}
-                  expandSidebar={toggleSidebar}
-                />
-              );
-            }
-
-            if (isAdsNavItem) {
-              return null;
-            }
-
-            return (
-              <SidebarNavLink
-                key={item.href}
-                item={item}
-                active={isActive}
-                collapsed={collapsed}
-                onNavigate={() => setMobileSidebarOpen(false)}
-                onPrefetch={(href) => router.prefetch(href)}
-              />
-            );
-          })}
-        </nav>
-
-        {hasToolNav ? (
-          <>
-            <SidebarDivider collapsed={collapsed} />
-
-            {!collapsed && <NavSectionLabel>Tools</NavSectionLabel>}
-
-            <nav className={cn("space-y-1", collapsed ? "px-2" : "space-y-1.5 px-2")}>
-              {visibleToolNav.map((item) => {
-                const isActive = isNavItemActive(item, pathname);
-                return (
-                  <SidebarNavLink
-                    key={item.href}
-                    item={item}
-                    active={isActive}
-                    collapsed={collapsed}
-                    onNavigate={() => setMobileSidebarOpen(false)}
-                    onPrefetch={(href) => router.prefetch(href)}
-                  />
-                );
-              })}
-            </nav>
-
-            <SidebarDivider collapsed={collapsed} />
-          </>
-        ) : null}
-
-        <nav className={cn("space-y-1", collapsed ? "px-2" : "px-2")}>
+        {renderSection(
+          "Assistent",
           <SidebarTooltip label="OpenClaw" collapsed={collapsed}>
             <button
               type="button"
@@ -494,8 +479,8 @@ export function Sidebar() {
               <Bot className={cn("shrink-0", collapsed ? "h-[1.125rem] w-[1.125rem]" : "h-4 w-4")} />
               {!collapsed && <span>OpenClaw</span>}
             </button>
-          </SidebarTooltip>
-        </nav>
+          </SidebarTooltip>,
+        )}
       </ScrollArea>
 
       {/* Bottom */}

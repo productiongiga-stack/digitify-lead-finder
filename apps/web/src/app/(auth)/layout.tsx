@@ -15,9 +15,11 @@ const benefits = [
   "100% Belgisch — AVG-conform & GDPR-ready",
 ];
 
+const COPYRIGHT_YEAR = new Date().getFullYear();
+
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex min-h-screen bg-background" suppressHydrationWarning>
       {/* Left branding panel — hidden on mobile */}
       <div className="relative hidden overflow-hidden border-r border-border/60 bg-card/95 px-12 py-14 shadow-xl lg:flex lg:w-[480px] xl:w-[520px] flex-col justify-between">
         {/* Glow blobs */}
@@ -25,7 +27,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <div className="pointer-events-none absolute bottom-0 right-0 h-80 w-80 rounded-full bg-emerald-500/10 blur-3xl" />
 
         {/* Logo */}
-        <Link href="/" className="relative z-10 flex items-center gap-3">
+        <Link href="/" className="relative z-10 flex items-center gap-3" suppressHydrationWarning>
           <AuthLogo size="sm" showText />
         </Link>
 
@@ -68,14 +70,14 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
 
         {/* Bottom disclaimer */}
         <p className="relative z-10 text-xs text-muted-foreground" suppressHydrationWarning>
-          © {new Date().getFullYear()} Digitify · BTW BE0685.556.507
+          © {COPYRIGHT_YEAR} Digitify · BTW BE0685.556.507
         </p>
       </div>
 
       {/* Right form panel */}
-      <div className="flex flex-1 flex-col items-center justify-center px-6 py-12">
+      <div className="flex flex-1 flex-col items-center justify-center px-6 py-12" suppressHydrationWarning>
         {/* Mobile-only logo */}
-        <Link href="/" className="mb-8 flex items-center gap-2 lg:hidden">
+        <Link href="/" className="mb-8 flex items-center gap-2 lg:hidden" suppressHydrationWarning>
           <AuthLogo size="sm" showText />
         </Link>
 
@@ -83,9 +85,9 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <Suspense fallback={<AuthFormSkeleton />}>{children}</Suspense>
         </div>
 
-        <p className="mt-8 text-center text-xs text-muted-foreground">
+        <p className="mt-8 text-center text-xs text-muted-foreground" suppressHydrationWarning>
           Terug naar{" "}
-          <Link href="/" className="font-medium text-primary hover:underline">
+          <Link href="/" className="font-medium text-primary hover:underline" suppressHydrationWarning>
             de website
           </Link>
         </p>
