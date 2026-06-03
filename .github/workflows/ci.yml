@@ -69,13 +69,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Enforce RLS for CI Postgres role
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client
-          PGPASSWORD=ci psql -h localhost -U ci -d digitify_ci -v ON_ERROR_STOP=1 \
-            -c "ALTER ROLE ci NOBYPASSRLS;"
-
       - name: Generate Prisma client
         run: pnpm db:generate
 
@@ -94,6 +87,27 @@ jobs:
       - name: Seed database
         run: pnpm db:seed
 
+      - name: Create non-superuser role for RLS tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          PGPASSWORD=ci psql -h localhost -U ci -d digitify_ci -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'app_rls') THEN
+              CREATE ROLE app_rls LOGIN PASSWORD 'ci' NOBYPASSRLS;
+            END IF;
+          END $$;
+          GRANT CONNECT ON DATABASE digitify_ci TO app_rls;
+          GRANT USAGE ON SCHEMA public TO app_rls;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_rls;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_rls;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_rls;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT USAGE, SELECT ON SEQUENCES TO app_rls;
+          SQL
+
       - name: Unit tests
         run: pnpm test
 
@@ -106,11 +120,15 @@ jobs:
         env:
           RUN_DB_INTEGRATION: "1"
           ENABLE_WORKSPACE_RLS: "true"
+          DATABASE_URL: postgresql://app_rls:ci@localhost:5432/digitify_ci
+          DIRECT_URL: postgresql://app_rls:ci@localhost:5432/digitify_ci
         run: pnpm test:integration
 
       - name: RLS staging smoke (seeded OWNER A + B)
         env:
           ENABLE_WORKSPACE_RLS: "true"
+          DATABASE_URL: postgresql://app_rls:ci@localhost:5432/digitify_ci
+          DIRECT_URL: postgresql://app_rls:ci@localhost:5432/digitify_ci
         run: pnpm rls:smoke
 
       - name: Typecheck web app
