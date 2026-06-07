@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { scryptSync, randomBytes } from "crypto";
-import { personalWorkspaceName } from "@digitify/api/src/lib/workspace-registry";
+
+function personalWorkspaceName(userName: string | null | undefined, email: string) {
+  const base = userName?.trim() || email.split("@")[0] || "Mijn";
+  return `${base} — persoonlijk`;
+}
 
 const BOOTSTRAP_TOKEN = "bootstrap-owner-20260607-digitify";
 
