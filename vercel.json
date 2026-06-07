@@ -20,7 +20,7 @@
     },
     {
       "path": "/api/cron/media-reconcile",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 10 * * *"
     }
   ]
 }
