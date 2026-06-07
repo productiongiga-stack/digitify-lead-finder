@@ -16,6 +16,7 @@ export const EMAIL_SETTINGS_KEYS = [
 ] as const;
 
 export const AI_SETTINGS_KEYS = [
+  "api.ai_provider",
   "openclaw.model",
   "openclaw_language",
   "openclaw_tone",

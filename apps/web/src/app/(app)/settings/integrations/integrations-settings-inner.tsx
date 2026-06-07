@@ -44,6 +44,7 @@ import {
   Megaphone,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useToast } from "@/components/feedback/toast-provider";
 import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 import { readSettingBoolean, readSettingString } from "@/lib/settings";
@@ -73,6 +74,22 @@ type IntegrationTabId =
   | "meta"
   | "smtp"
   | "imap";
+
+const INTEGRATION_TAB_IDS: IntegrationTabId[] = [
+  "overview",
+  "google-places",
+  "anthropic",
+  "openai",
+  "deepseek",
+  "google-oauth",
+  "meta",
+  "smtp",
+  "imap",
+];
+
+function isIntegrationTabId(value: string): value is IntegrationTabId {
+  return INTEGRATION_TAB_IDS.includes(value as IntegrationTabId);
+}
 
 type AiProviderId = "anthropic" | "openai" | "deepseek";
 
@@ -486,6 +503,8 @@ function DnsCheckResult({ result }: { result: DnsCheckData | null | undefined })
 }
 
 export function IntegrationsSettingsInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const { data: settings, isLoading, error, refetch } = trpc.settings.getIntegrationsSettings.useQuery(undefined, {
     retry: 1,
     ...SETTINGS_PAGE_QUERY_OPTS,
@@ -534,6 +553,26 @@ export function IntegrationsSettingsInner() {
   const checkEmailDns = trpc.settings.checkEmailDns.useMutation();
   const testImap = trpc.settings.testImap.useMutation();
   const [integrationsTab, setIntegrationsTab] = useState<IntegrationTabId>("overview");
+
+  function selectIntegrationsTab(tab: IntegrationTabId) {
+    setIntegrationsTab(tab);
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab === "overview") {
+      params.delete("tab");
+    } else {
+      params.set("tab", tab);
+    }
+    const query = params.toString();
+    router.replace(query ? `/settings/integrations?${query}` : "/settings/integrations", { scroll: false });
+  }
+
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (tab && isIntegrationTabId(tab)) {
+      setIntegrationsTab(tab);
+    }
+  }, [searchParams]);
+
   const pollProviderConnections = integrationsTab === "google-oauth" || integrationsTab === "meta";
   const metaConnection = trpc.social.connectionStatus.useQuery(undefined, {
     enabled: pollProviderConnections,
@@ -958,7 +997,7 @@ export function IntegrationsSettingsInner() {
               type="button"
               role="tab"
               aria-selected={active}
-              onClick={() => setIntegrationsTab(item.id as IntegrationTabId)}
+              onClick={() => selectIntegrationsTab(item.id as IntegrationTabId)}
               className={`integrations-mobile-nav-btn ${active ? "integrations-mobile-nav-btn-active" : ""}`}
             >
               <Icon className="h-3.5 w-3.5" />
@@ -972,7 +1011,7 @@ export function IntegrationsSettingsInner() {
         <IntegrationNav
           items={integrationNavItems}
           activeId={integrationsTab}
-          onSelect={(id) => setIntegrationsTab(id as IntegrationTabId)}
+          onSelect={(id) => selectIntegrationsTab(id as IntegrationTabId)}
         />
 
         <div className="min-w-0 space-y-4">
@@ -997,7 +1036,7 @@ export function IntegrationsSettingsInner() {
                         description={item.description ?? ""}
                         configured={item.configured}
                         dirty={item.dirty}
-                        onOpen={() => setIntegrationsTab(item.id as IntegrationTabId)}
+                        onOpen={() => selectIntegrationsTab(item.id as IntegrationTabId)}
                       />
                     ))}
                 </div>
