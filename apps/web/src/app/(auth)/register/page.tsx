@@ -6,6 +6,7 @@ import { trpc } from "@/lib/trpc/client";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Textarea } from "@digitify/ui";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { AuthLogo } from "@/components/auth/auth-logo";
+import { formatTrpcErrorMessage } from "@/lib/trpc/format-error";
 
 export default function RegisterPage() {
   const [name, setName] = useState("");
@@ -76,7 +77,9 @@ export default function RegisterPage() {
             <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={3} />
           </div>
           {requestAccess.isError && (
-            <p className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{requestAccess.error.message}</p>
+            <p className="whitespace-pre-line rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+              {formatTrpcErrorMessage(requestAccess.error.message)}
+            </p>
           )}
           <Button className="w-full rounded-full shadow-sm" disabled={requestAccess.isPending}>
             {requestAccess.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

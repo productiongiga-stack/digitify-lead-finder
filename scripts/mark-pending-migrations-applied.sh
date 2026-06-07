@@ -22,8 +22,8 @@ if [[ "$DATABASE_URL" == *"pooler"* || "$DATABASE_URL" == *"localhost"* ]] && [[
   export DIRECT_URL="$DATABASE_URL"
 fi
 
-if [[ -z "${DATABASE_URL:-}" ]]; then
-  echo "ERROR: Set DATABASE_URL or POSTGRES_URL_NON_POOLING (direct host, not pooler)." >&2
+if [[ -z "${DATABASE_URL:-}" || "$DATABASE_URL" == *"localhost"* ]]; then
+  echo "ERROR: Set DATABASE_URL to Supabase direct host (db.*.supabase.co:5432), not localhost." >&2
   exit 1
 fi
 
@@ -33,6 +33,22 @@ MIGRATIONS=(
   20260523160000_workspace_saved_searches
   20260523200000_scoring_workspace_and_rls
   20260523210000_email_template_body_format
+  20260528120000_email_draft_optional_lead
+  20260528140000_campaign_profile_type
+  20260601123000_social_posts
+  20260601124500_registration_workspace_target
+  20260601131000_lead_member_audit
+  20260601132000_personal_workspace_registration_repair
+  20260601150000_meta_ads
+  20260602120000_google_ads
+  20260602130000_social_post_metadata
+  20260607120000_media_generations
+  20260607140000_media_lip_sync
+  20260607150000_email_template_module
+  20260607150000_workspace_tenant_created_by
+  20260607160000_workspaces
+  20260607170000_lead_query_indexes
+  20260607200000_workspace_analytics_events
 )
 
 for name in "${MIGRATIONS[@]}"; do

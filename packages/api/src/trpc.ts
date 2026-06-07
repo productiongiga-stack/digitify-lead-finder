@@ -1,5 +1,7 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
+import { ZodError } from "zod";
+import { formatZodErrorMessage } from "./lib/format-zod-error";
 import { type PrismaClient, withWorkspaceRls, isWorkspaceRlsEnabled } from "@digitify/db";
 import { patchRequestContext, recordRouteMetric } from "@digitify/db";
 import { enforceRateLimit } from "./lib/rate-limit";
@@ -29,6 +31,19 @@ export type AppRole = "OWNER" | "ADMIN" | "MODERATOR" | "MEMBER" | "TRIAL" | "TE
 
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
+  errorFormatter({ shape, error }) {
+    if (error.cause instanceof ZodError) {
+      return {
+        ...shape,
+        message: formatZodErrorMessage(error.cause),
+        data: {
+          ...shape.data,
+          zodError: error.cause.flatten(),
+        },
+      };
+    }
+    return shape;
+  },
 });
 
 export const router = t.router;

@@ -40,6 +40,7 @@ import {
 import { applyWorkspaceCacheSettings, getDefaultCacheSettings } from "../lib/cache-config";
 import { clearAllDashboardCache, invalidateDashboardCacheForUser } from "../lib/dashboard-cache";
 import { clearAllSettingsCache } from "../lib/user-settings";
+import { verifyGooglePlacesApiKey } from "../lib/google-places";
 
 /* ---------- helpers ---------- */
 
@@ -636,34 +637,26 @@ export const settingsRouter = router({
 
   /* ---------- test connection endpoints ---------- */
 
-  testGooglePlaces: ownerProcedure.mutation(async ({ ctx }) => {
-    const scope = workspaceScopeFromUser(ctx.user);
-    const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["api.google_places_key"]);
-    const key = getSettingString(settingsRowsToMap(settings), "api.google_places_key");
-    if (!key) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Google Places API key is niet geconfigureerd." });
-
-    try {
-      const res = await fetch(
-        `https://places.googleapis.com/v1/places:searchText`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": key,
-            "X-Goog-FieldMask": "places.displayName",
-          },
-          body: JSON.stringify({ textQuery: "restaurant", maxResultCount: 1 }),
-        }
-      );
-      if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+  testGooglePlaces: ownerProcedure
+    .input(z.object({ apiKey: z.string().optional() }).optional())
+    .mutation(async ({ ctx, input }) => {
+      const inlineKey = input?.apiKey?.trim();
+      let key = inlineKey;
+      if (!key) {
+        const scope = workspaceScopeFromUser(ctx.user);
+        const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["api.google_places_key"]);
+        key = getSettingString(settingsRowsToMap(settings), "api.google_places_key");
       }
-      return { success: true, message: "Google Places API key is geldig." };
-    } catch (err: any) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: `Google Places test mislukt: ${err.message}` });
-    }
-  }),
+
+      try {
+        await verifyGooglePlacesApiKey(key);
+        return { success: true, message: "Google Places API key is geldig." };
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        const message = err instanceof Error ? err.message : "Onbekende fout";
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Google Places test mislukt: ${message}` });
+      }
+    }),
 
   testAnthropicKey: ownerProcedure.mutation(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);

@@ -52,6 +52,7 @@ import { useToast } from "@/components/feedback/toast-provider";
 import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 import { readSettingBoolean, readSettingString } from "@/lib/settings";
 import { SETTINGS_PAGE_QUERY_OPTS } from "@/lib/settings-query-options";
+import { formatTrpcErrorMessage } from "@/lib/trpc/format-error";
 
 const SECRET_MASK = "••••••••";
 
@@ -975,10 +976,15 @@ export function IntegrationsSettingsInner() {
               <div>
                 <CardTitle className="text-base">Google Places API</CardTitle>
                 <CardDescription className="text-xs">
-                  Voor bedrijfszoekopdrachten via Google Maps. Key aanmaken via{" "}
+                  Voor bedrijfszoekopdrachten via Google Maps. Schakel eerst{" "}
+                  <a href="https://console.cloud.google.com/apis/library/places.googleapis.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                    Places API (New)
+                  </a>{" "}
+                  in, maak daarna een API key (AIza...) via{" "}
                   <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                    Google Cloud Console
-                  </a>.
+                    Credentials
+                  </a>
+                  . Gebruik geen OAuth Client ID.
                 </CardDescription>
               </div>
               {googlePlacesConfigured || Boolean(googlePlacesKey.trim()) ? (
@@ -1023,7 +1029,10 @@ export function IntegrationsSettingsInner() {
                   variant="outline"
                   size="sm"
                   disabled={testGoogle.isPending || (!googlePlacesConfigured && !googlePlacesKey.trim())}
-                    onClick={() => { testGoogle.reset(); testGoogle.mutate(); }}
+                    onClick={() => {
+                      testGoogle.reset();
+                      testGoogle.mutate({ apiKey: googlePlacesKey.trim() || undefined });
+                    }}
                 >
                   {testGoogle.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Zap className="mr-2 h-3 w-3" />}
                   Test Verbinding
@@ -1054,7 +1063,10 @@ export function IntegrationsSettingsInner() {
                 ) : null}
               </div>
               <TestResult
-                result={testGoogle.data?.message ?? (testGoogle.error?.message || null)}
+                result={
+                  testGoogle.data?.message
+                    ?? (testGoogle.error ? formatTrpcErrorMessage(testGoogle.error.message) : null)
+                }
                 isError={testGoogle.isError}
               />
             </div>

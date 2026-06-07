@@ -28,6 +28,9 @@ const nextConfig = {
     },
   },
   outputFileTracingRoot: workspaceRoot,
+  outputFileTracingIncludes: {
+    "/api/internal/fix-production-db": ["./packages/db/prisma/manual/**/*.sql"],
+  },
   turbopack: {
     root: workspaceRoot,
   },

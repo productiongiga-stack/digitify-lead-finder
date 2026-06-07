@@ -9,6 +9,7 @@ import { isMissingSchemaError } from "../lib/prisma-schema";
 import { serializeSavedSearch } from "../lib/saved-search-serializer";
 import { ensureTenantSchemaCompatibility } from "../lib/tenant-schema-compat";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
+import { formatGooglePlacesErrorMessage } from "../lib/google-places";
 
 const searchStringSchema = z
   .string()
@@ -104,8 +105,8 @@ async function fetchPlacesForQuery(
       textQuery,
     });
     throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: `Google Places API fout (${response.status}). Controleer je API key en probeer opnieuw.`,
+      code: "BAD_REQUEST",
+      message: formatGooglePlacesErrorMessage(`HTTP ${response.status}: ${errorBody}`),
     });
   }
 

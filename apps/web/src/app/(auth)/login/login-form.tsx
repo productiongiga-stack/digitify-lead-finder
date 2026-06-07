@@ -23,7 +23,7 @@ export function LoginForm() {
     setLoading(true);
 
     const result = await signIn("credentials", {
-      email,
+      email: email.toLowerCase().trim(),
       password,
       redirect: false,
     });

@@ -11,6 +11,7 @@ import { ArrowLeft, UserPlus, Loader2, Trash2, AlertTriangle, CheckCircle2, XCir
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { ALL_MODULES } from "@/lib/navigation";
+import { formatTrpcErrorMessage } from "@/lib/trpc/format-error";
 
 // ─── Module Access Panel (owner-only) ─────────────────────────────────────────
 
@@ -433,8 +434,8 @@ export default function TeamSettingsPage() {
               Nieuwe uitnodigingen worden standaard als <strong>Member</strong> aangemaakt na e-mailbevestiging.
             </div>
             {createUser.isError && (
-              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                {createUser.error.message}
+              <div className="whitespace-pre-line rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                {formatTrpcErrorMessage(createUser.error.message)}
               </div>
             )}
           </div>
@@ -467,8 +468,8 @@ export default function TeamSettingsPage() {
               <Input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} placeholder="naam@bedrijf.com" type="email" />
             </div>
             {updateUserDetails.isError && (
-              <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-                {updateUserDetails.error.message}
+              <div className="whitespace-pre-line rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                {formatTrpcErrorMessage(updateUserDetails.error.message)}
               </div>
             )}
           </div>
@@ -504,8 +505,8 @@ export default function TeamSettingsPage() {
             </DialogDescription>
           </DialogHeader>
           {deleteUser.isError && (
-            <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-              {deleteUser.error.message}
+            <div className="whitespace-pre-line rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+              {formatTrpcErrorMessage(deleteUser.error.message)}
             </div>
           )}
           <DialogFooter>

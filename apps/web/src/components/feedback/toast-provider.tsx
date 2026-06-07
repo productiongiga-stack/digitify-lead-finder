@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { CheckCircle2, AlertCircle, Info, X } from "lucide-react";
+import { formatTrpcErrorMessage } from "@/lib/trpc/format-error";
 
 type ToastVariant = "success" | "error" | "info";
 
@@ -55,7 +56,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const showToast = useCallback(
     ({ title, description, variant = "success" }: ToastInput) => {
       const id = nextId.current++;
-      setToasts((current) => [...current, { id, title, description, variant }]);
+      const formattedDescription = description ? formatTrpcErrorMessage(description) : undefined;
+      setToasts((current) => [...current, { id, title, description: formattedDescription, variant }]);
       window.setTimeout(() => removeToast(id), 3500);
     },
     [removeToast]
@@ -79,7 +81,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-foreground">{toast.title}</p>
                   {toast.description ? (
-                    <p className="mt-1 text-xs text-muted-foreground">{toast.description}</p>
+                    <p className="mt-1 whitespace-pre-line text-xs text-muted-foreground">{toast.description}</p>
                   ) : null}
                 </div>
                 <button

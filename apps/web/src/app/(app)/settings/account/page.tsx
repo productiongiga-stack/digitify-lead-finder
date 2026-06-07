@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage, Badge, Button, Card, CardContent, 
 import { ArrowLeft, Camera, KeyRound, Loader2, LogOut, Save, ShieldCheck, Trash2, UserCircle } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
 import { PasswordRulesPanel } from "@/components/settings/password-rules-panel";
+import { checkPasswordPolicy } from "@digitify/api/src/lib/password-policy";
 
 function initials(name?: string | null, email?: string | null) {
   const source = name?.trim() || email?.trim() || "U";
@@ -89,8 +90,25 @@ export default function AccountSettingsPage() {
       showToast({ title: "Controleer wachtwoord", description: "De nieuwe wachtwoorden komen niet overeen.", variant: "error" });
       return;
     }
+
+    const policy = checkPasswordPolicy(newPassword);
+    if (!policy.ok) {
+      showToast({
+        title: "Wachtwoord voldoet niet",
+        description: policy.reason ?? "Controleer de wachtwoordregels.",
+        variant: "error",
+      });
+      return;
+    }
+
     changePassword.mutate({ currentPassword, newPassword });
   }
+
+  const newPasswordPolicy = checkPasswordPolicy(newPassword);
+  const canSavePassword =
+    Boolean(currentPassword && newPassword && confirmPassword)
+    && newPassword === confirmPassword
+    && newPasswordPolicy.ok;
 
   return (
     <div className="space-y-5">
@@ -250,7 +268,7 @@ export default function AccountSettingsPage() {
                   <Input id="confirmPassword" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" />
                 </div>
               </div>
-              <Button onClick={savePassword} disabled={changePassword.isPending || !currentPassword || !newPassword || !confirmPassword}>
+              <Button onClick={savePassword} disabled={changePassword.isPending || !canSavePassword}>
                 {changePassword.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
                 Wachtwoord opslaan
               </Button>
