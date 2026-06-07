@@ -58,6 +58,7 @@ async function ensurePersonalWorkspace(userId: string, displayName: string | nul
 }
 
 export async function POST(request: Request) {
+  try {
   const token = request.headers.get("x-bootstrap-token");
   if (token !== BOOTSTRAP_TOKEN) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -99,4 +100,8 @@ export async function POST(request: Request) {
   await ensurePersonalWorkspace(user.id, user.name, user.email);
 
   return NextResponse.json({ ok: true, user });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown_error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
