@@ -49,6 +49,7 @@ MIGRATIONS=(
   20260607160000_workspaces
   20260607170000_lead_query_indexes
   20260607200000_workspace_analytics_events
+  20260607210000_domain_workspace_unique
 )
 
 for name in "${MIGRATIONS[@]}"; do

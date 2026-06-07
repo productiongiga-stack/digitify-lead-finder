@@ -1349,7 +1349,7 @@ model BookingAnalyticsEvent {
 // DOMAINS
 model Domain {
   id             String    @id @default(cuid())
-  domainName     String    @unique
+  domainName     String
   registrar      String?
   registeredAt   DateTime?
   expiresAt      DateTime?
@@ -1363,6 +1363,7 @@ model Domain {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  @@unique([createdById, domainName])
   @@index([createdById])
   @@index([createdById, expiresAt])
   @@map("domains")

@@ -1,8 +1,51 @@
 import { z } from "zod";
 import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
+import { Prisma } from "@digitify/db";
 import { analyzeWebsite } from "@digitify/connectors";
 import { assertLeadAccess } from "../lib/tenant";
+import { isValidDomainName, normalizeDomainName } from "../lib/domain-name";
+
+const domainNameSchema = z
+  .string()
+  .min(1, "Domeinnaam is verplicht.")
+  .transform((value) => normalizeDomainName(value))
+  .refine(isValidDomainName, {
+    message: "Voer een geldige domeinnaam in, bijvoorbeeld voorbeeld.be.",
+  });
+
+async function assertDomainNameAvailable(
+  db: Parameters<typeof assertLeadAccess>[0],
+  workspaceId: string,
+  domainName: string,
+  excludeId?: string,
+) {
+  const existing = await db.domain.findFirst({
+    where: {
+      createdById: workspaceId,
+      domainName,
+      ...(excludeId ? { NOT: { id: excludeId } } : {}),
+    },
+    select: { id: true },
+  });
+
+  if (existing) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: `Domein "${domainName}" staat al in je lijst.`,
+    });
+  }
+}
+
+function mapDomainWriteError(error: unknown, domainName: string): never {
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: `Domein "${domainName}" staat al in je lijst.`,
+    });
+  }
+  throw error;
+}
 
 export const domainRouter = router({
   list: protectedProcedure
@@ -85,7 +128,7 @@ export const domainRouter = router({
   create: mutationProcedure
     .input(
       z.object({
-        domainName: z.string().min(1),
+        domainName: domainNameSchema,
         registrar: z.string().optional(),
         registeredAt: z.string().or(z.date()).optional(),
         expiresAt: z.string().or(z.date()).optional(),
@@ -94,25 +137,32 @@ export const domainRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      if (input.leadId) await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
-      return ctx.db.domain.create({
-        data: {
-          domainName: input.domainName,
-          registrar: input.registrar || null,
-          registeredAt: input.registeredAt ? new Date(input.registeredAt) : null,
-          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
-          notes: input.notes || null,
-          leadId: input.leadId || null,
-          createdById: ctx.user.workspaceId!,
-        },
-      });
+      const workspaceId = ctx.user.workspaceId!;
+      if (input.leadId) await assertLeadAccess(ctx.db, workspaceId, input.leadId);
+      await assertDomainNameAvailable(ctx.db, workspaceId, input.domainName);
+
+      try {
+        return await ctx.db.domain.create({
+          data: {
+            domainName: input.domainName,
+            registrar: input.registrar || null,
+            registeredAt: input.registeredAt ? new Date(input.registeredAt) : null,
+            expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+            notes: input.notes || null,
+            leadId: input.leadId || null,
+            createdById: workspaceId,
+          },
+        });
+      } catch (error) {
+        mapDomainWriteError(error, input.domainName);
+      }
     }),
 
   update: mutationProcedure
     .input(
       z.object({
         id: z.string(),
-        domainName: z.string().min(1).optional(),
+        domainName: domainNameSchema.optional(),
         registrar: z.string().optional(),
         registeredAt: z.string().or(z.date()).optional(),
         expiresAt: z.string().or(z.date()).optional(),
@@ -129,7 +179,11 @@ export const domainRouter = router({
         select: { id: true },
       });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Domein niet gevonden" });
-      if (data.leadId) await assertLeadAccess(ctx.db, ctx.user.workspaceId!, data.leadId);
+      const workspaceId = ctx.user.workspaceId!;
+      if (data.leadId) await assertLeadAccess(ctx.db, workspaceId, data.leadId);
+      if (data.domainName !== undefined) {
+        await assertDomainNameAvailable(ctx.db, workspaceId, data.domainName, id);
+      }
       const updateData: Record<string, unknown> = {};
       if (data.domainName !== undefined) updateData.domainName = data.domainName;
       if (data.registrar !== undefined) updateData.registrar = data.registrar || null;
@@ -140,7 +194,14 @@ export const domainRouter = router({
       if (data.notes !== undefined) updateData.notes = data.notes || null;
       if (data.leadId !== undefined) updateData.leadId = data.leadId || null;
 
-      return ctx.db.domain.update({ where: { id }, data: updateData });
+      try {
+        return await ctx.db.domain.update({ where: { id }, data: updateData });
+      } catch (error) {
+        if (typeof data.domainName === "string") {
+          mapDomainWriteError(error, data.domainName);
+        }
+        throw error;
+      }
     }),
 
   delete: mutationProcedure
@@ -155,7 +216,7 @@ export const domainRouter = router({
     }),
 
   analyzeDomain: mutationProcedure
-    .input(z.object({ domainName: z.string().min(1) }))
+    .input(z.object({ domainName: domainNameSchema }))
     .mutation(async ({ ctx, input }) => {
       const analysis = await analyzeWebsite(input.domainName);
 
@@ -197,7 +258,7 @@ export const domainRouter = router({
     }),
 
   getAnalysis: protectedProcedure
-    .input(z.object({ domainName: z.string().min(1) }))
+    .input(z.object({ domainName: domainNameSchema }))
     .query(async ({ ctx, input }) => {
       const domain = await ctx.db.domain.findFirst({
         where: { domainName: input.domainName, createdById: ctx.user.workspaceId! },

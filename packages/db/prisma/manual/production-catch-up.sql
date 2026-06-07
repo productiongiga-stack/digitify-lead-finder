@@ -377,3 +377,8 @@ DO $$ BEGIN
     FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+-- 20260607210000_domain_workspace_unique
+DROP INDEX IF EXISTS "domains_domainName_key";
+CREATE UNIQUE INDEX IF NOT EXISTS "domains_createdById_domainName_key"
+  ON "domains"("createdById", "domainName");
