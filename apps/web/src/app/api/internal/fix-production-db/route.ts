@@ -55,6 +55,16 @@ async function ensureEmailTemplateSchema() {
   await runSql(`ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "bodyFormat" "EmailTemplateBodyFormat" NOT NULL DEFAULT 'TEXT'`);
   await runSql(`CREATE INDEX IF NOT EXISTS "email_templates_createdById_type_idx" ON "email_templates"("createdById", "type")`);
   await runSql(`CREATE INDEX IF NOT EXISTS "email_templates_createdById_layout_idx" ON "email_templates"("createdById", "layout")`);
+  await runSql(`
+    DO $$ BEGIN
+      CREATE TYPE "EmailModule" AS ENUM ('LEADS', 'CAMPAIGNS', 'QUOTES', 'INVOICES', 'BOOKINGS', 'REVIEWS', 'AUTH', 'INBOX', 'SYSTEM');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+  `);
+  await runSql(`ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "module" "EmailModule" NOT NULL DEFAULT 'LEADS'`);
+  await runSql(`ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "templateKey" TEXT`);
+  await runSql(`ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "isSystem" BOOLEAN NOT NULL DEFAULT false`);
+  await runSql(`CREATE INDEX IF NOT EXISTS "email_templates_createdById_module_idx" ON "email_templates"("createdById", "module")`);
+  await runSql(`CREATE UNIQUE INDEX IF NOT EXISTS "email_templates_createdById_templateKey_key" ON "email_templates"("createdById", "templateKey")`);
 }
 
 export async function POST(request: Request) {
