@@ -27,6 +27,57 @@ function hashPassword(password: string) {
   return `${salt}:${hash}`;
 }
 
+async function ensureWorkspaceSchema() {
+  await runSql(`CREATE TYPE "WorkspaceType" AS ENUM ('PERSONAL', 'TEAM')`);
+  await runSql(`CREATE TYPE "WorkspaceMembershipStatus" AS ENUM ('ACTIVE', 'INVITED', 'DECLINED')`);
+  await runSql(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "activeWorkspaceId" TEXT`);
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS "workspaces" (
+      "id" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "type" "WorkspaceType" NOT NULL DEFAULT 'TEAM',
+      "ownerUserId" TEXT NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "workspaces_pkey" PRIMARY KEY ("id")
+    )
+  `);
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS "workspace_memberships" (
+      "id" TEXT NOT NULL,
+      "workspaceId" TEXT NOT NULL,
+      "userId" TEXT NOT NULL,
+      "role" "UserRole" NOT NULL DEFAULT 'MEMBER',
+      "status" "WorkspaceMembershipStatus" NOT NULL DEFAULT 'ACTIVE',
+      "invitedById" TEXT,
+      "invitedAt" TIMESTAMP(3),
+      "respondedAt" TIMESTAMP(3),
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "workspace_memberships_pkey" PRIMARY KEY ("id")
+    )
+  `);
+  await runSql(`CREATE UNIQUE INDEX IF NOT EXISTS "workspace_memberships_workspaceId_userId_key" ON "workspace_memberships"("workspaceId", "userId")`);
+}
+
+async function ensureAnalyticsSchema() {
+  await runSql(`
+    CREATE TABLE IF NOT EXISTS "workspace_analytics_events" (
+      "id" TEXT NOT NULL,
+      "workspaceId" TEXT NOT NULL,
+      "category" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      "path" TEXT,
+      "userId" TEXT,
+      "sessionId" TEXT,
+      "metadata" JSONB,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "workspace_analytics_events_pkey" PRIMARY KEY ("id")
+    )
+  `);
+  await runSql(`CREATE INDEX IF NOT EXISTS "workspace_analytics_events_workspaceId_createdAt_idx" ON "workspace_analytics_events"("workspaceId", "createdAt" DESC)`);
+}
+
 async function ensureEmailTemplateSchema() {
   await runSql(`
     DO $$ BEGIN
