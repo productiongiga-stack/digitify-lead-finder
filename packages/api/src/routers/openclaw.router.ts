@@ -6,7 +6,8 @@ import { type PrismaClient } from "@digitify/db";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
 import { assertLeadAccess } from "../lib/tenant";
-import { generateInboxAiMessage } from "../lib/inbox-ai-reply";
+import { generateDraftAiRewrite, generateInboxAiMessage } from "../lib/inbox-ai-reply";
+import { extractEmailTemplateMetadata } from "../lib/email-content";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
 
 async function getClient(db: PrismaClient, workspaceId: string): Promise<{ client: OpenClawClient | null; model: string }> {
@@ -310,68 +311,29 @@ export const openclawRouter = router({
     .input(z.object({
       draftId: z.string(),
       style: z.string(),
+      subject: z.string().optional(),
+      body: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { client } = await getClient(ctx.db, ctx.user.workspaceId!);
-      if (!client) {
-        return { rewritten: null, error: "API key niet geconfigureerd." };
-      }
-
-      const draft = await ctx.db.emailDraft.findFirstOrThrow({
+      const draft = await ctx.db.emailDraft.findFirst({
         where: { id: input.draftId, lead: { createdById: ctx.user.workspaceId! } },
         include: { lead: { select: { companyName: true, city: true, industry: true } } },
       });
-      if (!draft.lead) {
-        return { rewritten: null, error: "Dit concept heeft geen gekoppelde lead." };
+      if (!draft) {
+        return { rewritten: null, error: "Concept niet gevonden." };
       }
 
-      const prompt = `Herschrijf deze e-mail in een "${input.style}" stijl.
+      const storedMeta = extractEmailTemplateMetadata(draft.body);
+      const subject = input.subject?.trim() || draft.subject;
+      const body = input.body?.trim() || storedMeta.cleanBody;
 
-Huidige onderwerp: ${draft.subject}
-Huidige body:
-${draft.body}
-
-Lead context: ${draft.lead.companyName} uit ${draft.lead.city || "onbekend"}, sector: ${draft.lead.industry || "onbekend"}.
-
-BELANGRIJK:
-- Behoud de kernboodschap
-- Behoud bestaande {{...}} placeholders exact zoals ze al in de tekst staan
-- Gebruik voor afzendergegevens indien nodig alleen: {{senderName}}, {{senderTitle}}, {{senderCompany}}, {{senderEmail}}, {{senderPhone}}
-- Gebruik GEEN legacy placeholders zoals [Je naam] of [Je functie]
-- Schrijf de volledige tekst klaar voor verzending
-- Geef je antwoord in dit formaat:
-ONDERWERP: [nieuwe onderwerpregel]
----
-[nieuwe e-mail body]
----`;
-
-      const response = await client.chat(
-        [{ role: "user", content: prompt }],
-        {
-          leadData: {
-            companyName: draft.lead.companyName,
-            website: null,
-            city: draft.lead.city,
-            industry: draft.lead.industry,
-            overallScore: null,
-            scorePriority: null,
-            gmbRating: null,
-            gmbReviewCount: null,
-          },
-          businessContext: (await loadBusinessContext(ctx.db, ctx.user.workspaceId!)).businessContext,
-        }
-      );
-
-      const subjectMatch = response.match(/ONDERWERP:\s*(.+)/);
-      const bodyMatch = response.match(/---\n([\s\S]*?)\n---/);
-
-      return {
-        rewritten: {
-          subject: normalizeAiPlaceholderSyntax(subjectMatch?.[1]?.trim() || draft.subject),
-          body: normalizeAiPlaceholderSyntax(bodyMatch?.[1]?.trim() || response),
-        },
-        error: null,
-      };
+      return generateDraftAiRewrite(ctx.db, ctx.user.workspaceId!, {
+        style: input.style,
+        subject,
+        body,
+        recipientEmail: draft.toEmail,
+        lead: draft.lead,
+      });
     }),
 
   rewriteInboxMessage: aiRateLimitedProcedure

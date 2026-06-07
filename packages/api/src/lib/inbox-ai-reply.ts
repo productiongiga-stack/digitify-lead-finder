@@ -138,6 +138,113 @@ export function parseInboxAiResponse(
   };
 }
 
+export type GenerateDraftRewriteInput = {
+  style: string;
+  subject: string;
+  body: string;
+  recipientEmail?: string;
+  lead?: {
+    companyName: string;
+    city: string | null;
+    industry: string | null;
+  } | null;
+};
+
+export function buildDraftRewritePrompt(input: GenerateDraftRewriteInput) {
+  const leadContext = input.lead
+    ? `Lead: ${input.lead.companyName}${input.lead.city ? ` uit ${input.lead.city}` : ""}${
+        input.lead.industry ? `, sector: ${input.lead.industry}` : ""
+      }.`
+    : input.recipientEmail
+      ? `Ontvanger: ${input.recipientEmail}.`
+      : "";
+
+  return `Herschrijf deze outbound e-mail in het Nederlands (België) in een "${input.style}" stijl.
+
+${leadContext}
+
+HUIDIG ONDERWERP:
+${input.subject}
+
+HUIDIGE INHOUD:
+---
+${input.body}
+---
+
+INSTRUCTIES:
+- Behoud de kernboodschap en relevante details
+- Behoud bestaande {{...}} placeholders exact zoals ze al in de tekst staan
+- Gebruik voor afzendergegevens alleen: {{senderName}}, {{senderTitle}}, {{senderCompany}}, {{senderEmail}}, {{senderPhone}}
+- Geen markdown; alleen platte tekst klaar om te verzenden
+- Geen legacy placeholders zoals [Je naam] of [Je functie]
+
+Geef je antwoord exact in dit formaat:
+ONDERWERP: [nieuwe onderwerpregel]
+---
+[alleen de e-mail body, geen uitleg]
+---`;
+}
+
+export async function generateDraftAiRewrite(
+  db: PrismaClient,
+  workspaceId: string,
+  input: GenerateDraftRewriteInput,
+) {
+  const client = await getOpenClawClient(db, workspaceId);
+  if (!client) {
+    return {
+      rewritten: null,
+      error: "API-sleutel niet geconfigureerd. Ga naar Instellingen → Integraties en stel een AI-provider in.",
+    } as const;
+  }
+
+  if (!input.body.trim()) {
+    return {
+      rewritten: null,
+      error: "Vul eerst e-mailinhoud in voordat je herschrijft.",
+    } as const;
+  }
+
+  const businessContextData = await loadBusinessContext(db, workspaceId);
+  const prompt = buildDraftRewritePrompt(input);
+
+  try {
+    const response = await client.chat([{ role: "user", content: prompt }], {
+      businessContext: businessContextData.businessContext,
+      settings: {
+        aggressiveness: "balanced",
+        tone: "professional",
+        language: "nl",
+        companyName: businessContextData.companyName,
+      },
+      leadData: {
+        companyName: input.lead?.companyName || input.recipientEmail || "Ontvanger",
+        website: null,
+        city: input.lead?.city ?? null,
+        industry: input.lead?.industry ?? null,
+        overallScore: null,
+        scorePriority: null,
+        gmbRating: null,
+        gmbReviewCount: null,
+      },
+    });
+
+    return {
+      rewritten: parseInboxAiResponse(response, input.subject),
+      error: null,
+    } as const;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "AI-herschrijven mislukt";
+    if (/api[_\s-]?key|401|authentication|invalid/i.test(message)) {
+      return {
+        rewritten: null,
+        error: "Ongeldige of ontbrekende API-sleutel. Controleer Integraties → AI.",
+      } as const;
+    }
+    return { rewritten: null, error: message } as const;
+  }
+}
+
 export async function generateInboxAiMessage(
   db: PrismaClient,
   workspaceId: string,

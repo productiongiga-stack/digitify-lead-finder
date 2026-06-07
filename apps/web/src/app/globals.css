@@ -616,6 +616,74 @@
     @apply inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500 ring-2 ring-amber-500/25;
   }
 
+  .integrations-shell {
+    @apply grid gap-4 lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)] lg:items-start;
+  }
+
+  .integrations-nav {
+    @apply rounded-2xl border border-border/55 bg-gradient-to-b from-muted/25 to-card p-2 shadow-sm lg:sticky lg:top-4;
+  }
+
+  .integrations-nav-group + .integrations-nav-group {
+    @apply mt-3 border-t border-border/40 pt-3;
+  }
+
+  .integrations-nav-group-label {
+    @apply px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground;
+  }
+
+  .integrations-nav-item {
+    @apply flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-background/70;
+  }
+
+  .integrations-nav-item-active {
+    @apply bg-card text-foreground shadow-sm ring-1 ring-border/60;
+  }
+
+  .integrations-nav-item-icon {
+    @apply h-4 w-4 shrink-0 text-muted-foreground;
+  }
+
+  .integrations-nav-item-active .integrations-nav-item-icon {
+    @apply text-primary;
+  }
+
+  .integrations-nav-status-dot {
+    @apply h-2 w-2 rounded-full;
+  }
+
+  .integrations-nav-status-dot-ok {
+    @apply bg-emerald-500 ring-2 ring-emerald-500/20;
+  }
+
+  .integrations-nav-status-dot-pending {
+    @apply bg-muted-foreground/35;
+  }
+
+  .integrations-nav-dirty-dot {
+    @apply h-1.5 w-1.5 rounded-full bg-amber-500;
+  }
+
+  .integrations-overview-grid {
+    @apply grid gap-3 sm:grid-cols-2 xl:grid-cols-3;
+  }
+
+  .integrations-overview-card {
+    @apply rounded-2xl border border-border/60 bg-card p-4 shadow-sm transition hover:border-primary/30 hover:shadow-md;
+  }
+
+  .integrations-mobile-nav {
+    @apply flex gap-2 overflow-x-auto rounded-xl border border-border/50 bg-muted/20 p-1.5 lg:hidden;
+  }
+
+  .integrations-mobile-nav-btn {
+    @apply inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background/70;
+  }
+
+  .integrations-mobile-nav-btn-active {
+    @apply bg-card text-foreground shadow-sm;
+  }
+
   .bookings-filters {
     @apply grid gap-3 rounded-2xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-muted/20 p-3 shadow-sm sm:p-4 md:grid-cols-2 lg:grid-cols-4;
   }

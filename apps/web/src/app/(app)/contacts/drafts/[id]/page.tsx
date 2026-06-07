@@ -98,6 +98,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [bodyFormat, setBodyFormat] = useState<"TEXT" | "HTML">("TEXT");
   const [rewriteStyle, setRewriteStyle] = useState("Korter");
   const [rewriteResult, setRewriteResult] = useState<{ subject: string; body: string } | null>(null);
+  const [rewriteError, setRewriteError] = useState("");
 
   useEffect(() => {
     if (!draft || initialized) return;
@@ -146,9 +147,19 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
 
   const rewriteDraft = trpc.openclaw.rewriteDraft.useMutation({
     onSuccess: (data) => {
+      if (data.error) {
+        setRewriteError(data.error);
+        setRewriteResult(null);
+        return;
+      }
       if (data.rewritten) {
+        setRewriteError("");
         setRewriteResult(data.rewritten);
       }
+    },
+    onError: (error) => {
+      setRewriteError(error.message);
+      setRewriteResult(null);
     },
   });
 
@@ -527,10 +538,16 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
                   </div>
                   <Button
                     variant="outline"
-                    disabled={rewriteDraft.isPending || !body}
+                    disabled={rewriteDraft.isPending || !body.trim()}
                     onClick={() => {
                       setRewriteResult(null);
-                      rewriteDraft.mutate({ draftId: id, style: rewriteStyle });
+                      setRewriteError("");
+                      rewriteDraft.mutate({
+                        draftId: id,
+                        style: rewriteStyle,
+                        subject: subject.trim(),
+                        body: body.trim(),
+                      });
                     }}
                   >
                     {rewriteDraft.isPending ? (
@@ -542,9 +559,11 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
                   </Button>
                 </div>
 
-                {rewriteDraft.error && (
-                  <p className="text-sm text-destructive">{rewriteDraft.error.message}</p>
-                )}
+                {rewriteError ? (
+                  <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                    {rewriteError}
+                  </p>
+                ) : null}
 
                 {rewriteResult && (
                   <div className="space-y-3 rounded-md border bg-muted/50 p-4">

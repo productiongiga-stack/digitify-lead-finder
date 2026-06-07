@@ -15,10 +15,6 @@ import {
   Skeleton,
   Badge,
   Switch,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
 } from "@digitify/ui";
 import {
   ArrowLeft,
@@ -53,8 +49,30 @@ import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 import { readSettingBoolean, readSettingString } from "@/lib/settings";
 import { SETTINGS_PAGE_QUERY_OPTS } from "@/lib/settings-query-options";
 import { formatTrpcErrorMessage } from "@/lib/trpc/format-error";
+import {
+  DnsCopyField,
+  IntegrationActionBar,
+  IntegrationNav,
+  IntegrationOverviewCard,
+  IntegrationPanel,
+  IntegrationTestResult,
+  SecretKeyField,
+  SetupSteps,
+  type IntegrationNavItem,
+} from "@/components/settings/integrations/integration-ui";
 
 const SECRET_MASK = "••••••••";
+
+type IntegrationTabId =
+  | "overview"
+  | "google-places"
+  | "anthropic"
+  | "openai"
+  | "deepseek"
+  | "google-oauth"
+  | "meta"
+  | "smtp"
+  | "imap";
 
 type AiProviderId = "anthropic" | "openai" | "deepseek";
 
@@ -102,15 +120,7 @@ function resolveRecommendedTlsServername(host: string, username: string) {
   return host.trim();
 }
 
-function TestResult({ result, isError }: { result: string | null; isError: boolean }) {
-  if (!result) return null;
-  return (
-    <div className={`mt-2 flex items-center gap-2 rounded-md px-3 py-2 text-sm ${isError ? "bg-destructive/10 text-destructive" : "bg-green-500/10 text-green-700 dark:text-green-400"}`}>
-      {isError ? <AlertCircle className="h-4 w-4 shrink-0" /> : <CheckCircle className="h-4 w-4 shrink-0" />}
-      <span>{result}</span>
-    </div>
-  );
-}
+const TestResult = IntegrationTestResult;
 
 type SmtpDnsGuideData = {
   activeDomain?: string;
@@ -142,37 +152,6 @@ const DNS_RECORD_STYLES: Record<
     ring: "ring-emerald-500/20",
   },
 };
-
-function DnsCopyField({ label, value }: { label: string; value: string }) {
-  const { showToast } = useToast();
-  const [copied, setCopied] = useState(false);
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      showToast({ title: "Gekopieerd", description: `${label} staat op je klembord.` });
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      showToast({ title: "Kopiëren mislukt", variant: "error" });
-    }
-  }
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
-        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={handleCopy}>
-          {copied ? <Check className="mr-1 h-3 w-3 text-emerald-600" /> : <Copy className="mr-1 h-3 w-3" />}
-          {copied ? "Gekopieerd" : "Kopiëren"}
-        </Button>
-      </div>
-      <pre className="overflow-x-auto rounded-lg border bg-muted/40 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground">
-        {value}
-      </pre>
-    </div>
-  );
-}
 
 function SmtpDnsGuide({ guide }: { guide: SmtpDnsGuideData | undefined }) {
   if (!guide) return null;
@@ -506,17 +485,6 @@ function DnsCheckResult({ result }: { result: DnsCheckData | null | undefined })
   );
 }
 
-function TabStatusDot({ configured }: { configured: boolean }) {
-  if (configured) return null;
-  return (
-    <span
-      className="settings-integrations-tab-dot"
-      title="Nog niet volledig geconfigureerd"
-      aria-label="Nog niet volledig geconfigureerd"
-    />
-  );
-}
-
 export function IntegrationsSettingsInner() {
   const { data: settings, isLoading, error, refetch } = trpc.settings.getIntegrationsSettings.useQuery(undefined, {
     retry: 1,
@@ -565,8 +533,8 @@ export function IntegrationsSettingsInner() {
   const testSmtp = trpc.settings.testSmtp.useMutation();
   const checkEmailDns = trpc.settings.checkEmailDns.useMutation();
   const testImap = trpc.settings.testImap.useMutation();
-  const [integrationsTab, setIntegrationsTab] = useState("providers");
-  const pollProviderConnections = integrationsTab === "providers";
+  const [integrationsTab, setIntegrationsTab] = useState<IntegrationTabId>("overview");
+  const pollProviderConnections = integrationsTab === "google-oauth" || integrationsTab === "meta";
   const metaConnection = trpc.social.connectionStatus.useQuery(undefined, {
     enabled: pollProviderConnections,
     refetchInterval: pollProviderConnections ? 30_000 : false,
@@ -601,7 +569,6 @@ export function IntegrationsSettingsInner() {
   const [adsMaxDailyBudgetCents, setAdsMaxDailyBudgetCents] = useState("5000");
 
   // AI
-  const [selectedAiProvider, setSelectedAiProvider] = useState<AiProviderId>("anthropic");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
   const [deepseekKey, setDeepseekKey] = useState("");
@@ -657,10 +624,13 @@ export function IntegrationsSettingsInner() {
     imapUser: readSettingString(settings, "email.imap_user"),
     imapTls: readSettingBoolean(settings, "email.imap_tls", true),
   }), [settings]);
-  const googleProviderDirty =
-    googlePlacesKey.trim() !== initialState.googlePlacesKey
-    || googleOAuthClientId.trim() !== initialState.googleOAuthClientId
+  const googlePlacesDirty = googlePlacesKey.trim() !== initialState.googlePlacesKey;
+  const googleOAuthDirty =
+    googleOAuthClientId.trim() !== initialState.googleOAuthClientId
     || Boolean(googleOAuthClientSecret.trim());
+  const anthropicDirty = anthropicKey.trim() !== initialState.anthropicKey;
+  const openaiDirty = openaiKey.trim() !== initialState.openaiKey;
+  const deepseekDirty = deepseekKey.trim() !== initialState.deepseekKey;
   const metaProviderDirty =
     metaAppId.trim() !== initialState.metaAppId
     || socialAutopostEnabled !== initialState.socialAutopostEnabled
@@ -668,12 +638,7 @@ export function IntegrationsSettingsInner() {
     || adsDefaultCurrency.trim() !== initialState.adsDefaultCurrency
     || adsMaxDailyBudgetCents.trim() !== initialState.adsMaxDailyBudgetCents
     || Boolean(metaAppSecret.trim());
-  const googleDirty = googleProviderDirty || metaProviderDirty;
   const metaDirty = metaProviderDirty;
-  const aiDirty =
-    anthropicKey.trim() !== initialState.anthropicKey
-    || openaiKey.trim() !== initialState.openaiKey
-    || deepseekKey.trim() !== initialState.deepseekKey;
   const smtpDirty =
     smtpHost.trim() !== initialState.smtpHost
     || smtpPort.trim() !== initialState.smtpPort
@@ -687,41 +652,123 @@ export function IntegrationsSettingsInner() {
     || imapUser.trim() !== initialState.imapUser
     || imapTls !== initialState.imapTls
     || Boolean(imapPass.trim());
-  const anyDirty = googleDirty || aiDirty || smtpDirty || imapDirty;
-  const aiConfigured =
-    anthropicConfigured
-    || openaiConfigured
-    || deepseekConfigured
-    || Boolean(anthropicKey.trim() || openaiKey.trim() || deepseekKey.trim());
-  const activeAiProvider = AI_PROVIDER_OPTIONS.find((item) => item.id === selectedAiProvider) ?? AI_PROVIDER_OPTIONS[0];
-  const activeAiKey =
-    selectedAiProvider === "openai"
-      ? openaiKey
-      : selectedAiProvider === "deepseek"
-        ? deepseekKey
-        : anthropicKey;
-  const activeAiConfigured =
-    selectedAiProvider === "openai"
-      ? openaiConfigured
-      : selectedAiProvider === "deepseek"
-        ? deepseekConfigured
-        : anthropicConfigured;
-  const setActiveAiKey = (value: string) => {
-    if (selectedAiProvider === "openai") setOpenaiKey(value);
-    else if (selectedAiProvider === "deepseek") setDeepseekKey(value);
-    else setAnthropicKey(value);
-  };
-  const activeAiTest =
-    selectedAiProvider === "openai"
-      ? testOpenai
-      : selectedAiProvider === "deepseek"
-        ? testDeepseek
-        : testAnthropic;
+  const anthropicConfiguredActive = anthropicConfigured || Boolean(anthropicKey.trim());
+  const openaiConfiguredActive = openaiConfigured || Boolean(openaiKey.trim());
+  const deepseekConfiguredActive = deepseekConfigured || Boolean(deepseekKey.trim());
   const googleOAuthConfigured = Boolean(
     googleOAuthClientId.trim() && (googleOAuthClientSecret.trim() || googleOAuthSecretConfigured),
   );
+  const googlePlacesConfiguredActive = googlePlacesConfigured || Boolean(googlePlacesKey.trim());
   const metaConfigured = Boolean(metaAppId.trim() && (metaAppSecret.trim() || metaAppSecretConfigured));
   const metaRedirectUrl = "https://leads.digitify.be/api/integrations/meta/callback";
+
+  const integrationNavItems: IntegrationNavItem[] = [
+    { id: "overview", label: "Overzicht", description: "Status van alle koppelingen", icon: Settings2, configured: true, group: "Start" },
+    { id: "google-places", label: "Google Places", description: "Lead-zoekopdrachten", icon: Globe, configured: googlePlacesConfiguredActive, dirty: googlePlacesDirty, group: "Zoeken" },
+    { id: "anthropic", label: "Anthropic", description: "Claude API", icon: Bot, configured: anthropicConfiguredActive, dirty: anthropicDirty, group: "AI" },
+    { id: "openai", label: "OpenAI", description: "GPT API", icon: Bot, configured: openaiConfiguredActive, dirty: openaiDirty, group: "AI" },
+    { id: "deepseek", label: "DeepSeek", description: "DeepSeek API", icon: Bot, configured: deepseekConfiguredActive, dirty: deepseekDirty, group: "AI" },
+    { id: "google-oauth", label: "Google OAuth", description: "Agenda & Ads", icon: CalendarDays, configured: googleOAuthConfigured, dirty: googleOAuthDirty, group: "OAuth" },
+    { id: "meta", label: "Meta", description: "Facebook & Instagram", icon: Megaphone, configured: metaConfigured || Boolean(metaConnection.data?.connected), dirty: metaDirty, group: "OAuth" },
+    { id: "smtp", label: "SMTP", description: "Uitgaande e-mail", icon: Mail, configured: smtpConfigured, dirty: smtpDirty, group: "E-mail" },
+    { id: "imap", label: "IMAP", description: "Inkomende inbox", icon: Inbox, configured: imapConfigured, dirty: imapDirty, group: "E-mail" },
+  ];
+
+  function renderAiProviderPanel(provider: AiProviderId) {
+    const option = AI_PROVIDER_OPTIONS.find((item) => item.id === provider)!;
+    const configured =
+      provider === "openai"
+        ? openaiConfiguredActive
+        : provider === "deepseek"
+          ? deepseekConfiguredActive
+          : anthropicConfiguredActive;
+    const keyValue =
+      provider === "openai" ? openaiKey : provider === "deepseek" ? deepseekKey : anthropicKey;
+    const setKeyValue =
+      provider === "openai" ? setOpenaiKey : provider === "deepseek" ? setDeepseekKey : setAnthropicKey;
+    const dirty =
+      provider === "openai" ? openaiDirty : provider === "deepseek" ? deepseekDirty : anthropicDirty;
+    const testMutation =
+      provider === "openai" ? testOpenai : provider === "deepseek" ? testDeepseek : testAnthropic;
+
+    return (
+      <IntegrationPanel
+        icon={Bot}
+        iconClassName="bg-purple-500/10 text-purple-600 dark:text-purple-300"
+        title={`${option.label} API`}
+        description={option.description}
+        configured={configured}
+        footer={
+          <IntegrationActionBar>
+            <Button size="sm" onClick={() => handleSaveAiProvider(provider)} disabled={batchUpdate.isPending || !dirty}>
+              {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
+              Opslaan
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/settings/ai">
+                <Settings2 className="mr-2 h-3 w-3" />
+                AI-instellingen
+              </Link>
+            </Button>
+          </IntegrationActionBar>
+        }
+      >
+        <SecretKeyField
+          label="API-sleutel"
+          value={keyValue}
+          onChange={setKeyValue}
+          placeholder={configured ? "Nieuwe sleutel om te vervangen" : option.placeholder}
+          show={showAiKey}
+          onToggleShow={() => setShowAiKey(!showAiKey)}
+          hint="Welke provider actief is, stel je in via AI-instellingen. Bewaar hier de sleutels per aanbieder."
+        />
+        <IntegrationActionBar>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={testMutation.isPending || (!configured && !keyValue.trim())}
+            onClick={() => {
+              testMutation.reset();
+              testMutation.mutate();
+            }}
+          >
+            {testMutation.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Zap className="mr-2 h-3 w-3" />}
+            Test verbinding
+          </Button>
+          {configured ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              disabled={removeSettings.isPending}
+              onClick={() =>
+                requestRemoveSetting({
+                  title: `${option.label} API-sleutel verwijderen?`,
+                  description: `De opgeslagen ${option.label}-sleutel wordt permanent gewist.`,
+                  keys: [AI_PROVIDER_SETTING_KEYS[provider]],
+                  onCleared: () => {
+                    setKeyValue("");
+                    if (provider === "openai") setOpenaiConfigured(false);
+                    else if (provider === "deepseek") setDeepseekConfigured(false);
+                    else setAnthropicConfigured(false);
+                    testMutation.reset();
+                  },
+                })
+              }
+            >
+              <Trash2 className="mr-2 h-3 w-3" />
+              Sleutel verwijderen
+            </Button>
+          ) : null}
+        </IntegrationActionBar>
+        <TestResult
+          result={testMutation.data?.message ?? (testMutation.error ? formatTrpcErrorMessage(testMutation.error.message) : null)}
+          isError={testMutation.isError}
+        />
+      </IntegrationPanel>
+    );
+  }
 
   function extractDomainFromEmail(value: string) {
     const candidate = value.trim().toLowerCase();
@@ -738,7 +785,6 @@ export function IntegrationsSettingsInner() {
       const anthropicKeyRaw = readSettingString(settings, "api.anthropic_key");
       const openaiKeyRaw = readSettingString(settings, "api.openai_key");
       const deepseekKeyRaw = readSettingString(settings, "api.deepseek_key");
-      const providerRaw = readSettingString(settings, "api.ai_provider", "anthropic").toLowerCase();
       const smtpPassRaw = readSettingString(settings, "email.smtp_pass");
       const imapPassRaw = readSettingString(settings, "email.imap_pass");
 
@@ -748,9 +794,6 @@ export function IntegrationsSettingsInner() {
       setAnthropicConfigured(Boolean(anthropicKeyRaw));
       setOpenaiConfigured(Boolean(openaiKeyRaw));
       setDeepseekConfigured(Boolean(deepseekKeyRaw));
-      if (providerRaw === "openai" || providerRaw === "deepseek" || providerRaw === "anthropic") {
-        setSelectedAiProvider(providerRaw);
-      }
 
       setGooglePlacesKey(googleKeyRaw === SECRET_MASK ? "" : googleKeyRaw);
       setGoogleOAuthClientId(readSettingString(settings, "integrations.google_oauth_client_id"));
@@ -785,40 +828,19 @@ export function IntegrationsSettingsInner() {
     }
   }, [settings]);
 
-  function handleSave() {
+  function handleSaveGooglePlaces() {
+    batchUpdate.mutate([{ key: "api.google_places_key", value: googlePlacesKey.trim() }]);
+  }
+
+  function handleSaveGoogleOAuth() {
     batchUpdate.mutate([
-      { key: "api.google_places_key", value: googlePlacesKey.trim() },
       { key: "integrations.google_oauth_client_id", value: googleOAuthClientId.trim() },
       { key: "integrations.google_oauth_client_secret", value: googleOAuthClientSecret },
-      { key: "integrations.meta_app_id", value: metaAppId.trim() },
-      { key: "integrations.meta_app_secret", value: metaAppSecret },
-      { key: "social.autopost_enabled", value: String(socialAutopostEnabled) },
-      { key: "ads.autoads_enabled", value: String(adsAutoadsEnabled) },
-      { key: "ads.default_currency", value: adsDefaultCurrency.trim().toUpperCase() || "EUR" },
-      { key: "ads.max_daily_budget_cents", value: adsMaxDailyBudgetCents.trim() || "5000" },
-      { key: "api.anthropic_key", value: anthropicKey.trim() },
-      { key: "api.openai_key", value: openaiKey.trim() },
-      { key: "api.deepseek_key", value: deepseekKey.trim() },
-      { key: "email.smtp_host", value: smtpHost.trim() },
-      { key: "email.smtp_port", value: smtpPort.trim() || "587" },
-      { key: "email.smtp_user", value: smtpUser.trim() },
-      { key: "email.smtp_pass", value: smtpPass },
-      { key: "email.provider", value: smtpConfigured ? "smtp" : "console" },
-      { key: "email.smtp_servername", value: effectiveTlsServername },
-      { key: "email.smtp_tls_reject_unauthorized", value: String(smtpRejectUnauthorized) },
-      { key: "email.imap_host", value: imapHost.trim() },
-      { key: "email.imap_port", value: imapPort.trim() || "993" },
-      { key: "email.imap_user", value: imapUser.trim() },
-      { key: "email.imap_pass", value: imapPass },
-      { key: "email.imap_tls", value: String(imapTls) },
     ]);
   }
 
-  function handleSaveGoogle() {
+  function handleSaveMeta() {
     batchUpdate.mutate([
-      { key: "api.google_places_key", value: googlePlacesKey.trim() },
-      { key: "integrations.google_oauth_client_id", value: googleOAuthClientId.trim() },
-      { key: "integrations.google_oauth_client_secret", value: googleOAuthClientSecret },
       { key: "integrations.meta_app_id", value: metaAppId.trim() },
       { key: "integrations.meta_app_secret", value: metaAppSecret },
       { key: "social.autopost_enabled", value: String(socialAutopostEnabled) },
@@ -828,12 +850,11 @@ export function IntegrationsSettingsInner() {
     ]);
   }
 
-  function handleSaveAi() {
-    batchUpdate.mutate([
-      { key: "api.anthropic_key", value: anthropicKey.trim() },
-      { key: "api.openai_key", value: openaiKey.trim() },
-      { key: "api.deepseek_key", value: deepseekKey.trim() },
-    ]);
+  function handleSaveAiProvider(provider: AiProviderId) {
+    const key = AI_PROVIDER_SETTING_KEYS[provider];
+    const value =
+      provider === "openai" ? openaiKey.trim() : provider === "deepseek" ? deepseekKey.trim() : anthropicKey.trim();
+    batchUpdate.mutate([{ key, value }]);
   }
 
   function handleSaveSmtp() {
@@ -881,20 +902,6 @@ export function IntegrationsSettingsInner() {
     );
   }
 
-  function clearActiveAiKeyState() {
-    if (selectedAiProvider === "openai") {
-      setOpenaiKey("");
-      setOpenaiConfigured(false);
-    } else if (selectedAiProvider === "deepseek") {
-      setDeepseekKey("");
-      setDeepseekConfigured(false);
-    } else {
-      setAnthropicKey("");
-      setAnthropicConfigured(false);
-    }
-    activeAiTest.reset();
-  }
-
   if (isLoading) {
     return (
       <div className="space-y-5">
@@ -936,295 +943,168 @@ export function IntegrationsSettingsInner() {
           <Button variant="ghost" size="icon" className="rounded-xl"><ArrowLeft className="h-4 w-4" /></Button>
         </Link>
         <div className="app-page-heading">
-          <h1 className="app-page-title">Integraties & API Keys</h1>
-          <p className="app-page-subtitle">Configureer externe diensten en API-sleutels</p>
+          <h1 className="app-page-title">Integraties &amp; API-sleutels</h1>
+          <p className="app-page-subtitle">Koppel externe diensten per integratie — elke API heeft een eigen tab.</p>
         </div>
       </div>
 
-      <Tabs value={integrationsTab} onValueChange={setIntegrationsTab} className="space-y-4">
-        <TabsList className="settings-integrations-tabs">
-          <TabsTrigger value="providers" className="settings-integrations-tab">
-            <Bot className="settings-integrations-tab-icon" aria-hidden />
-            <span className="settings-integrations-tab-label">API &amp; AI</span>
-            <TabStatusDot configured={aiConfigured} />
-          </TabsTrigger>
-          <TabsTrigger value="calendar" className="settings-integrations-tab">
-            <CalendarDays className="settings-integrations-tab-icon" aria-hidden />
-            <span className="settings-integrations-tab-label">Google OAuth</span>
-            <TabStatusDot configured={googleOAuthConfigured} />
-          </TabsTrigger>
-          <TabsTrigger value="mail" className="settings-integrations-tab">
-            <Mail className="settings-integrations-tab-icon" aria-hidden />
-            <span className="settings-integrations-tab-label">SMTP &amp; DNS</span>
-            <TabStatusDot configured={smtpConfigured} />
-          </TabsTrigger>
-          <TabsTrigger value="inbox" className="settings-integrations-tab">
-            <Inbox className="settings-integrations-tab-icon" aria-hidden />
-            <span className="settings-integrations-tab-label">Inbox (IMAP)</span>
-            <TabStatusDot configured={imapConfigured} />
-          </TabsTrigger>
-        </TabsList>
+      <div className="integrations-mobile-nav" role="tablist" aria-label="Integraties (mobiel)">
+        {integrationNavItems.map((item) => {
+          const Icon = item.icon;
+          const active = integrationsTab === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setIntegrationsTab(item.id as IntegrationTabId)}
+              className={`integrations-mobile-nav-btn ${active ? "integrations-mobile-nav-btn-active" : ""}`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
 
-        <TabsContent value="providers" className="space-y-4">
-        {/* Google Places API */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
-                <Globe className="h-5 w-5 text-blue-500" />
-              </div>
-              <div>
-                <CardTitle className="text-base">Google Places API</CardTitle>
-                <CardDescription className="text-xs">
-                  Voor bedrijfszoekopdrachten via Google Maps. Schakel eerst{" "}
-                  <a href="https://console.cloud.google.com/apis/library/places.googleapis.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                    Places API (New)
-                  </a>{" "}
-                  in, maak daarna een API key (AIza...) via{" "}
-                  <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                    Credentials
-                  </a>
-                  . Gebruik geen OAuth Client ID.
+      <div className="integrations-shell">
+        <IntegrationNav
+          items={integrationNavItems}
+          activeId={integrationsTab}
+          onSelect={(id) => setIntegrationsTab(id as IntegrationTabId)}
+        />
+
+        <div className="min-w-0 space-y-4">
+        {integrationsTab === "overview" ? (
+          <div className="space-y-4">
+            <Card className="border-border/60 bg-gradient-to-br from-card via-card to-muted/20">
+              <CardHeader>
+                <CardTitle className="text-base">Overzicht werkruimte-integraties</CardTitle>
+                <CardDescription>
+                  Controleer in één oogopslag welke koppelingen actief zijn. Klik een kaart om direct naar de juiste tab te gaan.
                 </CardDescription>
-              </div>
-              {googlePlacesConfigured || Boolean(googlePlacesKey.trim()) ? (
-                <Badge variant="success" className="ml-auto"><CheckCircle className="mr-1 h-3 w-3" /> Actief</Badge>
-              ) : (
-                <Badge variant="secondary" className="ml-auto"><XCircle className="mr-1 h-3 w-3" /> Niet geconfigureerd</Badge>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <Label>API Key</Label>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    type={showGoogleKey ? "text" : "password"}
-                    value={googlePlacesKey}
-                    onChange={(e) => setGooglePlacesKey(e.target.value)}
-                    placeholder={googlePlacesConfigured ? "Nieuwe key invullen om te vervangen" : "AIza..."}
-                    className="pl-9 pr-10 font-mono text-sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowGoogleKey(!showGoogleKey)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    {showGoogleKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
+              </CardHeader>
+              <CardContent>
+                <div className="integrations-overview-grid">
+                  {integrationNavItems
+                    .filter((item) => item.id !== "overview")
+                    .map((item) => (
+                      <IntegrationOverviewCard
+                        key={item.id}
+                        icon={item.icon}
+                        title={item.label}
+                        description={item.description ?? ""}
+                        configured={item.configured}
+                        dirty={item.dirty}
+                        onOpen={() => setIntegrationsTab(item.id as IntegrationTabId)}
+                      />
+                    ))}
                 </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 pt-2">
-                <Button
-                  size="sm"
-                  onClick={handleSaveGoogle}
-                  disabled={batchUpdate.isPending || !googleProviderDirty}
+              </CardContent>
+            </Card>
+          </div>
+        ) : null}
+
+        {integrationsTab === "google-places" ? (
+          <IntegrationPanel
+            icon={Globe}
+            iconClassName="bg-blue-500/10 text-blue-600 dark:text-blue-300"
+            title="Google Places API"
+            description={
+              <>
+                Voor bedrijfszoekopdrachten via Google Maps. Schakel eerst{" "}
+                <a
+                  href="https://console.cloud.google.com/apis/library/places.googleapis.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
                 >
+                  Places API (New)
+                </a>{" "}
+                in, maak daarna een API-sleutel (AIza…) via{" "}
+                <a
+                  href="https://console.cloud.google.com/apis/credentials"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  Credentials
+                </a>
+                . Gebruik geen OAuth Client ID.
+              </>
+            }
+            configured={googlePlacesConfiguredActive}
+            footer={
+              <IntegrationActionBar>
+                <Button size="sm" onClick={handleSaveGooglePlaces} disabled={batchUpdate.isPending || !googlePlacesDirty}>
                   {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
                   Opslaan
                 </Button>
+              </IntegrationActionBar>
+            }
+          >
+            <SecretKeyField
+              label="API-sleutel"
+              value={googlePlacesKey}
+              onChange={setGooglePlacesKey}
+              placeholder={googlePlacesConfigured ? "Nieuwe sleutel om te vervangen" : "AIza…"}
+              show={showGoogleKey}
+              onToggleShow={() => setShowGoogleKey(!showGoogleKey)}
+            />
+            <IntegrationActionBar>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={testGoogle.isPending || (!googlePlacesConfigured && !googlePlacesKey.trim())}
+                onClick={() => {
+                  testGoogle.reset();
+                  testGoogle.mutate({ apiKey: googlePlacesKey.trim() || undefined });
+                }}
+              >
+                {testGoogle.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Zap className="mr-2 h-3 w-3" />}
+                Test verbinding
+              </Button>
+              {googlePlacesConfigured ? (
                 <Button
+                  type="button"
                   variant="outline"
                   size="sm"
-                  disabled={testGoogle.isPending || (!googlePlacesConfigured && !googlePlacesKey.trim())}
-                    onClick={() => {
-                      testGoogle.reset();
-                      testGoogle.mutate({ apiKey: googlePlacesKey.trim() || undefined });
-                    }}
+                  className="text-destructive hover:text-destructive"
+                  disabled={removeSettings.isPending}
+                  onClick={() =>
+                    requestRemoveSetting({
+                      title: "Google Places API-sleutel verwijderen?",
+                      description:
+                        "De opgeslagen sleutel wordt permanent gewist. Zoeken via Google Places werkt daarna niet meer tot je een nieuwe sleutel invult.",
+                      keys: ["api.google_places_key"],
+                      onCleared: () => {
+                        setGooglePlacesKey("");
+                        setGooglePlacesConfigured(false);
+                        testGoogle.reset();
+                      },
+                    })
+                  }
                 >
-                  {testGoogle.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Zap className="mr-2 h-3 w-3" />}
-                  Test Verbinding
+                  <Trash2 className="mr-2 h-3 w-3" />
+                  Sleutel verwijderen
                 </Button>
-                {googlePlacesConfigured ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="text-destructive hover:text-destructive"
-                    disabled={removeSettings.isPending}
-                    onClick={() =>
-                      requestRemoveSetting({
-                        title: "Google Places API key verwijderen?",
-                        description: "De opgeslagen key wordt permanent gewist. Zoeken via Google Places werkt daarna niet meer tot je een nieuwe key invult.",
-                        keys: ["api.google_places_key"],
-                        onCleared: () => {
-                          setGooglePlacesKey("");
-                          setGooglePlacesConfigured(false);
-                          testGoogle.reset();
-                        },
-                      })
-                    }
-                  >
-                    <Trash2 className="mr-2 h-3 w-3" />
-                    Key verwijderen
-                  </Button>
-                ) : null}
-              </div>
-              <TestResult
-                result={
-                  testGoogle.data?.message
-                    ?? (testGoogle.error ? formatTrpcErrorMessage(testGoogle.error.message) : null)
-                }
-                isError={testGoogle.isError}
-              />
-            </div>
-          </CardContent>
-        </Card>
+              ) : null}
+            </IntegrationActionBar>
+            <TestResult
+              result={
+                testGoogle.data?.message ?? (testGoogle.error ? formatTrpcErrorMessage(testGoogle.error.message) : null)
+              }
+              isError={testGoogle.isError}
+            />
+          </IntegrationPanel>
+        ) : null}
 
-        {/* AI API keys */}
-        <Card>
-          <CardHeader className="space-y-3">
-            <div className="flex justify-end">
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/settings/ai">
-                  <Settings2 className="mr-1.5 h-3.5 w-3.5" />
-                  AI Instellingen
-                </Link>
-              </Button>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/10">
-                <Bot className="h-5 w-5 text-purple-500" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <CardTitle className="text-base">AI API Keys</CardTitle>
-                <CardDescription className="text-xs">
-                  Sleutels voor AI-connectie. Provider en model stel je in via AI Instellingen.
-                </CardDescription>
-              </div>
-              {aiConfigured ? (
-                <Badge variant="success" className="shrink-0"><CheckCircle className="mr-1 h-3 w-3" /> Actief</Badge>
-              ) : (
-                <Badge variant="secondary" className="shrink-0"><XCircle className="mr-1 h-3 w-3" /> Niet geconfigureerd</Badge>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-xl border bg-gradient-to-br from-purple-500/5 via-transparent to-violet-500/5 p-4">
-              <div className="space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {AI_PROVIDER_OPTIONS.map((option) => {
-                      const configured =
-                        option.id === "openai"
-                          ? openaiConfigured || Boolean(openaiKey.trim())
-                          : option.id === "deepseek"
-                            ? deepseekConfigured || Boolean(deepseekKey.trim())
-                            : anthropicConfigured || Boolean(anthropicKey.trim());
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedAiProvider(option.id);
-                            setShowAiKey(false);
-                            activeAiTest.reset();
-                          }}
-                          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
-                            selectedAiProvider === option.id
-                              ? "border-purple-500/40 bg-purple-500/10 text-purple-700 dark:text-purple-300"
-                              : "border-border/60 bg-background/60 text-muted-foreground hover:border-border"
-                          }`}
-                        >
-                          <span
-                            className={`h-1.5 w-1.5 rounded-full ${configured ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
-                          />
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
+        {integrationsTab === "anthropic" ? renderAiProviderPanel("anthropic") : null}
+        {integrationsTab === "openai" ? renderAiProviderPanel("openai") : null}
+        {integrationsTab === "deepseek" ? renderAiProviderPanel("deepseek") : null}
 
-                  <div className="space-y-2">
-                    <Label>{activeAiProvider.label} API Key</Label>
-                    <div className="relative">
-                      <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        type={showAiKey ? "text" : "password"}
-                        value={activeAiKey}
-                        onChange={(e) => setActiveAiKey(e.target.value)}
-                        placeholder={
-                          activeAiConfigured
-                            ? "Nieuwe key invullen om te vervangen"
-                            : activeAiProvider.placeholder
-                        }
-                        className="bg-background/80 pl-9 pr-10 font-mono text-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowAiKey(!showAiKey)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                      >
-                        {showAiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={activeAiTest.isPending || (!activeAiConfigured && !activeAiKey.trim())}
-                      onClick={() => {
-                        activeAiTest.reset();
-                        activeAiTest.mutate();
-                      }}
-                    >
-                      {activeAiTest.isPending ? (
-                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                      ) : (
-                        <Zap className="mr-2 h-3 w-3" />
-                      )}
-                      Test {activeAiProvider.label}
-                    </Button>
-                    {activeAiConfigured ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="text-destructive hover:text-destructive"
-                        disabled={removeSettings.isPending}
-                        onClick={() =>
-                          requestRemoveSetting({
-                            title: `${activeAiProvider.label} API key verwijderen?`,
-                            description: `De opgeslagen ${activeAiProvider.label}-key wordt permanent gewist.`,
-                            keys: [AI_PROVIDER_SETTING_KEYS[selectedAiProvider]],
-                            onCleared: clearActiveAiKeyState,
-                          })
-                        }
-                      >
-                        <Trash2 className="mr-2 h-3 w-3" />
-                        Key verwijderen
-                      </Button>
-                    ) : null}
-                    <p className="text-[11px] text-muted-foreground">
-                      Welke provider actief is, stel je in via{" "}
-                      <Link href="/settings/ai" className="font-medium text-primary hover:underline">
-                        AI Instellingen
-                      </Link>
-                      . Alle keys bewaar je hier.
-                    </p>
-                  </div>
-                  <TestResult
-                    result={activeAiTest.data?.message ?? (activeAiTest.error?.message || null)}
-                    isError={activeAiTest.isError}
-                  />
-              </div>
-            </div>
-
-              <div className="flex items-center justify-end">
-              <Button size="sm" onClick={handleSaveAi} disabled={batchUpdate.isPending || !aiDirty}>
-                {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
-                AI Keys opslaan
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-        </TabsContent>
-
-        <TabsContent value="calendar" className="space-y-4">
-          {integrationsTab === "calendar" ? (
+        {integrationsTab === "google-oauth" ? (
           <>
           <Card>
             <CardHeader>
@@ -1344,7 +1224,7 @@ export function IntegrationsSettingsInner() {
                       OAuth wissen
                     </Button>
                   ) : null}
-                  <Button size="sm" onClick={handleSaveGoogle} disabled={batchUpdate.isPending || !googleProviderDirty}>
+                  <Button size="sm" onClick={handleSaveGoogleOAuth} disabled={batchUpdate.isPending || !googleOAuthDirty}>
                     {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
                     Google OAuth opslaan
                   </Button>
@@ -1352,7 +1232,10 @@ export function IntegrationsSettingsInner() {
               </div>
             </CardContent>
           </Card>
+          </>
+        ) : null}
 
+        {integrationsTab === "meta" ? (
           <Card className="overflow-hidden border-indigo-500/20">
             <CardHeader className="border-b bg-gradient-to-br from-indigo-500/10 via-sky-500/5 to-background">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1617,7 +1500,7 @@ export function IntegrationsSettingsInner() {
                       Meta loskoppelen
                     </Button>
                   ) : null}
-                  <Button size="sm" onClick={handleSaveGoogle} disabled={batchUpdate.isPending || !metaDirty}>
+                  <Button size="sm" onClick={handleSaveMeta} disabled={batchUpdate.isPending || !metaDirty}>
                     {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
                     Meta instellingen opslaan
                   </Button>
@@ -1625,12 +1508,9 @@ export function IntegrationsSettingsInner() {
               </div>
             </CardContent>
           </Card>
-          </>
-          ) : null}
-        </TabsContent>
+        ) : null}
 
-        <TabsContent value="mail" className="space-y-4">
-          {integrationsTab === "mail" ? (
+        {integrationsTab === "smtp" ? (
         <>
         {/* SMTP Email */}
         <Card>
@@ -1882,11 +1762,9 @@ export function IntegrationsSettingsInner() {
           </CardContent>
         </Card>
         </>
-          ) : null}
-        </TabsContent>
+        ) : null}
 
-        <TabsContent value="inbox" className="space-y-4">
-          {integrationsTab === "inbox" ? (
+        {integrationsTab === "imap" ? (
         <>
         {/* IMAP Inbox */}
         <Card>
@@ -2048,14 +1926,10 @@ export function IntegrationsSettingsInner() {
           </CardContent>
         </Card>
         </>
-          ) : null}
-        </TabsContent>
-      </Tabs>
+        ) : null}
 
-      <Button onClick={handleSave} disabled={batchUpdate.isPending || !anyDirty} size="lg">
-        {batchUpdate.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-        {batchUpdate.isPending ? "Opslaan..." : anyDirty ? "Alle instellingen opslaan" : "Alles opgeslagen"}
-      </Button>
+        </div>
+      </div>
     </div>
   );
 }
