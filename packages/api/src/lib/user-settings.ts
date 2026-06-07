@@ -1,7 +1,6 @@
 import { type PrismaClient } from "@digitify/db";
+import { getSettingsCacheTtlMs } from "./cache-config";
 import { type SettingRow } from "./settings";
-
-const SETTINGS_CACHE_TTL_MS = 45_000;
 const SETTINGS_CACHE_MAX_ENTRIES = 500;
 
 type CachedRows = {
@@ -51,8 +50,9 @@ function readCache(cacheKey: string): SettingRow[] | null {
 }
 
 function writeCache(cacheKey: string, rows: SettingRow[]) {
+  const userId = cacheKey.split("|")[0] ?? "";
   settingsCache.set(cacheKey, {
-    expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS,
+    expiresAt: Date.now() + getSettingsCacheTtlMs(userId),
     rows: cloneRows(rows),
   });
   if (settingsCache.size <= SETTINGS_CACHE_MAX_ENTRIES) return;
@@ -79,6 +79,10 @@ export function invalidateUserSettingsCache(userId: string) {
   for (const cacheKey of settingsCache.keys()) {
     if (cacheKey.startsWith(prefix)) settingsCache.delete(cacheKey);
   }
+}
+
+export function clearAllSettingsCache() {
+  settingsCache.clear();
 }
 
 export async function loadUserSettingRows(

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { registrationRouter } from "../routers/registration.router";
 
-vi.mock("../lib/email-sender", () => ({
-  sendBrandedEmail: vi.fn().mockResolvedValue(undefined),
+vi.mock("../lib/send-templated-email", () => ({
+  sendTemplatedEmail: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 function publicCtx(db: Record<string, unknown>) {

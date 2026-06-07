@@ -75,5 +75,24 @@ export * from "./secure-settings";
 export * from "./request-context";
 export * from "./perf-metrics";
 export * from "./workspace-rls";
-export * from "@prisma/client";
-export type { PrismaClient } from "@prisma/client";
+export { PrismaClient };
+export {
+  EmailTemplateBodyFormat,
+  EmailTemplateLayout,
+  EmailTemplateType,
+  EmailType,
+  MediaGenerationStatus,
+  MediaGenerationType,
+  Prisma,
+  UserRole,
+} from "@prisma/client";
+export type {
+  Activity,
+  EmailDraft,
+  Lead,
+  LeadContact,
+  ScoringWeight,
+  WorkspaceInvoice,
+  WorkspaceInvoiceItem,
+  WorkspaceSavedSearch,
+} from "@prisma/client";

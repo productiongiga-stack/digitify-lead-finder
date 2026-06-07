@@ -1,6 +1,7 @@
 import { type PrismaClient } from "@digitify/db";
 import { ensurePublicTenantToken } from "./public-tenant";
 import { userSettingKey } from "./user-settings";
+import { workspaceSettingKey } from "./workspace-settings";
 
 const WORKSPACE_INIT_KEY = "workspace.initialized_v2";
 const WORKSPACE_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -106,21 +107,99 @@ const DEFAULT_SERVICE_CATALOG = [
   },
 ] as const;
 
-export async function ensureUserWorkspace(db: PrismaClient, userId: string, fallbackCompanyName?: string | null) {
-  const cachedAt = workspaceCache.get(userId);
-  if (cachedAt && Date.now() - cachedAt < WORKSPACE_CACHE_TTL_MS) return;
+function workspaceInitKeys(workspaceId: string) {
+  return [
+    workspaceSettingKey(workspaceId, WORKSPACE_INIT_KEY),
+    userSettingKey(workspaceId, WORKSPACE_INIT_KEY),
+  ];
+}
 
-  const initKey = userSettingKey(userId, WORKSPACE_INIT_KEY);
-  const initialized = await db.setting.findUnique({
-    where: { key: initKey },
+function readErrorMessage(error: unknown) {
+  if (typeof error === "object" && error && "message" in error) {
+    return String((error as { message?: unknown }).message);
+  }
+  return String(error);
+}
+
+function isWorkspaceSeedRecoverableError(message: string) {
+  return (
+    message.includes("column `createdById` does not exist") ||
+    message.includes('column "createdById" does not exist') ||
+    /foreign key constraint/i.test(message)
+  );
+}
+
+async function hasWorkspaceInitialization(
+  db: Pick<PrismaClient, "setting">,
+  workspaceId: string,
+) {
+  const initialized = await db.setting.findFirst({
+    where: { key: { in: workspaceInitKeys(workspaceId) } },
     select: { key: true },
   });
-  if (initialized) {
-    await ensurePublicTenantToken(db, userId);
-    workspaceCache.set(userId, Date.now());
-    return;
-  }
+  return Boolean(initialized);
+}
 
+async function seedWorkspaceEntities(
+  tx: Pick<
+    PrismaClient,
+    "pipelineStage" | "tag" | "emailTemplate" | "serviceCatalog"
+  >,
+  workspaceId: string,
+) {
+  await tx.pipelineStage.createMany({
+    data: DEFAULT_PIPELINE_STAGES.map((stage) => ({
+      createdById: workspaceId,
+      name: stage.name,
+      color: stage.color,
+      sortOrder: stage.sortOrder,
+      isDefault: stage.isDefault,
+    })),
+    skipDuplicates: true,
+  });
+
+  await tx.tag.createMany({
+    data: DEFAULT_TAGS.map((tag) => ({
+      createdById: workspaceId,
+      name: tag.name,
+      color: tag.color,
+    })),
+    skipDuplicates: true,
+  });
+
+  await tx.emailTemplate.createMany({
+    data: DEFAULT_EMAIL_TEMPLATES.map((template) => ({
+      createdById: workspaceId,
+      name: template.name,
+      subject: template.subject,
+      body: template.body,
+      type: template.type,
+      layout: template.layout,
+      isGlobal: false,
+    })),
+    skipDuplicates: true,
+  });
+
+  await tx.serviceCatalog.createMany({
+    data: DEFAULT_SERVICE_CATALOG.map((service) => ({
+      createdById: workspaceId,
+      category: service.category,
+      name: service.name,
+      description: service.description,
+      basePrice: service.basePrice,
+      unit: service.unit,
+      sortOrder: service.sortOrder,
+      isActive: true,
+    })),
+    skipDuplicates: true,
+  });
+}
+
+async function applyWorkspaceBaseSettings(
+  tx: Pick<PrismaClient, "setting">,
+  workspaceId: string,
+  fallbackCompanyName?: string | null,
+) {
   const companyName = fallbackCompanyName?.trim() || "Mijn bedrijf";
   const defaults: Array<{ key: string; value: string }> = [
     { key: "branding.company_name", value: companyName },
@@ -131,96 +210,79 @@ export async function ensureUserWorkspace(db: PrismaClient, userId: string, fall
     { key: "bookings.embed_color", value: "#f9ae5a" },
   ];
 
-  const applyBaseSettings = async (tx: Pick<PrismaClient, "setting">) => {
-    await Promise.all(
-      defaults.map((setting) =>
-        tx.setting.upsert({
-          where: { key: userSettingKey(userId, setting.key) },
-          create: { key: userSettingKey(userId, setting.key), value: setting.value },
-          update: { value: setting.value },
-        }),
-      ),
-    );
+  await Promise.all(
+    defaults.map((setting) => {
+      const scopedKey = workspaceSettingKey(workspaceId, setting.key);
+      return tx.setting.upsert({
+        where: { key: scopedKey },
+        create: { key: scopedKey, value: setting.value },
+        update: { value: setting.value },
+      });
+    }),
+  );
+}
 
-    await tx.setting.upsert({
-      where: { key: initKey },
-      create: { key: initKey, value: "true" },
-      update: { value: "true" },
-    });
-  };
+async function markWorkspaceInitialized(
+  tx: Pick<PrismaClient, "setting">,
+  workspaceId: string,
+) {
+  const initKey = workspaceSettingKey(workspaceId, WORKSPACE_INIT_KEY);
+  await tx.setting.upsert({
+    where: { key: initKey },
+    create: { key: initKey, value: "true" },
+    update: { value: "true" },
+  });
+}
+
+async function applySettingsOnlyInitialization(
+  db: PrismaClient,
+  workspaceId: string,
+  fallbackCompanyName?: string | null,
+) {
+  await db.$transaction(async (tx) => {
+    if (await hasWorkspaceInitialization(tx, workspaceId)) return;
+    await applyWorkspaceBaseSettings(tx, workspaceId, fallbackCompanyName);
+    await markWorkspaceInitialized(tx, workspaceId);
+  });
+}
+
+/**
+ * Ensure default workspace settings and starter data exist for the active workspace.
+ * `workspaceId` is the tenant scope id (personal workspace id === user id, team workspace uses its own id).
+ */
+export async function ensureUserWorkspace(
+  db: PrismaClient,
+  workspaceId: string,
+  fallbackCompanyName?: string | null,
+) {
+  const cachedAt = workspaceCache.get(workspaceId);
+  if (cachedAt && Date.now() - cachedAt < WORKSPACE_CACHE_TTL_MS) return;
+
+  if (await hasWorkspaceInitialization(db, workspaceId)) {
+    await ensurePublicTenantToken(db, workspaceId);
+    workspaceCache.set(workspaceId, Date.now());
+    return;
+  }
 
   try {
     await db.$transaction(async (tx) => {
-      const alreadyInitialized = await tx.setting.findUnique({
-        where: { key: initKey },
-        select: { key: true },
-      });
-      if (alreadyInitialized) return;
+      if (await hasWorkspaceInitialization(tx, workspaceId)) return;
 
-      await tx.pipelineStage.createMany({
-        data: DEFAULT_PIPELINE_STAGES.map((stage) => ({
-          createdById: userId,
-          name: stage.name,
-          color: stage.color,
-          sortOrder: stage.sortOrder,
-          isDefault: stage.isDefault,
-        })),
-        skipDuplicates: true,
-      });
-
-      await tx.tag.createMany({
-        data: DEFAULT_TAGS.map((tag) => ({
-          createdById: userId,
-          name: tag.name,
-          color: tag.color,
-        })),
-        skipDuplicates: true,
-      });
-
-      await tx.emailTemplate.createMany({
-        data: DEFAULT_EMAIL_TEMPLATES.map((template) => ({
-          createdById: userId,
-          name: template.name,
-          subject: template.subject,
-          body: template.body,
-          type: template.type,
-          layout: template.layout,
-          isGlobal: false,
-        })),
-        skipDuplicates: true,
-      });
-
-      await tx.serviceCatalog.createMany({
-        data: DEFAULT_SERVICE_CATALOG.map((service) => ({
-          createdById: userId,
-          category: service.category,
-          name: service.name,
-          description: service.description,
-          basePrice: service.basePrice,
-          unit: service.unit,
-          sortOrder: service.sortOrder,
-          isActive: true,
-        })),
-        skipDuplicates: true,
-      });
-
-      await applyBaseSettings(tx);
+      await seedWorkspaceEntities(tx, workspaceId);
+      await applyWorkspaceBaseSettings(tx, workspaceId, fallbackCompanyName);
+      await markWorkspaceInitialized(tx, workspaceId);
     });
   } catch (error) {
-    const maybeMessage =
-      typeof error === "object" && error && "message" in error ? String((error as { message?: unknown }).message) : "";
-    const message = maybeMessage || String(error);
-    const isMissingCreatedByColumn =
-      message.includes("column `createdById` does not exist") ||
-      message.includes('column "createdById" does not exist');
-    if (!isMissingCreatedByColumn) throw error;
+    const message = readErrorMessage(error);
+    if (!isWorkspaceSeedRecoverableError(message)) throw error;
 
-    console.warn("[workspace] falling back to legacy init because createdById columns are not available yet");
-    await db.$transaction(async (tx) => {
-      await applyBaseSettings(tx);
-    });
+    console.warn(
+      "[workspace] entity seed failed, applying settings-only initialization",
+      { workspaceId, message },
+    );
+    await applySettingsOnlyInitialization(db, workspaceId, fallbackCompanyName);
   }
 
-  await ensurePublicTenantToken(db, userId);
-  workspaceCache.set(userId, Date.now());
+  await ensurePublicTenantToken(db, workspaceId);
+  workspaceCache.set(workspaceId, Date.now());
 }

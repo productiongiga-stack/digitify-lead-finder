@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { cn } from "@/lib/utils";
 import { useMutationGeneration } from "@/lib/use-mutation-generation";
@@ -3553,6 +3554,7 @@ function MetaOAuthScopesAlert({ scopes }: { scopes: string[] }) {
 
 export function MetaAdsPageInner() {
   const { showToast } = useToast();
+  const searchParams = useSearchParams();
   const utils = trpc.useUtils();
   const { beginGeneration, isCurrentGeneration } = useMutationGeneration();
   const { branding } = useBranding();
@@ -3610,6 +3612,14 @@ export function MetaAdsPageInner() {
   const [uploadingVariantAsset, setUploadingVariantAsset] = useState<string | null>(null);
   const [aiTrainingNotes, setAiTrainingNotes] = useState("");
 
+  const pendingAdJobId = searchParams.get("adJob");
+  const [appliedAdJobId, setAppliedAdJobId] = useState<string | null>(null);
+  const importCreativeAd = trpc.media.importToBlob.useMutation();
+  const creativeAdJob = trpc.media.getJobStatus.useQuery(
+    { jobId: pendingAdJobId || "" },
+    { enabled: Boolean(pendingAdJobId) && appliedAdJobId !== pendingAdJobId },
+  );
+
   const connection = trpc.metaAds.connectionStatus.useQuery(undefined, { refetchInterval: 30_000 });
   const metaAdAccountName = (connection.data?.selectedAdAccountName ?? "").trim();
   const metaPublisher = connection.data?.publisherIdentity;
@@ -3648,6 +3658,57 @@ export function MetaAdsPageInner() {
     { enabled: Boolean(selectedCampaignId && connection.data?.selectedAdAccountId) },
   );
   const drafts = trpc.metaAds.listDrafts.useQuery(undefined, { refetchInterval: 20_000 });
+
+  useEffect(() => {
+    if (!pendingAdJobId || appliedAdJobId === pendingAdJobId || !creativeAdJob.data) return;
+    const status = creativeAdJob.data;
+    if (status.status !== "COMPLETED" || (!status.outputUrl && !status.blobUrl)) return;
+
+    let cancelled = false;
+
+    async function applyCreativeAdJob() {
+      try {
+        let mediaUrl = status.blobUrl || status.outputUrl;
+        if (!mediaUrl) return;
+
+        if (!status.blobUrl) {
+          const imported = await importCreativeAd.mutateAsync({ jobId: pendingAdJobId! });
+          mediaUrl = imported.blobUrl || mediaUrl;
+        }
+
+        if (cancelled) return;
+        if (status.prompt?.trim()) {
+          setPrimaryText(status.prompt.trim());
+          setProduct(status.prompt.trim().slice(0, 120));
+        }
+        setStoryImageUrl(mediaUrl);
+        setPublishAsset("story");
+        setAdsTab("builder");
+        setActiveStep("ads");
+        setAppliedAdJobId(pendingAdJobId);
+        showToast({ title: "Creative Studio-advertentie geladen in builder" });
+      } catch (error) {
+        if (!cancelled) {
+          showToast({
+            title: "Advertentie laden mislukt",
+            description: error instanceof Error ? error.message : "Onbekende fout",
+            variant: "error",
+          });
+        }
+      }
+    }
+
+    void applyCreativeAdJob();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    appliedAdJobId,
+    creativeAdJob.data,
+    importCreativeAd,
+    pendingAdJobId,
+    showToast,
+  ]);
 
   const rows = drafts.data ?? [];
   const pendingApprovalCount = useMemo(

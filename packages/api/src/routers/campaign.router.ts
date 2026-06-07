@@ -5,6 +5,7 @@ import { OpenClawClient, type OpenClawContext } from "@digitify/openclaw";
 import { type PrismaClient } from "@digitify/db";
 import { normalizeAiPlaceholderSyntax } from "../lib/email-utils";
 import { sendBrandedEmail } from "../lib/email-sender";
+import { EMAIL_SYSTEM_TEMPLATES } from "../lib/email-template-starter-pack";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
@@ -290,6 +291,20 @@ export async function runAllDueDripsWorker(
   };
 }
 
+function getDripTemplateStep(templateKey: string, context: Record<string, string> = {}) {
+  const template = EMAIL_SYSTEM_TEMPLATES.find((item) => item.templateKey === templateKey);
+  if (!template) {
+    return { subject: "Opvolging", body: "Beste {{contactName}},\n\nEven een korte opvolging." };
+  }
+  let subject = template.subject;
+  let body = template.body;
+  for (const [key, value] of Object.entries(context)) {
+    subject = subject.split(`{{${key}}}`).join(value);
+    body = body.split(`{{${key}}}`).join(value);
+  }
+  return { subject, body };
+}
+
 function buildReviewStep(step: number) {
   if (step === 1) {
     return {
@@ -307,65 +322,18 @@ function buildReviewStep(step: number) {
   }
 
   if (step === 2) {
-    return {
-      subject: "Korte opvolging over je ervaring",
-      body: [
-        "Beste {{contactName}},",
-        "",
-        "Even een korte opvolging op mijn vorige bericht.",
-        "Heb je 1 minuut om je ervaring te delen? Dat helpt ons enorm.",
-        "",
-        "Alvast bedankt!",
-        "{{senderName}}",
-      ].join("\n"),
-    };
+    return getDripTemplateStep("campaign.review_step_2");
   }
 
-  return {
-    subject: "Laatste herinnering",
-    body: [
-      "Beste {{contactName}},",
-      "",
-      "Dit is mijn laatste korte herinnering.",
-      "Als je even feedback wil delen, hoor ik het heel graag.",
-      "",
-      "Bedankt voor je tijd.",
-      "{{senderName}}",
-    ].join("\n"),
-  };
+  return getDripTemplateStep("campaign.review_step_3");
 }
 
 function buildLeadFollowUpStep(baseSubject: string, step: number) {
   if (step === 2) {
-    return {
-      subject: `Opvolging: ${baseSubject}`,
-      body: [
-        "Beste {{contactName}},",
-        "",
-        "Ik volg even kort op over mijn eerdere bericht.",
-        "Denk je dat dit momenteel relevant is voor {{companyName}}?",
-        "",
-        "Als je wil, plan ik meteen een kort gesprek in.",
-        "",
-        "Vriendelijke groeten,",
-        "{{senderName}}",
-      ].join("\n"),
-    };
+    return getDripTemplateStep("campaign.drip_step_2", { baseSubject });
   }
 
-  return {
-    subject: `Laatste opvolging: ${baseSubject}`,
-    body: [
-      "Beste {{contactName}},",
-      "",
-      "Ik laat nog één laatste bericht na.",
-      "Als dit nu geen prioriteit is, geen probleem.",
-      "Laat gerust weten wanneer het beter past voor {{companyName}}.",
-      "",
-      "Vriendelijke groeten,",
-      "{{senderName}}",
-    ].join("\n"),
-  };
+  return getDripTemplateStep("campaign.drip_step_3", { baseSubject });
 }
 
 async function getOpenClawClient(db: PrismaClient, workspaceId: string): Promise<{ client: OpenClawClient | null }> {
@@ -428,32 +396,69 @@ function buildOpenclawContext(lead: any, campaign: any): OpenClawContext {
 }
 
 export const campaignRouter = router({
-  list: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.db.campaign.findMany({
-      where: { createdById: ctx.user.workspaceId! },
-      orderBy: { createdAt: "desc" },
-      include: {
-        _count: { select: { campaignLeads: true, templates: true } },
-        createdBy: { select: { id: true, name: true } },
-      },
-    });
-  }),
+  list: protectedProcedure
+    .input(
+      z
+        .object({
+          page: z.number().min(1).default(1),
+          pageSize: z.number().min(1).max(100).default(50),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const page = input?.page ?? 1;
+      const pageSize = input?.pageSize ?? 50;
+      const where = { createdById: ctx.user.workspaceId! };
+
+      const [items, total] = await Promise.all([
+        ctx.db.campaign.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          include: {
+            _count: { select: { campaignLeads: true, templates: true } },
+            createdBy: { select: { id: true, name: true } },
+          },
+        }),
+        ctx.db.campaign.count({ where }),
+      ]);
+
+      return {
+        items,
+        page,
+        pageSize,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      };
+    }),
 
   getById: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(
+      z.object({
+        id: z.string(),
+        leadsPage: z.number().min(1).default(1),
+        leadsPageSize: z.number().min(1).max(100).default(25),
+      }),
+    )
     .query(async ({ ctx, input }) => {
+      const { leadsPage, leadsPageSize } = input;
       const campaign = await ctx.db.campaign.findFirst({
         where: { id: input.id, createdById: ctx.user.workspaceId! },
         include: {
           createdBy: { select: { id: true, name: true } },
           templates: true,
           campaignLeads: {
+            orderBy: { addedAt: "desc" },
+            skip: (leadsPage - 1) * leadsPageSize,
+            take: leadsPageSize,
             include: {
               lead: {
                 include: {
                   tags: { include: { tag: true } },
                   emailDrafts: {
                     orderBy: { createdAt: "desc" },
+                    take: 5,
                     select: {
                       id: true,
                       status: true,
@@ -472,10 +477,13 @@ export const campaignRouter = router({
               },
             },
           },
+          _count: { select: { campaignLeads: true } },
         },
       });
 
       if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });
+
+      const campaignLeadsTotal = campaign._count.campaignLeads;
 
       const sequenceIds = (
         await ctx.db.emailSequence.findMany({
@@ -484,20 +492,28 @@ export const campaignRouter = router({
         })
       ).map((sequence) => sequence.id);
 
-      if (sequenceIds.length === 0) return campaign;
-      const sequenceIdSet = new Set(sequenceIds);
+      const paginatedLeads = campaign.campaignLeads.map((campaignLead) => ({
+        ...campaignLead,
+        lead: {
+          ...campaignLead.lead,
+          emailDrafts:
+            sequenceIds.length === 0
+              ? campaignLead.lead.emailDrafts
+              : campaignLead.lead.emailDrafts.filter(
+                  (draft) => draft.sequenceId && new Set(sequenceIds).has(draft.sequenceId),
+                ),
+        },
+      }));
+
+      const { _count, ...campaignWithoutCount } = campaign;
 
       return {
-        ...campaign,
-        campaignLeads: campaign.campaignLeads.map((campaignLead) => ({
-          ...campaignLead,
-          lead: {
-            ...campaignLead.lead,
-            emailDrafts: campaignLead.lead.emailDrafts.filter(
-              (draft) => draft.sequenceId && sequenceIdSet.has(draft.sequenceId)
-            ),
-          },
-        })),
+        ...campaignWithoutCount,
+        campaignLeads: paginatedLeads,
+        campaignLeadsTotal,
+        campaignLeadsPage: leadsPage,
+        campaignLeadsPageSize: leadsPageSize,
+        campaignLeadsTotalPages: Math.max(1, Math.ceil(campaignLeadsTotal / leadsPageSize)),
       };
     }),
 

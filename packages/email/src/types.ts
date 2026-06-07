@@ -7,6 +7,8 @@ export interface EmailMessage {
   text?: string;
   replyTo?: string;
   bcc?: string;
+  inReplyTo?: string;
+  references?: string;
   attachments?: EmailAttachment[];
 }
 

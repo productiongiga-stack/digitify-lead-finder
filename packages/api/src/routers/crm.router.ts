@@ -80,7 +80,7 @@ export const crmRouter = router({
               },
             },
             campaignLeads: {
-              take: 3,
+              take: 1,
               include: {
                 campaign: {
                   select: {

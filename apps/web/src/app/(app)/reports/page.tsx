@@ -36,12 +36,10 @@ export default function ReportsPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const audits = trpc.audit.listRecent.useQuery({ limit: 24 });
-  const leads = trpc.lead.list.useQuery({
-    page: 1,
-    pageSize: 200,
-    sortBy: "companyName",
-    sortDir: "asc",
-  });
+  const leads = trpc.lead.options.useQuery(
+    { limit: 30 },
+    { staleTime: 120_000 },
+  );
   const runAudit = trpc.audit.run.useMutation({
     onSuccess: (data) => {
       audits.refetch();
@@ -106,7 +104,7 @@ export default function ReportsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none">Geen lead</SelectItem>
-                  {(leads.data?.items ?? []).map((lead) => (
+                  {(leads.data ?? []).map((lead) => (
                     <SelectItem key={lead.id} value={lead.id}>
                       {lead.companyName}
                     </SelectItem>

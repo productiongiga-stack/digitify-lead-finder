@@ -52,6 +52,8 @@ export class SmtpProvider implements EmailProvider {
         text: message.text,
         replyTo: message.replyTo,
         bcc: message.bcc,
+        inReplyTo: message.inReplyTo,
+        references: message.references,
         attachments: message.attachments as nodemailer.SendMailOptions["attachments"],
       } as nodemailer.SendMailOptions);
       return { success: true, messageId: info.messageId };

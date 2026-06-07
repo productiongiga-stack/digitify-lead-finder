@@ -19,6 +19,7 @@ import {
 } from "@/components/quotes/quote-embed-layout";
 import { QuoteIconPicker } from "@/components/quotes/quote-icon-picker";
 import { QuoteDetailsStep } from "@/components/quotes/quote-embed-steps";
+import { useWidgetAnalytics } from "@/components/analytics/use-widget-analytics";
 import {
   buildFallbackSpecs,
   parseProductSpecs,
@@ -319,6 +320,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
   const isPreviewRoute = urlState.preview;
   const isInternalMode = mode === "internal" || urlState.internal;
   const tenantToken = urlState.tenantToken;
+  useWidgetAnalytics("quotes", isInternalMode ? null : tenantToken);
   const leadIdParam = urlState.leadId;
   const chatSessionIdParam = urlState.chatSessionId;
   const quoteIdParam = urlState.quoteId;
@@ -2452,7 +2454,7 @@ function QuoteConfigurator({ mode = "public" }: { mode?: QuoteConfiguratorMode }
   );
 }
 
-export default function QuoteEmbedPage() {
+export default function QuoteEmbedPage({ mode = "public" }: { mode?: QuoteConfiguratorMode }) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -2461,5 +2463,5 @@ export default function QuoteEmbedPage() {
 
   if (!mounted) return <QuoteEmbedFallback />;
 
-  return <QuoteConfigurator mode="public" />;
+  return <QuoteConfigurator mode={mode} />;
 }

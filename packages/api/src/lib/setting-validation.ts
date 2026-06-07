@@ -7,6 +7,7 @@ const DEFAULT_MAX_STRING_LENGTH = 10_000;
 const LARGE_STRING_MAX_LENGTH = 100_000;
 const LARGE_STRING_SETTING_KEYS = new Set([
   "email.custom_html",
+  "email.master_shell_html",
   "email.custom_html_presets_json",
   "email.default_layout_by_type_json",
   "seo.solution_pages_json",
@@ -35,6 +36,9 @@ const BOOLEAN_SETTING_KEYS = new Set([
   "seo.robots_index",
   "seo.robots_follow",
   "seo.structured_data_enabled",
+  "creative.brand_enabled",
+  "creative.include_logo",
+  "creative.auto_import",
 ]);
 
 const ENUM_SETTING_KEYS = new Map<string, readonly string[]>([

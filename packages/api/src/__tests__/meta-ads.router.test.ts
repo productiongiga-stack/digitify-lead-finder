@@ -65,9 +65,13 @@ describe("metaAds router flow", () => {
       adsetId: "adset_1",
       adsetIds: ["adset_1", "adset_2"],
       creativeId: "creative_1",
+      creativeIds: ["creative_1"],
       adId: "ad_1",
       adIds: ["ad_1", "ad_2"],
       status: "PAUSED",
+      metaState: null,
+      adsets: [],
+      syncedAt: null,
     });
   });
 

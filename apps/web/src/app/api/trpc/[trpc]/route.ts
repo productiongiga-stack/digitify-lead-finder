@@ -2,7 +2,10 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appRouter } from "@digitify/api";
 import { prisma } from "@digitify/db";
 import { runWithRequestContext } from "@digitify/db";
-import { ensureTenantSchemaCompatibility } from "@digitify/api/src/lib/tenant-schema-compat";
+import {
+  ensureTenantSchemaCompatibility,
+  isTenantSchemaEnsureEnabled,
+} from "@digitify/api/src/lib/tenant-schema-compat";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/options";
 import { randomUUID } from "crypto";
@@ -21,7 +24,9 @@ function resolveClientIp(req: Request): string {
 
 const handler = async (req: Request) => {
   assertServerEnv();
-  await ensureTenantSchemaCompatibility(prisma);
+  if (isTenantSchemaEnsureEnabled()) {
+    await ensureTenantSchemaCompatibility(prisma);
+  }
   const requestId = randomUUID();
   const session = await getServerSession(authOptions);
   const sessionUser = session?.user as

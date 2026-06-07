@@ -470,6 +470,85 @@ export const socialRouter = router({
     return { items, total, page, pageSize };
   }),
 
+  getAgenda: protectedProcedure
+    .input(
+      z.object({
+        from: z.coerce.date(),
+        to: z.coerce.date(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      const socialDb = ctx.db as any;
+
+      const [scheduled, unscheduled] = await Promise.all([
+        socialDb.socialPost.findMany({
+          where: {
+            createdById: workspaceId,
+            OR: [
+              { scheduledFor: { gte: input.from, lte: input.to } },
+              { publishedAt: { gte: input.from, lte: input.to } },
+            ],
+          },
+          orderBy: [{ scheduledFor: "asc" }, { publishedAt: "asc" }],
+        }),
+        socialDb.socialPost.findMany({
+          where: {
+            createdById: workspaceId,
+            scheduledFor: null,
+            status: { in: ["DRAFT", "PENDING_APPROVAL", "FAILED"] },
+          },
+          orderBy: { updatedAt: "desc" },
+          take: 50,
+        }),
+      ]);
+
+      return {
+        items: scheduled,
+        unscheduled,
+        from: input.from.toISOString(),
+        to: input.to.toISOString(),
+      };
+    }),
+
+  reschedulePost: adminProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        scheduledFor: z.coerce.date(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (input.scheduledFor.getTime() < Date.now() - 30_000) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Geplande tijd moet in de toekomst liggen." });
+      }
+
+      const socialDb = ctx.db as any;
+      const row = await socialDb.socialPost.findUnique({ where: { id: input.id } });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Social post niet gevonden." });
+      ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+      if (row.status !== "SCHEDULED") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Alleen ingeplande posts kunnen verplaatst worden.",
+        });
+      }
+
+      const updated = await socialDb.socialPost.update({
+        where: { id: input.id },
+        data: { scheduledFor: input.scheduledFor },
+      });
+
+      await createSocialActivity(ctx.db, {
+        userId: ctx.user.id,
+        type: "SOCIAL_POST_RESCHEDULED",
+        title: "Social post opnieuw ingepland",
+        metadata: { socialPostId: input.id, scheduledFor: input.scheduledFor.toISOString() },
+      });
+
+      return updated;
+    }),
+
   getById: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
     const row = await (ctx.db as any).socialPost.findUnique({ where: { id: input.id } });
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Social post niet gevonden." });

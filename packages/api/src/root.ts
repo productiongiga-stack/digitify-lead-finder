@@ -26,6 +26,9 @@ import { templateRouter } from "./routers/template.router";
 import { socialRouter } from "./routers/social.router";
 import { metaAdsRouter } from "./routers/meta-ads.router";
 import { googleAdsRouter } from "./routers/google-ads.router";
+import { mediaRouter } from "./routers/media.router";
+import { workspaceRouter } from "./routers/workspace.router";
+import { analyticsRouter } from "./routers/analytics.router";
 
 export const appRouter = router({
   dashboard: dashboardRouter,
@@ -55,6 +58,9 @@ export const appRouter = router({
   social: socialRouter,
   metaAds: metaAdsRouter,
   googleAds: googleAdsRouter,
+  media: mediaRouter,
+  workspace: workspaceRouter,
+  analytics: analyticsRouter,
 });
 
 export type AppRouter = typeof appRouter;

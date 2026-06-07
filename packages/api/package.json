@@ -15,6 +15,8 @@
     "@digitify/connectors": "workspace:^",
     "@digitify/db": "workspace:*",
     "@digitify/email": "workspace:^",
+    "@digitify/media-studio": "workspace:^",
+    "@vercel/blob": "^2.4.0",
     "@digitify/openclaw": "workspace:^",
     "@digitify/scoring": "workspace:^",
     "@sentry/node": "^10.53.1",

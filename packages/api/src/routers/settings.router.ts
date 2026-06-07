@@ -9,8 +9,9 @@ import {
   redactSecretSettingValue,
   SECRET_REDACTION_MASK,
 } from "@digitify/db";
-import { router, publicRateLimitedProcedure, protectedProcedure, adminProcedure, ownerProcedure, mutationProcedure } from "../trpc";
-import { loadEmailSettings } from "../lib/email-sender";
+import { router, publicRateLimitedProcedure, protectedProcedure, adminProcedure, ownerProcedure, mutationProcedure, aiRateLimitedProcedure } from "../trpc";
+import { generateMasterShellHtml } from "../lib/generate-email-shell";
+import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
 import { formatSmtpErrorMessage, normalizeTlsOptions } from "../lib/email-utils";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
 import {
@@ -23,6 +24,22 @@ import { loadUserSettingRows } from "../lib/user-settings";
 import { assertCanManageSettingKey, canReadSettingKey, filterReadableSettingsForRole } from "../lib/permissions";
 import { ensureUserWorkspace } from "../lib/user-workspace";
 import { normalizeSettingKey, validateSettingValue } from "../lib/setting-validation";
+import {
+  AI_SETTINGS_KEYS,
+  ANALYTICS_SETTINGS_KEYS,
+  BOOKINGS_SETTINGS_KEYS,
+  CACHE_SETTINGS_KEYS,
+  CHATBOT_SETTINGS_KEYS,
+  COMPANY_SETTINGS_KEYS,
+  EMAIL_SETTINGS_KEYS,
+  INTEGRATIONS_SETTINGS_KEYS,
+  QUOTES_CONFIGURATOR_SETTINGS_KEYS,
+  REVIEWS_SETTINGS_KEYS,
+  SEO_SETTINGS_KEYS,
+} from "../lib/settings-bundle-keys";
+import { applyWorkspaceCacheSettings, getDefaultCacheSettings } from "../lib/cache-config";
+import { clearAllDashboardCache, invalidateDashboardCacheForUser } from "../lib/dashboard-cache";
+import { clearAllSettingsCache } from "../lib/user-settings";
 
 /* ---------- helpers ---------- */
 
@@ -47,6 +64,17 @@ function sanitizeSettingsForViewer(settings: Record<string, unknown>) {
 
 function sanitizeSingleSettingForViewer(key: string, value: unknown) {
   return redactSecretSettingValue(key, value);
+}
+
+async function loadSettingsBundle(
+  ctx: { db: Parameters<typeof loadWorkspaceSettingRows>[0]; user: { id: string; role: string; workspaceId?: string; name?: string | null } },
+  keys: readonly string[],
+) {
+  const scope = workspaceScopeFromUser(ctx.user);
+  await ensureUserWorkspace(ctx.db, scope.workspaceId, ctx.user.name);
+  const rows = await loadWorkspaceSettingRows(ctx.db, scope, [...keys]);
+  const map = settingsRowsToMap(rows);
+  return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
 }
 
 function getDomainFromEmail(value: string) {
@@ -307,6 +335,10 @@ export const settingsRouter = router({
       "email.from_name",
       "email.from_email",
       "email.header_slogan",
+      "email.master_shell_html",
+      "email.custom_html",
+      "email.signature",
+      "email.footer",
     ];
     const rows = await loadWorkspaceSettingRows(ctx.db, scope, keys);
     const map = settingsRowsToMap(rows);
@@ -323,6 +355,69 @@ export const settingsRouter = router({
     return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
   }),
 
+  /** Display / density settings only */
+  getDisplaySettings: protectedProcedure.query(async ({ ctx }) => {
+    const scope = workspaceScopeFromUser(ctx.user);
+    await ensureUserWorkspace(ctx.db, scope.workspaceId, ctx.user.name);
+    const keys = ["ui.density", "display.typography_mode"];
+    const rows = await loadWorkspaceSettingRows(ctx.db, scope, keys);
+    const map = settingsRowsToMap(rows);
+    return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
+  }),
+
+  /** Mail-opmaak / afzender settings (avoids getAll). */
+  getEmailSettings: protectedProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, EMAIL_SETTINGS_KEYS)),
+
+  /** AI & OpenClaw settings (avoids getAll). */
+  getAiSettings: protectedProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, AI_SETTINGS_KEYS)),
+
+  /** Company & footer settings (avoids getAll). */
+  getCompanySettings: protectedProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, COMPANY_SETTINGS_KEYS)),
+
+  /** SEO & marketing page settings (avoids getAll). */
+  getSeoSettings: protectedProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, SEO_SETTINGS_KEYS)),
+
+  /** Review embed & public copy settings (avoids getAll). */
+  getReviewsSettings: protectedProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, REVIEWS_SETTINGS_KEYS)),
+
+  /** Quote configurator embed & PDF settings (avoids getAll). */
+  getQuotesConfiguratorSettings: protectedProcedure.query(async ({ ctx }) =>
+    loadSettingsBundle(ctx, QUOTES_CONFIGURATOR_SETTINGS_KEYS),
+  ),
+
+  /** Integrations, API keys & mail transport settings (avoids getAll). */
+  getIntegrationsSettings: protectedProcedure.query(async ({ ctx }) =>
+    loadSettingsBundle(ctx, INTEGRATIONS_SETTINGS_KEYS),
+  ),
+
+  /** Booking widget & calendar settings (avoids getAll). */
+  getBookingsSettings: protectedProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, BOOKINGS_SETTINGS_KEYS)),
+
+  /** Chatbot widget settings (avoids getAll). */
+  getChatbotSettings: protectedProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, CHATBOT_SETTINGS_KEYS)),
+
+  /** Website trackers & product analytics (owner only). */
+  getAnalyticsSettings: ownerProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, ANALYTICS_SETTINGS_KEYS)),
+
+  /** Server/client cache tuning (owner only). */
+  getCacheSettings: ownerProcedure.query(async ({ ctx }) => {
+    const bundle = await loadSettingsBundle(ctx, CACHE_SETTINGS_KEYS);
+    const defaults = getDefaultCacheSettings();
+    return {
+      ...bundle,
+      defaults,
+    };
+  }),
+
+  clearWorkspaceCaches: ownerProcedure.mutation(async ({ ctx }) => {
+    const scope = workspaceScopeFromUser(ctx.user);
+    invalidateWorkspaceSettingsCache(scope);
+    clearAllSettingsCache();
+    clearAllDashboardCache();
+    invalidateDashboardCacheForUser(scope.workspaceId);
+    return { success: true };
+  }),
+
   /** Narrow settings bundle for outbound compose / email preview (avoids getAll). */
   getEmailComposeSettings: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);
@@ -330,10 +425,15 @@ export const settingsRouter = router({
     const keys = [
       "branding.company_name",
       "branding.primary_color",
+      "branding.logo_url",
       "branding.website",
       "company.website",
       "company.phone",
       "email.header_slogan",
+      "email.master_shell_html",
+      "email.custom_html",
+      "email.signature",
+      "email.footer",
       "email.followup_days",
       "email.default_layout",
       "email.from_email",
@@ -345,6 +445,40 @@ export const settingsRouter = router({
     const map = settingsRowsToMap(rows);
     return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
   }),
+
+  generateMasterShellHtml: aiRateLimitedProcedure
+    .input(
+      z.object({
+        style: z.enum(["brief", "studio", "convert", "custom"]).default("studio"),
+        instructions: z.string().max(1000).optional(),
+        referenceHtml: z.string().max(100_000).optional(),
+        companyName: z.string().max(200).optional(),
+        primaryColor: z.string().max(20).optional(),
+        headerSlogan: z.string().max(500).optional(),
+        logoUrl: z.string().max(2000).optional(),
+        signature: z.string().max(5000).optional(),
+        footer: z.string().max(5000).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      assertCanManageSettingKey(ctx.user.role, "email.master_shell_html");
+      const scope = workspaceScopeFromUser(ctx.user);
+      return generateMasterShellHtml({
+        db: ctx.db,
+        scope,
+        style: input.style,
+        instructions: input.instructions,
+        referenceHtml: input.referenceHtml,
+        brandingOverrides: {
+          companyName: input.companyName,
+          primaryColor: input.primaryColor,
+          headerSlogan: input.headerSlogan,
+          logoUrl: input.logoUrl,
+          signature: input.signature,
+          footer: input.footer,
+        },
+      });
+    }),
 
   getAll: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);
@@ -430,6 +564,14 @@ export const settingsRouter = router({
         }),
       ]);
       invalidateWorkspaceSettingsCache(scope);
+      const cachePatch = Object.fromEntries(
+        uniqueEntries
+          .filter((item) => item.key.startsWith("cache."))
+          .map((item) => [item.key, String(item.value ?? "")]),
+      );
+      if (Object.keys(cachePatch).length > 0) {
+        applyWorkspaceCacheSettings(scope.workspaceId, cachePatch);
+      }
       return { success: true };
     }),
 
@@ -609,9 +751,7 @@ export const settingsRouter = router({
       }).optional()
     )
     .mutation(async ({ ctx, input }) => {
-      const nodemailer = await import("nodemailer");
       const scope = workspaceScopeFromUser(ctx.user);
-      const settings = await loadWorkspaceSettingRows(ctx.db, scope);
       const cfg = await loadEmailSettings(ctx.db, scope);
       const host = cfg.smtpHost;
       const port = cfg.smtpPort;
@@ -628,55 +768,36 @@ export const settingsRouter = router({
         });
       }
 
-      try {
-        const transporter = nodemailer.default.createTransport({
-          host,
-          port,
-          secure: port === 465,
-          auth: { user, pass },
-          connectionTimeout: 10_000,
-          greetingTimeout: 10_000,
-          socketTimeout: 20_000,
-          tls: normalizeTlsOptions({
-            host,
-            explicitServername: cfg.smtpServername,
-            username: user,
-            rejectUnauthorized: cfg.smtpRejectUnauthorized,
-          }),
+      const userProfile = await ctx.db.user.findUnique({ where: { id: ctx.user.id }, select: { email: true } });
+      const toEmail = input?.toEmail?.trim() || userProfile?.email || user;
+      const companyName = cfg.companyName || "Lead Finder";
+      const fromEmail = cfg.fromEmail || user;
+      const replyTo = cfg.replyTo;
+
+      const result = await sendBrandedEmail(ctx.db, {
+        toEmail,
+        subject: `SMTP Test - ${companyName}`,
+        body: "Dit is een test e-mail. Je SMTP configuratie werkt correct!",
+        userId: scope,
+      });
+
+      if (!result.success) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: result.error || "SMTP test mislukt.",
         });
-
-        const userProfile = await ctx.db.user.findUnique({ where: { id: ctx.user.id }, select: { email: true } });
-        const toEmail = input?.toEmail?.trim() || userProfile?.email || user;
-
-        const settingsMap = settingsRowsToMap(settings);
-        const companyName = getSettingString(settingsMap, "branding.company_name", "Lead Finder");
-        const fromEmail = getSettingString(settingsMap, "email.from_email") || user;
-        const fromName = getSettingString(settingsMap, "email.from_name") || companyName;
-        const replyTo = getSettingString(settingsMap, "email.reply_to");
-
-        await transporter.verify();
-        await transporter.sendMail({
-          from: fromName ? `"${fromName}" <${fromEmail}>` : fromEmail,
-          to: toEmail,
-          subject: `SMTP Test - ${companyName}`,
-          text: "Dit is een test e-mail. Je SMTP configuratie werkt correct!",
-          html: "<p>Dit is een test e-mail. Je SMTP configuratie werkt correct!</p>",
-          replyTo: replyTo || undefined,
-        });
-
-        return {
-          success: true,
-          message: `Test e-mail verstuurd naar ${toEmail}.`,
-          dnsGuide: buildSmtpDnsGuide({
-            smtpHost: host,
-            smtpUser: user,
-            fromEmail,
-            replyTo,
-          }),
-        };
-      } catch (err: any) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: formatSmtpErrorMessage(err) });
       }
+
+      return {
+        success: true,
+        message: `Test e-mail verstuurd naar ${toEmail}.`,
+        dnsGuide: buildSmtpDnsGuide({
+          smtpHost: host,
+          smtpUser: user,
+          fromEmail,
+          replyTo,
+        }),
+      };
     }),
 
   checkEmailDns: ownerProcedure
@@ -689,7 +810,12 @@ export const settingsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
-      const settingRows = await loadWorkspaceSettingRows(ctx.db, scope);
+      const settingRows = await loadWorkspaceSettingRows(ctx.db, scope, [
+        "email.from_email",
+        "email.smtp_user",
+        "email.reply_to",
+        "email.dkim_selector",
+      ]);
       const settingsMap = settingsRowsToMap(settingRows);
       const fromEmail = getSettingString(settingsMap, "email.from_email");
       const smtpUser = getSettingString(settingsMap, "email.smtp_user");
@@ -810,7 +936,13 @@ export const settingsRouter = router({
   testImap: ownerProcedure.mutation(async ({ ctx }) => {
     const { ImapFlow } = await import("imapflow");
     const scope = workspaceScopeFromUser(ctx.user);
-    const settings = await loadWorkspaceSettingRows(ctx.db, scope);
+    const settings = await loadWorkspaceSettingRows(ctx.db, scope, [
+      "email.imap_host",
+      "email.imap_port",
+      "email.imap_user",
+      "email.imap_pass",
+      "email.imap_tls",
+    ]);
     const settingsMap = settingsRowsToMap(settings);
     const host = getSettingString(settingsMap, "email.imap_host");
     const port = getSettingString(settingsMap, "email.imap_port", "993");

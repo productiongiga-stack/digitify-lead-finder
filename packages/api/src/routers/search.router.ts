@@ -75,6 +75,44 @@ function buildSearchQueries(input: {
   return Array.from(new Set(queries)).slice(0, 4);
 }
 
+async function fetchPlacesForQuery(
+  textQuery: string,
+  apiKey: string,
+  fieldMask: string,
+  maxResultCount: number,
+  userId: string,
+): Promise<Record<string, unknown>[]> {
+  const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": apiKey,
+      "X-Goog-FieldMask": fieldMask,
+    },
+    body: JSON.stringify({
+      textQuery,
+      maxResultCount,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    log.integration.error("Google Places API error", {
+      userId,
+      status: response.status,
+      bodyPreview: errorBody.slice(0, 200),
+      textQuery,
+    });
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: `Google Places API fout (${response.status}). Controleer je API key en probeer opnieuw.`,
+    });
+  }
+
+  const data = await response.json();
+  return Array.isArray(data.places) ? (data.places as Record<string, unknown>[]) : [];
+}
+
 export const searchRouter = router({
   searchPlaces: mutationProcedure
     .input(
@@ -134,37 +172,13 @@ export const searchRouter = router({
       );
       const dedupedPlaces = new Map<string, Record<string, unknown>>();
 
-      for (const textQuery of searchQueries) {
-        const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": apiKey,
-            "X-Goog-FieldMask": fieldMask,
-          },
-          body: JSON.stringify({
-            textQuery,
-            maxResultCount: perRequestResultCount,
-          }),
-        });
+      const placeBatches = await Promise.all(
+        searchQueries.map((textQuery) =>
+          fetchPlacesForQuery(textQuery, apiKey, fieldMask, perRequestResultCount, ctx.user.id),
+        ),
+      );
 
-        if (!response.ok) {
-          const errorBody = await response.text();
-          log.integration.error("Google Places API error", {
-            userId: ctx.user.id,
-            status: response.status,
-            bodyPreview: errorBody.slice(0, 200),
-            textQuery,
-          });
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: `Google Places API fout (${response.status}). Controleer je API key en probeer opnieuw.`,
-          });
-        }
-
-        const data = await response.json();
-        const places = Array.isArray(data.places) ? (data.places as Record<string, unknown>[]) : [];
-
+      for (const places of placeBatches) {
         for (const place of places) {
           const placeId = place.id as string | undefined;
           if (!placeId || dedupedPlaces.has(placeId)) continue;

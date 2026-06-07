@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
 import { assertPublicHttpUrl } from "@digitify/connectors";
-import { GoogleAdsApi, enums, errors, resources, toMicros, ResourceNames, type MutateOperation } from "google-ads-api";
+import type { GoogleAdsApi, MutateOperation } from "google-ads-api";
 import { validateBudgetGuard } from "./meta-ads";
 import { type WorkspaceScope } from "./workspace-settings";
 import {
@@ -12,6 +12,15 @@ import {
 } from "./google-ads-oauth";
 
 export type { GoogleAdsWorkspaceConfig };
+
+type GoogleAdsSdk = typeof import("google-ads-api");
+
+let googleAdsSdkPromise: Promise<GoogleAdsSdk> | null = null;
+
+function loadGoogleAdsSdk() {
+  googleAdsSdkPromise ??= import("google-ads-api");
+  return googleAdsSdkPromise;
+}
 
 type MutateResourcesResult = {
   results?: Array<{ resource_name?: string }>;
@@ -102,9 +111,18 @@ function withGoogleAdsHint(message: string): string {
 }
 
 export function formatGoogleAdsError(error: unknown): string {
-  if (error instanceof errors.GoogleAdsFailure) {
-    const parts = error.errors.map((entry) => formatGoogleAdsErrorEntry(entry)).filter(Boolean);
-    if (parts.length) return withGoogleAdsHint(parts.join(" · "));
+  if (error && typeof error === "object") {
+    const nested = (error as { errors?: unknown[] }).errors;
+    if (Array.isArray(nested) && nested.length) {
+      const parts = nested
+        .map((entry) =>
+          typeof entry === "object" && entry
+            ? formatGoogleAdsErrorEntry(entry as Parameters<typeof formatGoogleAdsErrorEntry>[0])
+            : String(entry),
+        )
+        .filter(Boolean);
+      if (parts.length) return withGoogleAdsHint(parts.join(" · "));
+    }
   }
 
   if (error instanceof Error) {
@@ -193,7 +211,7 @@ export function normalizeSearchCreatives(creatives: unknown) {
   };
 }
 
-function resolveKeywordMatchType(value: string) {
+function resolveKeywordMatchType(enums: GoogleAdsSdk["enums"], value: string) {
   const normalized = value.trim().toUpperCase();
   if (normalized === "BROAD") return enums.KeywordMatchType.BROAD;
   if (normalized === "EXACT") return enums.KeywordMatchType.EXACT;
@@ -272,7 +290,7 @@ async function fetchImageAssetData(url: string) {
   return bytes;
 }
 
-function createAdsClient(config: GoogleAdsWorkspaceConfig) {
+async function createAdsClient(config: GoogleAdsWorkspaceConfig) {
   if (!config.clientId || !config.clientSecret) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Google OAuth client ontbreekt in Integraties." });
   }
@@ -285,6 +303,7 @@ function createAdsClient(config: GoogleAdsWorkspaceConfig) {
   if (!config.refreshToken) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Koppel Google Ads eerst via Integraties." });
   }
+  const { GoogleAdsApi } = await loadGoogleAdsSdk();
   return new GoogleAdsApi({
     client_id: config.clientId,
     client_secret: config.clientSecret,
@@ -305,7 +324,7 @@ export function getGoogleAdsCustomer(client: GoogleAdsApi, config: GoogleAdsWork
 }
 
 export async function listGoogleAdCustomers(config: GoogleAdsWorkspaceConfig): Promise<GoogleAdCustomerSummary[]> {
-  const client = createAdsClient(config);
+  const client = await createAdsClient(config);
   const accessible = await client.listAccessibleCustomers(config.refreshToken);
   const resourceNames = Array.isArray(accessible)
     ? accessible
@@ -354,7 +373,7 @@ export async function listGoogleAdCustomers(config: GoogleAdsWorkspaceConfig): P
 }
 
 export async function listGoogleCampaigns(config: GoogleAdsWorkspaceConfig) {
-  const client = createAdsClient(config);
+  const client = await createAdsClient(config);
   const customer = getGoogleAdsCustomer(client, config);
   const rows = await customer.query(`
     SELECT
@@ -376,7 +395,7 @@ export async function listGoogleCampaigns(config: GoogleAdsWorkspaceConfig) {
 }
 
 export async function getGoogleAdsInsights(config: GoogleAdsWorkspaceConfig) {
-  const client = createAdsClient(config);
+  const client = await createAdsClient(config);
   const customer = getGoogleAdsCustomer(client, config);
   const rows = await customer.query(`
     SELECT
@@ -417,6 +436,7 @@ async function pushSearchPaused(params: {
   };
 }) {
   const { customer, customerId, plan } = params;
+  const { enums, ResourceNames, toMicros } = await loadGoogleAdsSdk();
   const targeting = defaultSearchTargeting(plan.targeting);
   const creative = normalizeSearchCreatives(plan.creatives);
   const dailyCents = Number(plan.dailyBudgetCents || plan.lifetimeBudgetCents || 0);
@@ -426,7 +446,7 @@ async function pushSearchPaused(params: {
   const campaignResourceName = ResourceNames.campaign(customerId, "-2");
   const adGroupResourceName = ResourceNames.adGroup(customerId, "-3");
 
-  const budgetOps: MutateOperation<resources.ICampaignBudget | resources.ICampaign>[] = [
+  const budgetOps: MutateOperation<any>[] = [
     {
       entity: "campaign_budget",
       operation: "create",
@@ -517,7 +537,7 @@ async function pushSearchPaused(params: {
         status: enums.AdGroupCriterionStatus.PAUSED,
         keyword: {
           text,
-          match_type: resolveKeywordMatchType(targeting.matchType),
+          match_type: resolveKeywordMatchType(enums, targeting.matchType),
         },
       })),
     );
@@ -533,7 +553,7 @@ async function pushSearchPaused(params: {
           negative: true,
           keyword: {
             text,
-            match_type: resolveKeywordMatchType(targeting.matchType),
+            match_type: resolveKeywordMatchType(enums, targeting.matchType),
           },
         })),
       );
@@ -561,6 +581,7 @@ async function pushPerformanceMaxPaused(params: {
   };
 }) {
   const { customer, customerId, plan } = params;
+  const { enums, ResourceNames } = await loadGoogleAdsSdk();
   const creative = normalizeSearchCreatives(plan.creatives);
   validatePerformanceMaxAssets(creative);
   const targeting = defaultSearchTargeting(plan.targeting);
@@ -583,7 +604,7 @@ async function pushPerformanceMaxPaused(params: {
   const nextAssetResourceName = () => ResourceNames.asset(customerId, tempAssetId--);
 
   // google-ads-api MutateOperation typings are narrower than batch create payloads.
-  const operations: MutateOperation<resources.ICampaignBudget | resources.ICampaign | resources.IAssetGroup | resources.IAssetGroupAsset | resources.IAsset>[] =
+  const operations: MutateOperation<any>[] =
     [
     {
       entity: "campaign_budget",
@@ -632,7 +653,7 @@ async function pushPerformanceMaxPaused(params: {
         resource_name: assetResourceName,
         text_asset: { text },
       },
-    } as unknown as MutateOperation<resources.IAsset>);
+    } as unknown as MutateOperation<any>);
     operations.push({
       entity: "asset_group_asset",
       operation: "create",
@@ -641,7 +662,7 @@ async function pushPerformanceMaxPaused(params: {
         asset: assetResourceName,
         field_type: fieldType,
       },
-    } as unknown as MutateOperation<resources.IAssetGroupAsset>);
+    } as unknown as MutateOperation<any>);
   };
 
   const addImageAsset = async (url: string, fieldType: number, label: string) => {
@@ -655,7 +676,7 @@ async function pushPerformanceMaxPaused(params: {
         name: `${plan.name} - ${label}`,
         image_asset: { data },
       },
-    } as unknown as MutateOperation<resources.IAsset>);
+    } as unknown as MutateOperation<any>);
     operations.push({
       entity: "asset_group_asset",
       operation: "create",
@@ -664,7 +685,7 @@ async function pushPerformanceMaxPaused(params: {
         asset: assetResourceName,
         field_type: fieldType,
       },
-    } as unknown as MutateOperation<resources.IAssetGroupAsset>);
+    } as unknown as MutateOperation<any>);
   };
 
   for (const text of creative.headlines.slice(0, 15)) {
@@ -687,7 +708,7 @@ async function pushPerformanceMaxPaused(params: {
     await addImageAsset(creative.landscapeLogoUrl, enums.AssetFieldType.LANDSCAPE_LOGO, "landscape logo");
   }
 
-  const geoOps: MutateOperation<resources.ICampaignCriterion>[] = [];
+  const geoOps: MutateOperation<any>[] = [];
   if (targeting.geoTargetConstants.length) {
     for (const geo of targeting.geoTargetConstants.slice(0, 10)) {
       geoOps.push({
@@ -737,7 +758,7 @@ export async function pushPausedGoogleAdPlan(params: {
   const { config, plan } = params;
   validateBudgetGuard(plan, config.maxDailyBudgetCents);
 
-  const client = createAdsClient(config);
+  const client = await createAdsClient(config);
   const customer = getGoogleAdsCustomer(client, config);
   const customerId = normalizeGoogleCustomerId(config.customerId);
   const campaignType = String(plan.campaignType || "SEARCH").toUpperCase();
@@ -776,7 +797,7 @@ export async function suggestBeneluxGeoTargets(
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
 
-  const client = createAdsClient(config);
+  const client = await createAdsClient(config);
   const customer = getGoogleAdsCustomer(client, config);
 
   const responses = await Promise.all(

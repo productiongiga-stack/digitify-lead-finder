@@ -98,6 +98,148 @@ export const contactRouter = router({
     };
   }),
 
+  getOverview: protectedProcedure
+    .input(
+      z.object({
+        status: z.string().optional(),
+        leadId: z.string().optional(),
+        search: z.string().optional(),
+        type: z.enum(EMAIL_TYPE_VALUES).optional(),
+        sourceModule: z.enum(OUTBOUND_SOURCE_MODULES).optional(),
+        page: z.number().min(1).default(1),
+        pageSize: z.number().min(1).max(100).default(50),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      await normalizeLegacyScheduledDrafts(ctx.db, workspaceId);
+
+      const scope = workspaceScopeFromUser(ctx.user);
+      const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["email.followup_days"]);
+      const followupDays = Math.max(
+        1,
+        Number.parseInt(getSettingString(settings, "email.followup_days", "3"), 10) || 3,
+      );
+      const reminderThreshold = new Date(Date.now() - followupDays * 24 * 60 * 60 * 1000);
+
+      const where: Record<string, unknown> = {
+        lead: { createdById: workspaceId },
+      };
+      if (input.status) {
+        where.status = input.status === "DRAFT" ? { in: ["DRAFT", "SCHEDULED"] } : input.status;
+      }
+      if (input.type) where.type = input.type;
+      if (input.sourceModule) {
+        Object.assign(where, buildOutboundSourceModuleWhere(input.sourceModule));
+      }
+      if (input.leadId) {
+        await assertLeadAccess(ctx.db, workspaceId, input.leadId);
+        where.leadId = input.leadId;
+      }
+      const search = input.search?.trim();
+      if (search) {
+        where.OR = [
+          { subject: { contains: search, mode: "insensitive" } },
+          { toEmail: { contains: search, mode: "insensitive" } },
+          { lead: { companyName: { contains: search, mode: "insensitive" }, createdById: workspaceId } },
+        ];
+      }
+
+      const [draftRows, draftTotal, pendingDrafts, followupLeads, followUpDrafts] = await Promise.all([
+        ctx.db.emailDraft.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip: (input.page - 1) * input.pageSize,
+          take: input.pageSize,
+          include: {
+            lead: { select: { id: true, companyName: true } },
+            author: { select: { id: true, name: true } },
+            approver: { select: { id: true, name: true } },
+            sequence: { select: { id: true, name: true } },
+          },
+        }),
+        ctx.db.emailDraft.count({ where }),
+        ctx.db.emailDraft.count({
+          where: { status: "PENDING_APPROVAL", lead: { createdById: workspaceId } },
+        }),
+        ctx.db.emailDraft.findMany({
+          where: {
+            status: "SENT",
+            sentAt: { lte: reminderThreshold },
+            lead: {
+              createdById: workspaceId,
+              status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
+            },
+          },
+          select: { leadId: true },
+          distinct: ["leadId"],
+          take: 30,
+        }),
+        ctx.db.emailDraft.findMany({
+          where: {
+            status: "SENT",
+            sentAt: { lte: reminderThreshold },
+            lead: {
+              createdById: workspaceId,
+              status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
+            },
+          },
+          orderBy: { sentAt: "asc" },
+          distinct: ["leadId"],
+          take: 8,
+          include: {
+            lead: {
+              select: {
+                id: true,
+                companyName: true,
+                status: true,
+                scorePriority: true,
+                city: true,
+              },
+            },
+          },
+        }),
+      ]);
+
+      const drafts = {
+        items: draftRows.map(enrichDraftRow),
+        total: draftTotal,
+        page: input.page,
+        pageSize: input.pageSize,
+        totalPages: Math.ceil(draftTotal / input.pageSize),
+      };
+
+      const followUpQueue = {
+        followupDays,
+        items: followUpDrafts.flatMap((draft) => {
+          if (!draft.lead) return [];
+          const sentAt = draft.sentAt ?? draft.createdAt;
+          const daysSinceSent = Math.max(
+            0,
+            Math.floor((Date.now() - new Date(sentAt).getTime()) / (1000 * 60 * 60 * 24)),
+          );
+          return [{
+            id: draft.id,
+            subject: draft.subject,
+            toEmail: draft.toEmail,
+            sentAt,
+            daysSinceSent,
+            recommendedAt: new Date(new Date(sentAt).getTime() + followupDays * 24 * 60 * 60 * 1000),
+            lead: draft.lead,
+          }];
+        }),
+      };
+
+      return {
+        drafts,
+        followUpQueue,
+        topbarStats: {
+          pendingDrafts,
+          followUpCount: followupLeads.length,
+        },
+      };
+    }),
+
   listDrafts: protectedProcedure
     .input(
       z.object({
@@ -605,7 +747,7 @@ export const contactRouter = router({
                 body: draft.body,
                 recipientCompany: draft.lead?.companyName ?? draft.toEmail,
                 leadId: draft.leadId ?? undefined,
-                userId: ctx.user.id,
+                userId: workspaceScopeFromUser(ctx.user),
                 trackingDraftId: draft.id,
               });
 

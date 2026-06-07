@@ -84,7 +84,6 @@ export function injectEmailTemplateMetadata(
   const base = extractEmailTemplateMetadata(body).cleanBody;
   const tags = [
     options.bodyFormat === "HTML" ? "[[BODY_FORMAT=HTML]]" : "",
-    options.layout ? `[[LAYOUT=${options.layout}]]` : "",
     options.type ? `[[TYPE=${options.type}]]` : "",
     options.description?.trim() ? `[[DESCRIPTION=${options.description.trim()}]]` : "",
     options.ctaText?.trim() && options.ctaUrl?.trim() ? `[[CTA_TEXT=${options.ctaText.trim()}]]` : "",

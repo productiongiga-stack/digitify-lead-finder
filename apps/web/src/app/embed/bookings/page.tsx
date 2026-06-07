@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { formatTimezoneLabel, toBookingIso } from "@/lib/booking-timezone";
+import { useWidgetAnalytics } from "@/components/analytics/use-widget-analytics";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -248,6 +249,7 @@ function BookingEmbedContent() {
   const timezone = params.get("timezone") || "Europe/Brussels";
   const defaultTimeMode = params.get("timeMode") === "12" ? "12" : "24";
   const tenant = params.get("tenant") || "";
+  useWidgetAnalytics("bookings", tenant);
   const quotePortal = params.get("quotePortal") || "";
   const portalToken = params.get("portalToken") || "";
   const bookingAuth = { tenant, quotePortal, portalToken };

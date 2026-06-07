@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { collapsed: sidebarCollapsed } = useSidebarLayout();
-  const { mobileSidebarOpen } = useUIStore();
+  const mobileSidebarOpen = useUIStore((state) => state.mobileSidebarOpen);
 
   return (
     <div

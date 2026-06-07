@@ -13,7 +13,16 @@ function resolveAppUrl() {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    instrumentationHook: true,
+    optimizePackageImports: [
+      "@digitify/ui",
+      "lucide-react",
+      "recharts",
+      "@tanstack/react-table",
+      "date-fns",
+      "@tanstack/react-query",
+      "zustand",
+      "@digitify/media-studio",
+    ],
     serverActions: {
       bodySizeLimit: "10mb",
     },

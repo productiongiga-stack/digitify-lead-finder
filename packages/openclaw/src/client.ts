@@ -72,6 +72,31 @@ export class OpenClawClient {
     return textBlock ? textBlock.text : "";
   }
 
+  /** Single-turn completion with a custom system prompt (e.g. HTML shell generation). */
+  async completeRaw(system: string, user: string, maxTokens = 4096): Promise<string> {
+    if (this.provider === "openai" && this.openai) {
+      const response = await this.openai.chat.completions.create({
+        model: this.model,
+        max_tokens: maxTokens,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      });
+      return response.choices[0]?.message?.content || "";
+    }
+
+    const response = await this.anthropic!.messages.create({
+      model: this.model,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: "user", content: user }],
+    });
+
+    const textBlock = response.content.find((b) => b.type === "text");
+    return textBlock ? textBlock.text : "";
+  }
+
   async draftEmail(context: OpenClawContext): Promise<EmailDraftSuggestion> {
     const response = await this.chat(
       [{ role: "user", content: EMAIL_DRAFT_PROMPT }],

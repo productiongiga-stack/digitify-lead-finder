@@ -51,7 +51,7 @@ import {
   extractQuoteIdFromDraftBody,
   getQuoteConfiguratorUrl,
 } from "@/lib/quote-outbound";
-import { useOutboundEmailPreviewSettings } from "@/lib/outbound-email-settings";
+import { useShellEmailPreviewProps } from "@/lib/outbound-email-settings";
 import { EmailPreview } from "@/components/email/preview";
 import { OutboundDraftTimeline } from "@/components/outbound/outbound-draft-timeline";
 import {
@@ -60,7 +60,7 @@ import {
 } from "@/components/outbound/outbound-draft-status-banner";
 import { applyEmailTemplateSelection } from "@/lib/apply-email-template";
 import { TemplatePicker } from "@/components/templates/template-picker";
-import { extractEmailTemplateMetadata, injectEmailTemplateMetadata, type EmailLayout } from "@/lib/email-content";
+import { extractEmailTemplateMetadata, injectEmailTemplateMetadata } from "@/lib/email-content";
 import {
   OUTBOUND_STATUS_LABELS,
   OUTBOUND_STATUS_VARIANTS,
@@ -82,7 +82,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
 
   const { data: draft, isLoading } = trpc.contact.getDraftById.useQuery({ id });
 
-  const { brandCompanyName, brandPrimaryColor, brandHeaderSlogan } = useOutboundEmailPreviewSettings();
+  const shellPreview = useShellEmailPreviewProps();
   const { data: templateData } = trpc.template.list.useQuery({ forOutbound: true });
   const templates = templateData?.templates ?? [];
 
@@ -92,7 +92,6 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [initialized, setInitialized] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
   const [rejectOpen, setRejectOpen] = useState(false);
-  const [emailLayout, setEmailLayout] = useState<EmailLayout>("modern");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [ctaText, setCtaText] = useState("");
   const [ctaUrl, setCtaUrl] = useState("");
@@ -106,7 +105,6 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     setSubject(draft.subject);
     setBody(parsed.cleanBody);
     setToEmail(draft.toEmail);
-    setEmailLayout(parsed.layout || "proposal");
     setCtaText(parsed.ctaText);
     setCtaUrl(parsed.ctaUrl);
     setBodyFormat(parsed.bodyFormat === "HTML" ? "HTML" : "TEXT");
@@ -180,7 +178,6 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
 
   const isEditable = canEditOutboundDraft(draft.status);
   const draftBodyForSave = injectEmailTemplateMetadata(body, {
-    layout: emailLayout,
     ctaText,
     ctaUrl,
     bodyFormat,
@@ -206,7 +203,6 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     setBodyFormat(applied.bodyFormat);
     setCtaText(applied.ctaText);
     setCtaUrl(applied.ctaUrl);
-    setEmailLayout(applied.layout);
   }
 
   function handleSave() {
@@ -614,21 +610,24 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
                   disabled={!isEditable}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Past onderwerp, inhoud en layout toe op dit outbound-concept. Sla op om wijzigingen te bewaren.
+                  Unieke inhoud per lead; opmaak volgt je workspace-instellingen onder Instellingen → E-mail.
                 </p>
               </div>
               <EmailPreview
                 subject={subject}
                 body={body}
-                companyName={brandCompanyName}
-                primaryColor={brandPrimaryColor}
-                fromName={draft.author.name || brandCompanyName}
-                headerSlogan={brandHeaderSlogan}
+                companyName={shellPreview.companyName}
+                primaryColor={shellPreview.primaryColor}
+                fromName={draft.author.name || shellPreview.fromName}
+                headerSlogan={shellPreview.headerSlogan}
                 recipientCompany={draft.lead?.companyName ?? draft.toEmail}
-                layout={emailLayout}
                 bodyFormat={bodyFormat}
                 ctaText={ctaText}
                 ctaUrl={ctaUrl}
+                logoUrl={shellPreview.logoUrl}
+                masterShellHtml={shellPreview.masterShellHtml}
+                signature={shellPreview.signature}
+                footer={shellPreview.footer}
               />
             </CardContent>
           </Card>

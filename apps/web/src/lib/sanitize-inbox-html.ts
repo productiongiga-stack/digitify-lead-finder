@@ -46,13 +46,44 @@ const INBOX_ALLOWED_ATTRIBUTES: sanitizeHtml.IOptions["allowedAttributes"] = {
   font: ["color", "face", "size"],
 };
 
+/** Email shell / branded preview — preserves table layout inline styles. */
+const EMAIL_SHELL_ALLOWED_TAGS = [
+  ...INBOX_ALLOWED_TAGS,
+  "html",
+  "head",
+  "body",
+  "meta",
+];
+
+const EMAIL_SHELL_ALLOWED_ATTRIBUTES: sanitizeHtml.IOptions["allowedAttributes"] = {
+  a: ["href", "title", "target", "rel", "style"],
+  img: ["src", "alt", "width", "height", "title", "style"],
+  td: ["colspan", "rowspan", "align", "valign", "width", "height", "bgcolor", "style"],
+  th: ["colspan", "rowspan", "align", "valign", "width", "style"],
+  tr: ["align", "valign", "style"],
+  tbody: ["style"],
+  thead: ["style"],
+  table: ["width", "border", "cellpadding", "cellspacing", "role", "align", "style"],
+  span: ["style"],
+  div: ["style", "align"],
+  p: ["style", "align"],
+  body: ["style"],
+  html: ["lang"],
+  meta: ["charset", "name", "content", "http-equiv"],
+  font: ["color", "face", "size"],
+};
+
+const PLACEHOLDER_HREF_RE = /^\{\{[a-zA-Z_][a-zA-Z0-9_]*\}\}$/;
+
 function sanitizeAnchor(tagName: string, attribs: sanitizeHtml.Attributes) {
   if (tagName !== "a" || !attribs.href) {
     return { tagName, attribs };
   }
   const href = attribs.href.trim();
   const lower = href.toLowerCase();
+  const isPlaceholder = PLACEHOLDER_HREF_RE.test(href);
   if (
+    isPlaceholder ||
     lower.startsWith("http://") ||
     lower.startsWith("https://") ||
     lower.startsWith("mailto:") ||
@@ -82,6 +113,39 @@ export function sanitizeInboxHtml(html: string): string {
       a: sanitizeAnchor,
     },
   });
+}
+
+/** Sanitize workspace master-shell HTML while keeping email-safe inline styles. */
+export function sanitizeEmailShellHtml(html: string): string {
+  return sanitizeHtml(html, {
+    allowedTags: EMAIL_SHELL_ALLOWED_TAGS,
+    allowedAttributes: EMAIL_SHELL_ALLOWED_ATTRIBUTES,
+    allowedSchemes: ["http", "https", "mailto"],
+    allowProtocolRelative: false,
+    disallowedTagsMode: "discard",
+    transformTags: {
+      a: sanitizeAnchor,
+    },
+  });
+}
+
+export function isFullHtmlEmailDocument(html: string) {
+  const trimmed = html.trim();
+  return /^<!doctype/i.test(trimmed) || /<html[\s>]/i.test(trimmed);
+}
+
+/** Build iframe document for previews (shell or fragment). */
+export function buildEmailPreviewDocument(html: string): string {
+  const trimmed = html.trim();
+  if (isFullHtmlEmailDocument(trimmed)) {
+    const safe = sanitizeEmailShellHtml(trimmed);
+    if (!/<head[\s>]/i.test(safe)) {
+      return safe;
+    }
+    const previewReset = `<style>a[style]{color:inherit !important;text-decoration:none !important;}</style>`;
+    return safe.replace(/<head([^>]*)>/i, `<head$1>${previewReset}`);
+  }
+  return buildInboxHtmlDocument(sanitizeInboxHtml(trimmed));
 }
 
 export function buildInboxHtmlDocument(safeBodyHtml: string): string {

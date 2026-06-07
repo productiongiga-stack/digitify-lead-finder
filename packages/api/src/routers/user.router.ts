@@ -3,17 +3,52 @@ import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
 import { ensureUserWorkspace } from "../lib/user-workspace";
-import { sendBrandedEmail } from "../lib/email-sender";
+import { sendTemplatedEmail } from "../lib/send-templated-email";
 import {
   assertWorkspaceMember,
   countWorkspaceOwners,
   getWorkspaceOwnerProfile,
   isWorkspaceOwner,
-  workspaceMemberWhere,
 } from "../lib/workspace";
+import { workspaceMemberUserIds } from "../lib/workspace-members";
+import { invalidateWorkspaceOwnerIdCache } from "../lib/workspace";
 import { passwordPolicySchema } from "../lib/password-policy";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { invalidateUserSettingsCache, loadUserSettingRows } from "../lib/user-settings";
+import { filterReadableSettingsForRole } from "../lib/permissions";
+import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
+import { redactSecretSettingValue } from "@digitify/db";
+
+const SHELL_BRANDING_KEYS = [
+  "branding.company_name",
+  "branding.company_slogan",
+  "branding.logo_url",
+  "branding.favicon_url",
+  "branding.primary_color",
+  "branding.website",
+  "branding.phone",
+  "branding.email",
+  "branding.address",
+  "branding.vat_number",
+  "branding.bank_account",
+  "company.name",
+  "company.website",
+  "company.phone",
+  "company.email",
+  "company.address",
+  "company.vat",
+  "company.kbo",
+  "company.niche",
+  "email.from_name",
+  "email.from_email",
+  "ui.density",
+] as const;
+
+function sanitizeShellSettings(settings: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(settings).map(([key, value]) => [key, redactSecretSettingValue(key, value)]),
+  );
+}
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -64,23 +99,35 @@ export const userRouter = router({
       ...profile,
       workspaceId,
       workspaceOwnerName: owner?.name || owner?.email || "Workspace",
-      isWorkspaceOwner: ctx.user.id === workspaceId,
+      isWorkspaceOwner: isWorkspaceOwner(ctx.user, workspaceId),
     };
   }),
 
   getWorkspaceInfo: protectedProcedure.query(async ({ ctx }) => {
     const workspaceId = ctx.user.workspaceId!;
-    const owner = await getWorkspaceOwnerProfile(ctx.db, workspaceId);
-    const memberCount = await ctx.db.user.count({
-      where: {
-        OR: [{ id: workspaceId }, { workspaceOwnerId: workspaceId }],
+    const workspace = await ctx.db.workspace.findUnique({
+      where: { id: workspaceId },
+      select: {
+        type: true,
+        ownerUserId: true,
+        _count: { select: { memberships: { where: { status: "ACTIVE" } } } },
       },
     });
+    const owner = await getWorkspaceOwnerProfile(ctx.db, workspaceId);
+    const memberCount =
+      workspace?._count.memberships ??
+      (await workspaceMemberUserIds(ctx.db, workspaceId)).length;
+    const isOwner =
+      ctx.user.workspaceRole === "OWNER" ||
+      ctx.user.id === workspace?.ownerUserId ||
+      ctx.user.id === workspaceId;
     return {
       workspaceId,
+      workspaceType: workspace?.type ?? "PERSONAL",
       ownerName: owner?.name || owner?.email || "Eigenaar",
       ownerEmail: owner?.email ?? "",
-      isOwner: ctx.user.id === workspaceId,
+      isOwner,
+      isPersonal: ctx.user.isPersonalWorkspace ?? workspaceId === ctx.user.id,
       memberCount,
       sharedResources: [
         "Leads & pipeline",
@@ -151,8 +198,19 @@ export const userRouter = router({
 
   list: adminProcedure.query(async ({ ctx }) => {
     const workspaceId = ctx.user.workspaceId!;
+    const userIds = await workspaceMemberUserIds(ctx.db, workspaceId);
+    const memberships = await ctx.db.workspaceMembership.findMany({
+      where: { workspaceId, status: "ACTIVE", userId: { in: userIds } },
+      select: { userId: true, role: true },
+    });
+    const roleByUserId = new Map(memberships.map((row) => [row.userId, row.role]));
+    const workspace = await ctx.db.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { ownerUserId: true },
+    });
+
     const users = await ctx.db.user.findMany({
-      where: workspaceMemberWhere(workspaceId),
+      where: { id: { in: userIds } },
       select: {
         id: true,
         email: true,
@@ -191,6 +249,9 @@ export const userRouter = router({
     const statusByUserId = new Map(googleStatuses.map((status) => [status.userId, status.googleCalendar]));
     return users.map((user) => ({
       ...user,
+      role:
+        roleByUserId.get(user.id) ??
+        (user.id === workspace?.ownerUserId ? "OWNER" : user.role),
       googleCalendar: statusByUserId.get(user.id) || {
         connected: false,
         syncEnabled: false,
@@ -205,8 +266,12 @@ export const userRouter = router({
     .input(z.object({ userId: z.string(), role: z.enum(["OWNER", "ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER", "VIEWER"]) }))
     .mutation(async ({ ctx, input }) => {
       const workspaceId = ctx.user.workspaceId!;
+      const workspace = await ctx.db.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { ownerUserId: true, type: true },
+      });
       const target = await assertWorkspaceMember(ctx.db, workspaceId, input.userId);
-      if (input.userId === workspaceId && input.role !== "OWNER") {
+      if (input.userId === workspace?.ownerUserId && input.role !== "OWNER") {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "De workspace-eigenaar moet de rol Eigenaar behouden.",
@@ -218,10 +283,26 @@ export const userRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: "Er moet minstens één owner blijven." });
         }
       }
-      return ctx.db.user.update({
-        where: { id: input.userId },
-        data: { role: input.role },
+
+      const membership = await ctx.db.workspaceMembership.findUnique({
+        where: { workspaceId_userId: { workspaceId, userId: input.userId } },
+        select: { id: true, status: true },
       });
+      if (membership?.status === "ACTIVE") {
+        await ctx.db.workspaceMembership.update({
+          where: { id: membership.id },
+          data: { role: input.role },
+        });
+      }
+
+      if (workspace?.type === "TEAM" && workspaceId === workspace.ownerUserId) {
+        await ctx.db.user.update({
+          where: { id: input.userId },
+          data: { role: input.role },
+        });
+      }
+
+      return { success: true, role: input.role };
     }),
 
   updateUserDetails: ownerProcedure
@@ -272,14 +353,24 @@ export const userRouter = router({
         where: { email },
         select: { id: true, name: true, role: true, workspaceOwnerId: true, passwordHash: true },
       });
-      if (existing?.id === workspaceId || existing?.workspaceOwnerId === workspaceId) {
-        throw new TRPCError({ code: "CONFLICT", message: "Deze gebruiker zit al in je team." });
-      }
-      if (existing?.workspaceOwnerId && existing.workspaceOwnerId !== workspaceId) {
-        throw new TRPCError({ code: "CONFLICT", message: "Deze gebruiker hoort al bij een andere workspace." });
-      }
-      if (existing?.role === "OWNER") {
-        throw new TRPCError({ code: "CONFLICT", message: "Owner-accounts kunnen niet als teamlid worden toegevoegd." });
+      if (existing) {
+        const activeMembership = await ctx.db.workspaceMembership.findFirst({
+          where: { workspaceId, userId: existing.id, status: "ACTIVE" },
+          select: { id: true },
+        });
+        if (activeMembership) {
+          throw new TRPCError({ code: "CONFLICT", message: "Deze gebruiker zit al in je team." });
+        }
+        const pendingMembership = await ctx.db.workspaceMembership.findFirst({
+          where: { workspaceId, userId: existing.id, status: "INVITED" },
+          select: { id: true },
+        });
+        if (pendingMembership) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Er staat al een open uitnodiging open voor deze gebruiker.",
+          });
+        }
       }
       const existingRequest = await ctx.db.registrationRequest.findFirst({
         where: {
@@ -306,20 +397,21 @@ export const userRouter = router({
           requestedRole: "MEMBER",
           status: "PENDING_EMAIL_VERIFICATION",
           emailVerificationToken: token,
+          targetWorkspaceId: workspaceId,
           targetWorkspaceOwnerId: workspaceId,
           invitedById: ctx.user.id,
         },
       });
 
       const verifyUrl = `${appUrl()}/register/verify?token=${token}`;
-      await sendBrandedEmail(ctx.db, {
+      await sendTemplatedEmail(ctx.db, workspaceId, {
+        templateKey: "auth.team_invite",
         toEmail: email,
-        subject: "Bevestig je team-uitnodiging voor Digitify Lead Finder",
-        body:
-          `Hallo ${input.name},\n\n` +
-          `Je bent uitgenodigd voor een team workspace in Digitify Lead Finder.\n` +
-          `Bevestig je e-mailadres via deze link:\n${verifyUrl}\n\n` +
-          `Na bevestiging word je gekoppeld aan de gedeelde team-workspace. Vanaf dan zie je teamleads en ziet het team duidelijk welke acties jij uitvoert.\n\nDigitify`,
+        placeholderContext: {
+          contactName: input.name,
+          verifyUrl,
+        },
+        userId: workspaceId,
       });
 
       return { success: true };
@@ -329,10 +421,14 @@ export const userRouter = router({
     .input(z.object({ userId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const workspaceId = ctx.user.workspaceId!;
+      const workspace = await ctx.db.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { ownerUserId: true },
+      });
       if (input.userId === ctx.user.id) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Je kunt jezelf niet verwijderen." });
       }
-      if (input.userId === workspaceId) {
+      if (input.userId === workspace?.ownerUserId) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "De workspace-eigenaar kan niet verwijderd worden." });
       }
       const target = await assertWorkspaceMember(ctx.db, workspaceId, input.userId);
@@ -343,7 +439,26 @@ export const userRouter = router({
         }
       }
 
-      await ctx.db.user.delete({ where: { id: input.userId } });
+      await ctx.db.workspaceMembership.deleteMany({
+        where: { workspaceId, userId: input.userId },
+      });
+      await ctx.db.user.updateMany({
+        where: { id: input.userId, workspaceOwnerId: workspaceId },
+        data: { workspaceOwnerId: null },
+      });
+
+      const removedUser = await ctx.db.user.findUnique({
+        where: { id: input.userId },
+        select: { activeWorkspaceId: true },
+      });
+      if (removedUser?.activeWorkspaceId === workspaceId) {
+        await ctx.db.user.update({
+          where: { id: input.userId },
+          data: { activeWorkspaceId: input.userId },
+        });
+        invalidateWorkspaceOwnerIdCache(input.userId);
+      }
+
       return { success: true };
     }),
 
@@ -395,5 +510,29 @@ export const userRouter = router({
     const raw = getSettingString(map, "modules.disabled", "");
     const disabled = raw ? raw.split(",").map((s: string) => s.trim()).filter(Boolean) : [];
     return { disabled };
+  }),
+
+  /** App shell bundle: modules + branding subset + density (avoids multiple round-trips). */
+  getShellContext: protectedProcedure.query(async ({ ctx }) => {
+    const scope = workspaceScopeFromUser(ctx.user);
+    await ensureUserWorkspace(ctx.db, scope.workspaceId, ctx.user.name);
+
+    const [moduleRows, workspaceRows] = await Promise.all([
+      loadUserSettingRows(ctx.db as any, ctx.user.id, ["modules.disabled"]),
+      loadWorkspaceSettingRows(ctx.db, scope, [...SHELL_BRANDING_KEYS]),
+    ]);
+
+    const moduleMap = settingsRowsToMap(moduleRows);
+    const raw = getSettingString(moduleMap, "modules.disabled", "");
+    const disabled = raw ? raw.split(",").map((s: string) => s.trim()).filter(Boolean) : [];
+
+    const settingsMap = settingsRowsToMap(workspaceRows);
+    const readable = filterReadableSettingsForRole(ctx.user.role, settingsMap);
+    const settings = sanitizeShellSettings(readable);
+
+    const densityRaw = getSettingString(settings, "ui.density", "comfortable");
+    const density = densityRaw === "compact" ? "compact" : "comfortable";
+
+    return { disabled, settings, density };
   }),
 });

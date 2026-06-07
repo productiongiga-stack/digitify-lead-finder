@@ -6,13 +6,15 @@ import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Switch,
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
 import { ArrowLeft, Save, Loader2, KeyRound } from "lucide-react";
 import Link from "next/link";
+import { SETTINGS_PAGE_QUERY_OPTS } from "@/lib/settings-query-options";
 
 export default function AISettingsPage() {
-  const { data: settings, isLoading } = trpc.settings.getAll.useQuery();
+  const { data: settings, isLoading } = trpc.settings.getAiSettings.useQuery(undefined, SETTINGS_PAGE_QUERY_OPTS);
+  const { data: integrations } = trpc.settings.getIntegrationsSettings.useQuery(undefined, SETTINGS_PAGE_QUERY_OPTS);
   const utils = trpc.useUtils();
 
   const saveSettings = trpc.settings.batchUpdate.useMutation({
-    onSuccess: () => utils.settings.getAll.invalidate(),
+    onSuccess: () => utils.settings.getAiSettings.invalidate(),
   });
 
   const [aiProvider, setAiProvider] = useState("anthropic");
@@ -37,7 +39,6 @@ export default function AISettingsPage() {
           return String(val);
         }
       };
-      setAiProvider(get("api.ai_provider", "anthropic"));
       setModel(get("openclaw.model", "claude-sonnet-4-20250514"));
       setLanguage(get("openclaw_language", "nl"));
       setTone(get("openclaw_tone", "professioneel"));
@@ -48,6 +49,12 @@ export default function AISettingsPage() {
       setLoaded(true);
     }
   }, [settings, loaded]);
+
+  useEffect(() => {
+    if (!integrations || !loaded) return;
+    const providerRaw = String(integrations["api.ai_provider"] ?? "anthropic").replace(/"/g, "");
+    setAiProvider(providerRaw === "openai" || providerRaw === "deepseek" ? providerRaw : "anthropic");
+  }, [integrations, loaded]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -62,7 +69,6 @@ export default function AISettingsPage() {
 
   function handleSave() {
     saveSettings.mutate([
-      { key: "api.ai_provider", value: aiProvider },
       { key: "openclaw.model", value: model },
       { key: "openclaw_language", value: language },
       { key: "openclaw_tone", value: tone },
@@ -102,16 +108,16 @@ export default function AISettingsPage() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label>AI Provider</Label>
-              <Select value={aiProvider} onValueChange={setAiProvider}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
-                  <SelectItem value="openai">OpenAI (GPT)</SelectItem>
-                  <SelectItem value="deepseek">DeepSeek</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                {aiProvider === "openai" ? "OpenAI (GPT)" : aiProvider === "deepseek" ? "DeepSeek" : "Anthropic (Claude)"}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Wijzig de actieve provider via{" "}
+                  <Link href="/settings/integrations" className="font-medium text-primary underline-offset-2 hover:underline">
+                    Integraties & API-sleutels
+                  </Link>
+                  .
+                </p>
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Model</Label>

@@ -27,7 +27,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { trpc } from "@/lib/trpc/client";
+import { useMyModules } from "@/components/layout/modules-provider";
 
 type SidebarNavEntry = {
   href: string;
@@ -291,30 +291,24 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { collapsed: sidebarCollapsed } = useSidebarLayout();
-  const { toggleSidebar, mobileSidebarOpen, setMobileSidebarOpen } = useUIStore();
+  const toggleSidebar = useUIStore((state) => state.toggleSidebar);
+  const mobileSidebarOpen = useUIStore((state) => state.mobileSidebarOpen);
+  const setMobileSidebarOpen = useUIStore((state) => state.setMobileSidebarOpen);
   const { branding } = useBranding();
 
-  // Load user's disabled modules (cached for 5 min)
-  const { data: moduleAccess } = trpc.user.getMyModules.useQuery(undefined, {
-    staleTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
-  const disabledModulesKey = (moduleAccess?.disabled ?? []).slice().sort().join("|");
+  const { data: moduleAccess } = useMyModules();
   const disabledModules = useMemo(
     () => new Set(moduleAccess?.disabled ?? []),
-    [disabledModulesKey],
+    [moduleAccess?.disabled],
   );
-
-  const filterVisibleItems = (items: QuickNavItem[]) =>
-    items.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId));
 
   const visibleNavGroups = useMemo(
     () =>
       SIDEBAR_NAV_GROUPS.map((group) => ({
         ...group,
-        items: filterVisibleItems(group.items),
+        items: group.items.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId)),
       })).filter((group) => group.items.length > 0),
-    [disabledModulesKey],
+    [disabledModules],
   );
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
@@ -349,33 +343,6 @@ export function Sidebar() {
       return changed ? next : prev;
     });
   }, [pathname, visibleNavGroups]);
-
-  useEffect(() => {
-    const skipPrefetch = new Set(["/meta-ads", "/google-ads", "/contacts/inbox", "/social"]);
-    const routes = [
-      DASHBOARD_NAV_ITEM.href,
-      ...visibleNavGroups.flatMap((group) => group.items.map((item) => item.href)),
-      ...BOTTOM_NAV_ITEMS.map((item) => item.href),
-    ].filter((href) => !skipPrefetch.has(href.split("?")[0] || href));
-    let cancelled = false;
-    const prefetchRoutes = () => {
-      if (cancelled) return;
-      routes.forEach((href) => router.prefetch(href));
-    };
-    const browser = globalThis as any;
-    if (typeof browser.requestIdleCallback === "function") {
-      const id = browser.requestIdleCallback(prefetchRoutes, { timeout: 1500 });
-      return () => {
-        cancelled = true;
-        browser.cancelIdleCallback?.(id);
-      };
-    }
-    const timeout = browser.setTimeout(prefetchRoutes, 250);
-    return () => {
-      cancelled = true;
-      browser.clearTimeout(timeout);
-    };
-  }, [router]);
 
   const logoUrl = branding.logoUrl;
   const brandName = branding.companyName || process.env.NEXT_PUBLIC_APP_NAME || "Lead Finder";

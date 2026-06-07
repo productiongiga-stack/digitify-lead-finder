@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useBranding } from "@/lib/branding";
+import { isPublicRuntimePath } from "@/lib/shell-paths";
 
 function hexToHslString(hex: string) {
   const normalized = hex.replace("#", "").trim();
@@ -47,13 +48,7 @@ function hexToHslString(hex: string) {
 
 export function BrandingCssVariables() {
   const pathname = usePathname();
-  const isPublicMarketingPath = ["/", "/product", "/oplossingen", "/over-ons", "/contact"].includes(pathname);
-  const isPublicRuntimePath =
-    isPublicMarketingPath ||
-    pathname.startsWith("/embed") ||
-    pathname.startsWith("/review/") ||
-    pathname.startsWith("/client-portal/");
-  const { branding } = useBranding(!isPublicRuntimePath);
+  const { branding } = useBranding(!isPublicRuntimePath(pathname));
 
   useEffect(() => {
     const primary = hexToHslString(branding.primaryColor);
@@ -64,6 +59,18 @@ export function BrandingCssVariables() {
     root.style.setProperty("--ring", primary);
     root.style.setProperty("--primary-foreground", "0 0% 100%");
   }, [branding.primaryColor]);
+
+  useEffect(() => {
+    if (!branding.faviconUrl) return;
+
+    let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "icon";
+      document.head.appendChild(link);
+    }
+    link.href = branding.faviconUrl;
+  }, [branding.faviconUrl]);
 
   return null;
 }

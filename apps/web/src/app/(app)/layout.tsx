@@ -10,7 +10,8 @@ import { OpenClawPanelWrapper } from "@/components/openclaw/panel-wrapper";
 import { AppShell } from "@/components/layout/app-shell";
 import { FeedbackButton } from "@/components/feedback/feedback-button";
 import { ModuleAccessGuard } from "@/components/layout/module-access-guard";
-import { SessionProvider } from "@/components/layout/session-provider";
+import { ModulesProvider } from "@/components/layout/modules-provider";
+import { AppAnalytics } from "@/components/analytics/app-analytics";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
@@ -20,7 +21,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <SessionProvider>
+    <ModulesProvider>
+      <AppAnalytics />
       <div className="flex min-h-screen bg-background/95">
         <Sidebar />
         <AppShell>
@@ -34,6 +36,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <FeedbackButton />
         <OpenClawPanelWrapper />
       </div>
-    </SessionProvider>
+    </ModulesProvider>
   );
 }

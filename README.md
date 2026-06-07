@@ -23,6 +23,8 @@ pnpm db:seed             # vereist SEED_* env — zie hieronder
 pnpm dev
 ```
 
+Na een productie-build (`pnpm build`) altijd `pnpm --filter @digitify/web dev:clean` gebruiken in plaats van `dev` — anders kan `.next` corrupt raken (lege CSS, 500-fouten).
+
 Open [http://localhost:3000](http://localhost:3000) (of poort uit terminal).
 
 **Bestaande database** (vóór init-migratie):

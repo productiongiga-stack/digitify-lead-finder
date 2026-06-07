@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
-import { replacePlaceholders } from "@digitify/email";
-import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
+import { loadEmailSettings } from "../lib/email-sender";
+import { sendTemplatedEmail } from "../lib/send-templated-email";
 import { assertLeadAccess } from "../lib/tenant";
 
 const REVIEW_STATUSES = ["PENDING", "SENT", "OPENED", "REVIEWED", "FEEDBACK"] as const;
@@ -158,26 +158,24 @@ export const reviewRouter = router({
       const platformLabel = getPlatformLabel(review.platform);
       const reviewGateUrl = getReviewGateUrl(review.id);
 
-      const bodyTemplate = [
-        `Beste {{clientName}},`,
-        ``,
-        `Bedankt voor uw vertrouwen in {{senderCompany}}! We hopen dat u tevreden bent met onze samenwerking.`,
+      const reviewBody = [
+        `Bedankt voor uw vertrouwen in ${cfg.companyName}! We hopen dat u tevreden bent met onze samenwerking.`,
         ``,
         `Mag ik u vragen om eerst kort uw ervaring met ons te beoordelen?`,
         ``,
         `Als u 4 of 5 sterren geeft, sturen we u meteen door naar ${platformLabel}. Bij een lagere score kunnen we uw feedback intern oppakken en verbeteren.`,
       ].join("\n");
 
-      const body = replacePlaceholders(bodyTemplate, {
-        clientName: review.clientName,
-        senderCompany: cfg.companyName,
-      }, { removeMissing: true });
-
-      const subject = `${review.clientName}, hoe was uw ervaring met ${cfg.companyName}?`;
-      const result = await sendBrandedEmail(ctx.db, {
+      const result = await sendTemplatedEmail(ctx.db, ctx.user.workspaceId!, {
+        templateKey: "review.request",
         toEmail: review.clientEmail,
-        subject,
-        body: `${body}\n\n[[CTA_TEXT=Geef uw beoordeling]]\n[[CTA_URL=${reviewGateUrl}]]`,
+        subjectOverride: `${review.clientName}, hoe was uw ervaring met ${cfg.companyName}?`,
+        placeholderContext: {
+          contactName: review.clientName,
+          senderCompany: cfg.companyName,
+          reviewBody,
+          reviewLink: reviewGateUrl,
+        },
         recipientCompany: review.lead?.companyName ?? review.clientName,
         leadId: review.leadId || undefined,
         userId: ctx.user.id,
@@ -242,26 +240,24 @@ export const reviewRouter = router({
           const platformLabel = getPlatformLabel(review.platform);
           const reviewGateUrl = getReviewGateUrl(review.id);
 
-          const bodyTemplate = [
-            `Beste {{clientName}},`,
-            ``,
-            `Bedankt voor uw vertrouwen in {{senderCompany}}! We hopen dat u tevreden bent met onze samenwerking.`,
+          const reviewBody = [
+            `Bedankt voor uw vertrouwen in ${cfg.companyName}! We hopen dat u tevreden bent met onze samenwerking.`,
             ``,
             `Mag ik u vragen om eerst kort uw ervaring met ons te beoordelen?`,
             ``,
             `Bij 4 of 5 sterren sturen we u meteen door naar ${platformLabel}. Bij een lagere score vragen we uw feedback intern op.`,
           ].join("\n");
 
-          const body = replacePlaceholders(bodyTemplate, {
-            clientName: review.clientName,
-            senderCompany: cfg.companyName,
-          }, { removeMissing: true });
-
-          const subject = `${review.clientName}, hoe was uw ervaring met ${cfg.companyName}?`;
-          const result = await sendBrandedEmail(ctx.db, {
+          const result = await sendTemplatedEmail(ctx.db, ctx.user.workspaceId!, {
+            templateKey: "review.request",
             toEmail: review.clientEmail,
-            subject,
-            body: `${body}\n\n[[CTA_TEXT=Geef uw beoordeling]]\n[[CTA_URL=${reviewGateUrl}]]`,
+            subjectOverride: `${review.clientName}, hoe was uw ervaring met ${cfg.companyName}?`,
+            placeholderContext: {
+              contactName: review.clientName,
+              senderCompany: cfg.companyName,
+              reviewBody,
+              reviewLink: reviewGateUrl,
+            },
             recipientCompany: review.lead?.companyName ?? review.clientName,
             leadId: review.leadId || undefined,
             userId: ctx.user.id,

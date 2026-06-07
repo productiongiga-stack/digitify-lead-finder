@@ -2,30 +2,19 @@
 
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { trpc } from "@/lib/trpc/client";
+import { isPublicRuntimePath } from "@/lib/shell-paths";
+import { useShellContext } from "@/components/layout/shell-provider";
 
 function applyDensity(value: "comfortable" | "compact") {
   if (typeof document === "undefined") return;
   document.documentElement.setAttribute("data-density", value);
 }
 
+/** Applies ui.density from shell context on app routes; localStorage bootstrap on public routes. */
 export function UiDensityProvider() {
   const pathname = usePathname();
-  const isPublicMarketingPath = ["/", "/product", "/oplossingen", "/over-ons", "/contact"].includes(pathname);
-  const isPublicRuntimePath =
-    isPublicMarketingPath ||
-    pathname.startsWith("/embed") ||
-    pathname.startsWith("/review/") ||
-    pathname.startsWith("/client-portal/");
-  const { data: densitySetting } = trpc.settings.get.useQuery(
-    { key: "ui.density" },
-    {
-      enabled: !isPublicRuntimePath,
-      staleTime: 5 * 60_000,
-      refetchOnMount: false,
-      refetchOnWindowFocus: false,
-    },
-  );
+  const isPublic = isPublicRuntimePath(pathname);
+  const shell = useShellContext();
 
   useEffect(() => {
     try {
@@ -39,16 +28,16 @@ export function UiDensityProvider() {
   }, []);
 
   useEffect(() => {
-    const settingDensity = typeof densitySetting === "string" ? densitySetting : "";
-    if (settingDensity === "compact" || settingDensity === "comfortable") {
-      applyDensity(settingDensity);
-      try {
-        localStorage.setItem("ui-density", settingDensity);
-      } catch {
-        // ignore
-      }
+    if (isPublic || !shell.data?.density) return;
+    const density = shell.data.density;
+    if (density !== "compact" && density !== "comfortable") return;
+    applyDensity(density);
+    try {
+      localStorage.setItem("ui-density", density);
+    } catch {
+      // ignore
     }
-  }, [densitySetting]);
+  }, [isPublic, shell.data?.density]);
 
   return null;
 }

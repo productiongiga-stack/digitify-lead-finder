@@ -22,21 +22,35 @@ import { canAccessSettingsPath } from "@/lib/permissions";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import { useHasMounted } from "@/lib/use-has-mounted";
+import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
 
 export function Topbar() {
   const mounted = useHasMounted();
   const { data: session } = useSession();
   const { theme, setTheme } = useTheme();
   const pathname = usePathname();
-  const { toggleOpenClaw, toggleMobileSidebar } = useUIStore();
+  const toggleOpenClaw = useUIStore((state) => state.toggleOpenClaw);
+  const toggleMobileSidebar = useUIStore((state) => state.toggleMobileSidebar);
   const { branding } = useBranding();
-  const { data: attentionSummary } = trpc.dashboard.getAttentionSummary.useQuery(undefined, {
-    staleTime: 120_000,
-    refetchInterval: 120_000,
+  const onDashboard = pathname === "/dashboard";
+  const pollAttention =
+    pathname.startsWith("/contacts") || pathname.startsWith("/leads");
+  const { data: dashboardOverview } = trpc.dashboard.getOverview.useQuery(undefined, {
+    enabled: onDashboard,
+    staleTime: 5 * 60_000,
     refetchOnWindowFocus: false,
   });
+  const { data: attentionSummary } = trpc.dashboard.getAttentionSummary.useQuery(undefined, {
+    enabled: pollAttention,
+    staleTime: 5 * 60_000,
+    refetchInterval: pollAttention ? 5 * 60_000 : false,
+    refetchOnWindowFocus: false,
+  });
+  const sessionUser = session?.user as { name?: string | null; email?: string | null; role?: string } | undefined;
+  const needsProfile = !sessionUser?.name || !sessionUser?.email || !sessionUser?.role;
   const { data: profile } = trpc.user.getProfile.useQuery(undefined, {
-    staleTime: 60_000,
+    enabled: needsProfile,
+    staleTime: 5 * 60_000,
     refetchOnWindowFocus: false,
   });
 
@@ -49,7 +63,11 @@ export function Topbar() {
     .toUpperCase() || displayEmail.slice(0, 1).toUpperCase() || "U";
 
   const pageTitle = resolvePageTitle(pathname, branding.companyName);
-  const attentionCount = mounted ? (attentionSummary?.totalCount ?? 0) : 0;
+  const attentionCount = mounted
+    ? onDashboard
+      ? (dashboardOverview?.attentionCount ?? 0)
+      : (attentionSummary?.totalCount ?? 0)
+    : 0;
   const role = (session?.user as { role?: string } | undefined)?.role;
   const canOpen = (href: string) => canAccessSettingsPath(role, href);
 
@@ -82,6 +100,7 @@ export function Topbar() {
       </div>
 
       <div className="flex items-center gap-2">
+        <WorkspaceSwitcher />
         {attentionCount > 0 ? (
           <Link href="/notifications" className="hidden md:block">
             <Badge variant="warning" className="h-8 px-3">

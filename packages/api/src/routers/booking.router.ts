@@ -2,7 +2,8 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, ownerProcedure, mutationProcedure } from "../trpc";
 import { type PrismaClient } from "@digitify/db";
-import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
+import { loadEmailSettings } from "../lib/email-sender";
+import { sendTemplatedEmail } from "../lib/send-templated-email";
 import { assertLeadAccess } from "../lib/tenant";
 import { log } from "../lib/logger";
 import {
@@ -243,8 +244,29 @@ async function syncBookingCalendarEvent(
   }
 }
 
+function buildBookingDetailsBlock(booking: {
+  date: Date;
+  duration: number;
+  notes: string | null;
+  status: string;
+  location?: string | null;
+  googleMeetLink?: string | null;
+  googleHtmlLink?: string | null;
+}) {
+  return [
+    `Datum: ${formatBookingDate(booking.date)}`,
+    `Duur: ${booking.duration} minuten`,
+    `Status: ${booking.status}`,
+    booking.location ? `Locatie: ${booking.location}` : "",
+    booking.googleMeetLink ? `Google Meet: ${booking.googleMeetLink}` : "",
+    booking.googleHtmlLink ? `Agenda event: ${booking.googleHtmlLink}` : "",
+    `Notities: ${booking.notes || "Geen notities."}`,
+  ].filter(Boolean).join("\n");
+}
+
 async function sendBookingChangeEmails(params: {
   db: PrismaClient;
+  workspaceId: string;
   booking: {
     clientName: string;
     clientEmail: string | null;
@@ -259,21 +281,25 @@ async function sendBookingChangeEmails(params: {
   };
   companyName: string;
   adminRecipient: string;
-  customerSubject: string;
-  customerIntro: string;
+  customerTemplateKey: string;
   adminSubject: string;
   adminIntro: string;
+  rejectionReason?: string;
+  manageUrl?: string;
   userId?: string;
 }) {
   const { booking, companyName, adminRecipient } = params;
-  const details = [
-    `Datum: ${formatBookingDate(booking.date)}`,
-    `Duur: ${booking.duration} minuten`,
-    `Status: ${booking.status}`,
-    booking.googleMeetLink ? `Google Meet: ${booking.googleMeetLink}` : "",
-    booking.googleHtmlLink ? `Agenda event: ${booking.googleHtmlLink}` : "",
-    `Notities: ${booking.notes || "Geen notities."}`,
-  ].filter(Boolean).join("\n");
+  const bookingDetails = buildBookingDetailsBlock(booking);
+  const placeholderContext = {
+    contactName: booking.clientName,
+    senderCompany: companyName,
+    bookingDetails,
+    clientEmail: booking.clientEmail || "-",
+    rejectionReason: params.rejectionReason ? ` Reden: ${params.rejectionReason}` : "",
+    manageUrl: params.manageUrl || "",
+    adminSubject: params.adminSubject,
+    adminIntro: params.adminIntro,
+  };
 
   const emailTasks: Promise<{ success: boolean; messageId?: string; error?: string }>[] = [];
   if (booking.clientEmail) {
@@ -293,25 +319,25 @@ async function sendBookingChangeEmails(params: {
         ]
       : undefined;
     emailTasks.push(
-      sendBrandedEmail(params.db, {
+      sendTemplatedEmail(params.db, params.workspaceId, {
+        templateKey: params.customerTemplateKey,
         toEmail: booking.clientEmail,
-        subject: params.customerSubject,
-        body: [`Beste ${booking.clientName},`, "", params.customerIntro, "", details].join("\n"),
+        placeholderContext,
         recipientCompany: booking.clientName,
         attachments,
         userId: params.userId,
-      })
+      }),
     );
   }
   if (adminRecipient) {
     emailTasks.push(
-      sendBrandedEmail(params.db, {
+      sendTemplatedEmail(params.db, params.workspaceId, {
+        templateKey: "booking.admin_notify",
         toEmail: adminRecipient,
-        subject: params.adminSubject,
-        body: [params.adminIntro, "", `Klant: ${booking.clientName}`, `E-mail: ${booking.clientEmail || "-"}`, details].join("\n"),
+        placeholderContext,
         recipientCompany: companyName,
         userId: params.userId,
-      })
+      }),
     );
   }
   const results = await Promise.allSettled(emailTasks);
@@ -516,32 +542,24 @@ export const bookingRouter = router({
       fireBookingWebhook(ctx.db, ctx.user.id, "booking.created", bookingToWebhookPayload(booking as Record<string, unknown>)).catch(() => null);
 
       const adminRecipient = emailCfg.fromEmail || emailCfg.smtpUser;
-      const bookingLabel = formatBookingDate(booking.date);
       const manageUrl = `${resolveAppUrl()}/bookings/manage/${encodeURIComponent(rescheduleToken)}`;
-      const sharedBody = [
-        `Boeking: ${bookingLabel}`,
-        `Duur: ${booking.duration} minuten`,
-        booking.location ? `Locatie: ${booking.location}` : "",
-        booking.googleMeetLink ? `Google Meet: ${booking.googleMeetLink}` : "",
-        `Notities: ${booking.notes || "Geen notities."}`,
-      ].filter(Boolean).join("\n");
-
+      const bookingDetails = buildBookingDetailsBlock(booking);
+      const placeholderContext = {
+        contactName: booking.clientName,
+        senderCompany: companyName,
+        bookingDetails,
+        clientEmail: booking.clientEmail || "-",
+        manageUrl,
+        adminSubject: `Nieuwe booking: ${booking.clientName}`,
+        adminIntro: "Er werd een booking aangemaakt in de app.",
+      };
       const emailTasks: Promise<{ success: boolean; messageId?: string; error?: string }>[] = [];
       if (booking.clientEmail) {
         emailTasks.push(
-          sendBrandedEmail(ctx.db, {
+          sendTemplatedEmail(ctx.db, ctx.user.workspaceId!, {
+            templateKey: "booking.pending",
             toEmail: booking.clientEmail,
-            subject: `Boeking ontvangen bij ${companyName}`,
-            body: [
-              `Beste ${booking.clientName},`,
-              ``,
-              `Bedankt voor uw aanvraag. We hebben uw boeking ontvangen.`,
-              sharedBody,
-              ``,
-              `We bevestigen uw afspraak zo snel mogelijk.`,
-              ``,
-              `Zelf aanpassen of annuleren: ${manageUrl}`,
-            ].join("\n"),
+            placeholderContext,
             recipientCompany: booking.clientName,
             attachments: [
               buildIcsAttachment({
@@ -562,16 +580,10 @@ export const bookingRouter = router({
       }
       if (adminRecipient) {
         emailTasks.push(
-          sendBrandedEmail(ctx.db, {
+          sendTemplatedEmail(ctx.db, ctx.user.workspaceId!, {
+            templateKey: "booking.admin_notify",
             toEmail: adminRecipient,
-            subject: `Nieuwe booking: ${booking.clientName}`,
-            body: [
-              `Er werd een booking aangemaakt in de app.`,
-              ``,
-              `Naam: ${booking.clientName}`,
-              `E-mail: ${booking.clientEmail || "-"}`,
-              sharedBody,
-            ].join("\n"),
+            placeholderContext,
             recipientCompany: companyName,
             userId: ctx.user.id,
           }),
@@ -706,11 +718,11 @@ export const bookingRouter = router({
       fireBookingWebhook(ctx.db, ctx.user.id, webhookUpdateEvent, bookingToWebhookPayload(updated as Record<string, unknown>)).catch(() => null);
       await sendBookingChangeEmails({
         db: ctx.db,
+        workspaceId: ctx.user.workspaceId!,
         booking: updated,
         companyName,
         adminRecipient,
-        customerSubject: `Update van uw afspraak bij ${companyName}`,
-        customerIntro: "Uw afspraakgegevens werden aangepast. Hieronder vindt u de nieuwste planning.",
+        customerTemplateKey: "booking.updated",
         adminSubject: `Booking aangepast: ${updated.clientName}`,
         adminIntro: "Een booking werd aangepast in de app.",
         userId: ctx.user.id,
@@ -743,11 +755,11 @@ export const bookingRouter = router({
       const synced = await syncBookingCalendarEvent(ctx.db, updated, companyName, updated.hostUserId || ctx.user.id);
       await sendBookingChangeEmails({
         db: ctx.db,
+        workspaceId: ctx.user.workspaceId!,
         booking: synced,
         companyName,
         adminRecipient,
-        customerSubject: `Uw afspraak is bevestigd`,
-        customerIntro: `Uw afspraak bij ${companyName} is bevestigd.`,
+        customerTemplateKey: "booking.confirmed",
         adminSubject: `Booking bevestigd: ${synced.clientName}`,
         adminIntro: "Een booking werd bevestigd.",
         userId: ctx.user.id,
@@ -798,11 +810,12 @@ export const bookingRouter = router({
       const synced = await syncBookingCalendarEvent(ctx.db, updated, companyName, updated.hostUserId || ctx.user.id);
       await sendBookingChangeEmails({
         db: ctx.db,
+        workspaceId: ctx.user.workspaceId!,
         booking: synced,
         companyName,
         adminRecipient,
-        customerSubject: `Update over uw booking aanvraag`,
-        customerIntro: `Uw booking aanvraag bij ${companyName} kon momenteel niet bevestigd worden.${input.reason ? ` Reden: ${input.reason}` : ""}`,
+        customerTemplateKey: "booking.cancelled",
+        rejectionReason: input.reason,
         adminSubject: `Booking afgewezen: ${synced.clientName}`,
         adminIntro: "Een booking werd afgewezen.",
         userId: ctx.user.id,

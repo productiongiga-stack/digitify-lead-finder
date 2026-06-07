@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { getServerSession } from "next-auth";
 import { prisma } from "@digitify/db";
 import { resolveWorkspaceOwnerId } from "@digitify/api/src/lib/workspace";
@@ -11,11 +12,9 @@ type SessionUser = {
   workspaceId?: string;
 };
 
-export async function getSession() {
-  return getServerSession(authOptions);
-}
+export const getSession = cache(async () => getServerSession(authOptions));
 
-export async function getCurrentUser() {
+export const getCurrentUser = cache(async () => {
   const session = await getSession();
   const sessionUser = session?.user as SessionUser | undefined;
   const userId = typeof sessionUser?.id === "string" ? sessionUser.id : "";
@@ -52,7 +51,7 @@ export async function getCurrentUser() {
     role: user.role,
     workspaceId,
   };
-}
+});
 
 export function workspaceIdFor(user: { id: string; workspaceId?: string }) {
   return user.workspaceId ?? user.id;

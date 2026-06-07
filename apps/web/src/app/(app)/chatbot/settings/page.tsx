@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, type ComponentType, type ReactNode } from "react";
 import { trpc } from "@/lib/trpc/client";
+import { SETTINGS_PAGE_QUERY_OPTS } from "@/lib/settings-query-options";
 import Link from "next/link";
 import {
   Button,
@@ -114,16 +115,16 @@ function normalizeAutoOpenDelay(value: string, fallback = "0") {
 }
 
 export default function ChatbotSettingsPage() {
-  const { data: settings, isLoading, error, refetch } = trpc.settings.getAll.useQuery(undefined, {
+  const { data: settings, isLoading, error, refetch } = trpc.settings.getChatbotSettings.useQuery(undefined, {
     retry: 1,
-    refetchOnWindowFocus: false,
+    ...SETTINGS_PAGE_QUERY_OPTS,
   });
   const utils = trpc.useUtils();
   const { showToast } = useToast();
 
   const batchUpdate = trpc.settings.batchUpdate.useMutation({
     onSuccess: () => {
-      utils.settings.getAll.invalidate();
+      utils.settings.getChatbotSettings.invalidate();
       showToast({ title: "Chatbot opgeslagen", description: "De widget-instellingen zijn bijgewerkt." });
     },
     onError: (error) =>

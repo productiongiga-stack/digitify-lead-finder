@@ -16,8 +16,12 @@ describe("workspaceMemberWhere", () => {
 describe("assertWorkspaceMember", () => {
   it("throws when user is outside workspace", async () => {
     const db = {
+      workspaceMembership: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
       user: {
         findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue({ id: "other-user", role: "MEMBER" }),
       },
     };
     await expect(assertWorkspaceMember(db as any, "ws-1", "other-user")).rejects.toMatchObject({
@@ -27,8 +31,12 @@ describe("assertWorkspaceMember", () => {
 
   it("returns member when found", async () => {
     const db = {
+      workspaceMembership: {
+        findUnique: vi.fn().mockResolvedValue({ role: "ADMIN", status: "ACTIVE" }),
+      },
       user: {
-        findFirst: vi.fn().mockResolvedValue({ id: "u2", role: "ADMIN" }),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue({ id: "u2", role: "ADMIN" }),
       },
     };
     const member = await assertWorkspaceMember(db as any, "ws-1", "u2");

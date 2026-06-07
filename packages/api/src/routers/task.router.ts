@@ -124,6 +124,10 @@ export const taskRouter = router({
         .object({
           status: z.enum(["TODO", "IN_PROGRESS", "DONE"]).optional(),
           relatedType: z.enum(["LEAD", "QUOTE", "BOOKING", "CLIENT"]).optional(),
+          page: z.number().min(1).default(1),
+          pageSize: z.number().min(1).max(200).default(100),
+          /** Sync linked Google Calendar events — off by default for fast list loads */
+          syncGoogleCalendar: z.boolean().default(false),
         })
         .default({}),
     )
@@ -135,14 +139,23 @@ export const taskRouter = router({
         createdById: scope.workspaceId,
         ...(input.relatedType ? { relatedType: input.relatedType } : {}),
       };
+      const listWhere = {
+        ...baseWhere,
+        ...(input.status ? { status: input.status } : {}),
+      };
 
-      const [rows, statusGroups] = await Promise.all([
+      const [rows, total, statusGroups] = await Promise.all([
         ctx.db.workspaceTask.findMany({
-          where: {
-            ...baseWhere,
-            ...(input.status ? { status: input.status } : {}),
-          },
+          where: listWhere,
+          orderBy: [
+            { status: "asc" },
+            { dueAt: "asc" },
+            { updatedAt: "desc" },
+          ],
+          skip: (input.page - 1) * input.pageSize,
+          take: input.pageSize,
         }),
+        ctx.db.workspaceTask.count({ where: listWhere }),
         ctx.db.workspaceTask.groupBy({
           by: ["status"],
           where: baseWhere,
@@ -150,47 +163,38 @@ export const taskRouter = router({
         }),
       ]);
 
-      const rowsWithEvent = rows.filter((row) => extractGoogleEventId(row.description));
-      if (rowsWithEvent.length > 0) {
-        await Promise.all(
-          rowsWithEvent.map(async (row) => {
-            const eventId = extractGoogleEventId(row.description);
-            if (!eventId) return;
-            const remote = await getGoogleBookingEvent(ctx.db, eventId, ctx.user.id).catch(() => null);
-            if (!remote || !remote.enabled) return;
+      if (input.syncGoogleCalendar) {
+        const rowsWithEvent = rows.filter((row) => extractGoogleEventId(row.description));
+        if (rowsWithEvent.length > 0) {
+          await Promise.all(
+            rowsWithEvent.slice(0, 10).map(async (row) => {
+              const eventId = extractGoogleEventId(row.description);
+              if (!eventId) return;
+              const remote = await getGoogleBookingEvent(ctx.db, eventId, ctx.user.id).catch(() => null);
+              if (!remote || !remote.enabled) return;
 
-            if (!remote.found || remote.cancelled) {
-              const cleaned = upsertGoogleEventIdInNotes(row.description, null) || "";
-              if (cleaned !== row.description) {
+              if (!remote.found || remote.cancelled) {
+                const cleaned = upsertGoogleEventIdInNotes(row.description, null) || "";
+                if (cleaned !== row.description) {
+                  await ctx.db.workspaceTask.update({
+                    where: { id: row.id },
+                    data: { description: cleaned },
+                  });
+                }
+                return;
+              }
+
+              if (remote.start && !sameCalendarDay(row.dueAt, remote.start)) {
                 await ctx.db.workspaceTask.update({
                   where: { id: row.id },
-                  data: { description: cleaned },
+                  data: { dueAt: remote.start },
                 });
+                row.dueAt = remote.start;
               }
-              return;
-            }
-
-            if (remote.start && !sameCalendarDay(row.dueAt, remote.start)) {
-              await ctx.db.workspaceTask.update({
-                where: { id: row.id },
-                data: { dueAt: remote.start },
-              });
-              row.dueAt = remote.start;
-            }
-          }),
-        );
-      }
-
-      rows.sort((a, b) => {
-        if (a.status !== b.status) {
-          const order = ["TODO", "IN_PROGRESS", "DONE"];
-          return order.indexOf(a.status) - order.indexOf(b.status);
+            }),
+          );
         }
-        const aDue = a.dueAt ? a.dueAt.getTime() : Number.MAX_SAFE_INTEGER;
-        const bDue = b.dueAt ? b.dueAt.getTime() : Number.MAX_SAFE_INTEGER;
-        if (aDue !== bDue) return aDue - bDue;
-        return b.updatedAt.getTime() - a.updatedAt.getTime();
-      });
+      }
 
       const labelFor = await resolveRelatedLabels(ctx.db, scope.workspaceId, rows);
       const items = rows.map((row) => ({
@@ -205,7 +209,14 @@ export const taskRouter = router({
         inProgress: countByStatus.get("IN_PROGRESS") ?? 0,
         done: countByStatus.get("DONE") ?? 0,
       };
-      return { items, summary };
+      return {
+        items,
+        summary,
+        page: input.page,
+        pageSize: input.pageSize,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / input.pageSize)),
+      };
     }),
 
   create: mutationProcedure

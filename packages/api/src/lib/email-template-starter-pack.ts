@@ -1,4 +1,15 @@
 import type { PrismaClient } from "@digitify/db";
+
+export type EmailModuleKey =
+  | "LEADS"
+  | "CAMPAIGNS"
+  | "QUOTES"
+  | "INVOICES"
+  | "BOOKINGS"
+  | "REVIEWS"
+  | "AUTH"
+  | "INBOX"
+  | "SYSTEM";
 import { emailTemplateDataFromInput } from "./email-templates";
 
 export type StarterTemplateType =
@@ -23,8 +34,26 @@ export type EmailTemplateStarterItem = {
   description: string;
   ctaText?: string;
   ctaUrl?: string;
+  module?: EmailModuleKey;
+  templateKey?: string;
+  isSystem?: boolean;
   /** When true, template is visible for every campaign filter in outbound. */
   isGlobal?: boolean;
+};
+
+export type SystemEmailTemplateDef = {
+  templateKey: string;
+  module: EmailModuleKey;
+  name: string;
+  type: StarterTemplateType;
+  subject: string;
+  body: string;
+  bodyFormat?: "TEXT" | "HTML";
+  layout?: StarterTemplateLayout;
+  description: string;
+  ctaText?: string;
+  ctaUrl?: string;
+  isSystem: boolean;
 };
 
 /** Canonical starter pack — single source for Template Studio seed + deprecated contact seed. */
@@ -190,6 +219,408 @@ export const EMAIL_TEMPLATE_STARTER_PACK: EmailTemplateStarterItem[] = [
   },
 ];
 
+/** System templates keyed by templateKey — used by transactional routers and sendTemplatedEmail. */
+export const EMAIL_SYSTEM_TEMPLATES: SystemEmailTemplateDef[] = [
+  {
+    templateKey: "booking.pending",
+    module: "BOOKINGS",
+    name: "Afspraak — Ontvangen",
+    type: "BOOKING",
+    description: "Klant: boeking ontvangen",
+    subject: "Boeking ontvangen bij {{senderCompany}}",
+    layout: "business",
+    body: [
+      "Beste {{contactName}},",
+      "",
+      "Bedankt voor uw aanvraag. We hebben uw boeking ontvangen.",
+      "{{bookingDetails}}",
+      "",
+      "We bevestigen uw afspraak zo snel mogelijk.",
+      "",
+      "Zelf aanpassen of annuleren: {{manageUrl}}",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "booking.confirmed",
+    module: "BOOKINGS",
+    name: "Afspraak — Bevestigd",
+    type: "BOOKING",
+    description: "Klant: afspraak bevestigd",
+    subject: "Uw afspraak is bevestigd",
+    layout: "business",
+    body: [
+      "Beste {{contactName}},",
+      "",
+      "Uw afspraak bij {{senderCompany}} is bevestigd.",
+      "{{bookingDetails}}",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "booking.updated",
+    module: "BOOKINGS",
+    name: "Afspraak — Bijgewerkt",
+    type: "BOOKING",
+    description: "Klant: afspraak gewijzigd",
+    subject: "Update van uw afspraak bij {{senderCompany}}",
+    layout: "business",
+    body: [
+      "Beste {{contactName}},",
+      "",
+      "Uw afspraakgegevens werden aangepast. Hieronder vindt u de nieuwste planning.",
+      "{{bookingDetails}}",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "booking.cancelled",
+    module: "BOOKINGS",
+    name: "Afspraak — Afgewezen",
+    type: "BOOKING",
+    description: "Klant: boeking afgewezen",
+    subject: "Update over uw booking aanvraag",
+    layout: "business",
+    body: [
+      "Beste {{contactName}},",
+      "",
+      "Uw booking aanvraag bij {{senderCompany}} kon momenteel niet bevestigd worden.{{rejectionReason}}",
+      "{{bookingDetails}}",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "booking.reminder_24h",
+    module: "BOOKINGS",
+    name: "Afspraak — Herinnering 24u",
+    type: "BOOKING",
+    description: "Herinnering 24 uur vooraf",
+    subject: "Herinnering: afspraak morgen bij {{senderCompany}}",
+    layout: "business",
+    body: [
+      "Beste {{contactName}},",
+      "",
+      "Dit is een vriendelijke herinnering voor uw afspraak morgen.",
+      "{{bookingDetails}}",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "booking.reminder_1h",
+    module: "BOOKINGS",
+    name: "Afspraak — Herinnering 1u",
+    type: "BOOKING",
+    description: "Herinnering 1 uur vooraf",
+    subject: "Herinnering: afspraak over 1 uur",
+    layout: "business",
+    body: [
+      "Beste {{contactName}},",
+      "",
+      "Uw afspraak start over ongeveer 1 uur.",
+      "{{bookingDetails}}",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "booking.admin_notify",
+    module: "BOOKINGS",
+    name: "Afspraak — Admin notificatie",
+    type: "BOOKING",
+    description: "Interne notificatie voor team",
+    subject: "{{adminSubject}}",
+    layout: "business",
+    body: [
+      "{{adminIntro}}",
+      "",
+      "Klant: {{contactName}}",
+      "E-mail: {{clientEmail}}",
+      "{{bookingDetails}}",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "auth.verify_email",
+    module: "AUTH",
+    name: "Auth — E-mail verifiëren",
+    type: "CUSTOM",
+    description: "Registratie e-mailverificatie",
+    subject: "Verifieer je toegang tot Digitify Lead Finder",
+    layout: "minimal",
+    body: [
+      "Hallo {{contactName}},",
+      "",
+      "Bedankt voor je registratieaanvraag voor Digitify Lead Finder.",
+      "",
+      "Bevestig je e-mailadres via deze link:",
+      "{{verifyUrl}}",
+      "",
+      "Daarna kan een admin je aanvraag goedkeuren.",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "auth.approved",
+    module: "AUTH",
+    name: "Auth — Toegang goedgekeurd",
+    type: "CUSTOM",
+    description: "Registratie goedgekeurd",
+    subject: "Je toegang tot Digitify Lead Finder is goedgekeurd",
+    layout: "minimal",
+    body: [
+      "Hallo {{contactName}},",
+      "",
+      "Je aanvraag is goedgekeurd. Je start in je eigen persoonlijke workspace.",
+      "",
+      "Login: {{loginUrl}}",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "auth.rejected",
+    module: "AUTH",
+    name: "Auth — Aanvraag afgewezen",
+    type: "CUSTOM",
+    description: "Registratie afgewezen",
+    subject: "Je aanvraag voor Digitify Lead Finder",
+    layout: "minimal",
+    body: [
+      "Hallo {{contactName}},",
+      "",
+      "Je aanvraag werd niet goedgekeurd.{{rejectionReason}}",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "auth.team_invite",
+    module: "AUTH",
+    name: "Auth — Team-uitnodiging",
+    type: "CUSTOM",
+    description: "Team workspace uitnodiging",
+    subject: "Bevestig je team-uitnodiging voor Digitify Lead Finder",
+    layout: "minimal",
+    body: [
+      "Hallo {{contactName}},",
+      "",
+      "Je bent uitgenodigd voor een team workspace in Digitify Lead Finder.",
+      "Bevestig je e-mailadres via deze link:",
+      "{{verifyUrl}}",
+      "",
+      "Na bevestiging word je gekoppeld aan de gedeelde team-workspace.",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "auth.team_activated",
+    module: "AUTH",
+    name: "Auth — Team geactiveerd",
+    type: "CUSTOM",
+    description: "Team-uitnodiging bevestigd",
+    subject: "Je team-uitnodiging is geactiveerd",
+    layout: "minimal",
+    body: [
+      "Hallo {{contactName}},",
+      "",
+      "Je hebt de team-uitnodiging bevestigd. Je kunt nu inloggen en werkt voortaan in de gedeelde workspace van je team.",
+      "",
+      "Login: {{loginUrl}}",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "review.request",
+    module: "REVIEWS",
+    name: "Review — Verzoek",
+    type: "REVIEW",
+    description: "Reviewverzoek naar klant",
+    subject: "Korte feedbackvraag",
+    layout: "minimal",
+    ctaText: "Geef uw beoordeling",
+    ctaUrl: "{{reviewLink}}",
+    body: [
+      "Beste {{contactName}},",
+      "",
+      "{{reviewBody}}",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "invoice.sent",
+    module: "INVOICES",
+    name: "Factuur — Verzonden",
+    type: "CUSTOM",
+    description: "Factuur naar klant",
+    subject: "Factuur {{invoiceNumber}}",
+    layout: "business",
+    body: [
+      "Beste {{contactName}},",
+      "",
+      "In bijlage vindt u factuur {{invoiceNumber}}.",
+      "Totaalbedrag: {{invoiceAmount}}",
+      "Vervaldatum: {{dueDate}}",
+      "Betalingsreferentie: {{paymentReference}}",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "invoice.reminder",
+    module: "INVOICES",
+    name: "Factuur — Herinnering",
+    type: "CUSTOM",
+    description: "Betalingsherinnering",
+    subject: "Betalingsherinnering {{invoiceNumber}}",
+    layout: "business",
+    body: [
+      "Beste {{contactName}},",
+      "",
+      "Dit is een vriendelijke herinnering voor factuur {{invoiceNumber}}.",
+      "Vervaldatum: {{dueDate}}",
+      "Openstaand bedrag: {{invoiceAmount}}",
+      "Betalingsreferentie: {{paymentReference}}",
+      "",
+      "Gelieve dit bedrag zo snel mogelijk te voldoen.",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "campaign.drip_step_2",
+    module: "CAMPAIGNS",
+    name: "Campagne — Drip stap 2",
+    type: "FOLLOW_UP",
+    description: "Tweede stap in drip-campagne",
+    subject: "Opvolging: {{baseSubject}}",
+    layout: "followup",
+    body: [
+      "Beste {{contactName}},",
+      "",
+      "Ik volg even kort op over mijn eerdere bericht.",
+      "Denk je dat dit momenteel relevant is voor {{companyName}}?",
+      "",
+      "Als je wil, plan ik meteen een kort gesprek in.",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "campaign.drip_step_3",
+    module: "CAMPAIGNS",
+    name: "Campagne — Drip stap 3",
+    type: "FOLLOW_UP",
+    description: "Derde stap in drip-campagne",
+    subject: "Laatste opvolging: {{baseSubject}}",
+    layout: "followup",
+    body: [
+      "Beste {{contactName}},",
+      "",
+      "Ik laat nog één laatste bericht na.",
+      "Als dit nu geen prioriteit is, geen probleem.",
+      "Laat gerust weten wanneer het beter past voor {{companyName}}.",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "campaign.review_step_2",
+    module: "CAMPAIGNS",
+    name: "Campagne — Review stap 2",
+    type: "REVIEW",
+    description: "Tweede review-opvolging",
+    subject: "Korte opvolging over je ervaring",
+    layout: "followup",
+    body: [
+      "Beste {{contactName}},",
+      "",
+      "Even een korte opvolging op mijn vorige bericht.",
+      "Heb je 1 minuut om je ervaring te delen? Dat helpt ons enorm.",
+      "",
+      "Alvast bedankt!",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "campaign.review_step_3",
+    module: "CAMPAIGNS",
+    name: "Campagne — Review stap 3",
+    type: "REVIEW",
+    description: "Laatste review-herinnering",
+    subject: "Laatste herinnering",
+    layout: "followup",
+    body: [
+      "Beste {{contactName}},",
+      "",
+      "Dit is mijn laatste korte herinnering.",
+      "Als je even feedback wil delen, hoor ik het heel graag.",
+      "",
+      "Bedankt voor je tijd.",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "feedback.admin_notify",
+    module: "SYSTEM",
+    name: "Systeem — Feedback notificatie",
+    type: "CUSTOM",
+    description: "Admin notificatie bij feedback",
+    subject: "{{feedbackSubject}}",
+    layout: "minimal",
+    body: [
+      "{{feedbackBody}}",
+    ].join("\n"),
+    isSystem: true,
+  },
+  {
+    templateKey: "system.registration_admin",
+    module: "SYSTEM",
+    name: "Systeem — Nieuwe registratie",
+    type: "CUSTOM",
+    description: "Admin notificatie nieuwe registratie",
+    subject: "Nieuwe registratieaanvraag voor Digitify Lead Finder",
+    layout: "minimal",
+    body: [
+      "Er is een nieuwe geverifieerde registratieaanvraag.",
+      "",
+      "Naam: {{contactName}}",
+      "E-mail: {{clientEmail}}",
+      "Bedrijf: {{companyName}}",
+      "",
+      "Bekijk de aanvraag bij Instellingen > Team & Rollen.",
+    ].join("\n"),
+    isSystem: true,
+  },
+];
+
+function systemTemplateToDbPayload(item: SystemEmailTemplateDef) {
+  return {
+    name: item.name,
+    subject: item.subject,
+    module: item.module,
+    templateKey: item.templateKey,
+    isSystem: item.isSystem,
+    isGlobal: false,
+    ...emailTemplateDataFromInput({
+      body: item.body,
+      bodyFormat: item.bodyFormat,
+      layout: item.layout ?? "business",
+      type: item.type,
+      description: item.description,
+      ctaText: item.ctaText,
+      ctaUrl: item.ctaUrl,
+    }),
+  };
+}
+
+export async function ensureSystemEmailTemplates(db: PrismaClient, workspaceId: string) {
+  for (const item of EMAIL_SYSTEM_TEMPLATES) {
+    const payload = systemTemplateToDbPayload(item);
+    const existing = await db.emailTemplate.findFirst({
+      where: { createdById: workspaceId, templateKey: item.templateKey },
+      select: { id: true },
+    });
+    if (!existing) {
+      await db.emailTemplate.create({
+        data: { createdById: workspaceId, ...payload },
+      });
+    }
+  }
+}
+
 export async function seedEmailTemplateStarterPack(
   db: PrismaClient,
   workspaceId: string,
@@ -277,6 +708,8 @@ export async function syncEmailTemplateStarterPack(
     });
     updated += 1;
   }
+
+  await ensureSystemEmailTemplates(db, workspaceId);
 
   return { created, updated, total: EMAIL_TEMPLATE_STARTER_PACK.length };
 }

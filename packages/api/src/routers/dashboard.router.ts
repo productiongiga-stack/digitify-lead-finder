@@ -24,6 +24,8 @@ type KpiResult = {
   contactedLeads: number;
   totalCampaigns: number;
   pendingDrafts: number;
+  approvedDrafts: number;
+  rejectedDrafts: number;
   sentEmails: number;
   wonLeads: number;
   avgScore: number;
@@ -587,6 +589,8 @@ async function loadKpis(ctx: WorkspaceCtx): Promise<KpiResult> {
   const contactedLeads = leadStatusCount.CONTACTED ?? 0;
   const wonLeads = leadStatusCount.WON ?? 0;
   const pendingDrafts = emailStatusCount.PENDING_APPROVAL ?? 0;
+  const approvedDrafts = emailStatusCount.APPROVED ?? 0;
+  const rejectedDrafts = emailStatusCount.REJECTED ?? 0;
   const sentEmails = emailStatusCount.SENT ?? 0;
   const scheduledEmails = emailStatusCount.SCHEDULED ?? 0;
   const failedEmails = emailStatusCount.FAILED ?? 0;
@@ -615,6 +619,8 @@ async function loadKpis(ctx: WorkspaceCtx): Promise<KpiResult> {
     contactedLeads,
     totalCampaigns,
     pendingDrafts,
+    approvedDrafts,
+    rejectedDrafts,
     sentEmails,
     wonLeads,
     avgScore: Math.round(leadsWithScore._avg.overallScore ?? 0),
@@ -784,8 +790,35 @@ async function loadOpenChats(ctx: WorkspaceCtx) {
   }));
 }
 
+function attentionCountFromOverviewParts(
+  kpis: KpiResult,
+  reminders: UnifiedRemindersResult,
+  expiringDomainCount: number,
+): number {
+  let count = 0;
+  count += Math.min(kpis.pendingDrafts, 20);
+  count += Math.min(kpis.approvedDrafts, 10);
+  if (kpis.approvedDrafts > 10) count += 1;
+
+  if (kpis.failedEmails > 0) {
+    const shown = Math.min(kpis.failedEmails, 10);
+    count += shown;
+    if (kpis.failedEmails > shown) count += 1;
+  }
+
+  count += Math.min(kpis.rejectedDrafts, 10);
+  if (kpis.rejectedDrafts > 10) count += 1;
+
+  if (kpis.pendingReviews > 0) count += 1;
+  if (kpis.unreadChats > 0) count += 1;
+  count += reminders.items.length;
+  count += Math.min(expiringDomainCount, 10);
+  return count;
+}
+
 type DashboardOverviewResult = {
   kpis: KpiResult;
+  attentionCount: number;
   recentActivity: Awaited<ReturnType<typeof loadRecentActivity>>;
   topLeads: Awaited<ReturnType<typeof loadTopLeads>>;
   pipelineOverview: Awaited<ReturnType<typeof loadPipelineOverview>>;
@@ -822,6 +855,7 @@ async function loadDashboardOverview(ctx: WorkspaceCtx): Promise<DashboardOvervi
 
   const result: DashboardOverviewResult = {
     kpis,
+    attentionCount: attentionCountFromOverviewParts(kpis, reminders, expiringDomains.length),
     recentActivity,
     topLeads,
     pipelineOverview,

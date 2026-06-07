@@ -23,6 +23,7 @@ export function canAccessSettingsPath(roleValue: string | null | undefined, path
 
   if (path === "/settings") return true;
   if (path === "/settings/account") return true;
+  if (path === "/settings/workspaces") return true;
   if (role === "OWNER") return path.startsWith("/settings/");
 
   const adminPaths = new Set([
@@ -50,6 +51,7 @@ export function canAccessSettingsPath(roleValue: string | null | undefined, path
   if (role === "MEMBER") {
     return new Set([
       "/settings",
+      "/settings/workspaces",
       "/settings/bookings",
       "/settings/reviews",
       "/settings/quotes",
@@ -59,7 +61,7 @@ export function canAccessSettingsPath(roleValue: string | null | undefined, path
     ]).has(path);
   }
   if (role === "TESTER" || role === "TRIAL" || role === "VIEWER") {
-    return path === "/settings/display";
+    return path === "/settings/display" || path === "/settings/workspaces";
   }
-  return path === "/settings/display";
+  return path === "/settings/display" || path === "/settings/workspaces";
 }

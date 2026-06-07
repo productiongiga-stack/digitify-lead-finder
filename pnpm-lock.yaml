@@ -53,6 +53,9 @@ importers:
       '@digitify/email':
         specifier: workspace:*
         version: link:../../packages/email
+      '@digitify/media-studio':
+        specifier: workspace:*
+        version: link:../../packages/media-studio
       '@digitify/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -171,6 +174,9 @@ importers:
       '@digitify/email':
         specifier: workspace:^
         version: link:../email
+      '@digitify/media-studio':
+        specifier: workspace:^
+        version: link:../media-studio
       '@digitify/openclaw':
         specifier: workspace:^
         version: link:../openclaw
@@ -183,6 +189,9 @@ importers:
       '@trpc/server':
         specifier: ^11.0.0
         version: 11.16.0(typescript@5.9.3)
+      '@vercel/blob':
+        specifier: ^2.4.0
+        version: 2.4.0
       google-ads-api:
         specifier: ^20.0.0
         version: 20.0.1
@@ -255,6 +264,15 @@ importers:
       '@types/nodemailer':
         specifier: ^6.4.0
         version: 6.4.23
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@22.19.17)(terser@5.48.0)
+
+  packages/media-studio:
+    devDependencies:
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

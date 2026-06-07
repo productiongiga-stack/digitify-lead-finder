@@ -26,7 +26,7 @@ import { OutboundWorkflowHelp } from "@/components/outbound/outbound-workflow-he
 import { extractEmailTemplateMetadata } from "@/lib/email-content";
 import { OUTBOUND_STATUS_LABELS, OUTBOUND_STATUS_VARIANTS } from "@/lib/contact-status";
 import { extractQuoteIdFromDraftBody, getQuoteConfiguratorUrl } from "@/lib/quote-outbound";
-import { useOutboundEmailPreviewSettings } from "@/lib/outbound-email-settings";
+import { useShellEmailPreviewProps } from "@/lib/outbound-email-settings";
 
 export default function ApprovalPage() {
   const utils = trpc.useUtils();
@@ -36,7 +36,7 @@ export default function ApprovalPage() {
     pageSize: 50,
   });
 
-  const { brandCompanyName, brandPrimaryColor, brandHeaderSlogan } = useOutboundEmailPreviewSettings();
+  const shellPreview = useShellEmailPreviewProps();
 
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
@@ -186,12 +186,15 @@ export default function ApprovalPage() {
                           <EmailPreview
                             subject={draft.subject}
                             body={parsedDraft.cleanBody}
-                            companyName={brandCompanyName}
-                            primaryColor={brandPrimaryColor}
-                            fromName={draft.author.name || brandCompanyName}
-                            headerSlogan={brandHeaderSlogan}
+                            companyName={shellPreview.companyName}
+                            primaryColor={shellPreview.primaryColor}
+                            fromName={draft.author.name || shellPreview.fromName}
+                            headerSlogan={shellPreview.headerSlogan}
                             recipientCompany={draft.lead?.companyName ?? draft.toEmail}
-                            layout={parsedDraft.layout}
+                            logoUrl={shellPreview.logoUrl}
+                            masterShellHtml={shellPreview.masterShellHtml}
+                            signature={shellPreview.signature}
+                            footer={shellPreview.footer}
                           />
                         </DialogContent>
                       </Dialog>

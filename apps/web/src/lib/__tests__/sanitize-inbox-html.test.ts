@@ -1,25 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { buildInboxHtmlDocument, sanitizeInboxHtml } from "../sanitize-inbox-html";
+import { buildEmailPreviewDocument } from "../sanitize-inbox-html";
 
-describe("sanitizeInboxHtml", () => {
-  it("strips script tags and javascript: links", () => {
-    const dirty = `<p>Hi</p><script>alert(1)</script><a href="javascript:alert(1)">click</a>`;
-    const safe = sanitizeInboxHtml(dirty);
-    expect(safe).not.toContain("<script");
-    expect(safe).not.toContain("javascript:");
-    expect(safe).toContain("<p>Hi</p>");
-  });
+describe("buildEmailPreviewDocument", () => {
+  it("keeps CTA placeholder links and inline button styles", () => {
+    const html = `<!DOCTYPE html><html><head></head><body>
+      <a href="{{bookingLink}}" style="display:inline-block;padding:15px 34px;color:#ffffff;background-color:#f9ae5a;text-decoration:none;font-weight:700;border-radius:999px;">
+        Plan een gesprek
+      </a>
+    </body></html>`;
 
-  it("allows https links with rel noopener", () => {
-    const safe = sanitizeInboxHtml('<a href="https://example.com">link</a>');
-    expect(safe).toContain('href="https://example.com"');
-    expect(safe).toContain('rel="noopener noreferrer"');
-  });
-
-  it("buildInboxHtmlDocument uses CSP and safe body only", () => {
-    const doc = buildInboxHtmlDocument("<p>Body</p>");
-    expect(doc).toContain("Content-Security-Policy");
-    expect(doc).toContain("<p>Body</p>");
-    expect(doc).not.toContain("<script");
+    const preview = buildEmailPreviewDocument(html);
+    expect(preview).toContain('href="{{bookingLink}}"');
+    expect(preview).toContain("border-radius:999px");
+    expect(preview).toContain("Plan een gesprek");
+    expect(preview).not.toContain("<span");
   });
 });

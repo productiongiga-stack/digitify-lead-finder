@@ -5,7 +5,7 @@ import { patchRequestContext, recordRouteMetric } from "@digitify/db";
 import { enforceRateLimit } from "./lib/rate-limit";
 import { invalidateDashboardCacheForUser } from "./lib/dashboard-cache";
 import { log } from "./lib/logger";
-import { resolveWorkspaceOwnerId } from "./lib/workspace";
+import { resolveWorkspaceContext } from "./lib/workspace-registry";
 
 export type Context = {
   db: PrismaClient;
@@ -16,6 +16,9 @@ export type Context = {
     role: string;
     /** From JWT when available; finalized in withWorkspace middleware. */
     workspaceId?: string;
+    /** Effective role in the active workspace (membership-based). */
+    workspaceRole?: string;
+    isPersonalWorkspace?: boolean;
   } | null;
   requestId: string;
   /** Client IP from reverse proxy headers (public endpoints). */
@@ -108,12 +111,31 @@ const withRateLimit = t.middleware(async ({ ctx, next }) => {
 // --- Auth middleware ---
 const withWorkspace = t.middleware(async ({ ctx, next }) => {
   if (!ctx.user) return next();
-  const workspaceId =
-    ctx.user.workspaceId ?? (await resolveWorkspaceOwnerId(ctx.db, ctx.user.id));
+
+  if (ctx.user.workspaceId) {
+    return next({
+      ctx: {
+        ...ctx,
+        user: {
+          ...ctx.user,
+          workspaceRole: ctx.user.workspaceRole ?? ctx.user.role,
+          isPersonalWorkspace:
+            ctx.user.isPersonalWorkspace ?? ctx.user.workspaceId === ctx.user.id,
+        },
+      },
+    });
+  }
+
+  const workspace = await resolveWorkspaceContext(ctx.db, ctx.user.id);
   return next({
     ctx: {
       ...ctx,
-      user: { ...ctx.user, workspaceId },
+      user: {
+        ...ctx.user,
+        workspaceId: workspace.workspaceId,
+        workspaceRole: workspace.workspaceRole,
+        isPersonalWorkspace: workspace.isPersonalWorkspace,
+      },
     },
   });
 });
@@ -135,8 +157,12 @@ const isAuthenticated = t.middleware(({ ctx, next }) => {
   return next({ ctx: { ...ctx, user: ctx.user } });
 });
 
+function effectiveWorkspaceRole(ctx: Context) {
+  return ctx.user?.workspaceRole ?? ctx.user?.role;
+}
+
 const enforceTrialAccess = t.middleware(async ({ ctx, next }) => {
-  if (!ctx.user || ctx.user.role !== "TRIAL") return next();
+  if (!ctx.user || effectiveWorkspaceRole(ctx) !== "TRIAL") return next();
   const user = await ctx.db.user.findUnique({
     where: { id: ctx.user.id },
     select: { createdAt: true },
@@ -170,7 +196,7 @@ const enforceMutationRole = t.middleware(({ ctx, next }) => {
   if (!ctx.user) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "Niet ingelogd." });
   }
-  if (READ_ONLY_ROLES.has(ctx.user.role as AppRole)) {
+  if (READ_ONLY_ROLES.has((ctx.user.workspaceRole ?? ctx.user.role) as AppRole)) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "Je rol heeft geen rechten om wijzigingen door te voeren.",
@@ -202,7 +228,8 @@ const hasRole = (...roles: string[]) =>
     if (!ctx.user) {
       throw new TRPCError({ code: "UNAUTHORIZED", message: "Niet ingelogd." });
     }
-    if (!roles.includes(ctx.user.role)) {
+    const role = ctx.user.workspaceRole ?? ctx.user.role;
+    if (!roles.includes(role)) {
       throw new TRPCError({ code: "FORBIDDEN", message: "Onvoldoende rechten." });
     }
     return next({ ctx: { ...ctx, user: ctx.user } });
@@ -217,6 +244,27 @@ export const adminProcedure = t.procedure
   .use(enforceTrialAccess)
   .use(hasRole("OWNER", "ADMIN"));
 
+const enforceWorkspaceOwnerAccess = t.middleware(async ({ ctx, next }) => {
+  if (!ctx.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "Niet ingelogd." });
+  }
+  const workspaceId = ctx.user.workspaceId ?? ctx.user.id;
+  if (ctx.user.isPersonalWorkspace || workspaceId === ctx.user.id) {
+    return next({ ctx: { ...ctx, user: { ...ctx.user, workspaceId } } });
+  }
+  if ((ctx.user.workspaceRole ?? ctx.user.role) === "OWNER") {
+    return next({ ctx: { ...ctx, user: { ...ctx.user, workspaceId } } });
+  }
+  const workspace = await ctx.db.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { ownerUserId: true },
+  });
+  if (workspace?.ownerUserId === ctx.user.id) {
+    return next({ ctx: { ...ctx, user: { ...ctx.user, workspaceId } } });
+  }
+  throw new TRPCError({ code: "FORBIDDEN", message: "Onvoldoende rechten." });
+});
+
 export const ownerProcedure = t.procedure
   .use(withLogging)
   .use(withRateLimit)
@@ -224,4 +272,4 @@ export const ownerProcedure = t.procedure
   .use(withWorkspace)
   .use(withWorkspaceRlsContext)
   .use(enforceTrialAccess)
-  .use(hasRole("OWNER"));
+  .use(enforceWorkspaceOwnerAccess);

@@ -6,6 +6,7 @@ import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label, Textare
 import { ArrowLeft, Save, Loader2, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
+import { SETTINGS_PAGE_QUERY_OPTS } from "@/lib/settings-query-options";
 
 function isValidEmail(email: string): boolean {
   if (!email) return true; // empty is ok
@@ -18,13 +19,13 @@ function isValidPhone(phone: string): boolean {
 }
 
 export default function CompanySettingsPage() {
-  const { data: settings, isLoading } = trpc.settings.getAll.useQuery();
+  const { data: settings, isLoading } = trpc.settings.getCompanySettings.useQuery(undefined, SETTINGS_PAGE_QUERY_OPTS);
   const utils = trpc.useUtils();
   const { showToast } = useToast();
 
   const batchUpdate = trpc.settings.batchUpdate.useMutation({
     onSuccess: () => {
-      utils.settings.getAll.invalidate();
+      utils.settings.getCompanySettings.invalidate();
       setShowSuccess(true);
       showToast({ title: "Bedrijfsgegevens opgeslagen", description: "Deze gegevens zijn bijgewerkt voor dit account." });
       setTimeout(() => setShowSuccess(false), 3000);
@@ -145,6 +146,14 @@ export default function CompanySettingsPage() {
         </div>
       </div>
 
+      <div className="rounded-xl border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+        Juridische gegevens en marketingfooter staan hier. Visuele merknaam, logo en kleuren beheer je onder{" "}
+        <Link href="/settings/branding" className="font-medium text-primary underline-offset-2 hover:underline">
+          Branding & afzender
+        </Link>
+        .
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -152,7 +161,7 @@ export default function CompanySettingsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label>Bedrijfsnaam</Label>
+              <Label>Bedrijfsnaam (juridisch)</Label>
               <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Mijn Bedrijf BV" />
             </div>
             <div className="space-y-2">

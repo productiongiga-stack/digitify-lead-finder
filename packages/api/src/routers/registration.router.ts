@@ -3,8 +3,12 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { Prisma } from "@digitify/db";
 import { router, ownerProcedure, protectedProcedure, publicRateLimitedProcedure, mutationProcedure } from "../trpc";
-import { sendBrandedEmail } from "../lib/email-sender";
+import { sendTemplatedEmail } from "../lib/send-templated-email";
 import { ensureUserWorkspace } from "../lib/user-workspace";
+import {
+  ensurePersonalWorkspace,
+  inviteUserToWorkspace,
+} from "../lib/workspace-registry";
 import { passwordPolicySchema } from "../lib/password-policy";
 import { notifyWorkspaceAdmins } from "../lib/workspace-members";
 import { log } from "../lib/logger";
@@ -23,17 +27,29 @@ function appUrl() {
   ).replace(/\/$/, "");
 }
 
-async function notifyRegistrationAdmins(db: any, subject: string, body: string) {
+async function notifyRegistrationAdmins(
+  db: any,
+  placeholderContext: Record<string, string | number | undefined>,
+) {
   const workspaceId = process.env.REGISTRATION_NOTIFY_WORKSPACE_ID?.trim();
   if (!workspaceId) return;
 
-  await notifyWorkspaceAdmins(db, workspaceId, subject, body, (args) =>
-    sendBrandedEmail(db, {
-      toEmail: args.toEmail,
-      subject: args.subject,
-      body: args.body,
-      userId: workspaceId,
-    }),
+  await notifyWorkspaceAdmins(
+    db,
+    workspaceId,
+    String(placeholderContext.feedbackSubject || "Nieuwe registratieaanvraag"),
+    String(placeholderContext.feedbackBody || ""),
+    (args) =>
+      sendTemplatedEmail(db, workspaceId, {
+        templateKey: "system.registration_admin",
+        toEmail: args.toEmail,
+        placeholderContext: {
+          ...placeholderContext,
+          contactName: placeholderContext.contactName || args.toEmail,
+          clientEmail: placeholderContext.clientEmail || args.toEmail,
+        },
+        userId: workspaceId,
+      }),
   );
 }
 
@@ -54,15 +70,29 @@ async function getFeedbackWorkspaceUserIds(ctx: { db: any; user: { id: string; w
   return ids;
 }
 
-async function activateTargetedInvitation(ctx: { db: any }, request: {
-  id: string;
-  name: string;
-  email: string;
-  passwordHash: string;
-  emailVerifiedAt: Date | null;
+function resolveInviteWorkspaceId(request: {
+  targetWorkspaceId: string | null;
   targetWorkspaceOwnerId: string | null;
 }) {
-  if (!request.targetWorkspaceOwnerId) return null;
+  return request.targetWorkspaceId || request.targetWorkspaceOwnerId;
+}
+
+async function activateTargetedInvitation(
+  ctx: { db: any },
+  request: {
+    id: string;
+    name: string;
+    email: string;
+    passwordHash: string;
+    emailVerifiedAt: Date | null;
+    targetWorkspaceOwnerId: string | null;
+    targetWorkspaceId: string | null;
+    invitedById: string | null;
+    requestedRole: string;
+  },
+) {
+  const workspaceId = resolveInviteWorkspaceId(request);
+  if (!workspaceId) return null;
 
   const existingUser = await ctx.db.user.findUnique({
     where: { email: request.email },
@@ -70,24 +100,24 @@ async function activateTargetedInvitation(ctx: { db: any }, request: {
   });
 
   if (existingUser) {
-    if (existingUser.id === request.targetWorkspaceOwnerId || existingUser.role === "OWNER") {
+    if (existingUser.id === workspaceId) {
       throw new TRPCError({
         code: "BAD_REQUEST",
-        message: "Owner-accounts kunnen niet als teamlid aan een andere workspace worden gekoppeld.",
+        message: "Deze gebruiker is al eigenaar van deze werkruimte.",
       });
     }
-    if (existingUser.workspaceOwnerId && existingUser.workspaceOwnerId !== request.targetWorkspaceOwnerId) {
-      throw new TRPCError({
-        code: "CONFLICT",
-        message: "Deze gebruiker hoort al bij een andere workspace.",
-      });
-    }
+
+    await ensurePersonalWorkspace(ctx.db, existingUser.id, existingUser.name || request.name);
+    await inviteUserToWorkspace(ctx.db, {
+      workspaceId,
+      invitedById: request.invitedById || workspaceId,
+      userId: existingUser.id,
+      role: request.requestedRole as "MEMBER",
+    });
 
     const user = await ctx.db.user.update({
       where: { id: existingUser.id },
       data: {
-        workspaceOwnerId: request.targetWorkspaceOwnerId,
-        role: "MEMBER",
         emailVerified: request.emailVerifiedAt || new Date(),
         name: existingUser.name || request.name,
       },
@@ -108,8 +138,15 @@ async function activateTargetedInvitation(ctx: { db: any }, request: {
       passwordHash: request.passwordHash,
       role: "MEMBER",
       emailVerified: request.emailVerifiedAt || new Date(),
-      workspaceOwnerId: request.targetWorkspaceOwnerId,
     },
+  });
+
+  await ensurePersonalWorkspace(ctx.db, user.id, request.name);
+  await inviteUserToWorkspace(ctx.db, {
+    workspaceId,
+    invitedById: request.invitedById || workspaceId,
+    userId: user.id,
+    role: request.requestedRole as "MEMBER",
   });
 
   await ctx.db.registrationRequest.update({
@@ -170,10 +207,15 @@ export const registrationRouter = router({
       });
 
       const verifyUrl = `${appUrl()}/register/verify?token=${token}`;
-      await sendBrandedEmail(ctx.db, {
+      const registrationWorkspaceId = process.env.REGISTRATION_NOTIFY_WORKSPACE_ID?.trim() || "";
+      await sendTemplatedEmail(ctx.db, registrationWorkspaceId, {
+        templateKey: "auth.verify_email",
         toEmail: email,
-        subject: "Verifieer je toegang tot Digitify Lead Finder",
-        body: `Hallo ${request.name},\n\nBedankt voor je registratieaanvraag voor Digitify Lead Finder.\n\nBevestig je e-mailadres via deze link:\n${verifyUrl}\n\nDaarna kan een admin je aanvraag goedkeuren.\n\nDigitify`,
+        placeholderContext: {
+          contactName: request.name,
+          verifyUrl,
+        },
+        userId: registrationWorkspaceId || undefined,
       });
 
       return { success: true };
@@ -200,21 +242,27 @@ export const registrationRouter = router({
         },
       });
 
-      if (updated.targetWorkspaceOwnerId) {
+      const inviteWorkspaceId = resolveInviteWorkspaceId(updated);
+      if (inviteWorkspaceId) {
         await activateTargetedInvitation(ctx, updated);
-        await sendBrandedEmail(ctx.db, {
+        await sendTemplatedEmail(ctx.db, inviteWorkspaceId, {
+          templateKey: "auth.team_invite",
           toEmail: updated.email,
-          subject: "Je team-uitnodiging is geactiveerd",
-          body: `Hallo ${updated.name},\n\nJe hebt de team-uitnodiging bevestigd. Je kunt nu inloggen en werkt voortaan in de gedeelde workspace van je team.\n\nLogin: ${appUrl()}/login\n\nDigitify`,
+          placeholderContext: {
+            contactName: updated.name,
+            verifyUrl: `${appUrl()}/settings/workspaces`,
+            loginUrl: `${appUrl()}/login`,
+          },
+          userId: inviteWorkspaceId,
         });
-        return { success: true, status: "APPROVED" };
+        return { success: true, status: "INVITED" };
       }
 
-      await notifyRegistrationAdmins(
-        ctx.db,
-        "Nieuwe registratieaanvraag voor Digitify Lead Finder",
-        `Er is een nieuwe geverifieerde registratieaanvraag.\n\nNaam: ${updated.name}\nE-mail: ${updated.email}\nBedrijf: ${updated.company || "-"}\n\nBekijk de aanvraag bij Instellingen > Team & Rollen.`,
-      );
+      await notifyRegistrationAdmins(ctx.db, {
+        contactName: updated.name,
+        clientEmail: updated.email,
+        companyName: updated.company || "-",
+      });
 
       return { success: true, status: updated.status };
     }),
@@ -225,8 +273,11 @@ export const registrationRouter = router({
     return ctx.db.registrationRequest.findMany({
       where: {
         OR: [
+          { targetWorkspaceId: workspaceId },
           { targetWorkspaceOwnerId: workspaceId },
-          ...(includeGlobal ? [{ targetWorkspaceOwnerId: null }] : []),
+          ...(includeGlobal
+            ? [{ targetWorkspaceId: null, targetWorkspaceOwnerId: null }]
+            : []),
         ],
       },
       orderBy: { createdAt: "desc" },
@@ -253,38 +304,53 @@ export const registrationRouter = router({
       }
 
       const currentWorkspaceId = ctx.user.workspaceId ?? ctx.user.id;
+      const requestWorkspaceId = resolveInviteWorkspaceId(request);
       if (
-        request.targetWorkspaceOwnerId &&
-        request.targetWorkspaceOwnerId !== currentWorkspaceId
+        requestWorkspaceId &&
+        requestWorkspaceId !== currentWorkspaceId
       ) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Deze aanvraag hoort bij een andere workspace." });
       }
-      if (!request.targetWorkspaceOwnerId && !canReviewGlobalRegistrations(currentWorkspaceId)) {
+      if (!requestWorkspaceId && !canReviewGlobalRegistrations(currentWorkspaceId)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Alleen de website-owner kan globale registraties goedkeuren." });
       }
 
-      const workspaceId = request.targetWorkspaceOwnerId || null;
+      const workspaceId = requestWorkspaceId;
       const user = await ctx.db.user.create({
         data: {
           name: request.name,
           email: request.email,
           passwordHash: request.passwordHash,
-          role: "MEMBER",
+          role: workspaceId ? "MEMBER" : "OWNER",
           emailVerified: request.emailVerifiedAt || new Date(),
-          workspaceOwnerId: workspaceId,
         },
       });
-      await ensureUserWorkspace(ctx.db, workspaceId || user.id, workspaceId ? ctx.user.name : request.name);
+      await ensurePersonalWorkspace(ctx.db, user.id, request.name);
+      if (workspaceId) {
+        await inviteUserToWorkspace(ctx.db, {
+          workspaceId,
+          invitedById: ctx.user.id,
+          userId: user.id,
+          role: request.requestedRole as "MEMBER",
+        });
+      } else {
+        await ensureUserWorkspace(ctx.db, user.id, request.name);
+      }
 
       await ctx.db.registrationRequest.update({
         where: { id: request.id },
         data: { status: "APPROVED", reviewedById: ctx.user.id, reviewedAt: new Date() },
       });
 
-      await sendBrandedEmail(ctx.db, {
+      const approvalWorkspaceId = workspaceId || user.id;
+      await sendTemplatedEmail(ctx.db, approvalWorkspaceId, {
+        templateKey: "auth.approved",
         toEmail: request.email,
-        subject: "Je toegang tot Digitify Lead Finder is goedgekeurd",
-        body: `Hallo ${request.name},\n\nJe aanvraag is goedgekeurd. Je start in je eigen persoonlijke workspace, zodat je geen leads of instellingen van andere teams ziet. Een owner kan je later expliciet aan een team-workspace toevoegen.\n\nLogin: ${appUrl()}/login\n\nDigitify`,
+        placeholderContext: {
+          contactName: request.name,
+          loginUrl: `${appUrl()}/login`,
+        },
+        userId: approvalWorkspaceId,
       });
 
       return user;
@@ -298,13 +364,11 @@ export const registrationRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Aanvraag niet gevonden." });
       }
       const currentWorkspaceId = ctx.user.workspaceId ?? ctx.user.id;
-      if (
-        existing.targetWorkspaceOwnerId &&
-        existing.targetWorkspaceOwnerId !== currentWorkspaceId
-      ) {
+      const requestWorkspaceId = resolveInviteWorkspaceId(existing);
+      if (requestWorkspaceId && requestWorkspaceId !== currentWorkspaceId) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Deze aanvraag hoort bij een andere workspace." });
       }
-      if (!existing.targetWorkspaceOwnerId && !canReviewGlobalRegistrations(currentWorkspaceId)) {
+      if (!requestWorkspaceId && !canReviewGlobalRegistrations(currentWorkspaceId)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Alleen de website-owner kan globale registraties afkeuren." });
       }
 
@@ -318,10 +382,15 @@ export const registrationRouter = router({
         },
       });
 
-      await sendBrandedEmail(ctx.db, {
+      const rejectWorkspaceId = ctx.user.workspaceId ?? ctx.user.id;
+      await sendTemplatedEmail(ctx.db, rejectWorkspaceId, {
+        templateKey: "auth.rejected",
         toEmail: request.email,
-        subject: "Je aanvraag voor Digitify Lead Finder",
-        body: `Hallo ${request.name},\n\nJe aanvraag werd niet goedgekeurd.${input.reason ? `\n\nReden: ${input.reason}` : ""}\n\nDigitify`,
+        placeholderContext: {
+          contactName: request.name,
+          rejectionReason: input.reason ? `\n\nReden: ${input.reason}` : "",
+        },
+        userId: rejectWorkspaceId,
       });
 
       return { success: true };
@@ -427,10 +496,13 @@ export const registrationRouter = router({
         `Feedback: ${input.subject}`,
         `Nieuwe feedback van ${ctx.user.name || ctx.user.email}.\n\nPagina: ${input.pageUrl || "-"}\n\n${input.message}`,
         (args) =>
-          sendBrandedEmail(ctx.db, {
+          sendTemplatedEmail(ctx.db, feedbackWorkspaceId, {
+            templateKey: "feedback.admin_notify",
             toEmail: args.toEmail,
-            subject: args.subject,
-            body: args.body,
+            placeholderContext: {
+              feedbackSubject: args.subject,
+              feedbackBody: args.body,
+            },
             userId: feedbackWorkspaceId,
           }),
       );

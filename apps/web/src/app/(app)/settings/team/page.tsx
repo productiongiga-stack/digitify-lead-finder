@@ -55,9 +55,13 @@ function ModuleAccessPanel({ userId, userName }: { userId: string; userName: str
 
 export default function TeamSettingsPage() {
   const { data: session } = useSession();
-  const currentRole = (session?.user as { role?: string } | undefined)?.role;
+  const sessionUser = session?.user as
+    | { role?: string; workspaceRole?: string; isPersonalWorkspace?: boolean }
+    | undefined;
+  const currentRole = sessionUser?.workspaceRole ?? sessionUser?.role;
   const canManageUsers = currentRole === "OWNER";
   const { data: workspaceInfo } = trpc.user.getWorkspaceInfo.useQuery();
+  const canInviteMembers = canManageUsers && workspaceInfo && !workspaceInfo.isPersonal;
   const { data: users, isLoading } = trpc.user.list.useQuery();
   const { data: requests, isLoading: requestsLoading } = trpc.registration.listRequests.useQuery(undefined, {
     enabled: canManageUsers,
@@ -126,7 +130,7 @@ export default function TeamSettingsPage() {
           <h1 className="text-xl font-bold tracking-tight">Team & Rollen</h1>
           <p className="text-sm text-muted-foreground">Beheer gebruikers en hun rechten</p>
         </div>
-        {canManageUsers ? (
+        {canInviteMembers ? (
           <Button onClick={() => setShowInvite(true)}>
             <UserPlus className="mr-2 h-4 w-4" />
             Uitnodigen
@@ -145,7 +149,9 @@ export default function TeamSettingsPage() {
               </div>
               <div className="min-w-0 space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold tracking-tight">Gedeelde workspace</p>
+                  <p className="text-sm font-semibold tracking-tight">
+                    {workspaceInfo.isPersonal ? "Persoonlijke werkruimte" : "Gedeelde workspace"}
+                  </p>
                   {workspaceInfo.isOwner ? (
                     <Badge className="border-primary/25 bg-primary/10 text-primary hover:bg-primary/10">
                       Eigenaar
@@ -155,9 +161,11 @@ export default function TeamSettingsPage() {
                   )}
                 </div>
                 <p className="text-sm leading-relaxed text-muted-foreground">
-                  {workspaceInfo.isOwner
-                    ? "Jij bent de eigenaar. Teamleden werken in dezelfde omgeving met gedeelde data."
-                    : `Je werkt in de workspace van ${workspaceInfo.ownerName}. Leads, campagnes en templates zijn gedeeld.`}
+                  {workspaceInfo.isPersonal
+                    ? "Dit is je eigen omgeving. Maak een team-werkruimte aan of nodig leden uit via Werkruimtes om samen te werken."
+                    : workspaceInfo.isOwner
+                      ? "Jij bent de eigenaar. Teamleden werken in dezelfde omgeving met gedeelde data."
+                      : `Je werkt in de workspace van ${workspaceInfo.ownerName}. Leads, campagnes en templates zijn gedeeld.`}
                 </p>
               </div>
             </div>

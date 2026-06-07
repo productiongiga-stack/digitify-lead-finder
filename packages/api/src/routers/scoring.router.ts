@@ -7,6 +7,73 @@ import { assertLeadAccess } from "../lib/tenant";
 import { loadMergedScoringWeights } from "../lib/scoring-weights";
 import { buildWebsiteAuditPayload, websiteAnalysisToEnrichment } from "../lib/website-audit";
 
+type ScoringWeightRow = {
+  id: string;
+  factorKey: string;
+};
+
+type ComputedFactor = {
+  factorKey: string;
+  rawValue: number;
+  weightedValue: number;
+  explanation: string;
+};
+
+async function upsertLeadScoringFactors(
+  db: {
+    leadScoringFactor: {
+      upsert: (args: {
+        where: { leadId_scoringWeightId: { leadId: string; scoringWeightId: string } };
+        create: {
+          leadId: string;
+          scoringWeightId: string;
+          rawValue: number;
+          weightedValue: number;
+          explanation: string;
+        };
+        update: {
+          rawValue: number;
+          weightedValue: number;
+          explanation: string;
+        };
+      }) => Promise<unknown>;
+    };
+  },
+  leadId: string,
+  factors: ComputedFactor[],
+  weights: ScoringWeightRow[],
+) {
+  const weightByKey = new Map(weights.map((weight) => [weight.factorKey, weight]));
+
+  await Promise.all(
+    factors.map((factor) => {
+      const weight = weightByKey.get(factor.factorKey);
+      if (!weight) return Promise.resolve();
+
+      return db.leadScoringFactor.upsert({
+        where: {
+          leadId_scoringWeightId: {
+            leadId,
+            scoringWeightId: weight.id,
+          },
+        },
+        create: {
+          leadId,
+          scoringWeightId: weight.id,
+          rawValue: factor.rawValue,
+          weightedValue: factor.weightedValue,
+          explanation: factor.explanation,
+        },
+        update: {
+          rawValue: factor.rawValue,
+          weightedValue: factor.weightedValue,
+          explanation: factor.explanation,
+        },
+      });
+    }),
+  );
+}
+
 export const scoringRouter = router({
   /**
    * Compute score for a lead using current enrichment data + scoring weights.
@@ -68,32 +135,7 @@ export const scoringRouter = router({
         },
       });
 
-      // Upsert scoring factors
-      for (const factor of result.factors) {
-        const weight = weights.find((w) => w.factorKey === factor.factorKey);
-        if (!weight) continue;
-
-        await ctx.db.leadScoringFactor.upsert({
-          where: {
-            leadId_scoringWeightId: {
-              leadId: input.leadId,
-              scoringWeightId: weight.id,
-            },
-          },
-          create: {
-            leadId: input.leadId,
-            scoringWeightId: weight.id,
-            rawValue: factor.rawValue,
-            weightedValue: factor.weightedValue,
-            explanation: factor.explanation,
-          },
-          update: {
-            rawValue: factor.rawValue,
-            weightedValue: factor.weightedValue,
-            explanation: factor.explanation,
-          },
-        });
-      }
+      await upsertLeadScoringFactors(ctx.db, input.leadId, result.factors, weights);
 
       await ctx.db.activity.create({
         data: {
@@ -122,7 +164,7 @@ export const scoringRouter = router({
         .object({
           leadIds: z.array(z.string()).optional(),
           onlyMissing: z.boolean().default(false),
-          limit: z.number().min(1).max(5000).default(1000),
+          limit: z.number().min(1).max(5000).default(200),
         })
         .optional()
     )
@@ -166,82 +208,81 @@ export const scoringRouter = router({
 
       let updated = 0;
       const errors: Array<{ leadId: string; companyName: string; message: string }> = [];
+      const CHUNK_SIZE = 50;
 
-      for (const lead of leads) {
-        try {
-          const enrichmentRows = lead.enrichmentData as Array<{
-            source: string;
-            data: unknown;
-          }>;
-          const bestEnrichmentRow =
-            enrichmentRows.find((row) => row.source === "website_analyzer") ??
-            enrichmentRows[0];
-          const enrichmentRaw = (bestEnrichmentRow?.data as Record<string, unknown> | undefined) ?? {};
+      for (let offset = 0; offset < leads.length; offset += CHUNK_SIZE) {
+        const chunk = leads.slice(offset, offset + CHUNK_SIZE);
+        const computed: Array<{
+          lead: (typeof leads)[number];
+          result: ReturnType<typeof computeScore>;
+        }> = [];
 
-          const leadData: LeadData = {
-            companyName: lead.companyName,
-            website: lead.website,
-            email: lead.email,
-            phone: lead.phone,
-            gmbRating: lead.gmbRating ? Number(lead.gmbRating) : null,
-            gmbReviewCount: lead.gmbReviewCount,
-            gmbCategories: (lead.gmbCategories as string[]) || [],
-            facebookUrl: lead.facebookUrl,
-            instagramUrl: lead.instagramUrl,
-            linkedinUrl: lead.linkedinUrl,
-            twitterUrl: lead.twitterUrl,
-            tiktokUrl: lead.tiktokUrl,
-            youtubeUrl: lead.youtubeUrl,
-          };
+        for (const lead of chunk) {
+          try {
+            const enrichmentRows = lead.enrichmentData as Array<{
+              source: string;
+              data: unknown;
+            }>;
+            const bestEnrichmentRow =
+              enrichmentRows.find((row) => row.source === "website_analyzer") ??
+              enrichmentRows[0];
+            const enrichmentRaw = (bestEnrichmentRow?.data as Record<string, unknown> | undefined) ?? {};
 
-          const enrichment: EnrichmentPayload = {
-            website_analysis: enrichmentRaw.website_analysis as EnrichmentPayload["website_analysis"],
-            social_analysis: enrichmentRaw.social_analysis as EnrichmentPayload["social_analysis"],
-          };
+            const leadData: LeadData = {
+              companyName: lead.companyName,
+              website: lead.website,
+              email: lead.email,
+              phone: lead.phone,
+              gmbRating: lead.gmbRating ? Number(lead.gmbRating) : null,
+              gmbReviewCount: lead.gmbReviewCount,
+              gmbCategories: (lead.gmbCategories as string[]) || [],
+              facebookUrl: lead.facebookUrl,
+              instagramUrl: lead.instagramUrl,
+              linkedinUrl: lead.linkedinUrl,
+              twitterUrl: lead.twitterUrl,
+              tiktokUrl: lead.tiktokUrl,
+              youtubeUrl: lead.youtubeUrl,
+            };
 
-          const result = computeScore({ lead: leadData, enrichment, weights: weightConfigs });
+            const enrichment: EnrichmentPayload = {
+              website_analysis: enrichmentRaw.website_analysis as EnrichmentPayload["website_analysis"],
+              social_analysis: enrichmentRaw.social_analysis as EnrichmentPayload["social_analysis"],
+            };
 
-          await ctx.db.lead.update({
-            where: { id: lead.id },
-            data: {
-              overallScore: result.overallScore,
-              scorePriority: result.priority,
-              scoreComputedAt: new Date(),
-            },
-          });
-
-          for (const factor of result.factors) {
-            const weight = weights.find((w) => w.factorKey === factor.factorKey);
-            if (!weight) continue;
-            await ctx.db.leadScoringFactor.upsert({
-              where: {
-                leadId_scoringWeightId: {
-                  leadId: lead.id,
-                  scoringWeightId: weight.id,
-                },
-              },
-              create: {
-                leadId: lead.id,
-                scoringWeightId: weight.id,
-                rawValue: factor.rawValue,
-                weightedValue: factor.weightedValue,
-                explanation: factor.explanation,
-              },
-              update: {
-                rawValue: factor.rawValue,
-                weightedValue: factor.weightedValue,
-                explanation: factor.explanation,
-              },
+            computed.push({
+              lead,
+              result: computeScore({ lead: leadData, enrichment, weights: weightConfigs }),
+            });
+          } catch (error: any) {
+            errors.push({
+              leadId: lead.id,
+              companyName: lead.companyName,
+              message: error?.message || "Onbekende fout",
             });
           }
+        }
 
-          updated += 1;
-        } catch (error: any) {
-          errors.push({
-            leadId: lead.id,
-            companyName: lead.companyName,
-            message: error?.message || "Onbekende fout",
-          });
+        if (computed.length > 0) {
+          await ctx.db.$transaction(
+            computed.map(({ lead, result }) =>
+              ctx.db.lead.update({
+                where: { id: lead.id },
+                data: {
+                  overallScore: result.overallScore,
+                  scorePriority: result.priority,
+                  scoreComputedAt: new Date(),
+                },
+              }),
+            ),
+          );
+
+          await Promise.all(
+            computed.map(({ lead, result }) =>
+              upsertLeadScoringFactors(ctx.db, lead.id, result.factors, weights),
+            ),
+          );
+
+          updated += computed.length;
         }
       }
 
@@ -425,32 +466,7 @@ export const scoringRouter = router({
         },
       });
 
-      // Persist factors
-      for (const factor of result.factors) {
-        const weight = weights.find((w) => w.factorKey === factor.factorKey);
-        if (!weight) continue;
-
-        await ctx.db.leadScoringFactor.upsert({
-          where: {
-            leadId_scoringWeightId: {
-              leadId: input.leadId,
-              scoringWeightId: weight.id,
-            },
-          },
-          create: {
-            leadId: input.leadId,
-            scoringWeightId: weight.id,
-            rawValue: factor.rawValue,
-            weightedValue: factor.weightedValue,
-            explanation: factor.explanation,
-          },
-          update: {
-            rawValue: factor.rawValue,
-            weightedValue: factor.weightedValue,
-            explanation: factor.explanation,
-          },
-        });
-      }
+      await upsertLeadScoringFactors(ctx.db, input.leadId, result.factors, weights);
 
       await ctx.db.activity.create({
         data: {

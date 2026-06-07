@@ -39,9 +39,10 @@ export default function QuotePrintPage() {
   const [ready, setReady] = useState(false);
 
   const { data: quote, isLoading: quoteLoading, isError: quoteError } = trpc.quote.getById.useQuery({ id });
-  const { data: settings, isLoading: settingsLoading, isError: settingsError } = trpc.settings.getAll.useQuery(undefined, {
-    staleTime: 60_000,
-  });
+  const { data: settings, isLoading: settingsLoading, isError: settingsError } =
+    trpc.settings.getBranding.useQuery(undefined, {
+      staleTime: 60_000,
+    });
 
   const company = useMemo(() => {
     const map = settings || {};

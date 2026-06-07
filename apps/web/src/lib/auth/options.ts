@@ -3,7 +3,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@digitify/db";
 import { scryptSync, timingSafeEqual } from "crypto";
 import { log } from "@digitify/api/src/lib/logger";
-import { resolveWorkspaceOwnerId, resolveWorkspaceOwnerIdSync } from "@digitify/api/src/lib/workspace";
+import { resolveWorkspaceContext } from "@digitify/api/src/lib/workspace-registry";
 
 function normalizeAbsoluteUrl(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
@@ -130,38 +130,65 @@ export const authOptions: NextAuthOptions = {
         }
 
         log.auth.info("Login success", { userId: user.id, email });
-        const workspaceId = resolveWorkspaceOwnerIdSync(user);
+        const workspace = await resolveWorkspaceContext(prisma, user.id);
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           role: user.role,
-          workspaceId,
+          workspaceId: workspace.workspaceId,
+          workspaceRole: workspace.workspaceRole,
+          isPersonalWorkspace: workspace.isPersonalWorkspace,
         };
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
         token.sub = user.id;
         token.role = (user as { role?: string }).role;
         token.name = user.name;
         token.email = user.email;
         token.workspaceId = (user as { workspaceId?: string }).workspaceId;
+        token.workspaceRole = (user as { workspaceRole?: string }).workspaceRole;
+        token.isPersonalWorkspace = (user as { isPersonalWorkspace?: boolean }).isPersonalWorkspace;
         return token;
       }
-      if (token.sub && typeof token.workspaceId !== "string") {
-        token.workspaceId = await resolveWorkspaceOwnerId(prisma, token.sub);
+
+      const hasWorkspaceContext =
+        typeof token.workspaceId === "string"
+        && typeof token.workspaceRole === "string"
+        && typeof token.isPersonalWorkspace === "boolean";
+
+      if (trigger === "update" || !hasWorkspaceContext) {
+        if (token.sub) {
+          const workspace = await resolveWorkspaceContext(prisma, token.sub);
+          token.workspaceId = workspace.workspaceId;
+          token.workspaceRole = workspace.workspaceRole;
+          token.isPersonalWorkspace = workspace.isPersonalWorkspace;
+        }
       }
+
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
-        (session.user as { id?: string; role?: string; workspaceId?: string }).id = token.sub;
-        (session.user as { role?: string }).role = token.role as string | undefined;
-        (session.user as { workspaceId?: string }).workspaceId =
+        const sessionUser = session.user as {
+          id?: string;
+          role?: string;
+          workspaceId?: string;
+          workspaceRole?: string;
+          isPersonalWorkspace?: boolean;
+        };
+        sessionUser.id = token.sub;
+        sessionUser.role = token.role as string | undefined;
+        sessionUser.workspaceId =
           typeof token.workspaceId === "string" ? token.workspaceId : undefined;
+        sessionUser.workspaceRole =
+          typeof token.workspaceRole === "string" ? token.workspaceRole : undefined;
+        sessionUser.isPersonalWorkspace =
+          typeof token.isPersonalWorkspace === "boolean" ? token.isPersonalWorkspace : undefined;
       }
       return session;
     },

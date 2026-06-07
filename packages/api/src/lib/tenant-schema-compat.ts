@@ -416,7 +416,16 @@ const TENANT_SCHEMA_STATEMENTS = [
   `ALTER TABLE "email_templates" ADD COLUMN IF NOT EXISTS "bodyFormat" "EmailTemplateBodyFormat" NOT NULL DEFAULT 'TEXT'`,
 ];
 
+/** Skip on production tRPC hot path unless TENANT_SCHEMA_ENSURE=true (migrations are the source of truth). */
+export function isTenantSchemaEnsureEnabled() {
+  const flag = process.env.TENANT_SCHEMA_ENSURE?.trim().toLowerCase();
+  if (flag === "1" || flag === "true" || flag === "yes") return true;
+  if (flag === "0" || flag === "false" || flag === "no") return false;
+  return process.env.NODE_ENV !== "production";
+}
+
 export async function ensureTenantSchemaCompatibility(db: PrismaClient, options?: { force?: boolean }) {
+  if (!options?.force && !isTenantSchemaEnsureEnabled()) return;
   const now = Date.now();
   const force = Boolean(options?.force);
   if (!force && !ensurePromise && failedAt > 0 && now - failedAt < FAILURE_RETRY_TTL_MS) return;

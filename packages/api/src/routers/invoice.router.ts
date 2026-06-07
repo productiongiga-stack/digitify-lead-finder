@@ -4,7 +4,7 @@ import { protectedProcedure, router, mutationProcedure } from "../trpc";
 import { migrateLegacyWorkspaceInvoices } from "../lib/migrate-workspace-invoices";
 import { nextInvoiceNumber, serializeInvoice } from "../lib/invoice-serializer";
 import { buildInvoiceOutboundBody } from "../lib/invoice-outbound";
-import { sendBrandedEmail } from "../lib/email-sender";
+import { sendTemplatedEmail } from "../lib/send-templated-email";
 import { workspaceScopeFromUser, type WorkspaceScope } from "../lib/workspace-settings";
 
 /** Quotes may use workspace id or legacy owner user id as createdById. */
@@ -48,6 +48,8 @@ export const invoiceRouter = router({
           status: z
             .enum(["DRAFT", "SENT", "PARTIALLY_PAID", "PAID", "OVERDUE", "CANCELLED"])
             .optional(),
+          page: z.number().min(1).default(1),
+          pageSize: z.number().min(1).max(100).default(25),
         })
         .default({}),
     )
@@ -55,30 +57,64 @@ export const invoiceRouter = router({
       const scope = workspaceScopeFromUser(ctx.user);
       await migrateLegacyWorkspaceInvoices(ctx.db, scope);
 
-      const rows = await ctx.db.workspaceInvoice.findMany({
-        where: { createdById: scope.workspaceId },
-        include: invoiceInclude,
-        orderBy: { issueDate: "desc" },
-      });
-
-      const allItems = rows.map(serializeInvoice);
-      const items = input.status
-        ? allItems.filter((item) => item.status === input.status)
-        : allItems;
-      const openItems = allItems.filter((item) => !["PAID", "CANCELLED"].includes(item.status));
-      const summary = {
-        total: allItems.length,
-        open: openItems.length,
-        draft: allItems.filter((item) => item.status === "DRAFT").length,
-        sent: allItems.filter((item) => item.status === "SENT").length,
-        overdue: allItems.filter((item) => item.status === "OVERDUE").length,
-        paid: allItems.filter((item) => item.status === "PAID").length,
-        totalOpenAmount: openItems.reduce((sum, item) => sum + item.total, 0),
+      const workspaceWhere = { createdById: scope.workspaceId };
+      const listWhere = {
+        ...workspaceWhere,
+        ...(input.status ? { status: input.status } : {}),
       };
-      const invoicedQuoteIds = allItems
-        .map((item) => item.quoteId)
+
+      const [rows, total, statusGroups, openAggregate, invoicedQuoteRows] = await Promise.all([
+        ctx.db.workspaceInvoice.findMany({
+          where: listWhere,
+          include: invoiceInclude,
+          orderBy: { issueDate: "desc" },
+          skip: (input.page - 1) * input.pageSize,
+          take: input.pageSize,
+        }),
+        ctx.db.workspaceInvoice.count({ where: listWhere }),
+        ctx.db.workspaceInvoice.groupBy({
+          by: ["status"],
+          where: workspaceWhere,
+          _count: { _all: true },
+        }),
+        ctx.db.workspaceInvoice.aggregate({
+          where: {
+            ...workspaceWhere,
+            status: { notIn: ["PAID", "CANCELLED"] },
+          },
+          _count: { _all: true },
+          _sum: { total: true },
+        }),
+        ctx.db.workspaceInvoice.findMany({
+          where: { ...workspaceWhere, quoteId: { not: null } },
+          select: { quoteId: true },
+        }),
+      ]);
+
+      const countByStatus = new Map(statusGroups.map((row) => [row.status, row._count._all]));
+      const items = rows.map(serializeInvoice);
+      const summary = {
+        total: statusGroups.reduce((sum, row) => sum + row._count._all, 0),
+        open: openAggregate._count._all,
+        draft: countByStatus.get("DRAFT") ?? 0,
+        sent: countByStatus.get("SENT") ?? 0,
+        overdue: countByStatus.get("OVERDUE") ?? 0,
+        paid: countByStatus.get("PAID") ?? 0,
+        totalOpenAmount: openAggregate._sum.total ?? 0,
+      };
+      const invoicedQuoteIds = invoicedQuoteRows
+        .map((row) => row.quoteId)
         .filter((id): id is string => typeof id === "string" && id.length > 0);
-      return { items, summary, invoicedQuoteIds };
+
+      return {
+        items,
+        summary,
+        invoicedQuoteIds,
+        page: input.page,
+        pageSize: input.pageSize,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / input.pageSize)),
+      };
     }),
 
   listBillableQuotes: protectedProcedure.query(async ({ ctx }) => {
@@ -409,19 +445,19 @@ export const invoiceRouter = router({
         });
       }
 
-      const result = await sendBrandedEmail(ctx.db, {
+      const result = await sendTemplatedEmail(ctx.db, ctx.user.workspaceId!, {
+        templateKey: "invoice.reminder",
         toEmail: current.clientEmail,
-        subject: `Betalingsherinnering ${current.invoiceNumber}`,
-        body: [
-          `Beste ${current.clientName},`,
-          ``,
-          `Dit is een vriendelijke herinnering voor factuur ${current.invoiceNumber}.`,
-          `Vervaldatum: ${new Date(current.dueDate).toLocaleDateString("nl-BE")}`,
-          `Openstaand bedrag: ${new Intl.NumberFormat("nl-BE", { style: "currency", currency: current.currency || "EUR" }).format(current.total)}`,
-          `Betalingsreferentie: ${current.paymentReference}`,
-          ``,
-          `Gelieve dit bedrag zo snel mogelijk te voldoen.`,
-        ].join("\n"),
+        placeholderContext: {
+          contactName: current.clientName,
+          invoiceNumber: current.invoiceNumber,
+          dueDate: new Date(current.dueDate).toLocaleDateString("nl-BE"),
+          invoiceAmount: new Intl.NumberFormat("nl-BE", {
+            style: "currency",
+            currency: current.currency || "EUR",
+          }).format(current.total),
+          paymentReference: current.paymentReference,
+        },
         recipientCompany: current.clientCompany || current.clientName,
         userId: ctx.user.id,
       });

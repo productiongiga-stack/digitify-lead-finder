@@ -1,7 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import { readSettingBoolean, readSettingString } from "@/lib/settings";
+import { SETTINGS_PAGE_QUERY_OPTS } from "@/lib/settings-query-options";
 import {
   Badge,
   Button,
@@ -10,15 +13,22 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  Input,
+  Label,
   Skeleton,
+  Switch,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from "@digitify/ui";
-import { ArrowLeft, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowLeft, Database, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
 
 function formatMs(value: number) {
@@ -37,6 +47,102 @@ function formatTrend(direction: "up" | "down" | "flat" | "na", value: number | n
   if (direction === "na" || value === null) return "n.v.t.";
   if (direction === "flat") return `${value}% (stabiel)`;
   return direction === "up" ? `+${value}%` : `${value}%`;
+}
+
+function CacheSettingsPanel() {
+  const utils = trpc.useUtils();
+  const { showToast } = useToast();
+  const cacheQuery = trpc.settings.getCacheSettings.useQuery(undefined, SETTINGS_PAGE_QUERY_OPTS);
+  const clearCaches = trpc.settings.clearWorkspaceCaches.useMutation({
+    onSuccess: () => showToast({ title: "Caches geleegd", description: "Settings- en dashboard-cache zijn gereset." }),
+  });
+  const batchUpdate = trpc.settings.batchUpdate.useMutation({
+    onSuccess: () => {
+      utils.settings.getCacheSettings.invalidate();
+      showToast({ title: "Cache-instellingen opgeslagen" });
+    },
+  });
+
+  const [dashboardTtl, setDashboardTtl] = useState("5");
+  const [settingsTtl, setSettingsTtl] = useState("45");
+  const [clientStale, setClientStale] = useState("5");
+  const [prefetchEnabled, setPrefetchEnabled] = useState(true);
+
+  useEffect(() => {
+    if (!cacheQuery.data) return;
+    setDashboardTtl(readSettingString(cacheQuery.data, "cache.dashboard_ttl_minutes", "5"));
+    setSettingsTtl(readSettingString(cacheQuery.data, "cache.settings_ttl_seconds", "45"));
+    setClientStale(readSettingString(cacheQuery.data, "cache.client_stale_time_minutes", "5"));
+    setPrefetchEnabled(readSettingBoolean(cacheQuery.data, "cache.prefetch_enabled", true));
+  }, [cacheQuery.data]);
+
+  if (cacheQuery.isLoading) return <Skeleton className="h-48 w-full" />;
+
+  const defaults = cacheQuery.data?.defaults;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Database className="h-4 w-4" />
+            Server cache
+          </CardTitle>
+          <CardDescription>
+            TTL voor dashboard-aggregaties en settings-bundles. Standaard: dashboard {defaults?.dashboardTtlMinutes ?? 5} min, settings {defaults?.settingsTtlSeconds ?? 45}s.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label>Dashboard cache (minuten)</Label>
+            <Input value={dashboardTtl} onChange={(e) => setDashboardTtl(e.target.value)} type="number" min={1} max={60} />
+          </div>
+          <div className="space-y-2">
+            <Label>Settings cache (seconden)</Label>
+            <Input value={settingsTtl} onChange={(e) => setSettingsTtl(e.target.value)} type="number" min={15} max={300} />
+          </div>
+          <div className="space-y-2">
+            <Label>Client stale-time (minuten)</Label>
+            <Input value={clientStale} onChange={(e) => setClientStale(e.target.value)} type="number" min={1} max={30} />
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <p className="text-sm font-medium">Prefetch ingeschakeld</p>
+              <p className="text-xs text-muted-foreground">Navigatie vooraf laden waar mogelijk.</p>
+            </div>
+            <Switch checked={prefetchEnabled} onCheckedChange={setPrefetchEnabled} />
+          </div>
+          <div className="flex flex-wrap gap-2 sm:col-span-2">
+            <Button
+              onClick={() =>
+                batchUpdate.mutate([
+                  { key: "cache.dashboard_ttl_minutes", value: dashboardTtl.trim() || "5" },
+                  { key: "cache.settings_ttl_seconds", value: settingsTtl.trim() || "45" },
+                  { key: "cache.client_stale_time_minutes", value: clientStale.trim() || "5" },
+                  { key: "cache.prefetch_enabled", value: String(prefetchEnabled) },
+                ])
+              }
+              disabled={batchUpdate.isPending}
+            >
+              <Save className="mr-2 h-4 w-4" />
+              Opslaan
+            </Button>
+            <Button variant="outline" onClick={() => clearCaches.mutate()} disabled={clearCaches.isPending}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              Alle caches legen
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      <p className="text-xs text-muted-foreground">
+        Bezoekers- en tracker-instellingen staan onder{" "}
+        <Link href="/settings/analytics" className="font-medium text-primary underline-offset-2 hover:underline">
+          Analytics & tracking
+        </Link>
+        .
+      </p>
+    </div>
+  );
 }
 
 export default function PerformanceSettingsPage() {
@@ -81,9 +187,9 @@ export default function PerformanceSettingsPage() {
             <ArrowLeft className="h-4 w-4" />
             Terug naar instellingen
           </Link>
-          <h1 className="text-xl font-bold tracking-tight">Performance</h1>
+          <h1 className="text-xl font-bold tracking-tight">Prestaties & cache</h1>
           <p className="text-sm text-muted-foreground">
-            Live overzicht van trage routes en querys. Ververs elke 15 seconden.
+            API-latency, trage queries en cache-TTL. Alleen voor workspace owners.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -108,6 +214,17 @@ export default function PerformanceSettingsPage() {
         </div>
       </div>
 
+      <Tabs defaultValue="metrics" className="space-y-4">
+        <TabsList className="settings-domain-tabs settings-domain-tabs-cols-2 w-full max-w-md">
+          <TabsTrigger value="metrics" className="settings-domain-tab">API-metrics</TabsTrigger>
+          <TabsTrigger value="cache" className="settings-domain-tab">Cache</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="cache" className="mt-0">
+          <CacheSettingsPanel />
+        </TabsContent>
+
+        <TabsContent value="metrics" className="mt-0 space-y-4">
       <div className="grid gap-3 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
@@ -262,6 +379,8 @@ export default function PerformanceSettingsPage() {
           )}
         </CardContent>
       </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -6,6 +6,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./master-shell": "./src/master-shell.ts",
     "./safe-url": "./src/safe-url.ts",
     "./layouts": "./src/layouts.ts",
     "./html-template": "./src/html-template.ts",

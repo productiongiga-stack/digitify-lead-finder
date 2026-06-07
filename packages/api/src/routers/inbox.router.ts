@@ -2,15 +2,13 @@ import { z } from "zod";
 import { router, protectedProcedure, aiRateLimitedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { ImapFlow } from "imapflow";
-import nodemailer from "nodemailer";
 import { createHash } from "node:crypto";
 import { type PrismaClient, Prisma } from "@digitify/db";
+import { buildLeadContext, replacePlaceholders } from "@digitify/email";
 import { normalizeTlsOptions } from "../lib/email-utils";
-import { buildLeadContext, generateBrandedHtml, normalizeHtmlEmailDocument, replacePlaceholders, type EmailLayout } from "@digitify/email";
-import { loadEmailSettings } from "../lib/email-sender";
+import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
 import { findLeadByEmailInWorkspace, resolveLeadForEmail, ensureLeadLink } from "../lib/lead-link";
-import { extractEmailTemplateMetadata } from "../lib/email-content";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser, type WorkspaceScope } from "../lib/workspace-settings";
 import { log } from "../lib/logger";
 import { generateInboxAiMessage } from "../lib/inbox-ai-reply";
@@ -211,19 +209,6 @@ async function assertNotDuplicateSend(
   recentSendGuards.set(params.guardKey, now);
 }
 
-function resolveLayoutForType(type: string, fallback: EmailLayout): EmailLayout {
-  switch (type) {
-    case "quote":
-      return "proposal";
-    case "follow_up":
-      return "followup";
-    case "booking_confirmation":
-      return "business";
-    default:
-      return fallback;
-  }
-}
-
 function mapInboxTypeToEmailType(type: "quote" | "lead_contact" | "reply" | "follow_up" | "general" | "booking_confirmation") {
   switch (type) {
     case "quote":
@@ -261,8 +246,27 @@ function resolveAppUrl() {
   return "http://localhost:3000";
 }
 
+const IMAP_SETTING_KEYS = [
+  "email.imap_host",
+  "email.imap_port",
+  "email.imap_user",
+  "email.imap_pass",
+  "email.imap_tls",
+  "email.smtp_servername",
+  "email.smtp_tls_reject_unauthorized",
+] as const;
+
+const SMTP_SETTING_KEYS = [
+  "email.smtp_host",
+  "email.smtp_port",
+  "email.smtp_user",
+  "email.smtp_pass",
+  "email.smtp_servername",
+  "email.smtp_tls_reject_unauthorized",
+] as const;
+
 async function getImapConfig(db: PrismaClient, scope: WorkspaceScope) {
-  const rows = await loadWorkspaceSettingRows(db, scope);
+  const rows = await loadWorkspaceSettingRows(db, scope, [...IMAP_SETTING_KEYS]);
   const settings = settingsRowsToMap(rows);
   const host = getSettingString(settings, "email.imap_host");
   const port = getSettingString(settings, "email.imap_port", "993");
@@ -293,7 +297,7 @@ async function getImapConfig(db: PrismaClient, scope: WorkspaceScope) {
 }
 
 async function getSmtpConfig(db: PrismaClient, scope: WorkspaceScope) {
-  const rows = await loadWorkspaceSettingRows(db, scope);
+  const rows = await loadWorkspaceSettingRows(db, scope, [...SMTP_SETTING_KEYS]);
   const settings = settingsRowsToMap(rows);
   const host = getSettingString(settings, "email.smtp_host");
   const port = getSettingString(settings, "email.smtp_port", "587");
@@ -449,17 +453,6 @@ async function sendInboxMessage(params: {
 
   const subject = replacePlaceholders(params.input.subject.trim(), placeholderContext, { removeMissing: true }).trim() || "Bericht";
   const resolvedBody = replacePlaceholders(params.input.body.trim(), placeholderContext, { removeMissing: true }).trim();
-  const templateMetadata = extractEmailTemplateMetadata(resolvedBody);
-  const isHtmlBody = templateMetadata.bodyFormat === "HTML";
-  const plainBody = isHtmlBody
-    ? templateMetadata.cleanBody
-    : [
-        templateMetadata.cleanBody,
-        emailSettings.signature.trim() ? emailSettings.signature.trim() : "",
-        emailSettings.footer.trim() ? emailSettings.footer.trim() : "",
-      ]
-        .filter(Boolean)
-        .join("\n\n");
   const draft = await params.db.emailDraft.create({
     data: {
       leadId: linkedLead?.id ?? null,
@@ -471,72 +464,43 @@ async function sendInboxMessage(params: {
       type: mapInboxTypeToEmailType(params.input.type),
     },
   });
-  const trackingPixel = `<img src="${resolveAppUrl()}/api/public/email/open/${encodeURIComponent(draft.id)}" alt="" width="1" height="1" style="display:none;border:0;outline:none;"/>`;
-  const htmlBody = isHtmlBody
-    ? normalizeHtmlEmailDocument(plainBody)
-    : generateBrandedHtml({
-        subject,
-        body: plainBody,
-        companyName: emailSettings.companyName || fromName || "Digitify",
-        primaryColor: emailSettings.primaryColor,
-        fromName,
-        fromEmail,
-        headerSlogan: emailSettings.headerSlogan,
-        recipientCompany: linkedLead?.companyName || params.input.to,
-        logoUrl: emailSettings.logoUrl,
-        hidePoweredBy: true,
-        layout: templateMetadata.layout || resolveLayoutForType(params.input.type, emailSettings.defaultLayout),
-        ctaText: templateMetadata.ctaText,
-        ctaUrl: templateMetadata.ctaUrl,
-        typographyMode: emailSettings.typographyMode,
-      });
-  const htmlBodyWithTracking = `${htmlBody}${trackingPixel}`;
 
-  const transporter = nodemailer.createTransport({
-    host: smtpConfig.host,
-    port: smtpConfig.port,
-    secure: smtpConfig.port === 465,
-    auth: { user: smtpConfig.user, pass: smtpConfig.pass },
-    tls: smtpConfig.tls,
+  const sendResult = await sendBrandedEmail(params.db, {
+    toEmail: params.input.to,
+    subject,
+    body: resolvedBody,
+    leadId: linkedLead?.id,
+    recipientCompany: linkedLead?.companyName || params.input.to,
+    placeholderContext,
+    userId: params.userId,
+    trackingDraftId: draft.id,
+    inReplyTo: params.input.inReplyTo,
+    references: params.input.references,
   });
 
-  let info: nodemailer.SentMessageInfo;
-  try {
-    info = await transporter.sendMail({
-      from: fromName ? `"${fromName}" <${fromEmail}>` : fromEmail,
-      to: params.input.to,
-      subject,
-      html: htmlBodyWithTracking,
-      text: plainBody,
-      replyTo: emailSettings.replyTo || undefined,
-      bcc: emailSettings.bcc || undefined,
-      inReplyTo: params.input.inReplyTo || undefined,
-      references: params.input.references || undefined,
-    });
-
-    if (!info.messageId) {
-      throw new Error("Missing messageId");
-    }
-  } catch (error) {
+  if (!sendResult.success || !sendResult.messageId) {
     await params.db.emailDraft.update({
       where: { id: draft.id },
       data: {
         status: "FAILED",
-        rejectionNote: error instanceof Error ? error.message : "E-mail kon niet worden verzonden",
+        rejectionNote: sendResult.error || "E-mail kon niet worden verzonden",
       },
     });
     throw new TRPCError({
       code: "INTERNAL_SERVER_ERROR",
-      message: "E-mail kon niet worden verzonden",
+      message: sendResult.error || "E-mail kon niet worden verzonden",
     });
   }
+
+  const messageId = sendResult.messageId;
+  const htmlBodyWithTracking = sendResult.html || "";
 
   await params.db.emailDraft.update({
     where: { id: draft.id },
     data: {
       status: "SENT",
       sentAt: new Date(),
-      messageId: info.messageId,
+      messageId,
       rejectionNote: null,
     },
   });
@@ -547,7 +511,7 @@ async function sendInboxMessage(params: {
       to: params.input.to,
       subject,
       html: htmlBodyWithTracking,
-      messageId: info.messageId,
+      messageId,
       inReplyTo: params.input.inReplyTo,
       references: params.input.references,
     });
@@ -555,7 +519,7 @@ async function sendInboxMessage(params: {
     log.email.warn("IMAP append to Sent failed", {
       userId: params.userId,
       leadId: linkedLead?.id ?? null,
-      messageId: info.messageId,
+      messageId,
     }, error);
   }
 
@@ -572,15 +536,15 @@ async function sendInboxMessage(params: {
         subject,
         from: fromEmail,
         to: params.input.to,
-        messageId: info.messageId,
-        bodyPreview: plainBody.slice(0, 280),
+        messageId,
+        bodyPreview: resolvedBody.slice(0, 280),
         sendGuardKey: guardKey,
         draftId: draft.id,
       },
     },
   });
 
-  return { success: true, status: "sent" as const, messageId: info.messageId };
+  return { success: true, status: "sent" as const, messageId };
 }
 
 /* ---------- router ---------- */

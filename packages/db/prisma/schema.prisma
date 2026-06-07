@@ -18,11 +18,15 @@ model User {
   emailVerified  DateTime?
   role           UserRole  @default(MEMBER)
   workspaceOwnerId String?
+  activeWorkspaceId String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   workspaceOwner   User?  @relation("WorkspaceMembers", fields: [workspaceOwnerId], references: [id], onDelete: SetNull)
   workspaceMembers User[] @relation("WorkspaceMembers")
+  ownedWorkspaces  Workspace[] @relation("WorkspaceOwner")
+  workspaceMemberships WorkspaceMembership[] @relation("WorkspaceMembershipUser")
+  sentWorkspaceInvites WorkspaceMembership[] @relation("WorkspaceMembershipInviter")
 
   accounts       Account[]
   sessions       Session[]
@@ -38,10 +42,6 @@ model User {
   reports        Report[]
   openclawLogs   OpenClawLog[]
   permissions    UserPermission[]
-  pipelineStages PipelineStage[]
-  tags           Tag[]
-  emailTemplates EmailTemplate[]
-  serviceCatalogEntries ServiceCatalog[]
   bookings       Booking[]
   hostedBookings Booking[] @relation("BookingHost")
   bookingEventTypes BookingEventType[]
@@ -62,9 +62,59 @@ model User {
   googleAdAccounts     GoogleAdAccount[] @relation("GoogleAdAccountCreatedBy")
   googleAdPlans        GoogleAdPlan[]    @relation("GoogleAdPlanCreatedBy")
   approvedGoogleAdPlans GoogleAdPlan[]   @relation("GoogleAdPlanApprovedBy")
+  mediaGenerations      MediaGeneration[]
 
   @@index([workspaceOwnerId])
+  @@index([activeWorkspaceId])
   @@map("users")
+}
+
+enum WorkspaceType {
+  PERSONAL
+  TEAM
+}
+
+enum WorkspaceMembershipStatus {
+  ACTIVE
+  INVITED
+  DECLINED
+}
+
+model Workspace {
+  id          String        @id @default(cuid())
+  name        String
+  type        WorkspaceType @default(TEAM)
+  ownerUserId String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  owner       User                  @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  memberships WorkspaceMembership[]
+
+  @@index([ownerUserId])
+  @@map("workspaces")
+}
+
+model WorkspaceMembership {
+  id          String                    @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        UserRole                  @default(MEMBER)
+  status      WorkspaceMembershipStatus @default(ACTIVE)
+  invitedById String?
+  invitedAt   DateTime?
+  respondedAt DateTime?
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation("WorkspaceMembershipUser", fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy User?     @relation("WorkspaceMembershipInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, userId])
+  @@index([userId, status])
+  @@index([workspaceId, status])
+  @@map("workspace_memberships")
 }
 
 model RegistrationRequest {
@@ -80,6 +130,7 @@ model RegistrationRequest {
   emailVerifiedAt       DateTime?
   reviewedById          String?
   targetWorkspaceOwnerId String?
+  targetWorkspaceId     String?
   invitedById           String?
   reviewedAt            DateTime?
   rejectionReason       String?                   @db.Text
@@ -90,6 +141,7 @@ model RegistrationRequest {
 
   @@index([status, createdAt])
   @@index([targetWorkspaceOwnerId, status, createdAt])
+  @@index([targetWorkspaceId, status, createdAt])
   @@index([invitedById])
   @@index([email])
   @@map("registration_requests")
@@ -267,6 +319,9 @@ model Lead {
   @@index([createdById, createdAt(sort: Desc)])
   @@index([createdById, updatedAt(sort: Desc)])
   @@index([createdById, status])
+  @@index([email])
+  @@index([gmbPlaceId])
+  @@index([createdById, gmbPlaceId])
   @@map("leads")
 }
 
@@ -293,6 +348,7 @@ model LeadContact {
 
   lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
+  @@index([leadId])
   @@map("lead_contacts")
 }
 
@@ -342,7 +398,6 @@ model PipelineStage {
   sortOrder Int     @default(0)
   isDefault Boolean @default(false)
 
-  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
   leads Lead[]
 
   @@index([createdById])
@@ -357,7 +412,6 @@ model Tag {
   name        String
   color       String @default("#6366f1")
 
-  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
   leads LeadTag[]
 
   @@index([createdById])
@@ -491,6 +545,18 @@ enum EmailTemplateBodyFormat {
   HTML
 }
 
+enum EmailModule {
+  LEADS
+  CAMPAIGNS
+  QUOTES
+  INVOICES
+  BOOKINGS
+  REVIEWS
+  AUTH
+  INBOX
+  SYSTEM
+}
+
 model EmailTemplate {
   id          String                   @id @default(cuid())
   createdById String?
@@ -500,6 +566,9 @@ model EmailTemplate {
   bodyFormat  EmailTemplateBodyFormat  @default(TEXT)
   type        EmailTemplateType        @default(CUSTOM)
   layout      EmailTemplateLayout @default(modern)
+  module      EmailModule              @default(LEADS)
+  templateKey String?
+  isSystem    Boolean                  @default(false)
   description String              @default("")
   ctaText     String              @default("")
   ctaUrl      String              @default("")
@@ -508,14 +577,15 @@ model EmailTemplate {
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
 
-  createdBy User?     @relation(fields: [createdById], references: [id], onDelete: Cascade)
   campaign  Campaign? @relation(fields: [campaignId], references: [id])
   drafts    EmailDraft[]
 
   @@index([createdById])
   @@index([createdById, type])
   @@index([createdById, layout])
+  @@index([createdById, module])
   @@unique([createdById, name])
+  @@unique([createdById, templateKey])
   @@map("email_templates")
 }
 
@@ -613,6 +683,7 @@ model Note {
   lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
   user User @relation(fields: [userId], references: [id])
 
+  @@index([leadId])
   @@map("notes")
 }
 
@@ -1406,8 +1477,6 @@ model ServiceCatalog {
   sortOrder   Int     @default(0)
   metadata    Json?   // extra config like packages, included items
 
-  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
-
   @@index([createdById])
   @@unique([createdById, category, name])
   @@map("service_catalog")
@@ -1468,4 +1537,60 @@ enum ChatRole {
   VISITOR
   BOT
   AGENT
+}
+
+enum MediaGenerationType {
+  IMAGE
+  VIDEO
+  MARKETING_AD
+  LIP_SYNC
+}
+
+enum MediaGenerationStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model MediaGeneration {
+  id            String                @id @default(cuid())
+  workspaceId   String
+  userId        String
+  type          MediaGenerationType
+  model         String
+  prompt        String                @db.Text
+  status        MediaGenerationStatus @default(PENDING)
+  requestId     String?
+  outputUrl     String?
+  blobUrl       String?
+  metadata      Json?
+  socialPostId  String?
+  errorMessage  String?               @db.Text
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, updatedAt])
+  @@map("media_generations")
+}
+
+model WorkspaceAnalyticsEvent {
+  id          String   @id @default(cuid())
+  workspaceId String
+  category    String
+  name        String
+  path        String?
+  userId      String?
+  sessionId   String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([workspaceId, category, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("workspace_analytics_events")
 }

@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { trpc } from "@/lib/trpc/client";
 import { cn } from "@/lib/utils";
 import {
@@ -27,6 +30,7 @@ import {
   TabsTrigger,
   Textarea,
 } from "@digitify/ui";
+import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
   CalendarDays,
@@ -66,6 +70,23 @@ import {
 } from "@/components/social/social-placement-editor";
 import { persistPlacementAssets } from "@/lib/persist-social-assets";
 import { FacebookPageAvatar, InstagramPageAvatar } from "@/components/social/social-platform-avatars";
+import type { SocialAgendaPost } from "@/components/social/social-agenda";
+
+const SocialImageGenerator = dynamic(
+  () =>
+    import("@/components/social/social-image-generator").then((module) => module.SocialImageGenerator),
+  { ssr: false, loading: () => <Skeleton className="h-48 w-full rounded-xl" /> },
+);
+
+const SocialAgenda = dynamic(
+  () => import("@/components/social/social-agenda").then((module) => module.SocialAgenda),
+  { ssr: false, loading: () => <Skeleton className="h-64 w-full rounded-xl" /> },
+);
+
+const SocialQueuePanel = dynamic(
+  () => import("./social-queue-panel").then((module) => module.SocialQueuePanel),
+  { ssr: false, loading: () => <Skeleton className="h-64 w-full rounded-xl" /> },
+);
 
 type Platform = "FACEBOOK" | "INSTAGRAM";
 type RowStatus = "DRAFT" | "PENDING_APPROVAL" | "SCHEDULED" | "PUBLISHING" | "PUBLISHED" | "FAILED" | "CANCELLED";
@@ -373,12 +394,78 @@ function explainMetaError(message: string) {
   return { title: "Publicatiefout", description: "Bekijk de technische details hieronder en probeer daarna opnieuw." };
 }
 
-function MetadataStat({ label, value }: { label: string; value: string }) {
+type SocialHeroStatTone = "amber" | "emerald" | "rose";
+
+const SOCIAL_HERO_STAT_TONES: Record<
+  SocialHeroStatTone,
+  { shell: string; icon: string; value: string; active: string }
+> = {
+  amber: {
+    shell:
+      "border-amber-200/80 bg-gradient-to-br from-amber-50/95 via-white/80 to-white/60 dark:border-amber-500/25 dark:from-amber-950/50 dark:via-white/5 dark:to-transparent",
+    icon: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+    value: "text-amber-800 dark:text-amber-200",
+    active: "ring-amber-400/40 shadow-[0_8px_24px_rgba(245,158,11,0.18)]",
+  },
+  emerald: {
+    shell:
+      "border-emerald-200/80 bg-gradient-to-br from-emerald-50/95 via-white/80 to-white/60 dark:border-emerald-500/25 dark:from-emerald-950/50 dark:via-white/5 dark:to-transparent",
+    icon: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+    value: "text-emerald-800 dark:text-emerald-200",
+    active: "ring-emerald-400/40 shadow-[0_8px_24px_rgba(16,185,129,0.18)]",
+  },
+  rose: {
+    shell:
+      "border-rose-200/80 bg-gradient-to-br from-rose-50/95 via-white/80 to-white/60 dark:border-rose-500/25 dark:from-rose-950/50 dark:via-white/5 dark:to-transparent",
+    icon: "bg-rose-500/15 text-rose-600 dark:text-rose-400",
+    value: "text-rose-800 dark:text-rose-200",
+    active: "ring-rose-400/40 shadow-[0_8px_24px_rgba(244,63,94,0.18)]",
+  },
+};
+
+function SocialHeroStat({
+  label,
+  value,
+  icon: Icon,
+  tone,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  icon: LucideIcon;
+  tone: SocialHeroStatTone;
+  onClick?: () => void;
+}) {
+  const styles = SOCIAL_HERO_STAT_TONES[tone];
+  const isActive = value > 0;
+  const Wrapper = onClick ? "button" : "div";
+
   return (
-    <div className="rounded-2xl border border-white/70 bg-white/65 p-3 shadow-sm backdrop-blur dark:border-white/10 dark:bg-white/5">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
-      <p className="mt-1 text-lg font-semibold tracking-tight">{value}</p>
-    </div>
+    <Wrapper
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      className={cn(
+        "group flex min-w-0 flex-1 flex-col gap-2 rounded-2xl border p-3 text-left shadow-sm backdrop-blur transition-all duration-200",
+        styles.shell,
+        onClick && "cursor-pointer hover:-translate-y-0.5 hover:shadow-md active:translate-y-0",
+        isActive && `ring-1 ${styles.active}`,
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span
+          className={cn(
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-transform group-hover:scale-105",
+            styles.icon,
+          )}
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+        <span className={cn("text-2xl font-bold tabular-nums leading-none tracking-tight", styles.value)}>
+          {value}
+        </span>
+      </div>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
+    </Wrapper>
   );
 }
 
@@ -620,8 +707,16 @@ function InstagramPreview({ caption, imageUrl, firstComment, format }: { caption
   );
 }
 
+const SOCIAL_TABS = ["composer", "agenda", "queue"] as const;
+type SocialTab = (typeof SOCIAL_TABS)[number];
+
 export function SocialPageInner() {
   const { showToast } = useToast();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { data: session } = useSession();
+  const role = (session?.user as { role?: string } | undefined)?.role;
+  const canSchedule = role === "OWNER" || role === "ADMIN";
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
@@ -631,7 +726,25 @@ export function SocialPageInner() {
   const [targetFacebook, setTargetFacebook] = useState(true);
   const [targetInstagram, setTargetInstagram] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
-  const [activeTab, setActiveTab] = useState<"composer" | "queue">("composer");
+  const [activeTab, setActiveTab] = useState<SocialTab>("composer");
+
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (tab && SOCIAL_TABS.includes(tab as SocialTab)) {
+      setActiveTab(tab as SocialTab);
+    }
+  }, [searchParams]);
+
+  const handleTabChange = useCallback(
+    (tab: string) => {
+      if (!SOCIAL_TABS.includes(tab as SocialTab)) return;
+      setActiveTab(tab as SocialTab);
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("tab", tab);
+      router.replace(`/social?${params.toString()}`);
+    },
+    [router, searchParams],
+  );
   const [headline, setHeadline] = useState("");
   const [cta, setCta] = useState("");
   const [hashtags, setHashtags] = useState("digitalegroei marketing belgie");
@@ -783,6 +896,127 @@ export function SocialPageInner() {
     onError: (error) => showToast({ title: "Generatie mislukt", description: error.message, variant: "error" }),
   });
 
+  const importCreativeImage = trpc.media.importToBlob.useMutation();
+  const pendingImageJobId = searchParams.get("imageJob");
+  const pendingVideoJobId = searchParams.get("videoJob");
+  const [appliedImageJobId, setAppliedImageJobId] = useState<string | null>(null);
+  const [appliedVideoJobId, setAppliedVideoJobId] = useState<string | null>(null);
+  const creativeImageJob = trpc.media.getJobStatus.useQuery(
+    { jobId: pendingImageJobId || "" },
+    { enabled: Boolean(pendingImageJobId) && appliedImageJobId !== pendingImageJobId },
+  );
+  const creativeVideoJob = trpc.media.getJobStatus.useQuery(
+    { jobId: pendingVideoJobId || "" },
+    { enabled: Boolean(pendingVideoJobId) && appliedVideoJobId !== pendingVideoJobId },
+  );
+
+  useEffect(() => {
+    if (!pendingImageJobId || appliedImageJobId === pendingImageJobId || !creativeImageJob.data) return;
+    const status = creativeImageJob.data;
+    if (status.status !== "COMPLETED" || (!status.outputUrl && !status.blobUrl)) return;
+
+    let cancelled = false;
+
+    async function applyCreativeImageJob() {
+      try {
+        let imageUrl = status.blobUrl || status.outputUrl;
+        if (!imageUrl) return;
+
+        if (!status.blobUrl) {
+          const imported = await importCreativeImage.mutateAsync({ jobId: pendingImageJobId! });
+          imageUrl = imported.blobUrl || imageUrl;
+        }
+
+        if (cancelled) return;
+        setPlacementAssets((current) => {
+          const next = { ...current };
+          if (placements.includes("FEED")) next.FEED = { imageUrl };
+          if (placements.includes("STORY")) next.STORY = { imageUrl };
+          if (placements.includes("REEL") && !next.REEL?.videoUrl) next.REEL = { imageUrl };
+          return next;
+        });
+        setAppliedImageJobId(pendingImageJobId);
+        setActiveTab("composer");
+        showToast({ title: "Creative Studio-afbeelding toegevoegd" });
+      } catch (error) {
+        if (!cancelled) {
+          showToast({
+            title: "Afbeelding laden mislukt",
+            description: error instanceof Error ? error.message : "Onbekende fout",
+            variant: "error",
+          });
+        }
+      }
+    }
+
+    void applyCreativeImageJob();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    appliedImageJobId,
+    creativeImageJob.data,
+    importCreativeImage,
+    pendingImageJobId,
+    placements,
+    showToast,
+  ]);
+
+  useEffect(() => {
+    if (!pendingVideoJobId || appliedVideoJobId === pendingVideoJobId || !creativeVideoJob.data) return;
+    const status = creativeVideoJob.data;
+    if (status.status !== "COMPLETED" || (!status.outputUrl && !status.blobUrl)) return;
+
+    let cancelled = false;
+
+    async function applyCreativeVideoJob() {
+      try {
+        let videoUrl = status.blobUrl || status.outputUrl;
+        if (!videoUrl) return;
+
+        if (!status.blobUrl) {
+          const imported = await importCreativeImage.mutateAsync({ jobId: pendingVideoJobId! });
+          videoUrl = imported.blobUrl || videoUrl;
+        }
+
+        if (cancelled) return;
+        setPlacementAssets((current) => {
+          const next = { ...current };
+          if (placements.includes("REEL")) next.REEL = { videoUrl };
+          if (placements.includes("STORY") && !next.STORY?.imageUrl) {
+            next.STORY = { videoUrl };
+          }
+          return next;
+        });
+        if (!placements.includes("REEL")) {
+          setPlacements((current) => (current.includes("REEL") ? current : [...current, "REEL"]));
+        }
+        setAppliedVideoJobId(pendingVideoJobId);
+        setActiveTab("composer");
+        showToast({ title: "Creative Studio-video toegevoegd" });
+      } catch (error) {
+        if (!cancelled) {
+          showToast({
+            title: "Video laden mislukt",
+            description: error instanceof Error ? error.message : "Onbekende fout",
+            variant: "error",
+          });
+        }
+      }
+    }
+
+    void applyCreativeVideoJob();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    appliedVideoJobId,
+    creativeVideoJob.data,
+    importCreativeImage,
+    pendingVideoJobId,
+    placements,
+    showToast,
+  ]);
 
   function selectedTargets(): Platform[] {
     const targets: Platform[] = [];
@@ -919,9 +1153,25 @@ export function SocialPageInner() {
     await approveAndSchedule.mutateAsync({ id: selected.id, scheduledFor: new Date(scheduledFor) });
   }
 
+  function planPostForDate(date: Date) {
+    resetEditor();
+    setScheduledFor(toDateTimeLocal(date.toISOString()));
+    setActiveTab("composer");
+    router.replace("/social?tab=composer");
+    showToast({
+      title: "Nieuwe planning",
+      description: `Stel je post in voor ${date.toLocaleString("nl-BE")}.`,
+    });
+  }
+
+  function openAgendaPost(post: SocialAgendaPost) {
+    loadRow(post);
+  }
+
   function loadRow(row: any) {
     const metadata = (row.metadata || {}) as SocialMetadata;
     setActiveTab("composer");
+    router.replace("/social?tab=composer");
     setSelectedId(row.id);
     setCaption(row.caption || "");
     setPlacements(metadata.placements?.length ? metadata.placements : metadata.postFormat === "STORY" ? ["STORY"] : ["FEED"]);
@@ -987,10 +1237,34 @@ export function SocialPageInner() {
               Composeer je post met CTA, hashtags, link en beeldformaten. We checken Instagram-ratio's vóór approval, tonen Facebook/Instagram previews en vertalen Meta-fouten naar duidelijke acties.
             </p>
           </div>
-          <div className="grid min-w-[260px] grid-cols-3 gap-2">
-            <MetadataStat label="Approval" value={String(stats.pending)} />
-            <MetadataStat label="Gepland" value={String(stats.scheduled)} />
-            <MetadataStat label="Fouten" value={String(stats.failed)} />
+          <div className="flex w-full min-w-[300px] max-w-[400px] flex-col gap-2 sm:flex-row lg:max-w-[420px]">
+            <SocialHeroStat
+              label="Approval"
+              value={stats.pending}
+              icon={ShieldCheck}
+              tone="amber"
+              onClick={() => {
+                setStatusFilter("PENDING_APPROVAL");
+                handleTabChange("queue");
+              }}
+            />
+            <SocialHeroStat
+              label="Gepland"
+              value={stats.scheduled}
+              icon={CalendarDays}
+              tone="emerald"
+              onClick={() => handleTabChange("agenda")}
+            />
+            <SocialHeroStat
+              label="Fouten"
+              value={stats.failed}
+              icon={AlertTriangle}
+              tone="rose"
+              onClick={() => {
+                setStatusFilter("FAILED");
+                handleTabChange("queue");
+              }}
+            />
           </div>
         </div>
         <div className="relative mt-5 flex flex-wrap gap-2">
@@ -1009,11 +1283,36 @@ export function SocialPageInner() {
         </div>
       </section>
 
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "composer" | "queue")} className="space-y-4">
-        <TabsList className="flex w-full flex-wrap justify-start">
-          <TabsTrigger value="composer">Composer</TabsTrigger>
-          <TabsTrigger value="queue" className="gap-2">
-            Posts queue
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
+        <TabsList
+          aria-label="Social Planner secties"
+          className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-xl border bg-muted/40 p-1"
+        >
+          <TabsTrigger
+            value="composer"
+            className="gap-2 rounded-lg px-3 py-2 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+          >
+            <Wand2 className="h-4 w-4 opacity-70" />
+            Composer
+          </TabsTrigger>
+          <TabsTrigger
+            value="agenda"
+            className="gap-2 rounded-lg px-3 py-2 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+          >
+            <CalendarDays className="h-4 w-4 opacity-70" />
+            Agenda
+            {stats.scheduled > 0 ? (
+              <Badge variant="secondary" className="h-5 min-w-5 justify-center px-1.5 text-[10px]">
+                {stats.scheduled}
+              </Badge>
+            ) : null}
+          </TabsTrigger>
+          <TabsTrigger
+            value="queue"
+            className="gap-2 rounded-lg px-3 py-2 data-[state=active]:bg-background data-[state=active]:shadow-sm"
+          >
+            <Megaphone className="h-4 w-4 opacity-70" />
+            Queue
             {rows.length > 0 ? (
               <Badge variant="secondary" className="h-5 min-w-5 justify-center px-1.5 text-[10px]">
                 {rows.length}
@@ -1121,6 +1420,16 @@ export function SocialPageInner() {
                   <Input id="social-brand-signature" disabled={!canEditSelected} value={brandSignature} onChange={(event) => setBrandSignature(event.target.value)} placeholder="Digitify · ..." />
                 </div>
               </div>
+
+              <SocialImageGenerator
+                disabled={!canEditSelected}
+                caption={caption}
+                template={template}
+                feedFormat={feedFormat}
+                placements={placements}
+                socialPostId={selectedId ?? undefined}
+                onImageReady={(assets) => setPlacementAssets((current) => ({ ...current, ...assets }))}
+              />
 
               <SocialPlacementEditor
                 placements={placements}
@@ -1315,98 +1624,31 @@ export function SocialPageInner() {
       </div>
         </TabsContent>
 
+        <TabsContent value="agenda" className="mt-0">
+          {activeTab === "agenda" ? (
+            <SocialAgenda
+              canReschedule={canSchedule}
+              onSelectPost={openAgendaPost}
+              onPlanNew={planPostForDate}
+            />
+          ) : null}
+        </TabsContent>
+
         <TabsContent value="queue" className="mt-0">
-          <Card>
-            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-base"><CalendarDays className="h-4 w-4" /> Posts queue</CardTitle>
-                <CardDescription>Status, planning, retries en duidelijke publicatiefouten.</CardDescription>
-              </div>
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-                <Button size="sm" variant="outline" onClick={() => setActiveTab("composer")}>
-                  <Wand2 className="mr-2 h-3.5 w-3.5" /> Nieuw bericht
-                </Button>
-                <div className="w-full sm:w-56">
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger><SelectValue placeholder="Filter status" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ALL">Alle statussen</SelectItem>
-                      <SelectItem value="DRAFT">Draft</SelectItem>
-                      <SelectItem value="PENDING_APPROVAL">Pending approval</SelectItem>
-                      <SelectItem value="SCHEDULED">Scheduled</SelectItem>
-                      <SelectItem value="PUBLISHED">Published</SelectItem>
-                      <SelectItem value="FAILED">Failed</SelectItem>
-                      <SelectItem value="CANCELLED">Cancelled</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {listQuery.isLoading ? (
-                <div className="space-y-2"><Skeleton className="h-16" /><Skeleton className="h-16" /></div>
-              ) : rows.length === 0 ? (
-                <EmptyState
-                  icon={<Megaphone />}
-                  title="Nog geen social posts"
-                  description="Maak eerst een draft aan in Composer en stuur die door voor goedkeuring."
-                  action={
-                    <Button size="sm" onClick={() => setActiveTab("composer")}>
-                      <Wand2 className="mr-2 h-4 w-4" /> Naar Composer
-                    </Button>
-                  }
-                />
-              ) : (
-                <div className="space-y-3">
-                  {rows.map((row: any) => {
-                    const errorHelp = row.lastError ? explainMetaError(row.lastError) : null;
-                    const isSelected = selectedId === row.id;
-                    return (
-                      <div
-                        key={row.id}
-                        className={cn(
-                          "rounded-2xl border bg-card p-3 transition hover:border-amber-300/70 hover:shadow-sm",
-                          isSelected && "border-amber-400/80 ring-1 ring-amber-400/30",
-                        )}
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1 space-y-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              {statusBadge(row.status)}
-                              <span className="text-xs text-muted-foreground">{row.targetPlatforms.join(" + ")}</span>
-                              {row.retryCount ? <Badge variant="outline">Retry {row.retryCount}/3</Badge> : null}
-                            </div>
-                            <p className="line-clamp-2 text-sm font-medium">{row.metadata?.headline ? `${row.metadata.headline} · ` : ""}{row.caption}</p>
-                            <p className="text-xs text-muted-foreground">Gepland: {prettyDate(row.scheduledFor)} · Gepubliceerd: {prettyDate(row.publishedAt)}</p>
-                            {row.lastError ? (
-                              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/25 dark:text-amber-100">
-                                <p className="font-semibold"><AlertTriangle className="mr-1 inline h-3.5 w-3.5" /> {errorHelp?.title}</p>
-                                <p className="mt-1">{errorHelp?.description}</p>
-                                <p className="mt-2 break-words font-mono text-[11px] opacity-80">{row.lastError}</p>
-                              </div>
-                            ) : null}
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            <Button size="sm" variant="outline" onClick={() => loadRow(row)}>Open</Button>
-                            {row.status === "FAILED" ? (
-                              <Button size="sm" variant="outline" onClick={() => retryFailed.mutate({ id: row.id })}>
-                                <RefreshCcw className="mr-2 h-3.5 w-3.5" /> Retry
-                              </Button>
-                            ) : null}
-                            {["SCHEDULED", "PENDING_APPROVAL"].includes(row.status) ? (
-                              <Button size="sm" variant="outline" onClick={() => cancelScheduled.mutate({ id: row.id })}>
-                                <XCircle className="mr-2 h-3.5 w-3.5" /> Annuleer
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {activeTab === "queue" ? (
+            <SocialQueuePanel
+              rows={rows}
+              isLoading={listQuery.isLoading}
+              statusFilter={statusFilter}
+              selectedId={selectedId}
+              onStatusFilterChange={setStatusFilter}
+              onOpenAgenda={() => handleTabChange("agenda")}
+              onOpenComposer={() => handleTabChange("composer")}
+              onOpenRow={loadRow}
+              onRetry={(rowId) => retryFailed.mutate({ id: rowId })}
+              onCancel={(rowId) => cancelScheduled.mutate({ id: rowId })}
+            />
+          ) : null}
         </TabsContent>
       </Tabs>
     </div>

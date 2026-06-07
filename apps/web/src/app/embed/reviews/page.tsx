@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getReviewTextDefault } from "@/lib/review-text";
 import { safeExternalUrl } from "@/lib/utils";
+import { useWidgetAnalytics } from "@/components/analytics/use-widget-analytics";
 
 const reviewPlatforms = [
   { key: "googleUrl", label: "Google" },
@@ -34,6 +35,8 @@ function ReviewEmbedContent() {
     params.get("description") ||
     "Geef eerst intern uw score. Bij 4 of 5 sterren kunt u meteen door naar het reviewplatform van uw keuze.";
   const company = params.get("company") || "Onze service";
+  const tenant = params.get("tenant") || "";
+  useWidgetAnalytics("reviews", tenant);
 
   const links = reviewPlatforms
     .map((platform) => ({

@@ -15,6 +15,9 @@ export type ParsedEmailTemplate = {
   bodyFormat: "TEXT" | "HTML";
   layout: string;
   type: string;
+  module: string;
+  templateKey: string | null;
+  isSystem: boolean;
   description: string;
   ctaText: string;
   ctaUrl: string;
@@ -114,6 +117,9 @@ export function parseTemplateRow(row: {
   ctaUrl?: string | null;
   campaignId: string | null;
   isGlobal: boolean;
+  module?: string | null;
+  templateKey?: string | null;
+  isSystem?: boolean | null;
   createdAt: Date;
   updatedAt: Date;
   campaign?: { id: string; name: string } | null;
@@ -146,6 +152,9 @@ export function parseTemplateRow(row: {
     bodyFormat,
     layout,
     type,
+    module: row.module ?? "LEADS",
+    templateKey: row.templateKey ?? null,
+    isSystem: row.isSystem ?? false,
     description,
     ctaText,
     ctaUrl,
@@ -177,6 +186,8 @@ export function buildOutboundTemplateWhere(
   };
 }
 
+const DEFAULT_EMAIL_TEMPLATE_LIST_LIMIT = 200;
+
 export async function listParsedEmailTemplates(
   db: any,
   workspaceId: string,
@@ -184,10 +195,15 @@ export async function listParsedEmailTemplates(
     campaignId?: string;
     forOutbound?: boolean;
     type?: string;
+    module?: string;
+    search?: string;
+    take?: number;
   },
 ): Promise<ParsedEmailTemplate[]> {
   const useCampaignScope = Boolean(options?.forOutbound || options?.campaignId);
-  const where = useCampaignScope
+  const moduleFilter = options?.module ? { module: options.module } : {};
+  const search = options?.search?.trim();
+  const baseWhere = useCampaignScope
     ? buildOutboundTemplateWhere(workspaceId, {
         campaignId: options?.campaignId,
         type: options?.type,
@@ -195,11 +211,30 @@ export async function listParsedEmailTemplates(
     : {
         createdById: workspaceId,
         ...(options?.type ? { type: options.type } : {}),
+        ...moduleFilter,
       };
+  const where = search
+    ? {
+        AND: [
+          baseWhere,
+          {
+            OR: [
+              { name: { contains: search, mode: "insensitive" } },
+              { subject: { contains: search, mode: "insensitive" } },
+              { description: { contains: search, mode: "insensitive" } },
+              { body: { contains: search, mode: "insensitive" } },
+            ],
+          },
+        ],
+      }
+    : baseWhere;
+
+  const take = Math.min(Math.max(options?.take ?? DEFAULT_EMAIL_TEMPLATE_LIST_LIMIT, 1), 500);
 
   const rows = await db.emailTemplate.findMany({
     where,
     orderBy: { updatedAt: "desc" },
+    take,
     include: { campaign: { select: { id: true, name: true } } },
   });
 

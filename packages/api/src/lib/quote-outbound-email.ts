@@ -196,7 +196,6 @@ export async function sendApprovedQuoteDraft(
     body: composedBody,
     recipientCompany: freshQuote.clientCompany || freshQuote.clientName,
     leadId: draft.leadId,
-    layout: "proposal",
     userId,
     trackingDraftId: draft.id,
     placeholderContext: {

@@ -1,4 +1,4 @@
-import { Skeleton } from "@digitify/ui";
+import { Skeleton } from "@digitify/ui/src/components/skeleton";
 
 /** Matches login/register card shape inside AuthLayout — avoids hydration mismatch with route Suspense. */
 export function AuthFormSkeleton() {

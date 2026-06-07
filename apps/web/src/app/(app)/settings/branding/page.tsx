@@ -15,15 +15,20 @@ export default function BrandingSettingsPage() {
   const utils = trpc.useUtils();
   const { showToast } = useToast();
 
+  const invalidateBrandingCaches = () => {
+    void utils.settings.getBranding.invalidate();
+    void utils.user.getShellContext.invalidate();
+  };
+
   const updateSetting = trpc.settings.update.useMutation({
-    onSuccess: () => utils.settings.getBranding.invalidate(),
+    onSuccess: invalidateBrandingCaches,
     onError: (error) =>
       showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
   });
 
   const batchUpdate = trpc.settings.batchUpdate.useMutation({
     onSuccess: () => {
-      utils.settings.getBranding.invalidate();
+      invalidateBrandingCaches();
       setInitialValues({ companyName, companySlogan, primaryColor, fromName, fromEmail });
       setShowSuccess(true);
       showToast({ title: "Branding opgeslagen", description: "Je branding is bijgewerkt voor dit account." });
@@ -165,8 +170,10 @@ export default function BrandingSettingsPage() {
           <Button variant="ghost" size="icon"><ArrowLeft className="h-4 w-4" /></Button>
         </Link>
         <div>
-          <h1 className="text-xl font-bold tracking-tight">Branding</h1>
-          <p className="text-sm text-muted-foreground">Pas je huisstijl en e-mail afzender aan</p>
+          <h1 className="text-xl font-bold tracking-tight">Branding & afzender</h1>
+          <p className="text-sm text-muted-foreground">
+            Logo, kleuren, favicon en standaard e-mailafzender voor mail, widgets en PDF&apos;s.
+          </p>
         </div>
       </div>
 

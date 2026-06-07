@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Button } from "@digitify/ui";
-import { Input } from "@digitify/ui";
-import { Label } from "@digitify/ui";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@digitify/ui";
+import { Button } from "@digitify/ui/src/components/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@digitify/ui/src/components/card";
+import { Input } from "@digitify/ui/src/components/input";
+import { Label } from "@digitify/ui/src/components/label";
 import { Loader2 } from "lucide-react";
 import { AuthLogo } from "@/components/auth/auth-logo";
 

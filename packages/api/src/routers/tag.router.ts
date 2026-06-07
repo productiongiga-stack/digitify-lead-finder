@@ -8,6 +8,7 @@ export const tagRouter = router({
     return ctx.db.tag.findMany({
       where: { createdById: ctx.user.workspaceId! },
       orderBy: { name: "asc" },
+      take: 100,
       include: { _count: { select: { leads: true } } },
     });
   }),

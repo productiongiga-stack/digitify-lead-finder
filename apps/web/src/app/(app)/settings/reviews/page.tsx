@@ -39,6 +39,7 @@ import {
   getReviewTextDefault,
   type ReviewTextField,
 } from "@/lib/review-text";
+import { SETTINGS_PAGE_QUERY_OPTS } from "@/lib/settings-query-options";
 
 function ReviewTextFieldEditor({
   field,
@@ -63,13 +64,13 @@ function ReviewTextFieldEditor({
 }
 
 export default function ReviewSettingsPage() {
-  const { data: settings, isLoading } = trpc.settings.getAll.useQuery();
+  const { data: settings, isLoading } = trpc.settings.getReviewsSettings.useQuery(undefined, SETTINGS_PAGE_QUERY_OPTS);
   const utils = trpc.useUtils();
   const { showToast } = useToast();
 
   const batchUpdate = trpc.settings.batchUpdate.useMutation({
     onSuccess: () => {
-      utils.settings.getAll.invalidate();
+      utils.settings.getReviewsSettings.invalidate();
       showToast({
         title: "Review instellingen opgeslagen",
         description: "De review embed en platformlinks zijn bijgewerkt.",

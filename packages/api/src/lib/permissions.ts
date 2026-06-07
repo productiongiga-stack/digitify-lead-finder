@@ -10,10 +10,10 @@ const VISUAL_SETTING_KEYS = new Set([
 ]);
 
 const PERSONAL_SETTING_PREFIXES = ["ui.", "display."];
-const ACCOUNT_SETTING_PREFIXES = ["branding.", "company.", "email."];
+const ACCOUNT_SETTING_PREFIXES = ["branding.", "company.", "email.", "creative."];
 const ADMIN_SETTING_PREFIXES = ["bookings.", "reviews.", "quotes.", "chatbot.", "ads.", ...PERSONAL_SETTING_PREFIXES];
 const MEMBER_SETTING_PREFIXES = ["bookings.", "reviews.", "quotes.", "chatbot.", "pipeline.", "scoring.", ...PERSONAL_SETTING_PREFIXES];
-const OWNER_SETTING_PREFIXES = ["api.", "openclaw.", "seo.", "social.", "integrations."];
+const OWNER_SETTING_PREFIXES = ["api.", "openclaw.", "seo.", "social.", "integrations.", "analytics.", "cache."];
 /** Workspace-wide booking secrets and timezone; only the workspace owner may read or change these. */
 const OWNER_ONLY_SETTING_KEYS = new Set([
   "bookings.google_calendar_timezone",

@@ -44,8 +44,9 @@ function applyDensityToDocument(value: Density) {
 export default function DisplaySettingsPage() {
   const { showToast } = useToast();
   const utils = trpc.useUtils();
-  const { data: settings, isLoading, error, refetch } = trpc.settings.getAll.useQuery(undefined, {
+  const { data: settings, isLoading, error, refetch } = trpc.settings.getDisplaySettings.useQuery(undefined, {
     retry: 1,
+    staleTime: 5 * 60_000,
     refetchOnWindowFocus: false,
   });
   const [density, setDensity] = useState<Density>("comfortable");
@@ -53,7 +54,8 @@ export default function DisplaySettingsPage() {
 
   const batchUpdate = trpc.settings.batchUpdate.useMutation({
     onSuccess: () => {
-      utils.settings.getAll.invalidate();
+      void utils.settings.getDisplaySettings.invalidate();
+      void utils.user.getShellContext.invalidate();
       showToast({
         title: "Weergave opgeslagen",
         description: "De dichtheid van de interface is bijgewerkt.",

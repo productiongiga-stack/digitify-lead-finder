@@ -197,6 +197,150 @@ export const leadRouter = router({
       };
     }),
 
+  /** Narrow lead list for table views — skips heavy includes (users, counts). */
+  listSummary: protectedProcedure
+    .input(
+      z.object({
+        filters: leadFilterSchema.optional(),
+        sortBy: z.string().default("createdAt"),
+        sortDir: z.enum(["asc", "desc"]).default("desc"),
+        page: z.number().min(1).default(1),
+        pageSize: z.number().min(1).max(100).default(25),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { filters, sortBy, sortDir, page, pageSize } = input;
+      const where: Record<string, unknown> = ownedLeadWhere(ctx.user.workspaceId!);
+      const [ownedPipelineStageIds, ownedTagIds] = await Promise.all([
+        filters?.pipelineStageIds?.length
+          ? ctx.db.pipelineStage
+              .findMany({
+                where: { id: { in: filters.pipelineStageIds }, createdById: ctx.user.workspaceId! },
+                select: { id: true },
+              })
+              .then((rows) => rows.map((row) => row.id))
+          : Promise.resolve<string[]>([]),
+        filters?.tags?.length
+          ? ctx.db.tag
+              .findMany({
+                where: { id: { in: filters.tags }, createdById: ctx.user.workspaceId! },
+                select: { id: true },
+              })
+              .then((rows) => rows.map((row) => row.id))
+          : Promise.resolve<string[]>([]),
+      ]);
+
+      if (filters?.search) {
+        where.OR = [
+          { companyName: { contains: filters.search, mode: "insensitive" } },
+          { email: { contains: filters.search, mode: "insensitive" } },
+          { city: { contains: filters.search, mode: "insensitive" } },
+          { industry: { contains: filters.search, mode: "insensitive" } },
+        ];
+      }
+      if (filters?.status?.length) where.status = { in: filters.status };
+      if (filters?.pipelineStageIds?.length) {
+        where.pipelineStageId = { in: ownedPipelineStageIds.length ? ownedPipelineStageIds : ["__no_stage__"] };
+      }
+      if (filters?.scoreMin !== undefined || filters?.scoreMax !== undefined) {
+        where.overallScore = {};
+        if (filters?.scoreMin !== undefined) (where.overallScore as Record<string, unknown>).gte = filters.scoreMin;
+        if (filters?.scoreMax !== undefined) (where.overallScore as Record<string, unknown>).lte = filters.scoreMax;
+      }
+      if (filters?.city) where.city = { contains: filters.city, mode: "insensitive" };
+      if (filters?.country) where.country = { contains: filters.country, mode: "insensitive" };
+      if (filters?.industry) where.industry = { contains: filters.industry, mode: "insensitive" };
+      if (filters?.source) where.source = filters.source;
+      if (filters?.assignedToId) where.assignedToId = filters.assignedToId;
+      if (filters?.hasEmail === true) where.email = { not: null };
+      if (filters?.hasEmail === false) where.email = null;
+      if (filters?.hasWebsite === true) where.website = { not: null };
+      if (filters?.hasWebsite === false) where.website = null;
+      if (filters?.scorePriority) where.scorePriority = filters.scorePriority;
+      if (filters?.tags?.length) {
+        where.tags = { some: { tagId: { in: ownedTagIds.length ? ownedTagIds : ["__no_tag__"] } } };
+      }
+      if (filters?.campaignId) {
+        where.campaignLeads = {
+          some: { campaignId: filters.campaignId, campaign: { createdById: ctx.user.workspaceId! } },
+        };
+      }
+      if (filters?.excludeDemo) {
+        where.NOT = {
+          companyName: {
+            in: [...DEMO_LEAD_NAMES],
+          },
+        };
+      }
+
+      const [items, total] = await Promise.all([
+        ctx.db.lead.findMany({
+          where,
+          orderBy: { [sortBy]: sortDir },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: {
+            id: true,
+            companyName: true,
+            email: true,
+            phone: true,
+            city: true,
+            country: true,
+            address: true,
+            zipCode: true,
+            industry: true,
+            overallScore: true,
+            scorePriority: true,
+            status: true,
+            gmbRating: true,
+            gmbReviewCount: true,
+            website: true,
+            createdAt: true,
+            tags: { select: { tag: { select: { id: true, name: true, color: true } } } },
+            savedBy: { select: { id: true, name: true, email: true } },
+          },
+        }),
+        ctx.db.lead.count({ where }),
+      ]);
+
+      return {
+        items,
+        total,
+        page,
+        pageSize,
+        totalPages: Math.ceil(total / pageSize),
+      };
+    }),
+
+  /** Lightweight lead picker for dropdowns (reports, compose, etc.) */
+  options: protectedProcedure
+    .input(
+      z
+        .object({
+          search: z.string().max(120).optional(),
+          limit: z.number().min(1).max(50).default(25),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const search = input?.search?.trim();
+      const limit = input?.limit ?? 25;
+      const where: Record<string, unknown> = ownedLeadWhere(ctx.user.workspaceId!);
+      if (search) {
+        where.OR = [
+          { companyName: { contains: search, mode: "insensitive" } },
+          { email: { contains: search, mode: "insensitive" } },
+        ];
+      }
+      const rows = await ctx.db.lead.findMany({
+        where,
+        orderBy: { companyName: "asc" },
+        take: limit,
+        select: { id: true, companyName: true, email: true },
+      });
+      return rows;
+    }),
+
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {

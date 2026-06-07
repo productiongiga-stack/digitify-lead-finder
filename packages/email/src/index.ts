@@ -3,6 +3,21 @@ export { ConsoleProvider } from "./providers/console";
 export { renderTemplate, renderSubject, htmlFromText } from "./template-renderer";
 export { generateBrandedHtml, normalizeHtmlEmailDocument, htmlToPlainText } from "./html-template";
 export type { BrandedHtmlOptions } from "./html-template";
+export {
+  renderMasterShell,
+  renderCtaBlock,
+  parseShellRenderMeta,
+  buildShellRenderMetaComment,
+  DEFAULT_MASTER_SHELL_HTML,
+} from "./master-shell";
+export type {
+  MasterShellBranding,
+  RenderMasterShellOptions,
+  CtaRenderOptions,
+  CtaButtonVariant,
+  CtaButtonSize,
+  CtaButtonAlign,
+} from "./master-shell";
 export { generateLayout } from "./layouts";
 export type { EmailLayout, LayoutOptions } from "./layouts";
 export type { EmailMessage, EmailAttachment, SendResult, EmailProvider, TemplateContext } from "./types";

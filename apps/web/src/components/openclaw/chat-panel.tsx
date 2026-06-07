@@ -30,7 +30,10 @@ const OPENCLAW_STARTER_PROMPTS = [
 ] as const;
 
 export function OpenClawPanel() {
-  const { openClawOpen, setOpenClawOpen, openClawAssistLaunch, clearOpenClawAssistLaunch } = useUIStore();
+  const openClawOpen = useUIStore((state) => state.openClawOpen);
+  const setOpenClawOpen = useUIStore((state) => state.setOpenClawOpen);
+  const openClawAssistLaunch = useUIStore((state) => state.openClawAssistLaunch);
+  const clearOpenClawAssistLaunch = useUIStore((state) => state.clearOpenClawAssistLaunch);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);

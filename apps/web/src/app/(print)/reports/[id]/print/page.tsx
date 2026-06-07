@@ -117,9 +117,10 @@ export default function ReportPrintPage() {
   const [ready, setReady] = useState(false);
 
   const { data: report, isLoading: reportLoading, isError: reportError } = trpc.report.getById.useQuery({ id: reportId });
-  const { data: brandingSettings, isLoading: settingsLoading, isError: settingsError } = trpc.settings.getAll.useQuery(undefined, {
-    staleTime: 60_000,
-  });
+  const { data: brandingSettings, isLoading: settingsLoading, isError: settingsError } =
+    trpc.settings.getBranding.useQuery(undefined, {
+      staleTime: 60_000,
+    });
 
   const branding = {
     companyName: String(brandingSettings?.["branding.company_name"] || brandingSettings?.["company.name"] || "Digitify"),

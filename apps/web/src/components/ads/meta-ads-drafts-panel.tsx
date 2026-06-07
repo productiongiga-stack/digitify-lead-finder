@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@digitify/ui";
 import { cn } from "@/lib/utils";
+import { MetaAdsCreativeStudioPanel } from "@/components/ads/meta-ads-creative-studio-panel";
 
 type DraftRow = {
   id: string;
@@ -89,6 +90,8 @@ export function MetaAdsDraftsPanel({
     : "Geen opgeslagen drafts";
 
   return (
+    <div className="space-y-4">
+      <MetaAdsCreativeStudioPanel />
     <Card className="border-border/60">
       <button
         type="button"
@@ -203,5 +206,6 @@ export function MetaAdsDraftsPanel({
         </CardContent>
       ) : null}
     </Card>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import {
   Badge,
@@ -21,13 +21,13 @@ import {
   Switch,
   Textarea,
 } from "@digitify/ui";
+import Link from "next/link";
 import { LayoutTemplate, Code2, Type } from "lucide-react";
 import { EmailPreview } from "@/components/email/preview";
 import { MailVariablesHelp } from "@/components/email/mail-variables-help";
 import { useToast } from "@/components/feedback/toast-provider";
 import type { EmailLayout, TemplateType } from "@/lib/email-content";
-import { LAYOUT_CATALOG, TEMPLATE_TYPES } from "@/lib/template-studio";
-import { EmailLayoutPicker, EmailLayoutPickerHint } from "@/components/templates/email-layout-picker";
+import { TEMPLATE_TYPES } from "@/lib/template-studio";
 import { TemplateScopeHelp } from "@/components/templates/template-scope-help";
 
 export type StudioForm = {
@@ -43,6 +43,7 @@ export type StudioForm = {
   ctaUrl: string;
   campaignId: string;
   isGlobal: boolean;
+  isSystem?: boolean;
 };
 
 export const EMPTY_STUDIO_FORM: StudioForm = {
@@ -87,6 +88,9 @@ type TemplateStudioEditorProps = {
   previewCompanyName: string;
   previewPrimaryColor: string;
   previewHeaderSlogan: string;
+  previewMasterShellHtml: string;
+  previewSignature?: string;
+  previewFooter?: string;
 };
 
 export function TemplateStudioEditor({
@@ -98,10 +102,17 @@ export function TemplateStudioEditor({
   previewCompanyName,
   previewPrimaryColor,
   previewHeaderSlogan,
+  previewMasterShellHtml,
+  previewSignature = "",
+  previewFooter = "",
 }: TemplateStudioEditorProps) {
   const { showToast } = useToast();
   const utils = trpc.useUtils();
-  const { data: campaigns } = trpc.campaign.list.useQuery(undefined, { enabled: open });
+  const { data: campaignData } = trpc.campaign.list.useQuery(
+    { page: 1, pageSize: 100 },
+    { enabled: open, staleTime: 120_000 },
+  );
+  const campaigns = campaignData?.items ?? [];
 
   const save = trpc.template.save.useMutation({
     onSuccess: () => {
@@ -123,11 +134,6 @@ export function TemplateStudioEditor({
   });
 
   const isValid = form.name.trim() && form.subject.trim() && form.body.trim();
-  const layoutInfo = useMemo(
-    () => LAYOUT_CATALOG.find((entry) => entry.id === form.layout),
-    [form.layout],
-  );
-
   function insertVariable(key: string) {
     const token = form.bodyFormat === "HTML" ? `{{${key}}}` : `{{${key}}}`;
     onFormChange({ ...form, body: form.body ? `${form.body}${form.bodyFormat === "HTML" ? " " : "\n"}${token}` : token });
@@ -176,9 +182,16 @@ export function TemplateStudioEditor({
         <DialogHeader>
           <DialogTitle>{form.id ? "Template bewerken" : "Nieuw uniek template"}</DialogTitle>
           <DialogDescription>
-            Kies type en layout, schrijf je inhoud en zie direct een unieke preview. Variabelen worden bij verzenden ingevuld.
+            Bewerk onderwerp en inhoud. De mail-opmaak komt uit je master shell in Instellingen → E-mail.
           </DialogDescription>
         </DialogHeader>
+
+        <div className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+          Mail-opmaak bewerken →{" "}
+          <Link href="/settings/email" className="font-medium text-primary underline-offset-2 hover:underline">
+            Instellingen → E-mail
+          </Link>
+        </div>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
           <div className="space-y-4">
@@ -189,6 +202,7 @@ export function TemplateStudioEditor({
                   value={form.name}
                   onChange={(e) => onFormChange({ ...form, name: e.target.value })}
                   placeholder="Bijv. Intro premium outreach"
+                  disabled={form.isSystem}
                 />
               </div>
               <div className="space-y-1.5">
@@ -236,8 +250,8 @@ export function TemplateStudioEditor({
                 >
                   <Type className="h-4 w-4 shrink-0" />
                   <span>
-                    <span className="font-medium">Tekst + layout</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">Automatische branded HTML</span>
+                    <span className="font-medium">Tekst</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">Inhoud in master shell</span>
                   </span>
                 </button>
                 <button
@@ -257,17 +271,6 @@ export function TemplateStudioEditor({
                 </button>
               </div>
             </div>
-
-            {form.bodyFormat === "TEXT" ? (
-            <div className="space-y-2">
-              <Label>HTML layout — elk template kan een eigen look krijgen</Label>
-              <EmailLayoutPicker
-                value={form.layout}
-                onChange={(layout) => onFormChange({ ...form, layout })}
-              />
-              <EmailLayoutPickerHint layoutId={form.layout} />
-            </div>
-            ) : null}
 
             <div className="space-y-1.5">
               <Label>{form.bodyFormat === "HTML" ? "HTML code" : "Bericht"}</Label>
@@ -364,14 +367,15 @@ export function TemplateStudioEditor({
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">{form.type}</Badge>
-              {form.bodyFormat === "HTML" ? <Badge variant="secondary">HTML</Badge> : <Badge variant="secondary">{form.layout}</Badge>}
+              {form.bodyFormat === "HTML" ? <Badge variant="secondary">HTML</Badge> : <Badge variant="secondary">Tekst</Badge>}
+              {form.isSystem ? <Badge variant="outline">Systeem</Badge> : null}
               {form.ctaText ? <Badge>CTA</Badge> : null}
               {form.isGlobal ? <Badge variant="outline">Alle campagnes</Badge> : null}
             </div>
             <div className="sticky top-0 rounded-xl border bg-muted/20 p-3">
               <p className="mb-3 flex items-center gap-2 text-sm font-medium">
                 <LayoutTemplate className="h-4 w-4" />
-                Live preview — {form.bodyFormat === "HTML" ? "eigen HTML" : layoutInfo?.label || form.layout}
+                Live preview — master shell
               </p>
               <EmailPreview
                 subject={form.subject || "Voorbeeld onderwerp"}
@@ -387,7 +391,9 @@ export function TemplateStudioEditor({
                 fromName={previewCompanyName}
                 headerSlogan={previewHeaderSlogan}
                 recipientCompany="Voorbeeldbedrijf BV"
-                layout={form.layout}
+                masterShellHtml={previewMasterShellHtml}
+                signature={previewSignature}
+                footer={previewFooter}
                 ctaText={form.ctaText}
                 ctaUrl={form.ctaUrl || "#"}
               />
@@ -419,6 +425,7 @@ export function templateToForm(template: {
   ctaUrl: string;
   campaignId: string | null;
   isGlobal: boolean;
+  isSystem?: boolean;
 }): StudioForm {
   return {
     id: template.id,
@@ -433,6 +440,7 @@ export function templateToForm(template: {
     ctaUrl: template.ctaUrl || "",
     campaignId: template.campaignId || "",
     isGlobal: template.isGlobal,
+    isSystem: template.isSystem ?? false,
   };
 }
 

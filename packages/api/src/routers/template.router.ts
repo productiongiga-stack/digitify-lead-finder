@@ -10,8 +10,15 @@ import {
 import { sanitizeCtaUrl } from "@digitify/email";
 import {
   EMAIL_TEMPLATE_STARTER_PACK,
+  EMAIL_SYSTEM_TEMPLATES,
+  ensureSystemEmailTemplates,
   syncEmailTemplateStarterPack,
 } from "../lib/email-template-starter-pack";
+import {
+  SYSTEM_MESSAGE_REGISTRY,
+  SYSTEM_MESSAGE_MODULES,
+  SYSTEM_MESSAGE_MODULE_LABELS,
+} from "../lib/email-system-message-registry";
 import {
   countLegacyLibraryEntries,
   migrateLegacyTemplateLibrary,
@@ -29,18 +36,139 @@ const templateTypeSchema = z.enum([
   "CUSTOM",
 ]);
 const layoutSchema = z.enum(["modern", "minimal", "business", "proposal", "followup"]);
+const moduleSchema = z.enum([
+  "LEADS",
+  "CAMPAIGNS",
+  "QUOTES",
+  "INVOICES",
+  "BOOKINGS",
+  "REVIEWS",
+  "AUTH",
+  "INBOX",
+  "SYSTEM",
+]);
 
 export const templateRouter = router({
-  /** Canonical starter templates — single source for Studio UI and seedStarterPack */
+  /** Canonical starter templates — handmatige outreach-teksten */
   starterPack: protectedProcedure.query(() => ({
-    items: EMAIL_TEMPLATE_STARTER_PACK,
+    items: EMAIL_TEMPLATE_STARTER_PACK.filter((item) => !item.isSystem && !item.templateKey),
   })),
+
+  listSystemMessages: protectedProcedure
+    .input(z.object({ module: moduleSchema.optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      await ensureSystemEmailTemplates(ctx.db, workspaceId);
+
+      const moduleFilter = input?.module;
+      const registryEntries = moduleFilter
+        ? SYSTEM_MESSAGE_REGISTRY.filter((entry) => entry.module === moduleFilter)
+        : SYSTEM_MESSAGE_REGISTRY;
+
+      const rows = await ctx.db.emailTemplate.findMany({
+        where: {
+          createdById: workspaceId,
+          isSystem: true,
+          templateKey: { not: null },
+          ...(moduleFilter ? { module: moduleFilter } : {}),
+        },
+        orderBy: [{ module: "asc" }, { name: "asc" }],
+      });
+
+      const rowByKey = new Map(rows.map((row) => [row.templateKey!, row]));
+      const items = registryEntries.map((registry) => {
+        const row = rowByKey.get(registry.templateKey);
+        const fallback = EMAIL_SYSTEM_TEMPLATES.find((item) => item.templateKey === registry.templateKey);
+        const parsed = row ? parseTemplateRow(row) : null;
+        return {
+          id: row?.id ?? null,
+          templateKey: registry.templateKey,
+          module: registry.module,
+          moduleLabel: SYSTEM_MESSAGE_MODULE_LABELS[registry.module as keyof typeof SYSTEM_MESSAGE_MODULE_LABELS],
+          name: row?.name ?? fallback?.name ?? registry.templateKey,
+          description: row?.description ?? fallback?.description ?? "",
+          trigger: registry.trigger,
+          placeholders: registry.placeholders,
+          subject: parsed?.subject ?? fallback?.subject ?? "",
+          body: parsed?.cleanBody ?? fallback?.body ?? "",
+          bodyFormat: parsed?.bodyFormat ?? fallback?.bodyFormat ?? "TEXT",
+          ctaText: parsed?.ctaText ?? fallback?.ctaText ?? "",
+          ctaUrl: parsed?.ctaUrl ?? fallback?.ctaUrl ?? "",
+          updatedAt: row?.updatedAt ?? null,
+        };
+      });
+
+      return {
+        modules: SYSTEM_MESSAGE_MODULES.map((id) => ({
+          id,
+          label: SYSTEM_MESSAGE_MODULE_LABELS[id],
+          count: SYSTEM_MESSAGE_REGISTRY.filter((entry) => entry.module === id).length,
+        })),
+        items,
+      };
+    }),
+
+  updateSystemMessage: mutationProcedure
+    .input(
+      z.object({
+        templateKey: z.string().min(1).max(120),
+        subject: z.string().min(1).max(300),
+        body: z.string().min(1).max(100000),
+        bodyFormat: z.enum(["TEXT", "HTML"]).default("TEXT"),
+        ctaText: z.string().max(120).optional(),
+        ctaUrl: z
+          .string()
+          .max(500)
+          .optional()
+          .refine((value) => !value?.trim() || Boolean(sanitizeCtaUrl(value)), {
+            message: "CTA URL moet http(s), mailto, een relatief pad of {{placeholder}} zijn.",
+          }),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      await ensureSystemEmailTemplates(ctx.db, workspaceId);
+
+      const existing = await ctx.db.emailTemplate.findFirst({
+        where: {
+          createdById: workspaceId,
+          templateKey: input.templateKey,
+          isSystem: true,
+        },
+      });
+      if (!existing) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Systeembericht niet gevonden.",
+        });
+      }
+
+      const templateData = emailTemplateDataFromInput({
+        body: input.body,
+        bodyFormat: input.bodyFormat,
+        layout: existing.layout,
+        type: existing.type,
+        description: existing.description,
+        ctaText: input.ctaText,
+        ctaUrl: input.ctaUrl,
+      });
+
+      const row = await ctx.db.emailTemplate.update({
+        where: { id: existing.id },
+        data: {
+          subject: input.subject.trim(),
+          ...templateData,
+        },
+      });
+      return parseTemplateRow(row);
+    }),
 
   list: protectedProcedure
     .input(
       z
         .object({
           type: templateTypeSchema.optional(),
+          module: moduleSchema.optional(),
           search: z.string().max(120).optional(),
           forOutbound: z.boolean().optional(),
           campaignId: z.string().optional(),
@@ -49,27 +177,21 @@ export const templateRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const typeFilter = input?.type;
+      const search = input?.search?.trim();
       const parsed = await listParsedEmailTemplates(ctx.db, ctx.user.workspaceId!, {
         forOutbound: input?.forOutbound,
         campaignId: input?.campaignId,
         type: typeFilter,
+        module: input?.module,
+        search,
       });
-      const search = input?.search?.trim().toLowerCase();
-
-      const filtered = search
-        ? parsed.filter((item) =>
-            item.name.toLowerCase().includes(search) ||
-            item.subject.toLowerCase().includes(search) ||
-            item.description.toLowerCase().includes(search) ||
-            item.cleanBody.toLowerCase().includes(search),
-          )
-        : parsed;
 
       return {
-        templates: filtered,
+        templates: parsed,
         total: parsed.length,
         layouts: layoutSchema.options,
         types: templateTypeSchema.options,
+        modules: moduleSchema.options,
       };
     }),
 
@@ -128,18 +250,18 @@ export const templateRouter = router({
         if (input.id) {
           const existing = await ctx.db.emailTemplate.findFirst({
             where: { id: input.id, createdById: ctx.user.workspaceId! },
-            select: { id: true },
+            select: { id: true, isSystem: true, name: true, templateKey: true, module: true },
           });
           if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
 
           const row = await ctx.db.emailTemplate.update({
             where: { id: input.id },
             data: {
-              name: input.name.trim(),
+              name: existing.isSystem ? existing.name : input.name.trim(),
               subject: input.subject.trim(),
               ...templateData,
               campaignId: input.campaignId ?? null,
-              isGlobal: input.isGlobal ?? false,
+              isGlobal: existing.isSystem ? false : (input.isGlobal ?? false),
             },
             include: { campaign: { select: { id: true, name: true } } },
           });
@@ -207,16 +329,25 @@ export const templateRouter = router({
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.emailTemplate.findFirst({
         where: { id: input.id, createdById: ctx.user.workspaceId! },
-        select: { id: true },
+        select: { id: true, isSystem: true },
       });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
+      if (existing.isSystem) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Systeem-templates kunnen niet verwijderd worden.",
+        });
+      }
       await ctx.db.emailTemplate.delete({ where: { id: input.id } });
       return { success: true };
     }),
 
-  seedStarterPack: mutationProcedure.mutation(async ({ ctx }) =>
-    syncEmailTemplateStarterPack(ctx.db, ctx.user.workspaceId!),
-  ),
+  seedStarterPack: mutationProcedure.mutation(async ({ ctx }) => {
+    const result = await syncEmailTemplateStarterPack(ctx.db, ctx.user.workspaceId!);
+    const { ensureSystemEmailTemplates } = await import("../lib/email-template-starter-pack");
+    await ensureSystemEmailTemplates(ctx.db, ctx.user.workspaceId!);
+    return result;
+  }),
 
   legacyLibraryStatus: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);

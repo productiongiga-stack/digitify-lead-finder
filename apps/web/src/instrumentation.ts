@@ -10,6 +10,8 @@ export async function register() {
   const { validateServerEnv } = await import("@digitify/api/src/lib/server-env");
   validateServerEnv();
 
+  if (process.env.NODE_ENV !== "production") return;
+
   const dsn = process.env.SENTRY_DSN?.trim() || process.env.NEXT_PUBLIC_SENTRY_DSN?.trim();
   if (!dsn) return;
 
@@ -18,6 +20,6 @@ export async function register() {
     dsn,
     environment: process.env.SENTRY_ENVIRONMENT || process.env.VERCEL_ENV || process.env.NODE_ENV,
     tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? "0.1"),
-    enabled: process.env.NODE_ENV !== "test",
+    enabled: true,
   });
 }

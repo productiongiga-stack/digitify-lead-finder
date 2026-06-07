@@ -27,6 +27,7 @@ import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/components/feedback/toast-provider";
 import { getAppUrl } from "@/lib/config";
 import { MARKETING_SOLUTION_SLUGS } from "@/lib/seo/solution-slugs";
+import { SETTINGS_PAGE_QUERY_OPTS } from "@/lib/settings-query-options";
 
 const TWITTER_CARD_OPTIONS = [
   { value: "summary_large_image", label: "Grote afbeelding" },
@@ -62,14 +63,14 @@ function readBool(settings: Record<string, unknown> | undefined, key: string, fa
 
 export default function SeoSettingsPage() {
   const pathname = usePathname();
-  const { data: settings, isLoading } = trpc.settings.getAll.useQuery();
+  const { data: settings, isLoading } = trpc.settings.getSeoSettings.useQuery(undefined, SETTINGS_PAGE_QUERY_OPTS);
   const { data: publicSeo } = trpc.settings.getPublicSeo.useQuery();
   const utils = trpc.useUtils();
   const { showToast } = useToast();
 
   const batchUpdate = trpc.settings.batchUpdate.useMutation({
     onSuccess: () => {
-      utils.settings.getAll.invalidate();
+      utils.settings.getSeoSettings.invalidate();
       utils.settings.getPublicSeo.invalidate();
       showToast({
         title: "SEO opgeslagen",

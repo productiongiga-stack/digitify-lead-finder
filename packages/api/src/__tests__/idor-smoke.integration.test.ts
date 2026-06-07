@@ -11,7 +11,7 @@ const runIntegration = process.env.RUN_DB_INTEGRATION === "1" && Boolean(process
 
 function callerCtx(
   db: PrismaClient,
-  user: { id: string; email: string; name: string; role: string; workspaceId: string },
+  user: { id: string; email: string; name: string | null; role: string; workspaceId: string },
 ) {
   return {
     db,
