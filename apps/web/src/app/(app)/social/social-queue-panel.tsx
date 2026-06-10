@@ -138,11 +138,11 @@ export function SocialQueuePanel({
               <SelectContent>
                 <SelectItem value="ALL">Alle statussen</SelectItem>
                 <SelectItem value="DRAFT">Draft</SelectItem>
-                <SelectItem value="PENDING_APPROVAL">Pending approval</SelectItem>
-                <SelectItem value="SCHEDULED">Scheduled</SelectItem>
-                <SelectItem value="PUBLISHED">Published</SelectItem>
-                <SelectItem value="FAILED">Failed</SelectItem>
-                <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                <SelectItem value="PENDING_APPROVAL">Wacht op goedkeuring</SelectItem>
+                <SelectItem value="SCHEDULED">Ingepland</SelectItem>
+                <SelectItem value="PUBLISHED">Gepubliceerd</SelectItem>
+                <SelectItem value="FAILED">Mislukt</SelectItem>
+                <SelectItem value="CANCELLED">Geannuleerd</SelectItem>
               </SelectContent>
             </Select>
           </div>

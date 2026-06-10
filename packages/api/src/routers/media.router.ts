@@ -26,6 +26,7 @@ import {
   saveCreativeAutoImport,
   saveCreativeBrandKit,
 } from "../lib/creative-brand";
+import { loadCreativeBrandContextForKit } from "../lib/social-brand-kits";
 import {
   addReferenceUpload,
   loadReferenceLibrary,
@@ -73,6 +74,7 @@ const startImageInput = z.object({
   imageUrl: z.string().url().optional(),
   imagesList: z.array(z.string().url()).max(14).optional(),
   socialPostId: z.string().optional(),
+  brandKitId: z.string().max(80).optional(),
 });
 
 const startVideoInput = z.object({
@@ -376,7 +378,7 @@ export const mediaRouter = router({
     }
 
     const aspectRatio = resolveAspectRatio(input);
-    const brand = await loadCreativeBrandContext(ctx.db, ctx.user.workspaceId!);
+    const brand = await loadCreativeBrandContextForKit(ctx.db, ctx.user.workspaceId!, input.brandKitId);
     const enriched = enrichGenerationWithBrand(brand, {
       prompt: input.prompt,
       modelType: model.type,

@@ -70,6 +70,7 @@ import {
 } from "@/components/social/social-placement-editor";
 import { persistPlacementAssets } from "@/lib/persist-social-assets";
 import { FacebookPageAvatar, InstagramPageAvatar } from "@/components/social/social-platform-avatars";
+import { SocialBrandKitPicker, type SocialBrandKitApplyPayload } from "@/components/social/social-brand-kit-picker";
 import { SocialComposerSection } from "@/components/social/social-composer-section";
 import { SocialPublishAccountPicker } from "@/components/social/social-publish-account-picker";
 import type { SocialAgendaPost } from "@/components/social/social-agenda";
@@ -102,6 +103,7 @@ type SocialMetadata = {
   firstComment?: string;
   altText?: string;
   brandSignature?: string;
+  brandKitId?: string;
   postFormat?: PostFormat;
   placements?: SocialPlacement[];
   feedFormat?: FeedAspectFormat;
@@ -790,7 +792,8 @@ export function SocialPageInner() {
   const [linkUrl, setLinkUrl] = useState("");
   const [firstComment, setFirstComment] = useState("");
   const [altText, setAltText] = useState("");
-  const [brandSignature, setBrandSignature] = useState("Digitify · meer zichtbaarheid, minder manueel werk");
+  const [brandSignature, setBrandSignature] = useState("");
+  const [selectedBrandKitId, setSelectedBrandKitId] = useState("");
   const [placements, setPlacements] = useState<SocialPlacement[]>(["FEED"]);
   const [feedFormat, setFeedFormat] = useState<FeedAspectFormat>("SQUARE");
   const [placementAssets, setPlacementAssets] = useState<PlacementAssets>({});
@@ -842,6 +845,7 @@ export function SocialPageInner() {
       firstComment,
       altText,
       brandSignature,
+      brandKitId: selectedBrandKitId || undefined,
       postFormat: previewFormat,
       placements,
       feedFormat,
@@ -853,6 +857,7 @@ export function SocialPageInner() {
     [
       altText,
       brandSignature,
+      selectedBrandKitId,
       cta,
       firstComment,
       feedFormat,
@@ -989,6 +994,15 @@ export function SocialPageInner() {
     },
     onError: (error) => showToast({ title: "Generatie mislukt", description: error.message, variant: "error" }),
   });
+
+  function applyBrandKitDefaults(payload: SocialBrandKitApplyPayload) {
+    if (payload.brandSignature) setBrandSignature(payload.brandSignature);
+    if (payload.hashtags) setHashtags(payload.hashtags);
+    if (payload.tone) setTone(payload.tone as SocialTone);
+    if (payload.cta) setCta(payload.cta);
+    if (payload.linkUrl) setLinkUrl(payload.linkUrl);
+    if (payload.template) setTemplate(payload.template);
+  }
 
   const importCreativeImage = trpc.media.importToBlob.useMutation();
   const pendingImageJobId = searchParams.get("imageJob");
@@ -1256,6 +1270,14 @@ export function SocialPageInner() {
     await submitApproval.mutateAsync({ id: selected.id });
   }
 
+  async function handleCreateAndSubmit() {
+    if (!ensureEditorReady({ requireInstagramSafe: true })) return;
+    const saved = await saveDraft();
+    const postId = saved && typeof saved === "object" && "id" in saved ? String((saved as { id: string }).id) : selected?.id;
+    if (!postId) return;
+    await submitApproval.mutateAsync({ id: postId });
+  }
+
   async function handleApproveAndSchedule() {
     if (!selected || !scheduledFor) return;
     if (!ensureEditorReady({ requireInstagramSafe: true })) return;
@@ -1304,6 +1326,7 @@ export function SocialPageInner() {
     setFirstComment(metadata.firstComment || "");
     setAltText(metadata.altText || "");
     setBrandSignature(metadata.brandSignature || "");
+    setSelectedBrandKitId(metadata.brandKitId || "");
   }
 
   function resetEditor() {
@@ -1318,11 +1341,12 @@ export function SocialPageInner() {
     setSelectedPageId(managedPagesQuery.data?.selectedPageId || connectionStatus.data?.pageId || managedPages[0]?.id || "");
     setHeadline("");
     setCta("");
-    setHashtags("digitalegroei marketing belgie");
+    setHashtags("");
     setLinkUrl("");
     setFirstComment("");
     setAltText("");
-    setBrandSignature("Digitify · meer zichtbaarheid, minder manueel werk");
+    setBrandSignature("");
+    setSelectedBrandKitId("");
     setPlacements(["FEED"]);
     setFeedFormat("SQUARE");
     setPlacementAssets({});
@@ -1452,9 +1476,17 @@ export function SocialPageInner() {
           <Card className="overflow-hidden border-amber-200/60 shadow-sm">
             <CardHeader className="bg-gradient-to-r from-amber-50 via-background to-emerald-50 dark:from-amber-950/30 dark:to-emerald-950/20">
               <CardTitle className="flex items-center gap-2 text-base"><Wand2 className="h-4 w-4 text-amber-600" /> Composer</CardTitle>
-              <CardDescription>Schrijf de post, voeg custom elementen toe en bewaar als draft.</CardDescription>
+              <CardDescription>Kies een merkkit, schrijf je post en bewaar als draft.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-5">
+              <SocialBrandKitPicker
+                selectedKitId={selectedBrandKitId}
+                onSelectedKitIdChange={setSelectedBrandKitId}
+                onApplyKit={applyBrandKitDefaults}
+                autoApplyDefaults={!selectedId}
+                disabled={!canEditSelected}
+              />
+
               <div className="space-y-2">
                 <Label htmlFor="social-caption">Caption</Label>
                 <Textarea
@@ -1511,7 +1543,13 @@ export function SocialPageInner() {
                       variant="outline"
                       className="w-full"
                       disabled={generateSuggestion.isPending || !template.trim()}
-                      onClick={() => generateSuggestion.mutate({ template: template.trim(), tone })}
+                      onClick={() =>
+                        generateSuggestion.mutate({
+                          template: template.trim(),
+                          tone,
+                          brandKitId: selectedBrandKitId || undefined,
+                        })
+                      }
                     >
                       {generateSuggestion.isPending ? (
                         <Loader2 className="mr-2 h-3 w-3 animate-spin" />
@@ -1539,6 +1577,7 @@ export function SocialPageInner() {
                   feedFormat={feedFormat}
                   placements={placements}
                   socialPostId={selectedId ?? undefined}
+                  brandKitId={selectedBrandKitId || undefined}
                   onImageReady={(assets) => setPlacementAssets((current) => ({ ...current, ...assets }))}
                 />
                 <SocialPlacementEditor
@@ -1674,7 +1713,11 @@ export function SocialPageInner() {
                   <Button variant="outline" disabled={isBusy || selected.status === "PENDING_APPROVAL"} onClick={handleSubmitForApproval}>
                     <Send className="mr-2 h-4 w-4" /> Ter goedkeuring
                   </Button>
-                ) : null}
+                ) : (
+                  <Button variant="outline" disabled={isBusy || !canEditSelected} onClick={handleCreateAndSubmit}>
+                    <Send className="mr-2 h-4 w-4" /> Opslaan & ter goedkeuring
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -1683,18 +1726,30 @@ export function SocialPageInner() {
             <Card className="border-emerald-200/60">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Approval & planning</CardTitle>
-                <CardDescription>Alleen OWNER/ADMIN kan goedkeuren en inplannen.</CardDescription>
+                <CardDescription>
+                  {canSchedule
+                    ? "Kies een publicatiedatum en keur de post goed."
+                    : "Alleen OWNER/ADMIN kan goedkeuren en inplannen."}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Input id="social-scheduled-for" type="datetime-local" value={scheduledFor} onChange={(event) => setScheduledFor(event.target.value)} />
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" disabled={isBusy || !scheduledFor} onClick={handleApproveAndSchedule}>
-                    <Clock3 className="mr-2 h-3.5 w-3.5" /> Goedkeuren & plannen
-                  </Button>
-                  <Button size="sm" variant="outline" disabled={isBusy} onClick={() => rejectPost.mutate({ id: selected.id })}>
-                    <XCircle className="mr-2 h-3.5 w-3.5" /> Afkeuren
-                  </Button>
-                </div>
+                {canSchedule ? (
+                  <>
+                    <Input id="social-scheduled-for" type="datetime-local" value={scheduledFor} onChange={(event) => setScheduledFor(event.target.value)} />
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" disabled={isBusy || !scheduledFor} onClick={handleApproveAndSchedule}>
+                        <Clock3 className="mr-2 h-3.5 w-3.5" /> Goedkeuren & plannen
+                      </Button>
+                      <Button size="sm" variant="outline" disabled={isBusy} onClick={() => rejectPost.mutate({ id: selected.id })}>
+                        <XCircle className="mr-2 h-3.5 w-3.5" /> Afkeuren
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="rounded-lg border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+                    Status: <strong className="text-foreground">{selected.status}</strong>. Een beheerder keurt en plant deze post in.
+                  </p>
+                )}
               </CardContent>
             </Card>
           ) : null}

@@ -28,6 +28,7 @@ type Props = {
   feedFormat: FeedAspectFormat;
   placements: SocialPlacement[];
   socialPostId?: string;
+  brandKitId?: string;
   onImageReady: (assets: PlacementAssets) => void;
 };
 
@@ -45,6 +46,7 @@ export function SocialImageGenerator({
   feedFormat,
   placements,
   socialPostId,
+  brandKitId,
   onImageReady,
 }: Props) {
   const { showToast } = useToast();
@@ -141,6 +143,7 @@ export function SocialImageGenerator({
             model,
             placementFormat: placementFormat(feedFormat, placements),
             socialPostId,
+            brandKitId,
           })
         }
       >

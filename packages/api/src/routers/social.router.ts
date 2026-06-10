@@ -28,6 +28,13 @@ import {
   resolvePrimaryImageUrl,
   type SocialPlacement,
 } from "../lib/social-placements";
+import {
+  deleteSocialBrandKit,
+  getSocialBrandKitById,
+  listSocialBrandKits,
+  setDefaultSocialBrandKit,
+  upsertSocialBrandKit,
+} from "../lib/social-brand-kits";
 
 const SOCIAL_PLATFORM = ["FACEBOOK", "INSTAGRAM"] as const;
 const SOCIAL_STATUS = [
@@ -80,6 +87,7 @@ const socialPostMetadataSchema = z
     firstComment: z.string().max(1000).optional(),
     altText: z.string().max(500).optional(),
     brandSignature: z.string().max(240).optional(),
+    brandKitId: z.string().max(80).optional(),
     postFormat: socialPostFormatEnum.default("SQUARE").optional(),
     placements: z.array(socialPlacementEnum).min(1).max(3).optional(),
     feedFormat: socialFeedFormatEnum.optional(),
@@ -153,6 +161,7 @@ function normalizeSocialMetadata(metadata?: z.infer<typeof socialPostMetadataSch
     firstComment: cleanOptionalText(metadata.firstComment),
     altText: cleanOptionalText(metadata.altText),
     brandSignature: cleanOptionalText(metadata.brandSignature),
+    brandKitId: cleanOptionalText(metadata.brandKitId),
     postFormat: metadata.postFormat || feedFormat,
     placements,
     feedFormat,
@@ -295,11 +304,21 @@ async function createSocialActivity(
 async function renderCaptionSuggestion(
   db: PrismaClient,
   workspaceId: string,
-  input: { template: string; campaignName?: string; tone?: string },
+  input: { template: string; campaignName?: string; tone?: string; brandKitId?: string },
 ) {
   const template = input.template.trim();
-  const tone = input.tone?.trim() || "professioneel";
+  const brandKit = await getSocialBrandKitById(db, workspaceId, input.brandKitId);
+  const tone = input.tone?.trim() || brandKit?.defaultTone?.trim() || brandKit?.brandVoice?.trim() || "professioneel";
   const campaignHint = input.campaignName ? `Campagne: ${input.campaignName}.` : "";
+  const brandHints = [
+    brandKit?.companyName ? `Merk: ${brandKit.companyName}.` : "",
+    brandKit?.brandSummary ? `Merkcontext: ${brandKit.brandSummary}.` : "",
+    brandKit?.brandKeywords ? `Keywords: ${brandKit.brandKeywords}.` : "",
+    brandKit?.brandAvoid ? `Vermijd: ${brandKit.brandAvoid}.` : "",
+    brandKit?.defaultCta ? `Voorkeur-CTA: ${brandKit.defaultCta}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const fallback = `${template}\n\n#marketing #digitalegroei`;
   const { provider, model, apiKey } = await loadAiProviderConfig(db, workspaceId);
@@ -313,7 +332,7 @@ async function renderCaptionSuggestion(
       {
         role: "user",
         content:
-          `Maak een social caption in het Nederlands (max 180 woorden). ${campaignHint} Toon een heldere CTA en behoud de templateboodschap. Toon enkel de caption, zonder extra uitleg.\n\nTemplate:\n${template}\n\nTone of voice: ${tone}`,
+          `Maak een social caption in het Nederlands (max 180 woorden). ${campaignHint} ${brandHints} Toon een heldere CTA en behoud de templateboodschap. Toon enkel de caption, zonder extra uitleg.\n\nTemplate:\n${template}\n\nTone of voice: ${tone}`,
       },
     ],
     {
@@ -322,7 +341,7 @@ async function renderCaptionSuggestion(
         aggressiveness: "balanced",
         tone,
         language: "nl",
-        companyName: "Digitify",
+        companyName: brandKit?.companyName?.trim() || "Digitify",
       },
     },
   );
@@ -860,6 +879,7 @@ export const socialRouter = router({
         template: z.string().min(1).max(3000),
         campaignId: z.string().optional(),
         tone: z.string().max(60).optional(),
+        brandKitId: z.string().max(80).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -876,8 +896,45 @@ export const socialRouter = router({
         template: input.template,
         campaignName,
         tone: input.tone,
+        brandKitId: input.brandKitId,
       });
     }),
+
+  listBrandKits: protectedProcedure.query(async ({ ctx }) =>
+    listSocialBrandKits(ctx.db, ctx.user.workspaceId!),
+  ),
+
+  upsertBrandKit: mutationProcedure
+    .input(
+      z.object({
+        id: z.string().max(80).optional(),
+        name: z.string().min(1).max(120),
+        companyName: z.string().max(160).optional(),
+        slogan: z.string().max(200).optional(),
+        primaryColor: z.string().max(32).optional(),
+        logoUrl: z.string().max(500).optional(),
+        website: z.string().max(500).optional(),
+        brandVoice: z.string().max(500).optional(),
+        brandKeywords: z.string().max(500).optional(),
+        brandAvoid: z.string().max(500).optional(),
+        brandSummary: z.string().max(2000).optional(),
+        brandSignature: z.string().max(240).optional(),
+        defaultHashtags: z.string().max(500).optional(),
+        defaultTone: z.string().max(80).optional(),
+        defaultCta: z.string().max(160).optional(),
+        defaultLinkUrl: z.string().max(500).optional(),
+        includeLogo: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => upsertSocialBrandKit(ctx.db, ctx.user.workspaceId!, input)),
+
+  deleteBrandKit: mutationProcedure
+    .input(z.object({ id: z.string().min(1).max(80) }))
+    .mutation(async ({ ctx, input }) => deleteSocialBrandKit(ctx.db, ctx.user.workspaceId!, input.id)),
+
+  setDefaultBrandKit: mutationProcedure
+    .input(z.object({ id: z.string().min(1).max(80) }))
+    .mutation(async ({ ctx, input }) => setDefaultSocialBrandKit(ctx.db, ctx.user.workspaceId!, input.id)),
 
   listManagedPages: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
