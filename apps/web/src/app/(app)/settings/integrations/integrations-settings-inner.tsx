@@ -1479,8 +1479,13 @@ export function IntegrationsSettingsInner() {
               </div>
               <TestResult
                 result={
-                  testGoogleSync.data?.message
-                    ?? (testGoogleSync.error ? formatTrpcErrorMessage(testGoogleSync.error.message) : null)
+                  testGoogleSync.data
+                    ? testGoogleSync.data.enabled
+                      ? `Google sync OK. ${testGoogleSync.data.upcomingGoogleEvents} afspraak(en) komende 7 dagen. Huidig slot: ${testGoogleSync.data.available ? "vrij" : "bezet"}.`
+                      : "Google sync staat nog uit. Koppel Google Agenda en activeer synchronisatie."
+                    : testGoogleSync.error
+                      ? formatTrpcErrorMessage(testGoogleSync.error.message)
+                      : null
                 }
                 isError={testGoogleSync.isError}
               />
