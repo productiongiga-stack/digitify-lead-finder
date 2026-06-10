@@ -24,11 +24,11 @@ type Props = {
 };
 
 export const SOCIAL_WIZARD_STEPS: SocialWizardStep[] = [
-  { id: "account", label: "Account", hint: "Waar publiceer je? Kies je Facebook-pagina en kanalen." },
-  { id: "brand", label: "Merkkit", hint: "Welke merkstijl, tone of voice en standaardvelden gebruik je?" },
-  { id: "text", label: "Tekst", hint: "Wat wil je zeggen in je post?" },
-  { id: "media", label: "Beeld", hint: "Welk formaat en welke afbeelding of video?" },
-  { id: "overview", label: "Overzicht", hint: "Controleer alles voordat je opslaat of inplant." },
+  { id: "account", label: "Account", hint: "Pagina en kanalen" },
+  { id: "brand", label: "Merkkit", hint: "Optioneel — standaardvelden" },
+  { id: "text", label: "Tekst", hint: "Je caption" },
+  { id: "media", label: "Beeld", hint: "Afbeelding of video" },
+  { id: "overview", label: "Klaar", hint: "Opslaan of inplannen" },
 ];
 
 export function SocialComposerWizard({
@@ -46,54 +46,51 @@ export function SocialComposerWizard({
   const isLast = currentStep >= steps.length - 1;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-1">
+    <div className="space-y-3">
+      <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
         {steps.map((item, index) => {
           const done = index < currentStep;
           const active = index === currentStep;
           return (
-            <div key={item.id} className="flex min-w-0 flex-1 items-center gap-1">
+            <div key={item.id} className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
                 disabled={disabled || index > currentStep}
                 onClick={() => index <= currentStep && onStepChange(index)}
                 className={cn(
-                  "flex min-w-0 flex-1 flex-col items-center gap-1 rounded-lg px-1 py-2 transition-colors",
-                  active && "bg-primary/10",
-                  done && !active && "opacity-80 hover:bg-muted/40",
+                  "flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-medium transition-colors",
+                  active && "border-primary bg-primary/10 text-foreground",
+                  done && !active && "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200",
+                  !active && !done && "border-border text-muted-foreground",
                   index > currentStep && "cursor-default opacity-40",
                 )}
               >
                 <span
                   className={cn(
-                    "flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold",
-                    active && "border-primary bg-primary text-primary-foreground",
-                    done && !active && "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-                    !active && !done && "border-border bg-background text-muted-foreground",
+                    "flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold",
+                    active && "bg-primary text-primary-foreground",
+                    done && !active && "bg-emerald-500 text-white",
+                    !active && !done && "bg-muted text-muted-foreground",
                   )}
                 >
-                  {done && !active ? <Check className="h-3.5 w-3.5" /> : index + 1}
+                  {done && !active ? <Check className="h-3 w-3" /> : index + 1}
                 </span>
-                <span className={cn("truncate text-[10px] font-medium", active ? "text-foreground" : "text-muted-foreground")}>
-                  {item.label}
-                </span>
+                <span className="hidden sm:inline">{item.label}</span>
               </button>
-              {index < steps.length - 1 ? <div className={cn("h-px w-2 shrink-0", done ? "bg-emerald-500/40" : "bg-border")} /> : null}
+              {index < steps.length - 1 ? <div className={cn("h-px w-2", done ? "bg-emerald-500/40" : "bg-border")} /> : null}
             </div>
           );
         })}
       </div>
 
-      <div className="rounded-xl border bg-muted/10 px-4 py-3">
-        <p className="text-sm font-semibold text-foreground">
-          Stap {currentStep + 1}: {step?.label}
-        </p>
-        <p className="text-xs text-muted-foreground">{step?.hint}</p>
-      </div>
+      <p className="text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">{step?.label}</span>
+        {step?.hint ? ` — ${step.hint}` : ""}
+      </p>
 
-      <div className="space-y-4">{children}</div>
+      <div>{children}</div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
         <Button type="button" variant="ghost" size="sm" disabled={disabled || currentStep === 0} onClick={onBack}>
           Terug
         </Button>

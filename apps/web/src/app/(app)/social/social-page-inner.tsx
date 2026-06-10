@@ -30,7 +30,6 @@ import {
   TabsTrigger,
   Textarea,
 } from "@digitify/ui";
-import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
   CalendarDays,
@@ -48,7 +47,6 @@ import {
   Megaphone,
   MessageCircle,
   MoreHorizontal,
-  Palette,
   RefreshCcw,
   Save,
   Send,
@@ -58,7 +56,6 @@ import {
   ThumbsUp,
   Wand2,
   X,
-  XCircle,
 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
 import {
@@ -408,81 +405,6 @@ function explainMetaError(message: string) {
     };
   }
   return { title: "Publicatiefout", description: "Bekijk de technische details hieronder en probeer daarna opnieuw." };
-}
-
-type SocialHeroStatTone = "amber" | "emerald" | "rose";
-
-const SOCIAL_HERO_STAT_TONES: Record<
-  SocialHeroStatTone,
-  { shell: string; icon: string; value: string; active: string }
-> = {
-  amber: {
-    shell:
-      "border-amber-200/80 bg-gradient-to-br from-amber-50/95 via-white/80 to-white/60 dark:border-amber-500/25 dark:from-amber-950/50 dark:via-white/5 dark:to-transparent",
-    icon: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-    value: "text-amber-800 dark:text-amber-200",
-    active: "ring-amber-400/40 shadow-[0_8px_24px_rgba(245,158,11,0.18)]",
-  },
-  emerald: {
-    shell:
-      "border-emerald-200/80 bg-gradient-to-br from-emerald-50/95 via-white/80 to-white/60 dark:border-emerald-500/25 dark:from-emerald-950/50 dark:via-white/5 dark:to-transparent",
-    icon: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-    value: "text-emerald-800 dark:text-emerald-200",
-    active: "ring-emerald-400/40 shadow-[0_8px_24px_rgba(16,185,129,0.18)]",
-  },
-  rose: {
-    shell:
-      "border-rose-200/80 bg-gradient-to-br from-rose-50/95 via-white/80 to-white/60 dark:border-rose-500/25 dark:from-rose-950/50 dark:via-white/5 dark:to-transparent",
-    icon: "bg-rose-500/15 text-rose-600 dark:text-rose-400",
-    value: "text-rose-800 dark:text-rose-200",
-    active: "ring-rose-400/40 shadow-[0_8px_24px_rgba(244,63,94,0.18)]",
-  },
-};
-
-function SocialHeroStat({
-  label,
-  value,
-  icon: Icon,
-  tone,
-  onClick,
-}: {
-  label: string;
-  value: number;
-  icon: LucideIcon;
-  tone: SocialHeroStatTone;
-  onClick?: () => void;
-}) {
-  const styles = SOCIAL_HERO_STAT_TONES[tone];
-  const isActive = value > 0;
-  const Wrapper = onClick ? "button" : "div";
-
-  return (
-    <Wrapper
-      type={onClick ? "button" : undefined}
-      onClick={onClick}
-      className={cn(
-        "group flex min-w-0 flex-1 flex-col gap-2 rounded-2xl border p-3 text-left shadow-sm backdrop-blur transition-all duration-200",
-        styles.shell,
-        onClick && "cursor-pointer hover:-translate-y-0.5 hover:shadow-md active:translate-y-0",
-        isActive && `ring-1 ${styles.active}`,
-      )}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <span
-          className={cn(
-            "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-transform group-hover:scale-105",
-            styles.icon,
-          )}
-        >
-          <Icon className="h-4 w-4" />
-        </span>
-        <span className={cn("text-2xl font-bold tabular-nums leading-none tracking-tight", styles.value)}>
-          {value}
-        </span>
-      </div>
-      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
-    </Wrapper>
-  );
 }
 
 type PreviewSlide = {
@@ -1451,65 +1373,58 @@ export function SocialPageInner() {
     cancelScheduled.isPending ||
     publishDuePosts.isPending;
 
+  const showPreviewPanel = wizardStep >= 3;
+
   return (
-    <div className="app-page space-y-5">
-      <section className="relative overflow-hidden rounded-[2rem] border border-amber-200/70 bg-[radial-gradient(circle_at_12%_10%,rgba(249,174,90,0.35),transparent_28%),linear-gradient(135deg,#fff7ed_0%,#f8fafc_48%,#e8f5ee_100%)] p-5 shadow-[0_28px_70px_rgba(120,74,26,0.12)] dark:border-amber-300/20 dark:bg-[radial-gradient(circle_at_12%_10%,rgba(249,174,90,0.18),transparent_28%),linear-gradient(135deg,#241a12_0%,#111827_55%,#10251f_100%)] sm:p-6">
-        <div className="absolute right-6 top-6 hidden h-28 w-28 rounded-full border border-amber-300/50 bg-white/30 blur-xl sm:block" />
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
-            <Badge variant="outline" className="mb-3 border-amber-300/70 bg-white/60 text-amber-900 dark:bg-white/10 dark:text-amber-100">
-              <Sparkles className="mr-1.5 h-3.5 w-3.5" /> Social Planner v2
-            </Badge>
-            <h1 className="text-3xl font-black tracking-tight text-slate-950 dark:text-white sm:text-4xl">Plan, preview en publiceer zonder Meta-verrassingen</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-700 dark:text-slate-200">
-              Composeer je post met CTA, hashtags, link en beeldformaten. We checken Instagram-ratio's vóór approval, tonen Facebook/Instagram previews en vertalen Meta-fouten naar duidelijke acties.
-            </p>
-          </div>
-          <div className="flex w-full min-w-[300px] max-w-[400px] flex-col gap-2 sm:flex-row lg:max-w-[420px]">
-            <SocialHeroStat
-              label="Approval"
-              value={stats.pending}
-              icon={ShieldCheck}
-              tone="amber"
+    <div className="app-page space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Social Planner</h1>
+          <p className="text-sm text-muted-foreground">Maak en plan posts voor Facebook & Instagram.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {stats.pending > 0 ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8"
               onClick={() => {
                 setStatusFilter("PENDING_APPROVAL");
                 handleTabChange("queue");
               }}
-            />
-            <SocialHeroStat
-              label="Gepland"
-              value={stats.scheduled}
-              icon={CalendarDays}
-              tone="emerald"
-              onClick={() => handleTabChange("agenda")}
-            />
-            <SocialHeroStat
-              label="Fouten"
-              value={stats.failed}
-              icon={AlertTriangle}
-              tone="rose"
+            >
+              <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+              {stats.pending} approval
+            </Button>
+          ) : null}
+          {stats.scheduled > 0 ? (
+            <Button size="sm" variant="outline" className="h-8" onClick={() => handleTabChange("agenda")}>
+              <CalendarDays className="mr-1.5 h-3.5 w-3.5" />
+              {stats.scheduled} gepland
+            </Button>
+          ) : null}
+          {stats.failed > 0 ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 border-rose-200 text-rose-700"
               onClick={() => {
                 setStatusFilter("FAILED");
                 handleTabChange("queue");
               }}
-            />
-          </div>
-        </div>
-        <div className="relative mt-5 flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" asChild className="bg-white/70 backdrop-blur dark:bg-white/10">
-            <Link href="/settings/integrations">
-              <Settings2 className="mr-2 h-4 w-4" /> Integraties
-            </Link>
+            >
+              <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />
+              {stats.failed} fout
+            </Button>
+          ) : null}
+          <Button size="sm" variant="outline" className="h-8" onClick={resetEditor}>
+            Nieuw
           </Button>
-          <Button size="sm" variant="outline" onClick={resetEditor} className="bg-white/70 backdrop-blur dark:bg-white/10">Nieuw draft</Button>
-          <Badge variant={connectionStatus.data?.connected ? "success" : "warning"} className="px-3 py-1.5">
-            {connectionStatus.data?.connected ? "Meta verbonden" : "Meta niet verbonden"}
-          </Badge>
-          <Badge variant={connectionStatus.data?.autopostEnabled ? "success" : "warning"} className="px-3 py-1.5">
-            Autopost {connectionStatus.data?.autopostEnabled ? "aan" : "uit"}
+          <Badge variant={connectionStatus.data?.connected ? "success" : "warning"}>
+            {connectionStatus.data?.connected ? "Meta OK" : "Meta uit"}
           </Badge>
         </div>
-      </section>
+      </div>
 
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
         <TabsList
@@ -1550,53 +1465,39 @@ export function SocialPageInner() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="composer" className="mt-0 space-y-5">
+        <TabsContent value="composer" className="mt-0 space-y-3">
       {!connectionStatus.isLoading && !connectionStatus.data?.connected ? (
-        <div className="flex flex-col gap-3 rounded-xl border border-amber-200/70 bg-amber-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between dark:border-amber-900/40 dark:bg-amber-950/25">
-          <p className="text-sm text-amber-950/90 dark:text-amber-100">
-            Meta is nog niet gekoppeld. Koppel je Page en Instagram Business-account om te kunnen publiceren.
-          </p>
-          <Button size="sm" variant="outline" className="shrink-0 bg-white/80 dark:bg-white/10" asChild>
-            <Link href="/settings/integrations">Meta instellen</Link>
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-sm dark:bg-amber-950/25">
+          <span className="text-amber-950/90 dark:text-amber-100">Meta niet gekoppeld.</span>
+          <Button size="sm" variant="outline" asChild>
+            <Link href="/settings/integrations">Koppelen</Link>
           </Button>
         </div>
-      ) : null}
-      {!connectionStatus.isLoading && connectionStatus.data?.connected && !connectionStatus.data.autopostEnabled ? (
-        <div className="flex flex-col gap-3 rounded-xl border border-rose-200/70 bg-rose-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between dark:border-rose-900/40 dark:bg-rose-950/25">
-          <p className="text-sm text-rose-950/90 dark:text-rose-100">
-            Autopost staat uit. Ingeplande posts worden niet automatisch gepubliceerd tot je dit aanzet.
-          </p>
-          <Button size="sm" variant="outline" className="shrink-0 bg-white/80 dark:bg-white/10" asChild>
-            <Link href="/settings/integrations">Autopost aanzetten</Link>
+      ) : !connectionStatus.isLoading && connectionStatus.data?.connected && !connectionStatus.data.autopostEnabled ? (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-rose-200/70 bg-rose-50/80 px-3 py-2 text-sm dark:bg-rose-950/25">
+          <span className="text-rose-950/90 dark:text-rose-100">Autopost staat uit — ingeplande posts worden niet live gezet.</span>
+          <Button size="sm" variant="outline" asChild>
+            <Link href="/settings/integrations">Aanzetten</Link>
           </Button>
         </div>
-      ) : null}
-      {canSchedule && overdueScheduledCount > 0 ? (
-        <div className="flex flex-col gap-3 rounded-xl border border-violet-200/70 bg-violet-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between dark:border-violet-900/40 dark:bg-violet-950/25">
-          <p className="text-sm text-violet-950/90 dark:text-violet-100">
-            {overdueScheduledCount} ingeplande {overdueScheduledCount === 1 ? "post wacht" : "posts wachten"} op publicatie
-            {connectionStatus.data?.autopostEnabled ? " en wordt automatisch verwerkt." : "."}
-          </p>
-          <Button
-            size="sm"
-            variant="outline"
-            className="shrink-0 bg-white/80 dark:bg-white/10"
-            disabled={publishDuePosts.isPending}
-            onClick={() => publishDuePosts.mutate()}
-          >
-            {publishDuePosts.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+      ) : canSchedule && overdueScheduledCount > 0 ? (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-violet-200/70 bg-violet-50/80 px-3 py-2 text-sm dark:bg-violet-950/25">
+          <span>{overdueScheduledCount} post{overdueScheduledCount === 1 ? "" : "s"} wacht op publicatie</span>
+          <Button size="sm" variant="outline" disabled={publishDuePosts.isPending} onClick={() => publishDuePosts.mutate()}>
+            {publishDuePosts.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="mr-1.5 h-3.5 w-3.5" />}
             Nu publiceren
           </Button>
         </div>
       ) : null}
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(420px,0.95fr)]">
-        <div className="space-y-5">
-          <Card className="overflow-hidden border-amber-200/60 shadow-sm">
-            <CardHeader className="bg-gradient-to-r from-amber-50 via-background to-emerald-50 dark:from-amber-950/30 dark:to-emerald-950/20">
-              <CardTitle className="flex items-center gap-2 text-base"><Wand2 className="h-4 w-4 text-amber-600" /> Composer</CardTitle>
-              <CardDescription>Volg de stappen om je post snel en logisch op te bouwen.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-5">
+      <div
+        className={cn(
+          "grid gap-4",
+          showPreviewPanel && "xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.85fr)]",
+        )}
+      >
+        <div className="space-y-3">
+          <Card className="border-border/70 shadow-sm">
+            <CardContent className="space-y-3 pt-5">
               <SocialComposerWizard
                 steps={SOCIAL_WIZARD_STEPS}
                 currentStep={wizardStep}
@@ -1649,7 +1550,7 @@ export function SocialPageInner() {
                 ) : null}
 
                 {wizardStep === 2 ? (
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     <div className="space-y-2">
                       <Label htmlFor="social-caption">Caption</Label>
                       <Textarea
@@ -1657,27 +1558,29 @@ export function SocialPageInner() {
                         disabled={!canEditSelected}
                         value={caption}
                         onChange={(event) => setCaption(event.target.value)}
-                        rows={7}
+                        rows={5}
                         placeholder="Schrijf je posttekst..."
                       />
-                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                        <span>{caption.length}/6000 tekens</span>
-                      </div>
+                      <p className="text-xs text-muted-foreground">{caption.length}/6000</p>
                     </div>
-                    <div className="rounded-xl border border-dashed bg-muted/10 p-3 space-y-3">
-                      <p className="text-xs font-medium text-muted-foreground">Of laat AI helpen</p>
+                    <SocialComposerSection
+                      title="AI-caption"
+                      description="Optioneel — beschrijf het onderwerp en genereer een tekst."
+                      icon={Sparkles}
+                      defaultOpen={false}
+                    >
                       <Textarea
                         id="social-template"
                         value={template}
                         onChange={(event) => setTemplate(event.target.value)}
-                        placeholder="Waar gaat de post over? Bijv. gratis intake voor KMO's in juni..."
+                        placeholder="Bijv. gratis intake voor KMO's in juni..."
                         rows={2}
                         disabled={!canEditSelected}
                       />
                       <div className="flex flex-wrap gap-2">
                         <Select value={tone} onValueChange={(value) => setTone(value as SocialTone)} disabled={!canEditSelected}>
-                          <SelectTrigger className="h-9 w-full sm:w-[220px]">
-                            <SelectValue placeholder="Tone of voice" />
+                          <SelectTrigger className="h-9 w-full sm:w-[200px]">
+                            <SelectValue placeholder="Tone" />
                           </SelectTrigger>
                           <SelectContent>
                             {SOCIAL_TONE_OPTIONS.map((option) => (
@@ -1704,10 +1607,10 @@ export function SocialPageInner() {
                           ) : (
                             <Sparkles className="mr-2 h-3 w-3" />
                           )}
-                          Caption genereren
+                          Genereren
                         </Button>
                       </div>
-                    </div>
+                    </SocialComposerSection>
                   </div>
                 ) : null}
 
@@ -1737,37 +1640,28 @@ export function SocialPageInner() {
                 ) : null}
 
                 {wizardStep === 4 ? (
-                  <div className="space-y-4">
-                    <div className="grid gap-3 rounded-xl border bg-muted/10 p-4 sm:grid-cols-2">
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Account</p>
-                        <p className="mt-1 text-sm font-medium">{selectedManagedPage?.name || "Geen pagina"}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {[targetFacebook ? "Facebook" : null, targetInstagram ? "Instagram" : null].filter(Boolean).join(" · ") || "Geen kanalen"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Merkkit</p>
-                        <p className="mt-1 text-sm font-medium">{selectedBrandKitName}</p>
-                      </div>
-                      <div className="sm:col-span-2">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Tekst</p>
-                        <p className="mt-1 line-clamp-4 whitespace-pre-line text-sm">{previewCaption || caption || "—"}</p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Formaten</p>
-                        <p className="mt-1 text-sm font-medium">{placements.join(", ") || "—"}</p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Media</p>
-                        <p className="mt-1 text-sm font-medium">{imageUrl ? "Afbeelding/video toegevoegd" : "Ontbreekt"}</p>
-                      </div>
+                  <div className="space-y-3">
+                    <div className="rounded-lg border bg-muted/10 px-3 py-2.5 text-sm">
+                      <p className="font-medium">{selectedManagedPage?.name || "Geen pagina"}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {[targetFacebook ? "Facebook" : null, targetInstagram ? "Instagram" : null].filter(Boolean).join(" + ") || "—"}
+                        {" · "}
+                        {selectedBrandKitName}
+                        {" · "}
+                        {placements.join(", ") || "geen formaat"}
+                      </p>
+                      <p className="mt-2 line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">{caption || "Geen caption"}</p>
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="social-hashtags">Hashtags</Label>
-                        <HashtagField id="social-hashtags" disabled={!canEditSelected} value={hashtags} onChange={setHashtags} />
-                      </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="social-hashtags">Hashtags</Label>
+                      <HashtagField id="social-hashtags" disabled={!canEditSelected} value={hashtags} onChange={setHashtags} />
+                    </div>
+                    <SocialComposerSection
+                      title="Extra velden"
+                      description="Link, CTA, headline — alleen als je ze nodig hebt."
+                      icon={Settings2}
+                      defaultOpen={Boolean(linkUrl.trim() || headline.trim() || cta.trim())}
+                    >
                       <div className="space-y-2">
                         <Label htmlFor="social-link">Link</Label>
                         <div className="relative">
@@ -1782,13 +1676,6 @@ export function SocialPageInner() {
                           />
                         </div>
                       </div>
-                    </div>
-                    <SocialComposerSection
-                      title="Meer opties"
-                      description="Headline, CTA, brand signature en interne notities."
-                      icon={Settings2}
-                      defaultOpen={Boolean(headline.trim() || cta.trim() || brandSignature.trim() || altText.trim())}
-                    >
                       <div className="space-y-2">
                         <Label htmlFor="social-headline">Headline / hook</Label>
                         <Input
@@ -1825,73 +1712,52 @@ export function SocialPageInner() {
                         />
                       </div>
                     </SocialComposerSection>
+
+                    {selected && canSchedule ? (
+                      <div className="space-y-2 rounded-lg border border-emerald-200/60 bg-emerald-500/5 p-3">
+                        <Label htmlFor="social-scheduled-for" className="text-xs">Publicatiedatum</Label>
+                        <Input id="social-scheduled-for" type="datetime-local" value={scheduledFor} onChange={(event) => setScheduledFor(event.target.value)} />
+                        <div className="flex flex-wrap gap-2">
+                          {selected.status === "SCHEDULED" ? (
+                            <>
+                              <Button size="sm" disabled={isBusy || !scheduledFor} onClick={handleApproveAndSchedule}>
+                                <Clock3 className="mr-2 h-3.5 w-3.5" /> Datum wijzigen
+                              </Button>
+                              <Button size="sm" variant="outline" disabled={isBusy} onClick={() => cancelScheduled.mutate({ id: selected.id })}>
+                                Annuleren
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button size="sm" disabled={isBusy || !scheduledFor} onClick={handleApproveAndSchedule}>
+                                <Clock3 className="mr-2 h-3.5 w-3.5" /> Goedkeuren & plannen
+                              </Button>
+                              {selected.status === "PENDING_APPROVAL" ? (
+                                <Button size="sm" variant="outline" disabled={isBusy} onClick={() => rejectPost.mutate({ id: selected.id })}>
+                                  Afkeuren
+                                </Button>
+                              ) : null}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ) : selected && !canSchedule ? (
+                      <p className="text-xs text-muted-foreground">Status: {selected.status}. Een beheerder plant deze post in.</p>
+                    ) : null}
                   </div>
                 ) : null}
               </SocialComposerWizard>
             </CardContent>
           </Card>
-
-          {selected ? (
-            <Card className="border-emerald-200/60">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Approval & planning</CardTitle>
-                <CardDescription>
-                  {canSchedule
-                    ? selected.status === "SCHEDULED"
-                      ? "Deze post staat al in de agenda. Pas de publicatiedatum aan of annuleer de planning."
-                      : "Kies een publicatiedatum en keur de post goed."
-                    : "Alleen OWNER/ADMIN kan goedkeuren en inplannen."}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {canSchedule ? (
-                  <>
-                    <Input id="social-scheduled-for" type="datetime-local" value={scheduledFor} onChange={(event) => setScheduledFor(event.target.value)} />
-                    <div className="flex flex-wrap gap-2">
-                      {selected.status === "SCHEDULED" ? (
-                        <>
-                          <Button size="sm" disabled={isBusy || !scheduledFor} onClick={handleApproveAndSchedule}>
-                            <Clock3 className="mr-2 h-3.5 w-3.5" /> Planning bijwerken
-                          </Button>
-                          <Button size="sm" variant="outline" disabled={isBusy} onClick={() => cancelScheduled.mutate({ id: selected.id })}>
-                            <XCircle className="mr-2 h-3.5 w-3.5" /> Planning annuleren
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <Button size="sm" disabled={isBusy || !scheduledFor} onClick={handleApproveAndSchedule}>
-                            <Clock3 className="mr-2 h-3.5 w-3.5" /> Goedkeuren & plannen
-                          </Button>
-                          {selected.status === "PENDING_APPROVAL" ? (
-                            <Button size="sm" variant="outline" disabled={isBusy} onClick={() => rejectPost.mutate({ id: selected.id })}>
-                              <XCircle className="mr-2 h-3.5 w-3.5" /> Afkeuren
-                            </Button>
-                          ) : null}
-                        </>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <p className="rounded-lg border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
-                    Status: <strong className="text-foreground">{selected.status}</strong>. Een beheerder keurt en plant deze post in.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          ) : null}
         </div>
 
-        <div className="space-y-5 xl:sticky xl:top-5 xl:self-start">
-          <Card className="overflow-hidden border-slate-200/70 bg-gradient-to-br from-white via-slate-50 to-amber-50/60 dark:from-slate-950 dark:via-slate-900 dark:to-amber-950/20">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base"><Eye className="h-4 w-4" /> Live preview</CardTitle>
-              <CardDescription>
-                {activePreviewSlide
-                  ? `${activePreviewSlide.label} · ${activePreviewSlide.subtitle}`
-                  : "Upload per publicatietype om de preview te zien."}
-              </CardDescription>
+        {showPreviewPanel ? (
+        <div className="xl:sticky xl:top-5 xl:self-start">
+          <Card className="overflow-hidden border-border/70 shadow-sm">
+            <CardHeader className="py-3">
+              <CardTitle className="flex items-center gap-2 text-sm"><Eye className="h-3.5 w-3.5" /> Preview</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-5">
+            <CardContent className="space-y-3 pb-4">
               {previewSlides.length > 0 ? (
                 <>
                   {previewSlides.length > 1 ? (
@@ -1937,11 +1803,7 @@ export function SocialPageInner() {
                   ) : null}
 
                   {activePreviewSlide ? (
-                    <div className="space-y-3">
-                      <p className="text-center text-xs text-muted-foreground">
-                        Preview {previewSlideIndex + 1} van {previewSlides.length}
-                        {previewSlides.length > 1 ? " · gebruik pijltjes of tabs" : ""}
-                      </p>
+                    <div className="space-y-2">
                       {activePreviewSlide.id === "REEL" ? (
                         <InstagramReelPreview
                           caption={previewCaption}
@@ -1990,23 +1852,15 @@ export function SocialPageInner() {
                   ) : null}
                 </>
               ) : (
-                <div className="rounded-2xl border border-dashed bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
-                  <ImageIcon className="mx-auto mb-3 h-8 w-8 opacity-40" />
-                  <p className="font-medium text-foreground">Nog geen preview beschikbaar</p>
-                  <p className="mt-1 text-xs">Upload een afbeelding (of reel-video) per gekozen publicatietype links.</p>
+                <div className="rounded-lg border border-dashed bg-muted/20 px-4 py-8 text-center text-xs text-muted-foreground">
+                  <ImageIcon className="mx-auto mb-2 h-6 w-6 opacity-40" />
+                  Voeg media toe om de preview te zien.
                 </div>
               )}
-
-              <div className="rounded-2xl border bg-white/70 p-3 text-xs leading-5 text-muted-foreground dark:bg-white/5">
-                <p className="font-semibold text-foreground"><Palette className="mr-1 inline h-3.5 w-3.5" /> Publicatie-regels</p>
-                <p>
-                  Feed: 4:5 tot 1.91:1 · Story/Reel: 9:16 (1080×1920). Reels vereisen een publieke MP4-video; cover is optioneel.
-                  {placements.length > 1 ? ` Je publiceert ${placements.length} varianten in één planning.` : ""}
-                </p>
-              </div>
             </CardContent>
           </Card>
         </div>
+        ) : null}
       </div>
         </TabsContent>
 

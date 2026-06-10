@@ -191,21 +191,12 @@ export function SocialBrandKitPicker({
 
   return (
     <>
-      <div className="overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-card via-card to-violet-500/[0.04]">
-        <div className="flex items-start gap-3 p-4">
-          <div
-            className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-sm"
-            style={{ backgroundColor: selectedKit?.primaryColor || "#f9ae5a" }}
-          >
-            <Sparkles className="h-4 w-4" />
-          </div>
+      <div className="space-y-3">
           <div className="min-w-0 flex-1 space-y-3">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <p className="text-sm font-semibold text-foreground">Merkkit</p>
-                <p className="text-xs text-muted-foreground">
-                  Kies welk merk deze post vertegenwoordigt. Velden, AI-caption en beeldgeneratie volgen automatisch.
-                </p>
+                <p className="text-xs text-muted-foreground">Optioneel — vult hashtags, tone en CTA automatisch in.</p>
               </div>
               <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={openCreate}>
                 <Plus className="mr-1.5 h-3.5 w-3.5" />
@@ -240,15 +231,10 @@ export function SocialBrandKitPicker({
               ) : null}
             </div>
 
-            {selectedKit ? (
-              <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-                {selectedKit.companyName ? <Badge variant="outline">{selectedKit.companyName}</Badge> : null}
-                {selectedKit.brandVoice ? <Badge variant="outline">{selectedKit.brandVoice}</Badge> : null}
-                {selectedKit.defaultHashtags ? <Badge variant="outline">Hashtags ingesteld</Badge> : null}
-              </div>
+            {selectedKit?.companyName ? (
+              <p className="text-[11px] text-muted-foreground">{selectedKit.companyName}</p>
             ) : null}
           </div>
-        </div>
       </div>
 
       <CreateModal
