@@ -376,7 +376,9 @@ async function publishSocialPostRecord(db: PrismaClient, post: SocialPostRecord)
     throw new Error("Meta is niet gekoppeld. Ga naar Instellingen → Integraties en koppel je Facebook-pagina.");
   }
 
-  const metadata = normalizeSocialMetadata(post.metadata);
+  const metadata = normalizeSocialMetadata(
+    (post.metadata || undefined) as z.infer<typeof socialPostMetadataSchema>,
+  );
   const publishTarget = await resolveSocialPublishTarget({
     config,
     publisherPageId: metadata.publisherPageId,
