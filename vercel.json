@@ -16,7 +16,7 @@
     },
     {
       "path": "/api/cron/social-publish",
-      "schedule": "0 9 * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/media-reconcile",

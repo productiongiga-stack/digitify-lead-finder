@@ -24,10 +24,11 @@ type Props = {
 };
 
 export const SOCIAL_WIZARD_STEPS: SocialWizardStep[] = [
-  { id: "brand", label: "Merk", hint: "Welk merk en waar publiceer je?" },
-  { id: "text", label: "Tekst", hint: "Wat wil je zeggen?" },
-  { id: "media", label: "Beeld", hint: "Welk formaat en welke media?" },
-  { id: "finish", label: "Klaar", hint: "Controleer en bewaar." },
+  { id: "account", label: "Account", hint: "Waar publiceer je? Kies je Facebook-pagina en kanalen." },
+  { id: "brand", label: "Merkkit", hint: "Welke merkstijl, tone of voice en standaardvelden gebruik je?" },
+  { id: "text", label: "Tekst", hint: "Wat wil je zeggen in je post?" },
+  { id: "media", label: "Beeld", hint: "Welk formaat en welke afbeelding of video?" },
+  { id: "overview", label: "Overzicht", hint: "Controleer alles voordat je opslaat of inplant." },
 ];
 
 export function SocialComposerWizard({

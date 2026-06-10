@@ -1007,14 +1007,63 @@ export function SocialPageInner() {
     if (payload.template) setTemplate(payload.template);
   }
 
+  const brandKitsQuery = trpc.social.listBrandKits.useQuery();
+  const selectedBrandKitName = useMemo(() => {
+    const kits = brandKitsQuery.data?.kits ?? [];
+    const match = kits.find((kit) => kit.id === selectedBrandKitId);
+    return match?.name || (selectedBrandKitId ? "Merkkit" : "Geen merkkit gekozen");
+  }, [brandKitsQuery.data?.kits, selectedBrandKitId]);
+
+  const overdueScheduledCount = useMemo(
+    () =>
+      rows.filter(
+        (row: { status: string; scheduledFor?: string | Date | null }) =>
+          row.status === "SCHEDULED" &&
+          row.scheduledFor &&
+          new Date(row.scheduledFor).getTime() <= Date.now(),
+      ).length,
+    [rows],
+  );
+
+  const publishDuePosts = trpc.social.publishDuePosts.useMutation({
+    onSuccess: async (summary) => {
+      await listQuery.refetch();
+      if (summary.published > 0 || summary.failed > 0) {
+        showToast({
+          title: "Publicatiewachtrij verwerkt",
+          description: `${summary.published} gepubliceerd · ${summary.failed} mislukt · ${summary.skipped} overgeslagen`,
+        });
+      }
+    },
+    onError: (error) =>
+      showToast({ title: "Publiceren mislukt", description: error.message, variant: "error" }),
+  });
+
+  useEffect(() => {
+    if (!canSchedule || !connectionStatus.data?.autopostEnabled || overdueScheduledCount === 0) return;
+    if (publishDuePosts.isPending) return;
+
+    const timer = window.setInterval(() => {
+      if (!publishDuePosts.isPending) publishDuePosts.mutate();
+    }, 60_000);
+
+    publishDuePosts.mutate();
+
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- poll only when overdue queue changes
+  }, [canSchedule, connectionStatus.data?.autopostEnabled, overdueScheduledCount]);
+
   function canProceedWizardStep(step: number) {
     if (step === 0) {
       return Boolean(selectedPageId) && (targetFacebook || targetInstagram);
     }
     if (step === 1) {
-      return Boolean(caption.trim());
+      return true;
     }
     if (step === 2) {
+      return Boolean(caption.trim());
+    }
+    if (step === 3) {
       if (!placements.length) return false;
       if (placements.includes("FEED") && !placementAssets.FEED?.imageUrl?.trim()) return false;
       if (placements.includes("STORY") && !placementAssets.STORY?.imageUrl?.trim()) return false;
@@ -1028,13 +1077,13 @@ export function SocialPageInner() {
     if (!canProceedWizardStep(wizardStep)) {
       if (wizardStep === 0) {
         showToast({
-          title: "Kies merk en kanalen",
+          title: "Kies publicatie-account",
           description: "Selecteer een pagina en minstens Facebook of Instagram.",
           variant: "error",
         });
-      } else if (wizardStep === 1) {
-        showToast({ title: "Caption verplicht", description: "Schrijf eerst je posttekst.", variant: "error" });
       } else if (wizardStep === 2) {
+        showToast({ title: "Caption verplicht", description: "Schrijf eerst je posttekst.", variant: "error" });
+      } else if (wizardStep === 3) {
         showToast({ title: "Media ontbreekt", description: "Voeg de benodigde afbeelding of video toe.", variant: "error" });
       }
       return;
@@ -1399,7 +1448,8 @@ export function SocialPageInner() {
     approveAndSchedule.isPending ||
     rejectPost.isPending ||
     retryFailed.isPending ||
-    cancelScheduled.isPending;
+    cancelScheduled.isPending ||
+    publishDuePosts.isPending;
 
   return (
     <div className="app-page space-y-5">
@@ -1511,6 +1561,34 @@ export function SocialPageInner() {
           </Button>
         </div>
       ) : null}
+      {!connectionStatus.isLoading && connectionStatus.data?.connected && !connectionStatus.data.autopostEnabled ? (
+        <div className="flex flex-col gap-3 rounded-xl border border-rose-200/70 bg-rose-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between dark:border-rose-900/40 dark:bg-rose-950/25">
+          <p className="text-sm text-rose-950/90 dark:text-rose-100">
+            Autopost staat uit. Ingeplande posts worden niet automatisch gepubliceerd tot je dit aanzet.
+          </p>
+          <Button size="sm" variant="outline" className="shrink-0 bg-white/80 dark:bg-white/10" asChild>
+            <Link href="/settings/integrations">Autopost aanzetten</Link>
+          </Button>
+        </div>
+      ) : null}
+      {canSchedule && overdueScheduledCount > 0 ? (
+        <div className="flex flex-col gap-3 rounded-xl border border-violet-200/70 bg-violet-50/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between dark:border-violet-900/40 dark:bg-violet-950/25">
+          <p className="text-sm text-violet-950/90 dark:text-violet-100">
+            {overdueScheduledCount} ingeplande {overdueScheduledCount === 1 ? "post wacht" : "posts wachten"} op publicatie
+            {connectionStatus.data?.autopostEnabled ? " en wordt automatisch verwerkt." : "."}
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0 bg-white/80 dark:bg-white/10"
+            disabled={publishDuePosts.isPending}
+            onClick={() => publishDuePosts.mutate()}
+          >
+            {publishDuePosts.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+            Nu publiceren
+          </Button>
+        </div>
+      ) : null}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(420px,0.95fr)]">
         <div className="space-y-5">
           <Card className="overflow-hidden border-amber-200/60 shadow-sm">
@@ -1546,30 +1624,31 @@ export function SocialPageInner() {
                 }
               >
                 {wizardStep === 0 ? (
-                  <div className="space-y-4">
-                    <SocialBrandKitPicker
-                      selectedKitId={selectedBrandKitId}
-                      onSelectedKitIdChange={setSelectedBrandKitId}
-                      onApplyKit={applyBrandKitDefaults}
-                      autoApplyDefaults={!selectedId}
-                      disabled={!canEditSelected}
-                    />
-                    <SocialPublishAccountPicker
-                      pages={managedPages}
-                      selectedPageId={selectedPageId}
-                      onSelectedPageIdChange={setSelectedPageId}
-                      selectedPage={selectedManagedPage}
-                      targetFacebook={targetFacebook}
-                      onTargetFacebookChange={setTargetFacebook}
-                      targetInstagram={targetInstagram}
-                      onTargetInstagramChange={setTargetInstagram}
-                      disabled={!canEditSelected}
-                      isLoading={managedPagesQuery.isLoading}
-                    />
-                  </div>
+                  <SocialPublishAccountPicker
+                    pages={managedPages}
+                    selectedPageId={selectedPageId}
+                    onSelectedPageIdChange={setSelectedPageId}
+                    selectedPage={selectedManagedPage}
+                    targetFacebook={targetFacebook}
+                    onTargetFacebookChange={setTargetFacebook}
+                    targetInstagram={targetInstagram}
+                    onTargetInstagramChange={setTargetInstagram}
+                    disabled={!canEditSelected}
+                    isLoading={managedPagesQuery.isLoading}
+                  />
                 ) : null}
 
                 {wizardStep === 1 ? (
+                  <SocialBrandKitPicker
+                    selectedKitId={selectedBrandKitId}
+                    onSelectedKitIdChange={setSelectedBrandKitId}
+                    onApplyKit={applyBrandKitDefaults}
+                    autoApplyDefaults={!selectedId}
+                    disabled={!canEditSelected}
+                  />
+                ) : null}
+
+                {wizardStep === 2 ? (
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <Label htmlFor="social-caption">Caption</Label>
@@ -1632,7 +1711,7 @@ export function SocialPageInner() {
                   </div>
                 ) : null}
 
-                {wizardStep === 2 ? (
+                {wizardStep === 3 ? (
                   <div className="space-y-4">
                     <SocialPlacementEditor
                       placements={placements}
@@ -1657,8 +1736,33 @@ export function SocialPageInner() {
                   </div>
                 ) : null}
 
-                {wizardStep === 3 ? (
+                {wizardStep === 4 ? (
                   <div className="space-y-4">
+                    <div className="grid gap-3 rounded-xl border bg-muted/10 p-4 sm:grid-cols-2">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Account</p>
+                        <p className="mt-1 text-sm font-medium">{selectedManagedPage?.name || "Geen pagina"}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {[targetFacebook ? "Facebook" : null, targetInstagram ? "Instagram" : null].filter(Boolean).join(" · ") || "Geen kanalen"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Merkkit</p>
+                        <p className="mt-1 text-sm font-medium">{selectedBrandKitName}</p>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Tekst</p>
+                        <p className="mt-1 line-clamp-4 whitespace-pre-line text-sm">{previewCaption || caption || "—"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Formaten</p>
+                        <p className="mt-1 text-sm font-medium">{placements.join(", ") || "—"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Media</p>
+                        <p className="mt-1 text-sm font-medium">{imageUrl ? "Afbeelding/video toegevoegd" : "Ontbreekt"}</p>
+                      </div>
+                    </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="space-y-2">
                         <Label htmlFor="social-hashtags">Hashtags</Label>
@@ -1910,6 +2014,9 @@ export function SocialPageInner() {
           {activeTab === "agenda" ? (
             <SocialAgenda
               canReschedule={canSchedule}
+              autopostEnabled={connectionStatus.data?.autopostEnabled ?? false}
+              onProcessQueue={canSchedule ? () => publishDuePosts.mutate() : undefined}
+              processQueuePending={publishDuePosts.isPending}
               onSelectPost={openAgendaPost}
               onPlanNew={planPostForDate}
             />

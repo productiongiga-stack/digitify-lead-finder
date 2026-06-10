@@ -221,6 +221,7 @@ describe("social publish worker", () => {
       socialPost: {
         findMany: socialPostFindMany,
         update: socialPostUpdate,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       activity: { create: vi.fn().mockResolvedValue({ id: "act_2" }) },
     } as any);
@@ -279,6 +280,7 @@ describe("social publish worker", () => {
       socialPost: {
         findMany: socialPostFindMany,
         update: socialPostUpdate,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       activity: { create: vi.fn().mockResolvedValue({ id: "act_story" }) },
     } as any);

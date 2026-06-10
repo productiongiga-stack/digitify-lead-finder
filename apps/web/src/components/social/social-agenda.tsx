@@ -11,6 +11,7 @@ import {
   Skeleton,
 } from "@digitify/ui";
 import {
+  AlertTriangle,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -20,6 +21,7 @@ import {
   ImageIcon,
   Instagram,
   Plus,
+  RefreshCcw,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/components/feedback/toast-provider";
@@ -55,15 +57,17 @@ export type SocialAgendaPost = {
 
 type CalendarView = "DAY" | "WEEK" | "MONTH";
 
-const STATUS_META: Record<string, { label: string; className: string }> = {
-  DRAFT: { label: "Draft", className: "bg-slate-500/15 text-slate-700 dark:text-slate-200" },
-  PENDING_APPROVAL: { label: "Approval", className: "bg-amber-500/15 text-amber-800 dark:text-amber-200" },
-  SCHEDULED: { label: "Gepland", className: "bg-emerald-500/15 text-emerald-800 dark:text-emerald-200" },
-  PUBLISHING: { label: "Publiceren", className: "bg-violet-500/15 text-violet-800 dark:text-violet-200" },
-  PUBLISHED: { label: "Live", className: "bg-sky-500/15 text-sky-800 dark:text-sky-200" },
-  FAILED: { label: "Mislukt", className: "bg-red-500/15 text-red-800 dark:text-red-200" },
-  CANCELLED: { label: "Geannuleerd", className: "bg-muted text-muted-foreground" },
+const STATUS_META: Record<string, { label: string; className: string; dotClassName: string }> = {
+  DRAFT: { label: "Draft", className: "bg-slate-500/15 text-slate-700 dark:text-slate-200", dotClassName: "bg-slate-500" },
+  PENDING_APPROVAL: { label: "Approval", className: "bg-amber-500/15 text-amber-800 dark:text-amber-200", dotClassName: "bg-amber-500" },
+  SCHEDULED: { label: "Gepland", className: "bg-emerald-500/15 text-emerald-800 dark:text-emerald-200", dotClassName: "bg-emerald-500" },
+  PUBLISHING: { label: "Publiceren", className: "bg-violet-500/15 text-violet-800 dark:text-violet-200", dotClassName: "bg-violet-500" },
+  PUBLISHED: { label: "Live", className: "bg-sky-500/15 text-sky-800 dark:text-sky-200", dotClassName: "bg-sky-500" },
+  FAILED: { label: "Mislukt", className: "bg-red-500/15 text-red-800 dark:text-red-200", dotClassName: "bg-red-500" },
+  CANCELLED: { label: "Geannuleerd", className: "bg-muted text-muted-foreground", dotClassName: "bg-muted-foreground" },
 };
+
+const STATUS_LEGEND = Object.values(STATUS_META);
 
 function postCalendarDate(post: SocialAgendaPost): Date | null {
   const raw = post.scheduledFor || post.publishedAt;
@@ -83,6 +87,12 @@ function postTimeLabel(post: SocialAgendaPost) {
   return formatTimeNl(date);
 }
 
+function isOverdueScheduled(post: SocialAgendaPost) {
+  if (post.status !== "SCHEDULED") return false;
+  const date = postCalendarDate(post);
+  return Boolean(date && date.getTime() <= Date.now());
+}
+
 function hasReel(post: SocialAgendaPost) {
   const metadata = (post.metadata || {}) as { placements?: string[] };
   return metadata.placements?.includes("REEL");
@@ -90,6 +100,9 @@ function hasReel(post: SocialAgendaPost) {
 
 type Props = {
   canReschedule?: boolean;
+  autopostEnabled?: boolean;
+  onProcessQueue?: () => void;
+  processQueuePending?: boolean;
   onSelectPost: (post: SocialAgendaPost) => void;
   onPlanNew: (date: Date) => void;
 };
@@ -111,6 +124,7 @@ function PostAgendaCard({
 }) {
   const status = STATUS_META[post.status] ?? STATUS_META.DRAFT;
   const platforms = post.targetPlatforms || [];
+  const overdue = isOverdueScheduled(post);
 
   return (
     <button
@@ -121,7 +135,10 @@ function PostAgendaCard({
       onDragEnd={onDragEnd}
       onClick={onClick}
       className={cn(
-        "w-full rounded-xl border border-border/60 bg-background/90 p-2 text-left shadow-sm transition-all hover:border-amber-300/60 hover:shadow-md",
+        "w-full rounded-xl border bg-background/90 p-2 text-left shadow-sm transition-all hover:shadow-md",
+        overdue
+          ? "border-violet-400/70 bg-violet-500/5 hover:border-violet-400"
+          : "border-border/60 hover:border-amber-300/60",
         compact ? "p-1.5" : "p-2.5",
       )}
     >
@@ -142,7 +159,7 @@ function PostAgendaCard({
               {postTimeLabel(post)}
             </span>
             <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-medium", status.className)}>
-              {status.label}
+              {overdue ? "Wacht op post" : status.label}
             </span>
           </div>
           <p className={cn("line-clamp-2 font-medium leading-snug text-foreground", compact ? "text-[11px]" : "text-xs")}>
@@ -158,7 +175,14 @@ function PostAgendaCard({
   );
 }
 
-export function SocialAgenda({ canReschedule = false, onSelectPost, onPlanNew }: Props) {
+export function SocialAgenda({
+  canReschedule = false,
+  autopostEnabled = false,
+  onProcessQueue,
+  processQueuePending = false,
+  onSelectPost,
+  onPlanNew,
+}: Props) {
   const { showToast } = useToast();
   const utils = trpc.useUtils();
   const [view, setView] = useState<CalendarView>("WEEK");
@@ -214,6 +238,25 @@ export function SocialAgenda({ canReschedule = false, onSelectPost, onPlanNew }:
   const monthCells = useMemo(() => monthCalendarCells(currentDate), [currentDate]);
 
   const unscheduled = (agendaQuery.data?.unscheduled ?? []) as SocialAgendaPost[];
+  const allItems = useMemo(
+    () => [...(agendaQuery.data?.items ?? []), ...unscheduled] as SocialAgendaPost[],
+    [agendaQuery.data?.items, unscheduled],
+  );
+
+  const agendaStats = useMemo(() => {
+    const todayKey = toDateKey(new Date());
+    let today = 0;
+    let overdue = 0;
+    let scheduled = 0;
+    for (const post of allItems) {
+      if (post.status === "SCHEDULED") {
+        scheduled += 1;
+        if (isOverdueScheduled(post)) overdue += 1;
+        if (postDateKey(post) === todayKey) today += 1;
+      }
+    }
+    return { today, overdue, scheduled };
+  }, [allItems]);
 
   function shiftRange(direction: -1 | 1) {
     setCurrentDate((prev) => {
@@ -262,6 +305,23 @@ export function SocialAgenda({ canReschedule = false, onSelectPost, onPlanNew }:
                 Plan en bekijk je social posts per dag, week of maand.
                 {canReschedule ? " Sleep ingeplande posts om ze te verplaatsen." : ""}
               </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Badge variant="outline" className="bg-background/80">
+                  Vandaag: {agendaStats.today}
+                </Badge>
+                <Badge variant="outline" className="bg-emerald-500/10 text-emerald-800 dark:text-emerald-200">
+                  Gepland: {agendaStats.scheduled}
+                </Badge>
+                {agendaStats.overdue > 0 ? (
+                  <Badge variant="warning" className="gap-1">
+                    <AlertTriangle className="h-3 w-3" />
+                    {agendaStats.overdue} achterstallig
+                  </Badge>
+                ) : null}
+                <Badge variant={autopostEnabled ? "success" : "warning"}>
+                  Autopost {autopostEnabled ? "aan" : "uit"}
+                </Badge>
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {(["DAY", "WEEK", "MONTH"] as const).map((entry) => (
@@ -289,10 +349,35 @@ export function SocialAgenda({ canReschedule = false, onSelectPost, onPlanNew }:
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
-            <Button size="sm" onClick={() => onPlanNew(currentDate)} className="bg-amber-600 hover:bg-amber-500">
-              <Plus className="mr-2 h-4 w-4" />
-              Post plannen
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {onProcessQueue && agendaStats.overdue > 0 ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={processQueuePending}
+                  onClick={onProcessQueue}
+                >
+                  {processQueuePending ? (
+                    <RefreshCcw className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCcw className="mr-2 h-4 w-4" />
+                  )}
+                  Nu publiceren
+                </Button>
+              ) : null}
+              <Button size="sm" onClick={() => onPlanNew(currentDate)} className="bg-amber-600 hover:bg-amber-500">
+                <Plus className="mr-2 h-4 w-4" />
+                Post plannen
+              </Button>
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5 border-t border-border/40 pt-3">
+            {STATUS_LEGEND.map((entry) => (
+              <span key={entry.label} className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span className={cn("h-2 w-2 rounded-full", entry.dotClassName)} />
+                {entry.label}
+              </span>
+            ))}
           </div>
         </CardHeader>
 
@@ -352,17 +437,18 @@ export function SocialAgenda({ canReschedule = false, onSelectPost, onPlanNew }:
               </div>
             </div>
           ) : view === "WEEK" ? (
-            <div className="grid gap-2 md:grid-cols-7">
+            <div className="grid gap-3 md:grid-cols-7">
               {weekDates.map((date) => {
                 const dateKey = toDateKey(date);
                 const isToday = isSameDateKey(dateKey, toDateKey(new Date()));
                 const dayItems = postsByDate.get(dateKey) ?? [];
+                const firstTime = dayItems[0] ? postTimeLabel(dayItems[0] as SocialAgendaPost) : null;
                 return (
                   <div
                     key={dateKey}
                     className={cn(
-                      "flex min-h-[280px] flex-col rounded-xl border p-2",
-                      isToday ? "border-amber-400/60 bg-amber-500/5 shadow-sm" : "border-border/60 bg-background/40",
+                      "flex min-h-[320px] flex-col rounded-xl border p-2.5",
+                      isToday ? "border-amber-400/80 bg-amber-500/8 shadow-md ring-1 ring-amber-300/40" : "border-border/60 bg-background/40",
                     )}
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={() => {
@@ -375,10 +461,16 @@ export function SocialAgenda({ canReschedule = false, onSelectPost, onPlanNew }:
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                           {weekdayLabel(date)}
+                          {isToday ? (
+                            <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                              Vandaag
+                            </span>
+                          ) : null}
                         </p>
-                        <p className="text-sm font-bold">{date.getDate()}</p>
+                        <p className="text-lg font-bold">{date.getDate()}</p>
+                        {firstTime ? <p className="text-[10px] text-muted-foreground">Eerste post {firstTime}</p> : null}
                       </div>
-                      <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                      <Badge variant={dayItems.length ? "secondary" : "outline"} className="h-6 min-w-6 justify-center px-1.5 text-[10px]">
                         {dayItems.length}
                       </Badge>
                     </div>
@@ -466,7 +558,12 @@ export function SocialAgenda({ canReschedule = false, onSelectPost, onPlanNew }:
                             onDragStart={() => setDraggingPostId(post.id)}
                             onDragEnd={() => setDraggingPostId(null)}
                             onClick={() => onSelectPost(post)}
-                            className="block w-full truncate rounded-md bg-amber-500/10 px-1.5 py-0.5 text-left text-[10px] font-medium text-amber-900 hover:bg-amber-500/20 dark:text-amber-100"
+                            className={cn(
+                              "block w-full truncate rounded-md px-1.5 py-0.5 text-left text-[10px] font-medium hover:opacity-90",
+                              isOverdueScheduled(post)
+                                ? "bg-violet-500/15 text-violet-900 dark:text-violet-100"
+                                : "bg-amber-500/10 text-amber-900 dark:text-amber-100",
+                            )}
                           >
                             {postTimeLabel(post)} · {(post.caption || "").slice(0, 28)}
                           </button>

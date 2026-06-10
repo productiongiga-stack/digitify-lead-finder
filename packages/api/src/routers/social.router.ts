@@ -356,6 +356,19 @@ async function renderCaptionSuggestion(
 export async function runDueSocialPostsWorker(db: PrismaClient) {
   const now = new Date();
   const socialDb = db as any;
+
+  const stuckThreshold = new Date(Date.now() - 10 * 60 * 1000);
+  await socialDb.socialPost.updateMany({
+    where: {
+      status: "PUBLISHING",
+      updatedAt: { lt: stuckThreshold },
+    },
+    data: {
+      status: "SCHEDULED",
+      lastError: "Publicatie onderbroken — wordt opnieuw geprobeerd.",
+    },
+  });
+
   const duePosts = await socialDb.socialPost.findMany({
     where: {
       status: "SCHEDULED",
@@ -374,6 +387,12 @@ export async function runDueSocialPostsWorker(db: PrismaClient) {
       const scope = { workspaceId: post.createdById, memberId: post.createdById };
       const config = await loadMetaWorkspaceConfig(db, scope);
       if (!config.autopostEnabled) {
+        await socialDb.socialPost.update({
+          where: { id: post.id },
+          data: {
+            lastError: "Autopost staat uit. Zet dit aan onder Instellingen → Integraties.",
+          },
+        });
         skipped += 1;
         continue;
       }
@@ -1029,6 +1048,8 @@ export const socialRouter = router({
       oauthHasDeprecatedScopes: oauthScopes.hasDeprecatedInstagramBusinessScopes,
     };
   }),
+
+  publishDuePosts: adminProcedure.mutation(async ({ ctx }) => runDueSocialPostsWorker(ctx.db)),
 
   disconnect: adminProcedure.mutation(async ({ ctx }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
