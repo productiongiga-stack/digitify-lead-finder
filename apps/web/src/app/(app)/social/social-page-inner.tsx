@@ -72,6 +72,7 @@ import { persistPlacementAssets } from "@/lib/persist-social-assets";
 import { FacebookPageAvatar, InstagramPageAvatar } from "@/components/social/social-platform-avatars";
 import { SocialBrandKitPicker, type SocialBrandKitApplyPayload } from "@/components/social/social-brand-kit-picker";
 import { SocialComposerSection } from "@/components/social/social-composer-section";
+import { SocialComposerWizard, SOCIAL_WIZARD_STEPS } from "@/components/social/social-composer-wizard";
 import { SocialPublishAccountPicker } from "@/components/social/social-publish-account-picker";
 import type { SocialAgendaPost } from "@/components/social/social-agenda";
 
@@ -794,6 +795,7 @@ export function SocialPageInner() {
   const [altText, setAltText] = useState("");
   const [brandSignature, setBrandSignature] = useState("");
   const [selectedBrandKitId, setSelectedBrandKitId] = useState("");
+  const [wizardStep, setWizardStep] = useState(0);
   const [placements, setPlacements] = useState<SocialPlacement[]>(["FEED"]);
   const [feedFormat, setFeedFormat] = useState<FeedAspectFormat>("SQUARE");
   const [placementAssets, setPlacementAssets] = useState<PlacementAssets>({});
@@ -1002,6 +1004,41 @@ export function SocialPageInner() {
     if (payload.cta) setCta(payload.cta);
     if (payload.linkUrl) setLinkUrl(payload.linkUrl);
     if (payload.template) setTemplate(payload.template);
+  }
+
+  function canProceedWizardStep(step: number) {
+    if (step === 0) {
+      return Boolean(selectedPageId) && (targetFacebook || targetInstagram);
+    }
+    if (step === 1) {
+      return Boolean(caption.trim());
+    }
+    if (step === 2) {
+      if (!placements.length) return false;
+      if (placements.includes("FEED") && !placementAssets.FEED?.imageUrl?.trim()) return false;
+      if (placements.includes("STORY") && !placementAssets.STORY?.imageUrl?.trim()) return false;
+      if (placements.includes("REEL") && !placementAssets.REEL?.videoUrl?.trim()) return false;
+      return Boolean(imageUrl.trim());
+    }
+    return true;
+  }
+
+  function goToNextWizardStep() {
+    if (!canProceedWizardStep(wizardStep)) {
+      if (wizardStep === 0) {
+        showToast({
+          title: "Kies merk en kanalen",
+          description: "Selecteer een pagina en minstens Facebook of Instagram.",
+          variant: "error",
+        });
+      } else if (wizardStep === 1) {
+        showToast({ title: "Caption verplicht", description: "Schrijf eerst je posttekst.", variant: "error" });
+      } else if (wizardStep === 2) {
+        showToast({ title: "Media ontbreekt", description: "Voeg de benodigde afbeelding of video toe.", variant: "error" });
+      }
+      return;
+    }
+    setWizardStep((current) => Math.min(current + 1, SOCIAL_WIZARD_STEPS.length - 1));
   }
 
   const importCreativeImage = trpc.media.importToBlob.useMutation();
@@ -1327,6 +1364,7 @@ export function SocialPageInner() {
     setAltText(metadata.altText || "");
     setBrandSignature(metadata.brandSignature || "");
     setSelectedBrandKitId(metadata.brandKitId || "");
+    setWizardStep(0);
   }
 
   function resetEditor() {
@@ -1347,6 +1385,7 @@ export function SocialPageInner() {
     setAltText("");
     setBrandSignature("");
     setSelectedBrandKitId("");
+    setWizardStep(0);
     setPlacements(["FEED"]);
     setFeedFormat("SQUARE");
     setPlacementAssets({});
@@ -1476,249 +1515,214 @@ export function SocialPageInner() {
           <Card className="overflow-hidden border-amber-200/60 shadow-sm">
             <CardHeader className="bg-gradient-to-r from-amber-50 via-background to-emerald-50 dark:from-amber-950/30 dark:to-emerald-950/20">
               <CardTitle className="flex items-center gap-2 text-base"><Wand2 className="h-4 w-4 text-amber-600" /> Composer</CardTitle>
-              <CardDescription>Kies een merkkit, schrijf je post en bewaar als draft.</CardDescription>
+              <CardDescription>Volg de stappen om je post snel en logisch op te bouwen.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-5">
-              <SocialBrandKitPicker
-                selectedKitId={selectedBrandKitId}
-                onSelectedKitIdChange={setSelectedBrandKitId}
-                onApplyKit={applyBrandKitDefaults}
-                autoApplyDefaults={!selectedId}
+              <SocialComposerWizard
+                steps={SOCIAL_WIZARD_STEPS}
+                currentStep={wizardStep}
+                onStepChange={setWizardStep}
+                canProceed={canProceedWizardStep(wizardStep)}
+                onNext={goToNextWizardStep}
+                onBack={() => setWizardStep((current) => Math.max(current - 1, 0))}
                 disabled={!canEditSelected}
-              />
-
-              <div className="space-y-2">
-                <Label htmlFor="social-caption">Caption</Label>
-                <Textarea
-                  id="social-caption"
-                  disabled={!canEditSelected}
-                  value={caption}
-                  onChange={(event) => setCaption(event.target.value)}
-                  rows={8}
-                  placeholder="Schrijf je posttekst..."
-                />
-                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <span>{caption.length}/6000 tekens</span>
-                  <span>{previewCaption.split(/\s+/).filter(Boolean).length} woorden in preview</span>
-                </div>
-              </div>
-
-              <SocialComposerSection
-                title="AI-assistent"
-                description="Genereer een caption op basis van een prompt en tone of voice."
-                icon={Sparkles}
-                defaultOpen={Boolean(template.trim())}
-                badge={template.trim() ? "Prompt ingevuld" : undefined}
-              >
-                <div className="grid gap-3 md:grid-cols-[1fr_220px]">
-                  <div className="space-y-2">
-                    <Label htmlFor="social-template">Template prompt</Label>
-                    <Textarea
-                      id="social-template"
-                      value={template}
-                      onChange={(event) => setTemplate(event.target.value)}
-                      placeholder="Zomercampagne: focus op lokale zichtbaarheid en gratis intake call..."
-                      rows={3}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="social-tone">Tone of voice</Label>
-                    <Select value={tone} onValueChange={(value) => setTone(value as SocialTone)}>
-                      <SelectTrigger id="social-tone" className="h-9">
-                        <SelectValue placeholder="Kies tone of voice" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {SOCIAL_TONE_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs leading-5 text-muted-foreground">
-                      {SOCIAL_TONE_OPTIONS.find((option) => option.value === tone)?.description}
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="w-full"
-                      disabled={generateSuggestion.isPending || !template.trim()}
-                      onClick={() =>
-                        generateSuggestion.mutate({
-                          template: template.trim(),
-                          tone,
-                          brandKitId: selectedBrandKitId || undefined,
-                        })
-                      }
-                    >
-                      {generateSuggestion.isPending ? (
-                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                      ) : (
-                        <Megaphone className="mr-2 h-3 w-3" />
-                      )}
-                      Caption genereren
+                footer={
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button onClick={handleCreateOrUpdate} disabled={isBusy || !canEditSelected}>
+                      {isBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                      {selected ? "Draft opslaan" : "Draft aanmaken"}
                     </Button>
+                    {selected ? (
+                      <Button variant="outline" disabled={isBusy || selected.status === "PENDING_APPROVAL"} onClick={handleSubmitForApproval}>
+                        <Send className="mr-2 h-4 w-4" /> Ter goedkeuring
+                      </Button>
+                    ) : (
+                      <Button variant="outline" disabled={isBusy || !canEditSelected} onClick={handleCreateAndSubmit}>
+                        <Send className="mr-2 h-4 w-4" /> Opslaan & ter goedkeuring
+                      </Button>
+                    )}
                   </div>
-                </div>
-              </SocialComposerSection>
-
-              <SocialComposerSection
-                title="Beeld & plaatsingen"
-                description="Afbeelding genereren en feed-, story- of reel-formaten instellen."
-                icon={ImageIcon}
-                defaultOpen={Boolean(imageUrl) || Object.keys(placementAssets).length > 0}
-                badge={imageUrl ? "Beeld aanwezig" : undefined}
-                badgeVariant="success"
-              >
-                <SocialImageGenerator
-                  disabled={!canEditSelected}
-                  caption={caption}
-                  template={template}
-                  feedFormat={feedFormat}
-                  placements={placements}
-                  socialPostId={selectedId ?? undefined}
-                  brandKitId={selectedBrandKitId || undefined}
-                  onImageReady={(assets) => setPlacementAssets((current) => ({ ...current, ...assets }))}
-                />
-                <SocialPlacementEditor
-                  placements={placements}
-                  feedFormat={feedFormat}
-                  assets={placementAssets}
-                  disabled={!canEditSelected}
-                  targetInstagram={targetInstagram}
-                  onPlacementsChange={setPlacements}
-                  onFeedFormatChange={setFeedFormat}
-                  onAssetsChange={setPlacementAssets}
-                />
-              </SocialComposerSection>
-
-              <SocialComposerSection
-                title="Extra's"
-                description="Headline, CTA, link, hashtags en brand signature voor de preview."
-                icon={Settings2}
-                defaultOpen={Boolean(headline.trim() || cta.trim() || linkUrl.trim() || hashtags.trim() || brandSignature.trim())}
-                badge={
-                  [headline, cta, linkUrl, hashtags, brandSignature].filter((value) => value.trim()).length > 0
-                    ? `${[headline, cta, linkUrl, hashtags, brandSignature].filter((value) => value.trim()).length} velden`
-                    : undefined
                 }
               >
-                <div className="space-y-2">
-                  <Label htmlFor="social-headline">Headline / hook</Label>
-                  <Input
-                    id="social-headline"
-                    disabled={!canEditSelected}
-                    value={headline}
-                    onChange={(event) => setHeadline(event.target.value)}
-                    placeholder="Bijvoorbeeld: Meer leads zonder extra chaos"
-                  />
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="social-cta">CTA</Label>
-                    <Input
-                      id="social-cta"
+                {wizardStep === 0 ? (
+                  <div className="space-y-4">
+                    <SocialBrandKitPicker
+                      selectedKitId={selectedBrandKitId}
+                      onSelectedKitIdChange={setSelectedBrandKitId}
+                      onApplyKit={applyBrandKitDefaults}
+                      autoApplyDefaults={!selectedId}
                       disabled={!canEditSelected}
-                      value={cta}
-                      onChange={(event) => setCta(event.target.value)}
-                      placeholder="Plan een gratis intake"
+                    />
+                    <SocialPublishAccountPicker
+                      pages={managedPages}
+                      selectedPageId={selectedPageId}
+                      onSelectedPageIdChange={setSelectedPageId}
+                      selectedPage={selectedManagedPage}
+                      targetFacebook={targetFacebook}
+                      onTargetFacebookChange={setTargetFacebook}
+                      targetInstagram={targetInstagram}
+                      onTargetInstagramChange={setTargetInstagram}
+                      disabled={!canEditSelected}
+                      isLoading={managedPagesQuery.isLoading}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="social-link">Link</Label>
-                    <div className="relative">
-                      <LinkIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        id="social-link"
+                ) : null}
+
+                {wizardStep === 1 ? (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="social-caption">Caption</Label>
+                      <Textarea
+                        id="social-caption"
                         disabled={!canEditSelected}
-                        className="pl-9"
-                        value={linkUrl}
-                        onChange={(event) => setLinkUrl(event.target.value)}
-                        placeholder="https://leads.digitify.be"
+                        value={caption}
+                        onChange={(event) => setCaption(event.target.value)}
+                        rows={7}
+                        placeholder="Schrijf je posttekst..."
                       />
+                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                        <span>{caption.length}/6000 tekens</span>
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-dashed bg-muted/10 p-3 space-y-3">
+                      <p className="text-xs font-medium text-muted-foreground">Of laat AI helpen</p>
+                      <Textarea
+                        id="social-template"
+                        value={template}
+                        onChange={(event) => setTemplate(event.target.value)}
+                        placeholder="Waar gaat de post over? Bijv. gratis intake voor KMO's in juni..."
+                        rows={2}
+                        disabled={!canEditSelected}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Select value={tone} onValueChange={(value) => setTone(value as SocialTone)} disabled={!canEditSelected}>
+                          <SelectTrigger className="h-9 w-full sm:w-[220px]">
+                            <SelectValue placeholder="Tone of voice" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SOCIAL_TONE_OPTIONS.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={generateSuggestion.isPending || !template.trim() || !canEditSelected}
+                          onClick={() =>
+                            generateSuggestion.mutate({
+                              template: template.trim(),
+                              tone,
+                              brandKitId: selectedBrandKitId || undefined,
+                            })
+                          }
+                        >
+                          {generateSuggestion.isPending ? (
+                            <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                          ) : (
+                            <Sparkles className="mr-2 h-3 w-3" />
+                          )}
+                          Caption genereren
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="social-hashtags">Hashtags</Label>
-                    <HashtagField id="social-hashtags" disabled={!canEditSelected} value={hashtags} onChange={setHashtags} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="social-brand-signature">Brand signature</Label>
-                    <Input
-                      id="social-brand-signature"
+                ) : null}
+
+                {wizardStep === 2 ? (
+                  <div className="space-y-4">
+                    <SocialPlacementEditor
+                      placements={placements}
+                      feedFormat={feedFormat}
+                      assets={placementAssets}
                       disabled={!canEditSelected}
-                      value={brandSignature}
-                      onChange={(event) => setBrandSignature(event.target.value)}
-                      placeholder="Digitify · ..."
+                      targetInstagram={targetInstagram}
+                      onPlacementsChange={setPlacements}
+                      onFeedFormatChange={setFeedFormat}
+                      onAssetsChange={setPlacementAssets}
+                    />
+                    <SocialImageGenerator
+                      disabled={!canEditSelected}
+                      caption={caption}
+                      template={template}
+                      feedFormat={feedFormat}
+                      placements={placements}
+                      socialPostId={selectedId ?? undefined}
+                      brandKitId={selectedBrandKitId || undefined}
+                      onImageReady={(assets) => setPlacementAssets((current) => ({ ...current, ...assets }))}
                     />
                   </div>
-                </div>
-              </SocialComposerSection>
+                ) : null}
 
-              <SocialComposerSection
-                title="Review & notities"
-                description="Alt-tekst en eerste reactie voor interne review (niet automatisch gepubliceerd)."
-                icon={MessageCircle}
-                defaultOpen={Boolean(altText.trim() || firstComment.trim())}
-                badge={altText.trim() || firstComment.trim() ? "Notitie aanwezig" : undefined}
-              >
-                <div className="space-y-2">
-                  <Label htmlFor="social-alt-text">Alt-tekst / interne notitie</Label>
-                  <Textarea
-                    id="social-alt-text"
-                    disabled={!canEditSelected}
-                    value={altText}
-                    onChange={(event) => setAltText(event.target.value)}
-                    rows={3}
-                    placeholder="Beschrijf de afbeelding voor review en toegankelijkheid..."
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="social-first-comment">Eerste reactie preview</Label>
-                  <Textarea
-                    id="social-first-comment"
-                    disabled={!canEditSelected}
-                    value={firstComment}
-                    onChange={(event) => setFirstComment(event.target.value)}
-                    rows={3}
-                    placeholder="Optioneel: extra hashtags of context."
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    V1 publiceert alleen de feed post zelf. Deze reactie blijft bewaard als review-notitie.
-                  </p>
-                </div>
-              </SocialComposerSection>
-
-              <SocialPublishAccountPicker
-                pages={managedPages}
-                selectedPageId={selectedPageId}
-                onSelectedPageIdChange={setSelectedPageId}
-                selectedPage={selectedManagedPage}
-                targetFacebook={targetFacebook}
-                onTargetFacebookChange={setTargetFacebook}
-                targetInstagram={targetInstagram}
-                onTargetInstagramChange={setTargetInstagram}
-                disabled={!canEditSelected}
-                isLoading={managedPagesQuery.isLoading}
-              />
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Button onClick={handleCreateOrUpdate} disabled={isBusy || !canEditSelected}>
-                  {isBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                  {selected ? "Draft opslaan" : "Draft aanmaken"}
-                </Button>
-                {selected ? (
-                  <Button variant="outline" disabled={isBusy || selected.status === "PENDING_APPROVAL"} onClick={handleSubmitForApproval}>
-                    <Send className="mr-2 h-4 w-4" /> Ter goedkeuring
-                  </Button>
-                ) : (
-                  <Button variant="outline" disabled={isBusy || !canEditSelected} onClick={handleCreateAndSubmit}>
-                    <Send className="mr-2 h-4 w-4" /> Opslaan & ter goedkeuring
-                  </Button>
-                )}
-              </div>
+                {wizardStep === 3 ? (
+                  <div className="space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="social-hashtags">Hashtags</Label>
+                        <HashtagField id="social-hashtags" disabled={!canEditSelected} value={hashtags} onChange={setHashtags} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="social-link">Link</Label>
+                        <div className="relative">
+                          <LinkIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            id="social-link"
+                            disabled={!canEditSelected}
+                            className="pl-9"
+                            value={linkUrl}
+                            onChange={(event) => setLinkUrl(event.target.value)}
+                            placeholder="https://..."
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <SocialComposerSection
+                      title="Meer opties"
+                      description="Headline, CTA, brand signature en interne notities."
+                      icon={Settings2}
+                      defaultOpen={Boolean(headline.trim() || cta.trim() || brandSignature.trim() || altText.trim())}
+                    >
+                      <div className="space-y-2">
+                        <Label htmlFor="social-headline">Headline / hook</Label>
+                        <Input
+                          id="social-headline"
+                          disabled={!canEditSelected}
+                          value={headline}
+                          onChange={(event) => setHeadline(event.target.value)}
+                          placeholder="Optioneel"
+                        />
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="social-cta">CTA</Label>
+                          <Input id="social-cta" disabled={!canEditSelected} value={cta} onChange={(event) => setCta(event.target.value)} />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="social-brand-signature">Brand signature</Label>
+                          <Input
+                            id="social-brand-signature"
+                            disabled={!canEditSelected}
+                            value={brandSignature}
+                            onChange={(event) => setBrandSignature(event.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="social-alt-text">Interne notitie</Label>
+                        <Textarea
+                          id="social-alt-text"
+                          disabled={!canEditSelected}
+                          value={altText}
+                          onChange={(event) => setAltText(event.target.value)}
+                          rows={2}
+                        />
+                      </div>
+                    </SocialComposerSection>
+                  </div>
+                ) : null}
+              </SocialComposerWizard>
             </CardContent>
           </Card>
 
