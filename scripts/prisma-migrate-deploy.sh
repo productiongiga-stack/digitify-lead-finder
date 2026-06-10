@@ -6,7 +6,10 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root/packages/db"
 
 # Migrations must use a direct (non-pooler) connection — Supabase pooler rejects DDL.
-migrate_url="${DIRECT_URL:-${POSTGRES_URL_NON_POOLING:-}}"
+migrate_url="${DIRECT_URL:-${POSTGRES_URL_NON_POOLING:-${POSTGRES_URL:-}}}"
+if [[ "$migrate_url" == *"pooler"* ]]; then
+  migrate_url="${POSTGRES_URL_NON_POOLING:-}"
+fi
 if [[ "$migrate_url" == *"pooler"* || "$migrate_url" == *"localhost"* || "$migrate_url" == *"127.0.0.1"* ]]; then
   migrate_url=""
 fi
@@ -30,7 +33,16 @@ else
 fi
 
 if [[ -z "${DATABASE_URL:-}" ]]; then
+  if [[ "${SKIP_DB_MIGRATE:-}" == "1" || "${VERCEL:-}" == "1" ]]; then
+    echo "WARN: Skipping prisma migrate deploy (no DATABASE_URL on this runner)." >&2
+    exit 0
+  fi
   echo "ERROR: Set DIRECT_URL, POSTGRES_URL_NON_POOLING, or DATABASE_URL for migrations." >&2
+  exit 1
+fi
+
+if [[ "$DATABASE_URL" == *"pooler"* ]]; then
+  echo "ERROR: DATABASE_URL points at a pooler. Set DIRECT_URL or POSTGRES_URL_NON_POOLING to the direct Supabase host (db.*.supabase.co:5432)." >&2
   exit 1
 fi
 
