@@ -124,6 +124,51 @@ describe("social router flow", () => {
     });
     expect(scheduled.status).toBe("SCHEDULED");
   });
+
+  it("updates scheduledFor when post is already scheduled", async () => {
+    const scheduledAt = new Date(Date.now() + 60 * 60 * 1000);
+    const row = {
+      id: "sp_scheduled",
+      createdById: TEST_USER_ID,
+      caption: "Hallo",
+      imageUrl: "https://example.com/a.jpg",
+      targetPlatforms: ["FACEBOOK"],
+      status: "SCHEDULED",
+      scheduledFor: scheduledAt,
+      retryCount: 0,
+      approvedById: TEST_USER_ID,
+    };
+
+    const socialPostFindUnique = vi.fn().mockResolvedValue(row);
+    const socialPostUpdate = vi.fn().mockResolvedValue({
+      ...row,
+      scheduledFor: new Date(Date.now() + 2 * 60 * 60 * 1000),
+    });
+
+    const caller = socialRouter.createCaller(
+      makeCtx({
+        socialPost: {
+          findUnique: socialPostFindUnique,
+          update: socialPostUpdate,
+        },
+        activity: { create: vi.fn().mockResolvedValue({ id: "act_2" }) },
+      }),
+    );
+
+    const rescheduled = await caller.approveAndSchedule({
+      id: "sp_scheduled",
+      scheduledFor: new Date(Date.now() + 2 * 60 * 60 * 1000),
+    });
+
+    expect(rescheduled.status).toBe("SCHEDULED");
+    expect(socialPostUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "sp_scheduled" },
+        data: expect.objectContaining({ scheduledFor: expect.any(Date) }),
+      }),
+    );
+    expect(socialPostUpdate.mock.calls[0]?.[0]?.data).not.toHaveProperty("status");
+  });
 });
 
 describe("social publish worker", () => {

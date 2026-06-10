@@ -765,6 +765,23 @@ export const socialRouter = router({
       const row = await socialDb.socialPost.findUnique({ where: { id: input.id } });
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Social post niet gevonden." });
       ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+
+      if (row.status === "SCHEDULED") {
+        const updated = await socialDb.socialPost.update({
+          where: { id: input.id },
+          data: { scheduledFor: input.scheduledFor },
+        });
+
+        await createSocialActivity(ctx.db, {
+          userId: ctx.user.id,
+          type: "SOCIAL_POST_RESCHEDULED",
+          title: "Social post opnieuw ingepland",
+          metadata: { socialPostId: input.id, scheduledFor: input.scheduledFor.toISOString() },
+        });
+
+        return updated;
+      }
+
       ensureSchedulableStatus(row.status);
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
       const publishTarget = await resolvePostPublishTarget(ctx.db, scope, row.metadata);

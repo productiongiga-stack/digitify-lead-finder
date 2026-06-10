@@ -960,7 +960,8 @@ export function SocialPageInner() {
   const approveAndSchedule = trpc.social.approveAndSchedule.useMutation({
     onSuccess: async () => {
       await listQuery.refetch();
-      showToast({ title: "Post ingepland" });
+      const wasScheduled = selected?.status === "SCHEDULED";
+      showToast({ title: wasScheduled ? "Planning bijgewerkt" : "Post ingepland" });
     },
     onError: (error) => showToast({ title: "Inplannen mislukt", description: error.message, variant: "error" }),
   });
@@ -1732,7 +1733,9 @@ export function SocialPageInner() {
                 <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Approval & planning</CardTitle>
                 <CardDescription>
                   {canSchedule
-                    ? "Kies een publicatiedatum en keur de post goed."
+                    ? selected.status === "SCHEDULED"
+                      ? "Deze post staat al in de agenda. Pas de publicatiedatum aan of annuleer de planning."
+                      : "Kies een publicatiedatum en keur de post goed."
                     : "Alleen OWNER/ADMIN kan goedkeuren en inplannen."}
                 </CardDescription>
               </CardHeader>
@@ -1741,12 +1744,27 @@ export function SocialPageInner() {
                   <>
                     <Input id="social-scheduled-for" type="datetime-local" value={scheduledFor} onChange={(event) => setScheduledFor(event.target.value)} />
                     <div className="flex flex-wrap gap-2">
-                      <Button size="sm" disabled={isBusy || !scheduledFor} onClick={handleApproveAndSchedule}>
-                        <Clock3 className="mr-2 h-3.5 w-3.5" /> Goedkeuren & plannen
-                      </Button>
-                      <Button size="sm" variant="outline" disabled={isBusy} onClick={() => rejectPost.mutate({ id: selected.id })}>
-                        <XCircle className="mr-2 h-3.5 w-3.5" /> Afkeuren
-                      </Button>
+                      {selected.status === "SCHEDULED" ? (
+                        <>
+                          <Button size="sm" disabled={isBusy || !scheduledFor} onClick={handleApproveAndSchedule}>
+                            <Clock3 className="mr-2 h-3.5 w-3.5" /> Planning bijwerken
+                          </Button>
+                          <Button size="sm" variant="outline" disabled={isBusy} onClick={() => cancelScheduled.mutate({ id: selected.id })}>
+                            <XCircle className="mr-2 h-3.5 w-3.5" /> Planning annuleren
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button size="sm" disabled={isBusy || !scheduledFor} onClick={handleApproveAndSchedule}>
+                            <Clock3 className="mr-2 h-3.5 w-3.5" /> Goedkeuren & plannen
+                          </Button>
+                          {selected.status === "PENDING_APPROVAL" ? (
+                            <Button size="sm" variant="outline" disabled={isBusy} onClick={() => rejectPost.mutate({ id: selected.id })}>
+                              <XCircle className="mr-2 h-3.5 w-3.5" /> Afkeuren
+                            </Button>
+                          ) : null}
+                        </>
+                      )}
                     </div>
                   </>
                 ) : (
