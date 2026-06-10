@@ -42,10 +42,15 @@ import {
   ExternalLink,
   Trash2,
   Megaphone,
+  Sparkles,
+  Globe2,
+  CheckCircle2,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useToast } from "@/components/feedback/toast-provider";
+import { hasRole } from "@/lib/permissions";
 import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 import { readSettingBoolean, readSettingString } from "@/lib/settings";
 import { SETTINGS_PAGE_QUERY_OPTS } from "@/lib/settings-query-options";
@@ -61,12 +66,14 @@ import {
   SetupSteps,
   type IntegrationNavItem,
 } from "@/components/settings/integrations/integration-ui";
+import { MuapiIntegrationPanel } from "@/components/settings/integrations/muapi-integration-panel";
 
 const SECRET_MASK = "••••••••";
 
 type IntegrationTabId =
   | "overview"
   | "google-places"
+  | "muapi"
   | "anthropic"
   | "openai"
   | "deepseek"
@@ -78,6 +85,7 @@ type IntegrationTabId =
 const INTEGRATION_TAB_IDS: IntegrationTabId[] = [
   "overview",
   "google-places",
+  "muapi",
   "anthropic",
   "openai",
   "deepseek",
@@ -505,7 +513,11 @@ function DnsCheckResult({ result }: { result: DnsCheckData | null | undefined })
 export function IntegrationsSettingsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { data: session, status: sessionStatus } = useSession();
+  const role = (session?.user as { role?: string } | undefined)?.role;
+  const canManageWorkspaceIntegrations = hasRole(role, ["OWNER"]);
   const { data: settings, isLoading, error, refetch } = trpc.settings.getIntegrationsSettings.useQuery(undefined, {
+    enabled: sessionStatus === "authenticated" && canManageWorkspaceIntegrations,
     retry: 1,
     ...SETTINGS_PAGE_QUERY_OPTS,
   });
@@ -552,7 +564,12 @@ export function IntegrationsSettingsInner() {
   const testSmtp = trpc.settings.testSmtp.useMutation();
   const checkEmailDns = trpc.settings.checkEmailDns.useMutation();
   const testImap = trpc.settings.testImap.useMutation();
+  const testGoogleSync = trpc.booking.testGoogleSync.useMutation();
   const [integrationsTab, setIntegrationsTab] = useState<IntegrationTabId>("overview");
+  const muapiKeyStatus = trpc.media.getMuapiKeyStatus.useQuery(undefined, {
+    enabled: integrationsTab === "overview" || integrationsTab === "muapi",
+    refetchOnWindowFocus: false,
+  });
 
   function selectIntegrationsTab(tab: IntegrationTabId) {
     setIntegrationsTab(tab);
@@ -570,6 +587,38 @@ export function IntegrationsSettingsInner() {
     const tab = searchParams.get("tab");
     if (tab && isIntegrationTabId(tab)) {
       setIntegrationsTab(tab);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (sessionStatus !== "authenticated") return;
+    if (!canManageWorkspaceIntegrations && integrationsTab !== "overview" && integrationsTab !== "muapi") {
+      selectIntegrationsTab("muapi");
+    }
+  }, [sessionStatus, canManageWorkspaceIntegrations, integrationsTab]);
+
+  useEffect(() => {
+    const googleStatus = searchParams.get("google");
+    if (!googleStatus) return;
+    const messages: Record<string, { title: string; description?: string; variant?: "error" }> = {
+      connected: { title: "Google Agenda gekoppeld", description: "Agenda-sync is actief." },
+      forbidden: { title: "Geen rechten", description: "Alleen eigenaar of admin kan Google Agenda koppelen.", variant: "error" },
+      error: { title: "Koppeling mislukt", description: "Probeer opnieuw of controleer je OAuth-credentials.", variant: "error" },
+      "missing-config": { title: "OAuth niet geconfigureerd", description: "Vul eerst Google Client ID en secret in.", variant: "error" },
+    };
+    const message = messages[googleStatus] ?? {
+      title: "Google Agenda",
+      description: googleStatus,
+      variant: "error" as const,
+    };
+    showToast(message);
+    if (googleStatus) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("google");
+      const query = params.toString();
+      router.replace(query ? `/settings/integrations?${query}` : "/settings/integrations?tab=google-oauth", {
+        scroll: false,
+      });
     }
   }, [searchParams]);
 
@@ -598,6 +647,11 @@ export function IntegrationsSettingsInner() {
   const [googleOAuthClientSecret, setGoogleOAuthClientSecret] = useState("");
   const [googleOAuthSecretConfigured, setGoogleOAuthSecretConfigured] = useState(false);
   const [showGoogleOAuthSecret, setShowGoogleOAuthSecret] = useState(false);
+  const [googleOauthEmail, setGoogleOauthEmail] = useState("");
+  const [googleServiceAccountEmail, setGoogleServiceAccountEmail] = useState("");
+  const [googleServicePrivateKey, setGoogleServicePrivateKey] = useState("");
+  const [googleServicePrivateKeyConfigured, setGoogleServicePrivateKeyConfigured] = useState(false);
+  const [showGoogleServicePrivateKey, setShowGoogleServicePrivateKey] = useState(false);
   const [metaAppId, setMetaAppId] = useState("");
   const [metaAppSecret, setMetaAppSecret] = useState("");
   const [metaAppSecretConfigured, setMetaAppSecretConfigured] = useState(false);
@@ -662,6 +716,8 @@ export function IntegrationsSettingsInner() {
     imapPort: readSettingString(settings, "email.imap_port", "993"),
     imapUser: readSettingString(settings, "email.imap_user"),
     imapTls: readSettingBoolean(settings, "email.imap_tls", true),
+    googleOauthEmail: readSettingString(settings, "bookings.google_oauth_account_email"),
+    googleServiceAccountEmail: readSettingString(settings, "bookings.google_service_account_email"),
   }), [settings]);
   const googlePlacesDirty = googlePlacesKey.trim() !== initialState.googlePlacesKey;
   const googleOAuthDirty =
@@ -697,21 +753,35 @@ export function IntegrationsSettingsInner() {
   const googleOAuthConfigured = Boolean(
     googleOAuthClientId.trim() && (googleOAuthClientSecret.trim() || googleOAuthSecretConfigured),
   );
+  const googleCalendarOAuthConnected = Boolean(googleOauthEmail.trim());
+  const googleServiceAccountConfigured = Boolean(
+    googleServiceAccountEmail.trim() &&
+      (googleServicePrivateKey.trim() || googleServicePrivateKeyConfigured),
+  );
+  const googleCalendarDirty =
+    googleServiceAccountEmail.trim() !== initialState.googleServiceAccountEmail
+    || Boolean(googleServicePrivateKey.trim());
+  const muapiConfigured = Boolean(muapiKeyStatus.data?.hasKey);
   const googlePlacesConfiguredActive = googlePlacesConfigured || Boolean(googlePlacesKey.trim());
   const metaConfigured = Boolean(metaAppId.trim() && (metaAppSecret.trim() || metaAppSecretConfigured));
   const metaRedirectUrl = "https://leads.digitify.be/api/integrations/meta/callback";
 
-  const integrationNavItems: IntegrationNavItem[] = [
+  const integrationNavItemsAll: IntegrationNavItem[] = [
     { id: "overview", label: "Overzicht", description: "Status van alle koppelingen", icon: Settings2, configured: true, group: "Start" },
     { id: "google-places", label: "Google Places", description: "Lead-zoekopdrachten", icon: Globe, configured: googlePlacesConfiguredActive, dirty: googlePlacesDirty, group: "Zoeken" },
+    { id: "muapi", label: "MuAPI", description: "Creative Studio & AI-media", icon: Sparkles, configured: muapiConfigured, group: "AI & media" },
     { id: "anthropic", label: "Anthropic", description: "Claude API", icon: Bot, configured: anthropicConfiguredActive, dirty: anthropicDirty, group: "AI" },
     { id: "openai", label: "OpenAI", description: "GPT API", icon: Bot, configured: openaiConfiguredActive, dirty: openaiDirty, group: "AI" },
     { id: "deepseek", label: "DeepSeek", description: "DeepSeek API", icon: Bot, configured: deepseekConfiguredActive, dirty: deepseekDirty, group: "AI" },
-    { id: "google-oauth", label: "Google OAuth", description: "Agenda & Ads", icon: CalendarDays, configured: googleOAuthConfigured, dirty: googleOAuthDirty, group: "OAuth" },
+    { id: "google-oauth", label: "Google OAuth", description: "Agenda, Meet & Ads", icon: CalendarDays, configured: googleOAuthConfigured || googleCalendarOAuthConnected, dirty: googleOAuthDirty || googleCalendarDirty, group: "OAuth" },
     { id: "meta", label: "Meta", description: "Facebook & Instagram", icon: Megaphone, configured: metaConfigured || Boolean(metaConnection.data?.connected), dirty: metaDirty, group: "OAuth" },
     { id: "smtp", label: "SMTP", description: "Uitgaande e-mail", icon: Mail, configured: smtpConfigured, dirty: smtpDirty, group: "E-mail" },
     { id: "imap", label: "IMAP", description: "Inkomende inbox", icon: Inbox, configured: imapConfigured, dirty: imapDirty, group: "E-mail" },
   ];
+  const integrationNavItems =
+    sessionStatus === "loading" || canManageWorkspaceIntegrations
+      ? integrationNavItemsAll
+      : integrationNavItemsAll.filter((item) => item.id === "overview" || item.id === "muapi");
 
   function renderAiProviderPanel(provider: AiProviderId) {
     const option = AI_PROVIDER_OPTIONS.find((item) => item.id === provider)!;
@@ -835,8 +905,14 @@ export function IntegrationsSettingsInner() {
       setDeepseekConfigured(Boolean(deepseekKeyRaw));
 
       setGooglePlacesKey(googleKeyRaw === SECRET_MASK ? "" : googleKeyRaw);
+      const googleServicePrivateKeyRaw = readSettingString(settings, "bookings.google_service_account_private_key");
+
       setGoogleOAuthClientId(readSettingString(settings, "integrations.google_oauth_client_id"));
       setGoogleOAuthClientSecret(googleOAuthSecretRaw === SECRET_MASK ? "" : googleOAuthSecretRaw);
+      setGoogleOauthEmail(readSettingString(settings, "bookings.google_oauth_account_email"));
+      setGoogleServiceAccountEmail(readSettingString(settings, "bookings.google_service_account_email"));
+      setGoogleServicePrivateKeyConfigured(Boolean(googleServicePrivateKeyRaw));
+      setGoogleServicePrivateKey(googleServicePrivateKeyRaw === SECRET_MASK ? "" : googleServicePrivateKeyRaw);
       setMetaAppId(readSettingString(settings, "integrations.meta_app_id"));
       setMetaAppSecret(metaAppSecretRaw === SECRET_MASK ? "" : metaAppSecretRaw);
       setSocialAutopostEnabled(readSettingBoolean(settings, "social.autopost_enabled", false));
@@ -875,6 +951,13 @@ export function IntegrationsSettingsInner() {
     batchUpdate.mutate([
       { key: "integrations.google_oauth_client_id", value: googleOAuthClientId.trim() },
       { key: "integrations.google_oauth_client_secret", value: googleOAuthClientSecret },
+    ]);
+  }
+
+  function handleSaveGoogleCalendarServiceAccount() {
+    batchUpdate.mutate([
+      { key: "bookings.google_service_account_email", value: googleServiceAccountEmail.trim() },
+      { key: "bookings.google_service_account_private_key", value: googleServicePrivateKey },
     ]);
   }
 
@@ -941,7 +1024,7 @@ export function IntegrationsSettingsInner() {
     );
   }
 
-  if (isLoading) {
+  if (sessionStatus === "loading" || (canManageWorkspaceIntegrations && isLoading)) {
     return (
       <div className="space-y-5">
         <Skeleton className="h-8 w-64" />
@@ -983,7 +1066,11 @@ export function IntegrationsSettingsInner() {
         </Link>
         <div className="app-page-heading">
           <h1 className="app-page-title">Integraties &amp; API-sleutels</h1>
-          <p className="app-page-subtitle">Koppel externe diensten per integratie — elke API heeft een eigen tab.</p>
+          <p className="app-page-subtitle">
+            {canManageWorkspaceIntegrations
+              ? "Koppel externe diensten per integratie — elke API heeft een eigen tab."
+              : "Beheer je persoonlijke MuAPI-sleutel voor Creative Studio en Social Planner."}
+          </p>
         </div>
       </div>
 
@@ -1139,6 +1226,8 @@ export function IntegrationsSettingsInner() {
           </IntegrationPanel>
         ) : null}
 
+        {integrationsTab === "muapi" ? <MuapiIntegrationPanel /> : null}
+
         {integrationsTab === "anthropic" ? renderAiProviderPanel("anthropic") : null}
         {integrationsTab === "openai" ? renderAiProviderPanel("openai") : null}
         {integrationsTab === "deepseek" ? renderAiProviderPanel("deepseek") : null}
@@ -1152,9 +1241,9 @@ export function IntegrationsSettingsInner() {
                   <CalendarDays className="h-5 w-5 text-sky-500" />
                 </div>
                 <div>
-                  <CardTitle className="text-base">Google Calendar & Meet OAuth</CardTitle>
+                  <CardTitle className="text-base">Google OAuth-credentials</CardTitle>
                   <CardDescription className="text-xs">
-                    Globale Google app-credentials voor login. Elke gebruiker koppelt daarna zijn eigen agenda via Booking instellingen.
+                    Workspace Google-app voor Agenda, Meet en Google Ads. Sla client ID en secret op voordat je koppelingen activeert.
                   </CardDescription>
                 </div>
                 {googleOAuthClientId.trim() && (googleOAuthSecretConfigured || googleOAuthClientSecret.trim()) ? (
@@ -1228,47 +1317,173 @@ export function IntegrationsSettingsInner() {
                   <Link href="/google-ads">Open Google Ads module</Link>
                 </Button>
               </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {googleOAuthConfigured ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    disabled={removeSettings.isPending}
+                    onClick={() =>
+                      requestRemoveSetting({
+                        title: "Google OAuth-gegevens verwijderen?",
+                        description: "Client ID en secret worden gewist. Agenda- en Ads-koppelingen werken pas weer na nieuwe credentials.",
+                        keys: [
+                          "integrations.google_oauth_client_id",
+                          "integrations.google_oauth_client_secret",
+                        ],
+                        onCleared: () => {
+                          setGoogleOAuthClientId("");
+                          setGoogleOAuthClientSecret("");
+                          setGoogleOAuthSecretConfigured(false);
+                        },
+                      })
+                    }
+                  >
+                    <Trash2 className="mr-2 h-3 w-3" />
+                    OAuth wissen
+                  </Button>
+                ) : null}
+                <Button size="sm" onClick={handleSaveGoogleOAuth} disabled={batchUpdate.isPending || !googleOAuthDirty}>
+                  {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
+                  Google OAuth opslaan
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+                  <CalendarDays className="h-5 w-5 text-blue-500" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Google Agenda-koppeling</CardTitle>
+                  <CardDescription className="text-xs">
+                    OAuth voor persoonlijke agenda-sync of service account voor server-side synchronisatie in de boekingswidget.
+                  </CardDescription>
+                </div>
+                {googleCalendarOAuthConnected ? (
+                  <Badge variant="success" className="ml-auto"><CheckCircle className="mr-1 h-3 w-3" /> Verbonden</Badge>
+                ) : googleServiceAccountConfigured ? (
+                  <Badge variant="success" className="ml-auto"><CheckCircle className="mr-1 h-3 w-3" /> Service account</Badge>
+                ) : (
+                  <Badge variant="secondary" className="ml-auto"><XCircle className="mr-1 h-3 w-3" /> Niet gekoppeld</Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="settings-connect-card">
+                  <div className="h-1 bg-gradient-to-r from-blue-500/85 via-blue-500/30 to-transparent" />
+                  <div className="settings-connect-card-body space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 gap-3">
+                        <div className="settings-connect-card-icon bg-blue-500/10 text-blue-600 ring-blue-500/20 dark:text-blue-400">
+                          <Globe2 className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold tracking-tight">OAuth koppeling</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            Inloggen met Google en automatische agenda-sync voor afspraken.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    {googleOauthEmail ? (
+                      <p className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 text-xs text-muted-foreground">
+                        Actief als <span className="font-medium text-foreground">{googleOauthEmail}</span>
+                      </p>
+                    ) : null}
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <Button type="button" className="shadow-sm sm:flex-1" asChild disabled={!googleOAuthConfigured}>
+                        <a href="/api/integrations/google-calendar/connect">
+                          <Globe2 className="mr-2 h-4 w-4" />
+                          {googleOauthEmail ? "Opnieuw verbinden" : "Verbind met Google"}
+                        </a>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => testGoogleSync.mutate()}
+                        disabled={testGoogleSync.isPending || (!googleCalendarOAuthConnected && !googleServiceAccountConfigured)}
+                        className="sm:shrink-0"
+                      >
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        {testGoogleSync.isPending ? "Testen..." : "Test sync"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                <div className="settings-connect-card">
+                  <div className="h-1 bg-gradient-to-r from-violet-500/85 via-violet-500/30 to-transparent" />
+                  <div className="settings-connect-card-body">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 gap-3">
+                        <div className="settings-connect-card-icon bg-violet-500/10 text-violet-600 ring-violet-500/20 dark:text-violet-400">
+                          <Settings2 className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold tracking-tight">Service account</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            Alternatief voor teams: koppel via service account credentials.
+                          </p>
+                        </div>
+                      </div>
+                      <Badge
+                        variant={googleServiceAccountConfigured ? "success" : "secondary"}
+                        className="shrink-0 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                      >
+                        {googleServiceAccountConfigured ? "Ingevuld" : "Optioneel"}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Service account e-mail</Label>
+                <Input
+                  value={googleServiceAccountEmail}
+                  onChange={(event) => setGoogleServiceAccountEmail(event.target.value)}
+                  placeholder="digitify-bookings@project.iam.gserviceaccount.com"
+                />
+              </div>
+              <SecretKeyField
+                label="Service account private key"
+                value={googleServicePrivateKey}
+                onChange={setGoogleServicePrivateKey}
+                placeholder={googleServicePrivateKeyConfigured ? "Nieuwe key om te vervangen" : "-----BEGIN PRIVATE KEY-----"}
+                show={showGoogleServicePrivateKey}
+                onToggleShow={() => setShowGoogleServicePrivateKey(!showGoogleServicePrivateKey)}
+                hint="JSON key of PEM private key uit Google Cloud Console."
+              />
+
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <Button variant="outline" size="sm" asChild>
                   <Link href="/settings/bookings#google-agenda">
                     <CalendarDays className="mr-2 h-3.5 w-3.5" />
-                    Mijn agenda koppelen
+                    Boekingswidget & tijdzone
                   </Link>
                 </Button>
-                <div className="flex flex-wrap items-center gap-2">
-                  {googleOAuthConfigured ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="text-destructive hover:text-destructive"
-                      disabled={removeSettings.isPending}
-                      onClick={() =>
-                        requestRemoveSetting({
-                          title: "Google OAuth-gegevens verwijderen?",
-                          description: "Client ID en secret worden gewist. Agenda-koppelingen werken pas weer na nieuwe credentials.",
-                          keys: [
-                            "integrations.google_oauth_client_id",
-                            "integrations.google_oauth_client_secret",
-                          ],
-                          onCleared: () => {
-                            setGoogleOAuthClientId("");
-                            setGoogleOAuthClientSecret("");
-                            setGoogleOAuthSecretConfigured(false);
-                          },
-                        })
-                      }
-                    >
-                      <Trash2 className="mr-2 h-3 w-3" />
-                      OAuth wissen
-                    </Button>
-                  ) : null}
-                  <Button size="sm" onClick={handleSaveGoogleOAuth} disabled={batchUpdate.isPending || !googleOAuthDirty}>
-                    {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
-                    Google OAuth opslaan
-                  </Button>
-                </div>
+                <Button
+                  size="sm"
+                  onClick={handleSaveGoogleCalendarServiceAccount}
+                  disabled={batchUpdate.isPending || !googleCalendarDirty}
+                >
+                  {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
+                  Service account opslaan
+                </Button>
               </div>
+              <TestResult
+                result={
+                  testGoogleSync.data?.message
+                    ?? (testGoogleSync.error ? formatTrpcErrorMessage(testGoogleSync.error.message) : null)
+                }
+                isError={testGoogleSync.isError}
+              />
             </CardContent>
           </Card>
           </>

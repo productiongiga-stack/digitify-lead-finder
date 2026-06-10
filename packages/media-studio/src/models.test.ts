@@ -23,13 +23,13 @@ describe("media studio models", () => {
 
   it("resolves known model metadata", () => {
     const model = getModelById("flux-dev");
-    expect(model?.endpoint).toBe("flux-dev");
+    expect(model?.endpoint).toBe("flux-dev-image");
     expect(model?.type).toBe("IMAGE");
-    expect(getModelById("seedream-5.0")?.endpoint).toBe("bytedance-seedream-v5.0");
+    expect(getModelById("seedream-5.0")?.endpoint).toBe("seedream-5.0");
     expect(getModelById("kling-v2.1")?.endpoint).toBe("kling-v2.1-master-t2v");
     expect(getModelById("flux-kontext-dev")?.endpoint).toBe("flux-kontext-dev-i2i");
-    expect(getModelById("seedance-2-vip-omni-reference")?.endpoint).toBe("sd-2-vip-omni-reference");
-    expect(getModelById("grok-imagine-t2v")?.endpoint).toBe("grok-imagine-t2v");
+    expect(getModelById("seedance-2-vip-omni-reference")?.endpoint).toBe("seedance-2-vip-omni-reference");
+    expect(getModelById("grok-imagine-t2v")?.endpoint).toBe("grok-imagine-text-to-video");
     expect(getModelById("infinitetalk-image-to-video")?.lipSyncMode).toBe("PORTRAIT");
   });
 

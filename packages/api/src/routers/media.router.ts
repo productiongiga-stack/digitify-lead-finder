@@ -543,7 +543,7 @@ export const mediaRouter = router({
 
     const resolution = input.resolution || model.resolutions?.[0] || "720p";
     let endpoint = model.endpoint;
-    if (modelId === "seedance-2-vip-omni-reference" && resolution === "1080p") {
+    if (resolution === "1080p" && (modelId === "seedance-2-vip-omni-reference" || endpoint === "seedance-2-vip-omni-reference")) {
       endpoint = "sd-2-vip-omni-reference-1080p";
     }
 

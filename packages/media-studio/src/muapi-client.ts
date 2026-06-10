@@ -1,3 +1,4 @@
+import { resolveMuapiEndpoint } from "./endpoint-aliases";
 import { getModelById } from "./models";
 
 const MUAPI_BASE_URL = "https://api.muapi.ai";
@@ -68,7 +69,8 @@ export async function submitMuapiJob(
   endpoint: string,
   payload: Record<string, unknown>,
 ): Promise<MuapiSubmitResult> {
-  const response = await muapiFetch(apiKey, `/api/v1/${endpoint}`, {
+  const resolvedEndpoint = resolveMuapiEndpoint(endpoint);
+  const response = await muapiFetch(apiKey, `/api/v1/${resolvedEndpoint}`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -297,7 +299,7 @@ export async function generateMarketingAd(apiKey: string, params: GenerateMarket
   const endpoint =
     params.resolution === "1080p"
       ? "sd-2-vip-omni-reference-1080p"
-      : "sd-2-vip-omni-reference";
+      : "seedance-2-vip-omni-reference";
 
   const payload: Record<string, unknown> = {
     prompt: params.prompt,

@@ -103,7 +103,18 @@ type SocialMetadata = {
   postFormat?: PostFormat;
   placements?: SocialPlacement[];
   feedFormat?: FeedAspectFormat;
+  publisherPageId?: string;
+  publisherPageName?: string;
+  publisherInstagramUsername?: string;
   assets?: PlacementAssets;
+};
+
+type ManagedMetaPage = {
+  id: string;
+  name: string;
+  accessToken: string;
+  instagramBusinessId: string;
+  instagramUsername: string;
 };
 
 const FORMAT_OPTIONS: Array<{ value: PostFormat; label: string; description: string; className: string }> = [
@@ -534,11 +545,14 @@ function InstagramReelPreview({
   caption,
   imageUrl,
   videoUrl,
+  username = "digitify.be",
 }: {
   caption: string;
   imageUrl: string;
   videoUrl?: string;
+  username?: string;
 }) {
+  const displayUsername = username.replace(/^@/, "");
   return (
     <div className="overflow-hidden rounded-[1.6rem] border border-zinc-200 bg-zinc-950 text-white shadow-[0_22px_55px_rgba(24,24,27,0.18)]">
       <div className="relative mx-auto aspect-[9/16] max-h-[560px] bg-zinc-900">
@@ -556,7 +570,7 @@ function InstagramReelPreview({
           <div className="flex items-center gap-2">
             <InstagramPageAvatar size="sm" label="D" />
             <div>
-              <p className="text-sm font-semibold">digitify.be</p>
+              <p className="text-sm font-semibold">{displayUsername}</p>
               <p className="text-xs text-white/70">Reel</p>
             </div>
           </div>
@@ -574,7 +588,17 @@ function InstagramReelPreview({
   );
 }
 
-function FacebookPreview({ caption, imageUrl, format }: { caption: string; imageUrl: string; format: PostFormat }) {
+function FacebookPreview({
+  caption,
+  imageUrl,
+  format,
+  pageName = "Digitify",
+}: {
+  caption: string;
+  imageUrl: string;
+  format: PostFormat;
+  pageName?: string;
+}) {
   if (format === "STORY") {
     return (
       <div className="overflow-hidden rounded-[1.6rem] border border-slate-200 bg-slate-950 text-white shadow-[0_22px_55px_rgba(15,23,42,0.18)]">
@@ -591,7 +615,7 @@ function FacebookPreview({ caption, imageUrl, format }: { caption: string; image
             <div className="flex items-center gap-2">
               <FacebookPageAvatar size="sm" />
               <div>
-                <p className="text-sm font-semibold">Digitify</p>
+                <p className="text-sm font-semibold">{pageName}</p>
                 <p className="text-xs text-white/70">Story · 24 uur zichtbaar</p>
               </div>
             </div>
@@ -609,7 +633,7 @@ function FacebookPreview({ caption, imageUrl, format }: { caption: string; image
       <div className="flex items-center gap-3 px-4 py-3">
         <FacebookPageAvatar />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">Digitify</p>
+          <p className="truncate text-sm font-semibold">{pageName}</p>
           <p className="text-xs text-slate-500">Gesponsord · openbaar</p>
         </div>
         <MoreHorizontal className="h-5 w-5 text-slate-500" />
@@ -638,7 +662,20 @@ function FacebookPreview({ caption, imageUrl, format }: { caption: string; image
   );
 }
 
-function InstagramPreview({ caption, imageUrl, firstComment, format }: { caption: string; imageUrl: string; firstComment: string; format: PostFormat }) {
+function InstagramPreview({
+  caption,
+  imageUrl,
+  firstComment,
+  format,
+  username = "digitify.be",
+}: {
+  caption: string;
+  imageUrl: string;
+  firstComment: string;
+  format: PostFormat;
+  username?: string;
+}) {
+  const displayUsername = username.replace(/^@/, "");
   const formatClass = FORMAT_OPTIONS.find((item) => item.value === format)?.className || "aspect-square";
   if (format === "STORY") {
     return (
@@ -661,7 +698,7 @@ function InstagramPreview({ caption, imageUrl, firstComment, format }: { caption
             <div className="flex items-center gap-2">
               <InstagramPageAvatar size="sm" label="D" />
               <div>
-                <p className="text-sm font-semibold">digitify.be</p>
+                <p className="text-sm font-semibold">{displayUsername}</p>
                 <p className="text-xs text-white/70">Instagram Story</p>
               </div>
             </div>
@@ -679,7 +716,7 @@ function InstagramPreview({ caption, imageUrl, firstComment, format }: { caption
       <div className="flex items-center gap-3 px-4 py-3">
         <InstagramPageAvatar />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">digitify.be</p>
+          <p className="truncate text-sm font-semibold">{displayUsername}</p>
           <p className="text-xs text-zinc-500">België</p>
         </div>
         <MoreHorizontal className="h-5 w-5 text-zinc-500" />
@@ -696,7 +733,7 @@ function InstagramPreview({ caption, imageUrl, firstComment, format }: { caption
       </div>
       <div className="space-y-2 px-4 py-3">
         <div className="flex gap-3"><Heart className="h-5 w-5" /><MessageCircle className="h-5 w-5" /><Send className="h-5 w-5" /></div>
-        <p className="text-sm"><span className="font-semibold">digitify.be</span> <span className="whitespace-pre-line">{caption}</span></p>
+        <p className="text-sm"><span className="font-semibold">{displayUsername}</span> <span className="whitespace-pre-line">{caption}</span></p>
         {firstComment.trim() ? (
           <p className="rounded-xl bg-zinc-50 p-2 text-xs text-zinc-600">
             Eerste reactie preview: {firstComment.trim()}
@@ -756,12 +793,24 @@ export function SocialPageInner() {
   const [feedFormat, setFeedFormat] = useState<FeedAspectFormat>("SQUARE");
   const [placementAssets, setPlacementAssets] = useState<PlacementAssets>({});
   const [previewSlideIndex, setPreviewSlideIndex] = useState(0);
+  const [selectedPageId, setSelectedPageId] = useState("");
 
   const listQuery = trpc.social.list.useQuery(
     statusFilter === "ALL" ? undefined : { status: statusFilter as any },
     { refetchInterval: 20_000 },
   );
   const connectionStatus = trpc.social.connectionStatus.useQuery();
+  const managedPagesQuery = trpc.social.listManagedPages.useQuery(undefined, {
+    enabled: Boolean(connectionStatus.data?.connected),
+  });
+  const managedPages = useMemo(
+    () => (managedPagesQuery.data?.pages ?? []) as ManagedMetaPage[],
+    [managedPagesQuery.data?.pages],
+  );
+  const selectedManagedPage = useMemo(
+    () => managedPages.find((page) => page.id === selectedPageId) || null,
+    [managedPages, selectedPageId],
+  );
 
   const rows = useMemo(() => listQuery.data?.items ?? [], [listQuery.data?.items]);
   const selected = rows.find((row: any) => row.id === selectedId) || null;
@@ -794,10 +843,53 @@ export function SocialPageInner() {
       postFormat: previewFormat,
       placements,
       feedFormat,
+      publisherPageId: selectedPageId || undefined,
+      publisherPageName: selectedManagedPage?.name || undefined,
+      publisherInstagramUsername: selectedManagedPage?.instagramUsername || undefined,
       assets: placementAssets,
     }),
-    [altText, brandSignature, cta, firstComment, feedFormat, hashtags, headline, linkUrl, placementAssets, placements, previewFormat],
+    [
+      altText,
+      brandSignature,
+      cta,
+      firstComment,
+      feedFormat,
+      hashtags,
+      headline,
+      linkUrl,
+      placementAssets,
+      placements,
+      previewFormat,
+      selectedManagedPage?.instagramUsername,
+      selectedManagedPage?.name,
+      selectedPageId,
+    ],
   );
+
+  const previewPageName = selectedManagedPage?.name || connectionStatus.data?.pageName || "Digitify";
+  const previewInstagramUsername =
+    selectedManagedPage?.instagramUsername || connectionStatus.data?.instagramUsername || "digitify.be";
+
+  useEffect(() => {
+    if (selectedPageId || !managedPages.length) return;
+    const defaultPageId =
+      managedPagesQuery.data?.selectedPageId ||
+      connectionStatus.data?.pageId ||
+      managedPages[0]?.id ||
+      "";
+    if (defaultPageId) setSelectedPageId(defaultPageId);
+  }, [
+    connectionStatus.data?.pageId,
+    managedPages,
+    managedPagesQuery.data?.selectedPageId,
+    selectedPageId,
+  ]);
+
+  useEffect(() => {
+    if (targetInstagram && selectedManagedPage && !selectedManagedPage.instagramBusinessId) {
+      setTargetInstagram(false);
+    }
+  }, [selectedManagedPage, targetInstagram]);
 
   const previewCaption = useMemo(
     () => buildPreviewCaption({ caption, headline, cta, hashtags, linkUrl, brandSignature }),
@@ -1036,6 +1128,24 @@ export function SocialPageInner() {
       return false;
     }
 
+    if (!selectedPageId) {
+      showToast({
+        title: "Account ontbreekt",
+        description: "Kies een Facebook-pagina om op te posten.",
+        variant: "error",
+      });
+      return false;
+    }
+
+    if (targets.includes("INSTAGRAM") && !selectedManagedPage?.instagramBusinessId) {
+      showToast({
+        title: "Instagram ontbreekt",
+        description: "Het geselecteerde account heeft geen gekoppeld Instagram Business-profiel.",
+        variant: "error",
+      });
+      return false;
+    }
+
     if (!placements.length) {
       showToast({ title: "Onvolledig", description: "Kies minstens één publicatietype.", variant: "error" });
       return false;
@@ -1183,6 +1293,7 @@ export function SocialPageInner() {
     setPlacementAssets(metadata.assets || {});
     setTargetFacebook((row.targetPlatforms || []).includes("FACEBOOK"));
     setTargetInstagram((row.targetPlatforms || []).includes("INSTAGRAM"));
+    setSelectedPageId(metadata.publisherPageId || managedPagesQuery.data?.selectedPageId || connectionStatus.data?.pageId || "");
     setScheduledFor(toDateTimeLocal(row.scheduledFor));
     setHeadline(metadata.headline || "");
     setCta(metadata.cta || "");
@@ -1202,6 +1313,7 @@ export function SocialPageInner() {
     setScheduledFor("");
     setTargetFacebook(true);
     setTargetInstagram(true);
+    setSelectedPageId(managedPagesQuery.data?.selectedPageId || connectionStatus.data?.pageId || managedPages[0]?.id || "");
     setHeadline("");
     setCta("");
     setHashtags("digitalegroei marketing belgie");
@@ -1453,15 +1565,70 @@ export function SocialPageInner() {
                 <p className="text-xs text-muted-foreground">V1 publiceert alleen de feed post zelf. Deze reactie blijft bewaard als review-notitie.</p>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm">
-                  <input type="checkbox" checked={targetFacebook} disabled={!canEditSelected} onChange={(event) => setTargetFacebook(event.target.checked)} />
-                  Facebook Page
-                </label>
-                <label className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm">
-                  <input type="checkbox" checked={targetInstagram} disabled={!canEditSelected} onChange={(event) => setTargetInstagram(event.target.checked)} />
-                  Instagram Business feed
-                </label>
+              <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+                <div className="space-y-2">
+                  <Label htmlFor="social-publish-account">Publicatie-account</Label>
+                  {managedPagesQuery.isLoading ? (
+                    <Skeleton className="h-10 w-full rounded-xl" />
+                  ) : managedPages.length > 0 ? (
+                    <Select
+                      value={selectedPageId || undefined}
+                      onValueChange={setSelectedPageId}
+                      disabled={!canEditSelected}
+                    >
+                      <SelectTrigger id="social-publish-account" className="h-10">
+                        <SelectValue placeholder="Kies een Facebook-pagina" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {managedPages.map((page) => (
+                          <SelectItem key={page.id} value={page.id}>
+                            <span className="flex flex-col items-start gap-0.5">
+                              <span>{page.name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {page.instagramUsername
+                                  ? `Instagram @${page.instagramUsername.replace(/^@/, "")}`
+                                  : "Geen Instagram gekoppeld"}
+                              </span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Geen beheerde pagina&apos;s gevonden. Koppel Meta opnieuw via Integraties.
+                    </p>
+                  )}
+                  {selectedManagedPage ? (
+                    <p className="text-xs text-muted-foreground">
+                      Facebook: <span className="font-medium text-foreground">{selectedManagedPage.name}</span>
+                      {selectedManagedPage.instagramUsername
+                        ? ` · Instagram @${selectedManagedPage.instagramUsername.replace(/^@/, "")}`
+                        : " · Instagram niet gekoppeld"}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="flex items-center gap-2 rounded-xl border bg-background px-3 py-2 text-sm">
+                    <input type="checkbox" checked={targetFacebook} disabled={!canEditSelected} onChange={(event) => setTargetFacebook(event.target.checked)} />
+                    Facebook Page
+                  </label>
+                  <label
+                    className={cn(
+                      "flex items-center gap-2 rounded-xl border bg-background px-3 py-2 text-sm",
+                      !selectedManagedPage?.instagramBusinessId && "opacity-60",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={targetInstagram}
+                      disabled={!canEditSelected || !selectedManagedPage?.instagramBusinessId}
+                      onChange={(event) => setTargetInstagram(event.target.checked)}
+                    />
+                    Instagram Business feed
+                  </label>
+                </div>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1565,6 +1732,7 @@ export function SocialPageInner() {
                           caption={previewCaption}
                           imageUrl={activePreviewSlide.imageUrl}
                           videoUrl={activePreviewSlide.videoUrl}
+                          username={previewInstagramUsername}
                         />
                       ) : (
                         <div
@@ -1579,6 +1747,7 @@ export function SocialPageInner() {
                               caption={activePreviewSlide.id === "STORY" ? "" : previewCaption}
                               imageUrl={activePreviewSlide.imageUrl}
                               format={activePreviewSlide.format}
+                              pageName={previewPageName}
                             />
                           ) : null}
                           {targetInstagram ? (
@@ -1588,6 +1757,7 @@ export function SocialPageInner() {
                                 imageUrl={activePreviewSlide.imageUrl}
                                 firstComment={firstComment}
                                 format="STORY"
+                                username={previewInstagramUsername}
                               />
                             ) : (
                               <InstagramPreview
@@ -1595,6 +1765,7 @@ export function SocialPageInner() {
                                 imageUrl={activePreviewSlide.imageUrl}
                                 firstComment={firstComment}
                                 format={activePreviewSlide.format}
+                                username={previewInstagramUsername}
                               />
                             )
                           ) : null}

@@ -2,12 +2,15 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const mockedMeta = vi.hoisted(() => ({
   clearMetaSettings: vi.fn(),
+  loadMetaManagedPages: vi.fn(),
   loadMetaWorkspaceConfig: vi.fn(),
   publishFacebookImagePost: vi.fn(),
   publishFacebookImageStory: vi.fn(),
   publishInstagramImagePost: vi.fn(),
   publishInstagramImageStory: vi.fn(),
   publishInstagramReel: vi.fn(),
+  resolveSocialPublishTarget: vi.fn(),
+  upsertMetaSettings: vi.fn(),
   workspaceScopeFromAuthenticatedUser: vi.fn((user: { id: string; workspaceId?: string }) => ({
     workspaceId: user.workspaceId || user.id,
     memberId: user.id,
@@ -50,6 +53,27 @@ function makeCtx(db: Record<string, unknown>, role: string = "OWNER") {
 }
 
 describe("social router flow", () => {
+  beforeEach(() => {
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "ig_123",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "ig_123",
+      instagramUsername: "digitify.be",
+    });
+  });
+
   it("creates draft, submits approval and schedules", async () => {
     const row = {
       id: "sp_1",
@@ -105,6 +129,7 @@ describe("social router flow", () => {
 describe("social publish worker", () => {
   beforeEach(() => {
     mockedMeta.loadMetaWorkspaceConfig.mockReset();
+    mockedMeta.resolveSocialPublishTarget.mockReset();
     mockedMeta.publishFacebookImagePost.mockReset();
     mockedMeta.publishFacebookImageStory.mockReset();
     mockedMeta.publishInstagramImagePost.mockReset();
@@ -137,6 +162,13 @@ describe("social publish worker", () => {
       pageAccessToken: "page-token",
       tokenExpiresAt: "",
       autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "",
+      instagramUsername: "",
     });
     mockedMeta.publishFacebookImagePost.mockRejectedValue(new Error("Meta publish failed"));
 
@@ -187,6 +219,13 @@ describe("social publish worker", () => {
       pageAccessToken: "page-token",
       tokenExpiresAt: "",
       autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "ig_123",
+      instagramUsername: "digitify.be",
     });
     mockedMeta.publishFacebookImageStory.mockResolvedValue("fb_story_1");
     mockedMeta.publishInstagramImageStory.mockResolvedValue("ig_story_1");

@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
   if (!["OWNER", "ADMIN"].includes(String(user.role || ""))) {
-    return NextResponse.redirect(new URL("/settings/bookings?google=forbidden#google-agenda", request.url));
+    return NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=forbidden", request.url));
   }
   const userId = (user as any).id as string | undefined;
   if (!userId) {
@@ -32,22 +32,22 @@ export async function GET(request: Request) {
   const cookieState = cookieStore.get("digitify_google_calendar_state")?.value || "";
 
   if (error) {
-    return NextResponse.redirect(new URL(`/settings/bookings?google=${encodeURIComponent(error)}#google-agenda`, request.url));
+    return NextResponse.redirect(new URL(`/settings/integrations?tab=google-oauth&google=${encodeURIComponent(error)}`, request.url));
   }
 
   if (!code || !state || !cookieState || state !== cookieState) {
-    return NextResponse.redirect(new URL("/settings/bookings?google=invalid-state", request.url));
+    return NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=invalid-state", request.url));
   }
 
   const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(prisma as any, { userId });
   if (!clientId || !clientSecret) {
-    return NextResponse.redirect(new URL("/settings/bookings?google=missing-config", request.url));
+    return NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=missing-config", request.url));
   }
   if (!isValidGoogleOAuthClientId(clientId)) {
-    return NextResponse.redirect(new URL("/settings/bookings?google=invalid-client-id", request.url));
+    return NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=invalid-client-id", request.url));
   }
   if (!isValidGoogleOAuthClientSecret(clientSecret)) {
-    return NextResponse.redirect(new URL("/settings/bookings?google=invalid-client-secret", request.url));
+    return NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=invalid-client-secret", request.url));
   }
 
   try {
@@ -150,7 +150,7 @@ export async function GET(request: Request) {
       })
     );
 
-    const response = NextResponse.redirect(new URL("/settings/bookings?google=connected#google-agenda", request.url));
+    const response = NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=connected", request.url));
     response.cookies.set("digitify_google_calendar_state", "", {
       httpOnly: true,
       sameSite: "lax",
@@ -168,6 +168,6 @@ export async function GET(request: Request) {
     return response;
   } catch (callbackError) {
     console.error("[google-calendar-callback] OAuth callback failed", callbackError);
-    return NextResponse.redirect(new URL("/settings/bookings?google=error#google-agenda", request.url));
+    return NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=error", request.url));
   }
 }

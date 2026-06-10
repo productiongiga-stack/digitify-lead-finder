@@ -178,7 +178,7 @@ export type SettingsSection = {
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/account", title: "Account & Profiel", description: "Naam, profielfoto en wachtwoord", icon: UserCircle, allowedRoles: ["OWNER", "ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER", "VIEWER"] },
   { href: "/settings/workspaces", title: "Werkruimtes", description: "Eigen of gedeelde werkruimte, uitnodigingen en teamleden", icon: Layers, allowedRoles: ["OWNER", "ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER", "VIEWER"] },
-  { href: "/settings/integrations", title: "Integraties & API-sleutels", description: "SMTP/IMAP en externe API-verbindingen", icon: Key, allowedRoles: ["OWNER"] },
+  { href: "/settings/integrations", title: "Integraties & API-sleutels", description: "MuAPI, Google, Meta, AI, SMTP/IMAP en OAuth-koppelingen", icon: Key, allowedRoles: ["OWNER", "ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER"] },
   { href: "/settings/branding", title: "Branding & afzender", description: "Logo, kleuren, favicon en standaard e-mailafzender", icon: Palette, allowedRoles: ["OWNER"] },
   { href: "/settings/seo", title: "SEO & vindbaarheid", description: "Titels, meta, sitemap en zoekmachines", icon: Globe2, allowedRoles: ["OWNER"] },
   { href: "/settings/scoring", title: "Scoring-configuratie", description: "Pas scoringgewichten en factoren aan", icon: Gauge, allowedRoles: ["OWNER", "ADMIN"] },
@@ -187,7 +187,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/analytics", title: "Analytics & tracking", description: "Website trackers, bezoekers en teamgebruik (owner)", icon: BarChart3, allowedRoles: ["OWNER"] },
   { href: "/settings/pipeline", title: "Pipeline-stappen", description: "Beheer je salespipeline", icon: GitBranch, allowedRoles: ["OWNER", "ADMIN"] },
   { href: "/settings/ai", title: "AI-assistent", description: "Model, taal en tone of voice", icon: Bot, allowedRoles: ["OWNER"] },
-  { href: "/settings/creative-studio", title: "Creative Studio", description: "Persoonlijke MuAPI-key voor AI-media", icon: Sparkles, allowedRoles: ["OWNER", "ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER"] },
   { href: "/settings/company", title: "Bedrijfsgegevens", description: "Naam, adres, BTW en KBO", icon: Building2, allowedRoles: ["OWNER"] },
   { href: "/settings/bookings", title: "Boekingswidget", description: "Beschikbaarheid en embed voor afspraken", icon: Calendar, allowedRoles: ["OWNER", "ADMIN", "MEMBER"] },
   { href: "/settings/reviews", title: "Reviewwidget", description: "Reviewlinks, embed en instellingen", icon: Star, allowedRoles: ["OWNER", "ADMIN", "MODERATOR", "MEMBER"] },

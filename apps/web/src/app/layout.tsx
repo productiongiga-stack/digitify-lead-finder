@@ -32,7 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         className="font-sans"
         style={{ fontFamily: "var(--font-poppins), system-ui, sans-serif" }}
       >
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           <TRPCProvider>
             <SessionProvider>
             <ToastProvider>

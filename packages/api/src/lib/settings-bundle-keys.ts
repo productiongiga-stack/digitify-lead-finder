@@ -211,6 +211,11 @@ export const INTEGRATIONS_SETTINGS_KEYS = [
   "email.imap_tls",
   "company.email",
   "email.from_email",
+  "bookings.google_oauth_account_email",
+  "bookings.google_calendar_id",
+  "bookings.google_sync_enabled",
+  "bookings.google_service_account_email",
+  "bookings.google_service_account_private_key",
 ] as const;
 
 export const BOOKINGS_SETTINGS_KEYS = [

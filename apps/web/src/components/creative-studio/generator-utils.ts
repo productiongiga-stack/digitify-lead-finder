@@ -19,7 +19,7 @@ export type ModelListItem = {
 };
 
 export const IMAGE_MODE_DEFAULTS: Record<ImageGeneratorMode, string> = {
-  T2I: "flux-dev",
+  T2I: "flux-2-dev",
   I2I: "nano-banana-2-edit",
 };
 

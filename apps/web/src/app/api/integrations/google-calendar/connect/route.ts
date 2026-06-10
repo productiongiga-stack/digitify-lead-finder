@@ -13,11 +13,11 @@ export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
     const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("callbackUrl", "/settings/bookings#google-agenda");
+    loginUrl.searchParams.set("callbackUrl", "/settings/integrations?tab=google-oauth");
     return NextResponse.redirect(loginUrl);
   }
   if (!["OWNER", "ADMIN"].includes(String(user.role || ""))) {
-    return NextResponse.redirect(new URL("/settings/bookings?google=forbidden#google-agenda", request.url));
+    return NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=forbidden", request.url));
   }
 
   const userId = (user as { id?: string }).id;
@@ -26,15 +26,15 @@ export async function GET(request: Request) {
     userId ? { userId } : undefined,
   );
   if (!clientId || !clientSecret) {
-    return NextResponse.redirect(new URL("/settings/bookings?google=missing-config", request.url));
+    return NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=missing-config", request.url));
   }
 
   if (!isValidGoogleOAuthClientId(clientId)) {
-    return NextResponse.redirect(new URL("/settings/bookings?google=invalid-client-id", request.url));
+    return NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=invalid-client-id", request.url));
   }
 
   if (!isValidGoogleOAuthClientSecret(clientSecret)) {
-    return NextResponse.redirect(new URL("/settings/bookings?google=invalid-client-secret", request.url));
+    return NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=invalid-client-secret", request.url));
   }
 
   const appUrl = resolveOAuthAppUrl(request);

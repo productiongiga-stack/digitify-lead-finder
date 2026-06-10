@@ -50,7 +50,7 @@ export function SocialImageGenerator({
   const { showToast } = useToast();
   const keyStatus = trpc.media.getMuapiKeyStatus.useQuery(undefined, MUAPI_KEY_QUERY_OPTIONS);
   const models = trpc.media.listModels.useQuery(undefined, MEDIA_MODELS_QUERY_OPTIONS);
-  const [model, setModel] = useState("flux-dev");
+  const [model, setModel] = useState("flux-2-dev");
   const [jobId, setJobId] = useState<string | null>(null);
 
   const startImage = trpc.media.startImageGeneration.useMutation({
@@ -105,7 +105,7 @@ export function SocialImageGenerator({
   if (!keyStatus.data?.hasKey) {
     return (
       <Button size="sm" variant="outline" className="w-full" asChild>
-        <Link href="/settings/creative-studio">
+        <Link href="/settings/integrations?tab=muapi">
           <Sparkles className="mr-2 h-3 w-3" />
           MuAPI-key instellen
         </Link>

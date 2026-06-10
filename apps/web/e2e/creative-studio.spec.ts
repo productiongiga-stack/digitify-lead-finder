@@ -35,10 +35,10 @@ test.describe("Creative Studio smoke", () => {
     await expect(page.getByText("Lip Sync Studio")).toBeVisible();
   });
 
-  test("settings page shows MuAPI key section", async ({ page }) => {
-    await page.goto("/settings/creative-studio");
-    await expect(page.getByRole("heading", { name: "Creative Studio" })).toBeVisible();
-    await expect(page.getByText("MuAPI API-key")).toBeVisible();
+  test("integrations page shows MuAPI key section", async ({ page }) => {
+    await page.goto("/settings/integrations?tab=muapi");
+    await expect(page.getByRole("heading", { name: /Integraties & API-sleutels/i })).toBeVisible();
+    await expect(page.getByText("MuAPI (Creative Studio)")).toBeVisible();
     await expect(page.getByText("Automatisch opslaan in bibliotheek")).toBeVisible();
   });
 });

@@ -121,19 +121,19 @@ export function ReferencePicker({
                       onClick={() => toggleUrl(item.url)}
                       className={cn(
                         "relative aspect-square w-full overflow-hidden rounded-lg border transition",
-                        isSelected ? "border-amber-500 ring-2 ring-amber-500/30" : "border-border hover:border-amber-300/60",
+                        isSelected ? "border-primary ring-2 ring-primary/30" : "border-border hover:border-primary/40",
                       )}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={item.url} alt={item.filename} className="h-full w-full object-cover" />
                       {isSelected ? (
-                        <span className="absolute inset-0 flex items-center justify-center bg-amber-500/20">
+                        <span className="absolute inset-0 flex items-center justify-center bg-primary/20">
                           {multi ? (
-                            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-600 text-xs font-bold text-white">
+                            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
                               {order + 1}
                             </span>
                           ) : (
-                            <Check className="h-5 w-5 text-amber-700" />
+                            <Check className="h-5 w-5 text-primary" />
                           )}
                         </span>
                       ) : null}

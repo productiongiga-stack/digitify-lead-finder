@@ -366,6 +366,52 @@ export function pickDefaultMetaPage(pages: MetaManagedPage[]) {
   return withInstagram || pages[0] || null;
 }
 
+export type SocialPublishTarget = {
+  pageId: string;
+  pageAccessToken: string;
+  pageName: string;
+  instagramBusinessId: string;
+  instagramUsername: string;
+};
+
+export async function resolveSocialPublishTarget(params: {
+  config: MetaWorkspaceConfig;
+  publisherPageId?: string | null;
+}): Promise<SocialPublishTarget> {
+  const requestedPageId = params.publisherPageId?.trim() || params.config.pageId?.trim();
+  if (!requestedPageId) {
+    throw new Error("Geen Facebook-pagina geselecteerd. Kies een account in de Social Planner.");
+  }
+
+  if (requestedPageId === params.config.pageId?.trim() && params.config.pageAccessToken) {
+    return {
+      pageId: params.config.pageId,
+      pageAccessToken: params.config.pageAccessToken,
+      pageName: "",
+      instagramBusinessId: params.config.instagramBusinessId,
+      instagramUsername: "",
+    };
+  }
+
+  if (!params.config.accessToken) {
+    throw new Error("Meta access token ontbreekt. Koppel Meta opnieuw via Integraties.");
+  }
+
+  const pages = await loadMetaManagedPages(params.config.accessToken);
+  const page = pages.find((item) => item.id === requestedPageId);
+  if (!page) {
+    throw new Error("Geselecteerde Facebook-pagina is niet meer beschikbaar. Kies een ander account.");
+  }
+
+  return {
+    pageId: page.id,
+    pageAccessToken: page.accessToken,
+    pageName: page.name,
+    instagramBusinessId: page.instagramBusinessId,
+    instagramUsername: page.instagramUsername,
+  };
+}
+
 export async function publishFacebookImagePost(params: {
   pageId: string;
   pageAccessToken: string;

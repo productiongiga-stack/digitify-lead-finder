@@ -41,18 +41,18 @@ export const studioSectionClass =
 
 export function CreativeStudioHero() {
   return (
-    <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-amber-500/10 via-background to-violet-500/10 p-6 sm:p-8">
+    <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-primary/10 via-background to-primary/5 p-6 sm:p-8">
       <div
         aria-hidden
-        className="pointer-events-none absolute -right-8 -top-8 h-40 w-40 rounded-full bg-amber-400/20 blur-3xl"
+        className="pointer-events-none absolute -right-8 -top-8 h-40 w-40 rounded-full bg-primary/20 blur-3xl"
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute -bottom-10 left-1/3 h-32 w-32 rounded-full bg-violet-400/15 blur-3xl"
+        className="pointer-events-none absolute -bottom-10 left-1/3 h-32 w-32 rounded-full bg-primary/10 blur-3xl"
       />
       <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-2">
-          <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+          <div className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
             <Sparkles className="h-3.5 w-3.5" />
             Open Generative AI
           </div>
@@ -63,7 +63,7 @@ export function CreativeStudioHero() {
           </p>
         </div>
         <Button variant="outline" size="sm" className="shrink-0 bg-background/80 backdrop-blur" asChild>
-          <Link href="/settings/creative-studio">
+          <Link href="/settings/integrations?tab=muapi">
             <KeyRound className="mr-2 h-4 w-4" />
             MuAPI-instellingen
           </Link>
@@ -119,7 +119,7 @@ export function CreativeStudioStats({
       label: "Merkkit",
       value: brandEnabled ? "Actief" : "Uit",
       icon: Palette,
-      tone: brandEnabled ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
+      tone: brandEnabled ? "text-primary" : "text-muted-foreground",
     },
     {
       label: "Deze maand",
@@ -179,12 +179,12 @@ export function GeneratorShell({
   children,
 }: GeneratorShellProps) {
   return (
-    <Card className={cn(studioCardClass, "border-t-4 border-t-amber-500/70")}>
+    <Card className={cn(studioCardClass, "border-t-4 border-t-primary/70")}>
       <CardHeader className="space-y-3 border-b border-border/50 bg-muted/10 pb-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="space-y-1">
             <CardTitle className="flex items-center gap-2 text-lg">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-primary">
                 <Icon className="h-4 w-4" />
               </span>
               {title}
@@ -193,12 +193,12 @@ export function GeneratorShell({
           </div>
           <div className="flex flex-wrap gap-2">
             {costLabel ? (
-              <Badge variant="outline" className="border-amber-500/30 bg-amber-500/5 font-mono text-xs">
+              <Badge variant="outline" className="border-primary/30 bg-primary/5 font-mono text-xs text-primary">
                 {costLabel} / run
               </Badge>
             ) : null}
             {brandActive ? (
-              <Badge className="gap-1 bg-amber-600 hover:bg-amber-600">
+              <Badge className="gap-1 bg-primary hover:bg-primary">
                 <Sparkles className="h-3 w-3" />
                 Merk actief
               </Badge>
@@ -229,7 +229,7 @@ export function GeneratorModeToggle<T extends string>({
           size="sm"
           variant={value === option.value ? "default" : "outline"}
           className={cn(
-            value === option.value && "bg-amber-600 hover:bg-amber-500",
+            value === option.value && "bg-primary hover:bg-primary/90",
             "h-auto flex-col items-start gap-0.5 px-3 py-2",
           )}
           onClick={() => onChange(option.value)}
@@ -352,7 +352,7 @@ type PreviewProps = {
 
 export function CreativePreview({ children, actions, label = "Resultaat" }: PreviewProps) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-amber-500/20 bg-gradient-to-b from-amber-500/5 to-background p-1 shadow-inner">
+    <div className="overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-b from-primary/5 to-background p-1 shadow-inner">
       <div className="rounded-[14px] border bg-card p-3">
         <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
         <div className="overflow-hidden rounded-xl bg-muted/30">{children}</div>
@@ -376,7 +376,7 @@ export function GenerateButton({
   return (
     <Button
       size="lg"
-      className="w-full bg-gradient-to-r from-amber-600 to-amber-500 text-white shadow-md hover:from-amber-500 hover:to-amber-400 sm:w-auto"
+      className="w-full bg-primary text-primary-foreground shadow-md hover:bg-primary/90 sm:w-auto"
       disabled={disabled}
       aria-busy={isLoading}
       onClick={onClick}

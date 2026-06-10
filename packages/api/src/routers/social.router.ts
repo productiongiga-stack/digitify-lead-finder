@@ -7,6 +7,7 @@ import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import { probeSocialImage, validateSocialImageForPublish } from "../lib/social-image";
 import {
   clearMetaSettings,
+  loadMetaManagedPages,
   loadMetaWorkspaceConfig,
   publishFacebookImagePost,
   publishFacebookImageStory,
@@ -14,6 +15,8 @@ import {
   publishInstagramImageStory,
   publishInstagramReel,
   resolveMetaOAuthScopeSummary,
+  resolveSocialPublishTarget,
+  upsertMetaSettings,
   workspaceScopeFromAuthenticatedUser,
 } from "../lib/social-meta";
 import {
@@ -80,6 +83,9 @@ const socialPostMetadataSchema = z
     postFormat: socialPostFormatEnum.default("SQUARE").optional(),
     placements: z.array(socialPlacementEnum).min(1).max(3).optional(),
     feedFormat: socialFeedFormatEnum.optional(),
+    publisherPageId: z.string().max(64).optional(),
+    publisherPageName: z.string().max(160).optional(),
+    publisherInstagramUsername: z.string().max(80).optional(),
     assets: z
       .object({
         FEED: socialPlacementAssetSchema.optional(),
@@ -150,6 +156,9 @@ function normalizeSocialMetadata(metadata?: z.infer<typeof socialPostMetadataSch
     postFormat: metadata.postFormat || feedFormat,
     placements,
     feedFormat,
+    publisherPageId: cleanOptionalText(metadata.publisherPageId),
+    publisherPageName: cleanOptionalText(metadata.publisherPageName),
+    publisherInstagramUsername: cleanOptionalText(metadata.publisherInstagramUsername),
     assets,
   };
 }
@@ -176,13 +185,32 @@ function placementLabel(placement: SocialPlacement) {
   return "Reel";
 }
 
-async function ensurePostCanPublish(post: { imageUrl: string; targetPlatforms: string[]; metadata?: unknown }) {
+async function ensurePostCanPublish(
+  post: { imageUrl: string; targetPlatforms: string[]; metadata?: unknown },
+  publishTarget?: { pageId: string; pageAccessToken: string; instagramBusinessId: string },
+) {
   const metadata = normalizeSocialMetadata((post.metadata || undefined) as z.infer<typeof socialPostMetadataSchema>);
   const placements = metadata.placements || ["FEED"];
   const assets = metadata.assets || normalizePlacementAssets(metadata);
 
   if (!placements.length) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Kies minstens één publicatietype (Feed, Story of Reel)." });
+  }
+
+  if (!publishTarget?.pageId || !publishTarget.pageAccessToken) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Geen Facebook-pagina geselecteerd. Kies een account in de Social Planner.",
+    });
+  }
+
+  const needsInstagram =
+    post.targetPlatforms.includes("INSTAGRAM") || placements.some((placement) => placement === "STORY" || placement === "REEL");
+  if (needsInstagram && !publishTarget.instagramBusinessId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Het geselecteerde account heeft geen gekoppeld Instagram Business-profiel.",
+    });
   }
 
   if (placements.includes("REEL") && !post.targetPlatforms.includes("INSTAGRAM")) {
@@ -224,6 +252,26 @@ async function ensurePostCanPublish(post: { imageUrl: string; targetPlatforms: s
       imageUrl,
       targetPlatforms: post.targetPlatforms,
       placement: probeFormatForPlacement(placement),
+    });
+  }
+}
+
+async function resolvePostPublishTarget(
+  db: PrismaClient,
+  scope: { workspaceId: string; memberId: string },
+  metadata?: unknown,
+) {
+  const config = await loadMetaWorkspaceConfig(db, scope);
+  const normalized = normalizeSocialMetadata((metadata || undefined) as z.infer<typeof socialPostMetadataSchema>);
+  try {
+    return await resolveSocialPublishTarget({
+      config,
+      publisherPageId: normalized.publisherPageId,
+    });
+  } catch (error) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: error instanceof Error ? error.message : "Publicatie-account kon niet worden opgelost.",
     });
   }
 }
@@ -311,9 +359,11 @@ export async function runDueSocialPostsWorker(db: PrismaClient) {
         continue;
       }
 
-      if (!config.pageId || !config.pageAccessToken) {
-        throw new Error("Meta Page is niet verbonden (pageId/token ontbreekt).");
-      }
+      const metadata = normalizeSocialMetadata(post.metadata);
+      const publishTarget = await resolveSocialPublishTarget({
+        config,
+        publisherPageId: metadata.publisherPageId,
+      });
 
       await socialDb.socialPost.update({
         where: { id: post.id },
@@ -324,21 +374,17 @@ export async function runDueSocialPostsWorker(db: PrismaClient) {
       });
 
       const externalIds: Record<string, string> = {};
-      const metadata = normalizeSocialMetadata(post.metadata);
       const placements = metadata.placements || ["FEED"];
       const assets = metadata.assets || normalizePlacementAssets(metadata);
 
-      await ensurePostCanPublish({
-        imageUrl: post.imageUrl,
-        targetPlatforms: post.targetPlatforms,
-        metadata,
-      });
-
-      if (post.targetPlatforms.includes("INSTAGRAM") && placements.some((p) => p === "STORY" || p === "REEL")) {
-        if (!config.instagramBusinessId) {
-          throw new Error("Instagram Business-account ontbreekt voor deze workspace.");
-        }
-      }
+      await ensurePostCanPublish(
+        {
+          imageUrl: post.imageUrl,
+          targetPlatforms: post.targetPlatforms,
+          metadata,
+        },
+        publishTarget,
+      );
 
       for (const placement of placements) {
         if (placement === "FEED") {
@@ -346,16 +392,16 @@ export async function runDueSocialPostsWorker(db: PrismaClient) {
           const publishCaption = buildPublishedCaption(post.caption, metadata, "FEED");
           if (post.targetPlatforms.includes("FACEBOOK")) {
             externalIds.facebook = await publishFacebookImagePost({
-              pageId: config.pageId,
-              pageAccessToken: config.pageAccessToken,
+              pageId: publishTarget.pageId,
+              pageAccessToken: publishTarget.pageAccessToken,
               caption: publishCaption,
               imageUrl,
             });
           }
           if (post.targetPlatforms.includes("INSTAGRAM")) {
             externalIds.instagram = await publishInstagramImagePost({
-              instagramBusinessId: config.instagramBusinessId!,
-              pageAccessToken: config.pageAccessToken,
+              instagramBusinessId: publishTarget.instagramBusinessId,
+              pageAccessToken: publishTarget.pageAccessToken,
               caption: publishCaption,
               imageUrl,
             });
@@ -366,15 +412,15 @@ export async function runDueSocialPostsWorker(db: PrismaClient) {
           const imageUrl = resolvePlacementImageUrl("STORY", metadata, post.imageUrl);
           if (post.targetPlatforms.includes("FACEBOOK")) {
             externalIds.facebookStory = await publishFacebookImageStory({
-              pageId: config.pageId,
-              pageAccessToken: config.pageAccessToken,
+              pageId: publishTarget.pageId,
+              pageAccessToken: publishTarget.pageAccessToken,
               imageUrl,
             });
           }
           if (post.targetPlatforms.includes("INSTAGRAM")) {
             externalIds.instagramStory = await publishInstagramImageStory({
-              instagramBusinessId: config.instagramBusinessId!,
-              pageAccessToken: config.pageAccessToken,
+              instagramBusinessId: publishTarget.instagramBusinessId,
+              pageAccessToken: publishTarget.pageAccessToken,
               imageUrl,
             });
           }
@@ -386,8 +432,8 @@ export async function runDueSocialPostsWorker(db: PrismaClient) {
           const coverUrl = resolvePlacementImageUrl("REEL", metadata, post.imageUrl);
           const publishCaption = buildPublishedCaption(post.caption, metadata, "REEL");
           externalIds.instagramReel = await publishInstagramReel({
-            instagramBusinessId: config.instagramBusinessId!,
-            pageAccessToken: config.pageAccessToken,
+            instagramBusinessId: publishTarget.instagramBusinessId,
+            pageAccessToken: publishTarget.pageAccessToken,
             caption: publishCaption,
             videoUrl,
             coverUrl: coverUrl || undefined,
@@ -658,11 +704,16 @@ export const socialRouter = router({
       if (!["DRAFT", "FAILED", "CANCELLED"].includes(row.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Deze post kan niet ter goedkeuring worden aangeboden." });
       }
-      await ensurePostCanPublish({
-        imageUrl: row.imageUrl,
-        targetPlatforms: row.targetPlatforms,
-        metadata: row.metadata,
-      });
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      const publishTarget = await resolvePostPublishTarget(ctx.db, scope, row.metadata);
+      await ensurePostCanPublish(
+        {
+          imageUrl: row.imageUrl,
+          targetPlatforms: row.targetPlatforms,
+          metadata: row.metadata,
+        },
+        publishTarget,
+      );
 
       const updated = await socialDb.socialPost.update({
         where: { id: input.id },
@@ -696,11 +747,16 @@ export const socialRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Social post niet gevonden." });
       ensureWorkspaceAccess(row, ctx.user.workspaceId!);
       ensureSchedulableStatus(row.status);
-      await ensurePostCanPublish({
-        imageUrl: row.imageUrl,
-        targetPlatforms: row.targetPlatforms,
-        metadata: row.metadata,
-      });
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      const publishTarget = await resolvePostPublishTarget(ctx.db, scope, row.metadata);
+      await ensurePostCanPublish(
+        {
+          imageUrl: row.imageUrl,
+          targetPlatforms: row.targetPlatforms,
+          metadata: row.metadata,
+        },
+        publishTarget,
+      );
 
       const updated = await socialDb.socialPost.update({
         where: { id: input.id },
@@ -823,16 +879,71 @@ export const socialRouter = router({
       });
     }),
 
+  listManagedPages: protectedProcedure.query(async ({ ctx }) => {
+    const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+    const config = await loadMetaWorkspaceConfig(ctx.db, scope);
+    if (!config.accessToken) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Koppel Meta eerst via Integraties." });
+    }
+
+    const pages = await loadMetaManagedPages(config.accessToken);
+    const selectedPage = pages.find((page) => page.id === config.pageId) || null;
+
+    return {
+      pages,
+      selectedPageId: config.pageId || null,
+      selectedPageName: selectedPage?.name || null,
+      selectedInstagramUsername: selectedPage?.instagramUsername || null,
+    };
+  }),
+
+  selectPublishingPage: adminProcedure
+    .input(
+      z.object({
+        pageId: z.string().min(1),
+        pageName: z.string().max(160).optional(),
+        pageAccessToken: z.string().min(1),
+        instagramBusinessId: z.string().optional(),
+        instagramUsername: z.string().max(80).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      await upsertMetaSettings(ctx.db, scope, [
+        { key: "social.meta_page_id", value: input.pageId },
+        { key: "social.meta_page_access_token", value: input.pageAccessToken },
+        { key: "social.meta_instagram_business_id", value: input.instagramBusinessId || "" },
+      ]);
+
+      return {
+        pageId: input.pageId,
+        pageName: input.pageName || null,
+        instagramBusinessId: input.instagramBusinessId || null,
+        instagramUsername: input.instagramUsername || null,
+      };
+    }),
+
   connectionStatus: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadMetaWorkspaceConfig(ctx.db, scope);
     const oauthScopes = resolveMetaOAuthScopeSummary();
+    let pageName: string | null = null;
+    let instagramUsername: string | null = null;
+
+    if (config.accessToken && config.pageId) {
+      const pages = await loadMetaManagedPages(config.accessToken).catch(() => []);
+      const selectedPage = pages.find((page) => page.id === config.pageId);
+      pageName = selectedPage?.name || null;
+      instagramUsername = selectedPage?.instagramUsername || null;
+    }
 
     return {
       hasAppCredentials: Boolean(config.appId && config.appSecret),
       connected: Boolean(config.pageId && config.pageAccessToken),
       pageId: config.pageId || null,
+      pageName,
       instagramBusinessId: config.instagramBusinessId || null,
+      instagramUsername,
       autopostEnabled: config.autopostEnabled,
       tokenExpiresAt: config.tokenExpiresAt || null,
       oauthLoginMode: oauthScopes.loginMode,

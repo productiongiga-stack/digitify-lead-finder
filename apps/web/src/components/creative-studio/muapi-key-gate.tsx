@@ -38,7 +38,7 @@ export function MuapiKeyGate({
     return (
       <CreativeEmptyState icon={KeyRound} title={title} description={description}>
         <Button className="mt-4" asChild>
-          <Link href="/settings/creative-studio">
+          <Link href="/settings/integrations?tab=muapi">
             <Sparkles className="mr-2 h-4 w-4" />
             MuAPI-key instellen
           </Link>
