@@ -337,28 +337,104 @@ export type MetaManagedPage = {
   instagramUsername: string;
 };
 
+type MetaAccountsListItem = {
+  id?: string;
+  name?: string;
+  access_token?: string;
+  instagram_business_account?: { id?: string; username?: string };
+};
+
+type MetaCollectionResponse<T> = {
+  data?: T[];
+  paging?: {
+    cursors?: { after?: string };
+    next?: string;
+  };
+};
+
+function mapMetaAccountsListItem(item: MetaAccountsListItem): MetaManagedPage | null {
+  if (!item.id?.trim() || !item.access_token?.trim()) return null;
+  return {
+    id: item.id.trim(),
+    name: (item.name ?? "").trim(),
+    accessToken: item.access_token.trim(),
+    instagramBusinessId: item.instagram_business_account?.id?.trim() || "",
+    instagramUsername: item.instagram_business_account?.username?.trim() || "",
+  };
+}
+
+export async function metaGetCollection<T>(
+  path: string,
+  params: Record<string, string | undefined>,
+): Promise<T[]> {
+  const items: T[] = [];
+  let after: string | undefined;
+
+  for (let page = 0; page < 20; page += 1) {
+    const raw = (await metaGet(path, {
+      ...params,
+      limit: params.limit || "100",
+      ...(after ? { after } : {}),
+    })) as MetaCollectionResponse<T>;
+
+    items.push(...(raw.data || []));
+    after = raw.paging?.cursors?.after?.trim();
+    if (!after || !raw.paging?.next) break;
+  }
+
+  return items;
+}
+
+export async function resolvePageInstagramLink(page: MetaManagedPage): Promise<MetaManagedPage> {
+  if (page.instagramBusinessId) return page;
+
+  try {
+    const raw = (await metaGet(page.id, {
+      access_token: page.accessToken,
+      fields: "instagram_business_account{id,username}",
+    })) as {
+      instagram_business_account?: { id?: string; username?: string };
+    };
+
+    const instagramBusinessId = raw.instagram_business_account?.id?.trim() || "";
+    const instagramUsername = raw.instagram_business_account?.username?.trim() || "";
+    if (!instagramBusinessId) return page;
+
+    return {
+      ...page,
+      instagramBusinessId,
+      instagramUsername,
+    };
+  } catch {
+    return page;
+  }
+}
+
+async function enrichManagedPagesInstagram(pages: MetaManagedPage[]) {
+  const batchSize = 8;
+  const enriched: MetaManagedPage[] = [];
+
+  for (let index = 0; index < pages.length; index += batchSize) {
+    const batch = pages.slice(index, index + batchSize);
+    const resolved = await Promise.all(batch.map((page) => resolvePageInstagramLink(page)));
+    enriched.push(...resolved);
+  }
+
+  return enriched;
+}
+
 export async function loadMetaManagedPages(userAccessToken: string): Promise<MetaManagedPage[]> {
-  const raw = (await metaGet("me/accounts", {
+  const rows = await metaGetCollection<MetaAccountsListItem>("me/accounts", {
     fields: "id,name,access_token,instagram_business_account{id,username}",
     access_token: userAccessToken,
-  })) as {
-    data?: Array<{
-      id?: string;
-      name?: string;
-      access_token?: string;
-      instagram_business_account?: { id?: string; username?: string };
-    }>;
-  };
+    limit: "100",
+  });
 
-  return (raw.data || [])
-    .map((item) => ({
-      id: item.id || "",
-      name: item.name || "",
-      accessToken: item.access_token || "",
-      instagramBusinessId: item.instagram_business_account?.id || "",
-      instagramUsername: item.instagram_business_account?.username || "",
-    }))
-    .filter((item) => Boolean(item.id && item.accessToken));
+  const pages = rows
+    .map((item) => mapMetaAccountsListItem(item))
+    .filter((item): item is MetaManagedPage => Boolean(item));
+
+  return enrichManagedPagesInstagram(pages);
 }
 
 export function pickDefaultMetaPage(pages: MetaManagedPage[]) {

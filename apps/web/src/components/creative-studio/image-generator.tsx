@@ -39,6 +39,7 @@ import {
 import { MediaJobProgress } from "./media-job-progress";
 import { MuapiKeyGate } from "./muapi-key-gate";
 import { ReferencePicker } from "./reference-picker";
+import { BrandPromptPreview } from "./brand-prompt-preview";
 import { useMediaJob } from "./use-media-job";
 import { useRegeneratePrefill } from "./use-regenerate-prefill";
 
@@ -285,6 +286,11 @@ export function ImageGenerator({ socialPostId }: Props) {
             rows={4}
             className="min-h-[120px] resize-y border-border/70 bg-background/50"
             placeholder="Bijvoorbeeld: minimalistische productfoto op marmeren achtergrond, warm licht, premium look"
+          />
+          <BrandPromptPreview
+            brand={brandKit.data}
+            prompt={prompt}
+            modelType={mode === "I2I" ? "IMAGE_I2I" : "IMAGE"}
           />
         </div>
 

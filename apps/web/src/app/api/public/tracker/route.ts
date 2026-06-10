@@ -1,56 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { log } from "@digitify/api/src/lib/logger";
+import { persistDomainTracker, type DomainTrackerStore } from "@digitify/api/src/lib/domain-insights";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
-};
-
-type TrackerStore = {
-  domainId: string;
-  domainName: string;
-  summary: {
-    pageviews: number;
-    uniqueVisitors: number;
-    lastSeen: string | null;
-  };
-  devices: Array<{
-    type: string;
-    count: number;
-  }>;
-  browsers: Array<{
-    name: string;
-    count: number;
-  }>;
-  campaigns: Array<{
-    source: string;
-    medium: string;
-    campaign: string;
-    count: number;
-  }>;
-  pages: Array<{
-    url: string;
-    title: string;
-    count: number;
-    lastSeen: string;
-  }>;
-  referrers: Array<{
-    source: string;
-    count: number;
-  }>;
-  visitors: Array<{
-    id: string;
-    count: number;
-    lastSeen: string;
-    pageUrl: string;
-    language: string;
-    timezone: string;
-    deviceType: string;
-    browser: string;
-  }>;
 };
 
 function getVisitorId(request: Request, payload: Record<string, unknown>) {
@@ -136,30 +93,23 @@ export async function POST(request: Request) {
       },
     });
 
-    if (
-      !domain ||
-      !domain.leadId ||
-      domain.status !== "ACTIVE" ||
-      !domain.lead ||
-      domain.lead.createdById !== domain.createdById
-    ) {
+    if (!domain || domain.status !== "ACTIVE") {
       return NextResponse.json({ success: false }, { headers: corsHeaders });
     }
 
-    const source = `website_tracker:${domain.id}`;
-    const existing = await prisma.enrichmentData.findUnique({
-      where: {
-        leadId_source: {
-          leadId: domain.leadId,
-          source,
-        },
-      },
+    if (domain.lead && domain.lead.createdById !== domain.createdById) {
+      return NextResponse.json({ success: false }, { headers: corsHeaders });
+    }
+
+    const domainRow = await prisma.domain.findUnique({
+      where: { id: domainId },
+      select: { trackerData: true },
     });
 
     const now = new Date().toISOString();
     const visitorId = getVisitorId(request, payload);
     const referrerSource = getReferrerSource(referrer);
-    const current = (existing?.data as TrackerStore | null) || {
+    const current = (domainRow?.trackerData as DomainTrackerStore | null) || {
       domainId: domain.id,
       domainName: domain.domainName,
       summary: {
@@ -277,7 +227,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const updated: TrackerStore = {
+    const updated: DomainTrackerStore = {
       domainId: domain.id,
       domainName: domain.domainName,
       summary: {
@@ -299,22 +249,10 @@ export async function POST(request: Request) {
         .slice(0, 50),
     };
 
-    await prisma.enrichmentData.upsert({
-      where: {
-        leadId_source: {
-          leadId: domain.leadId,
-          source,
-        },
-      },
-      create: {
-        leadId: domain.leadId,
-        source,
-        data: updated as unknown as object,
-      },
-      update: {
-        data: updated as unknown as object,
-        fetchedAt: new Date(),
-      },
+    await persistDomainTracker(prisma as any, {
+      domainId: domain.id,
+      leadId: domain.leadId,
+      tracker: updated,
     });
 
     return NextResponse.json({ success: true }, { headers: corsHeaders });

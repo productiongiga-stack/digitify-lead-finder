@@ -28,6 +28,7 @@ import { LIBRARY_SAVE_LABEL, MEDIA_MODELS_QUERY_OPTIONS, MUAPI_KEY_QUERY_OPTIONS
 import { type ModelListItem } from "./generator-utils";
 import { MediaJobProgress } from "./media-job-progress";
 import { MuapiKeyGate } from "./muapi-key-gate";
+import { BrandPromptPreview } from "./brand-prompt-preview";
 import { ReferencePicker } from "./reference-picker";
 import { useMediaJob } from "./use-media-job";
 import { useRegeneratePrefill } from "./use-regenerate-prefill";
@@ -217,6 +218,7 @@ export function LipSyncGenerator({ socialPostId }: Props) {
             rows={3}
             placeholder="Bijvoorbeeld: natuurlijke hoofdbewegingen, vriendelijke presentatiestijl"
           />
+          <BrandPromptPreview brand={brandKit.data} prompt={prompt} modelType="LIP_SYNC" />
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">

@@ -1356,6 +1356,11 @@ model Domain {
   status         String    @default("ACTIVE") // ACTIVE, EXPIRING, EXPIRED, TRANSFERRED
   sslStatus      String?   @default("UNKNOWN") // VALID, EXPIRED, NONE, UNKNOWN
   notes          String?
+  analysisData   Json?
+  trackerData    Json?
+  lastAnalyzedAt DateTime?
+  lastTrackerAt  DateTime?
+  healthScore    Int?
   leadId         String?
   lead           Lead?     @relation(fields: [leadId], references: [id])
   createdById    String
@@ -1366,6 +1371,8 @@ model Domain {
   @@unique([createdById, domainName])
   @@index([createdById])
   @@index([createdById, expiresAt])
+  @@index([createdById, healthScore])
+  @@index([createdById, lastAnalyzedAt])
   @@map("domains")
 }
 

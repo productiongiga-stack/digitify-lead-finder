@@ -28,6 +28,7 @@ import { formatModelOptionLabel } from "@/lib/format-model-label";
 import { cn } from "@/lib/utils";
 import { LIBRARY_SAVE_LABEL, MEDIA_MODELS_QUERY_OPTIONS, MUAPI_KEY_QUERY_OPTIONS } from "./constants";
 import { MediaJobProgress } from "./media-job-progress";
+import { BrandPromptPreview } from "./brand-prompt-preview";
 import { MuapiKeyGate } from "./muapi-key-gate";
 import { useMediaJob } from "./use-media-job";
 
@@ -154,6 +155,7 @@ export function MarketingAdGenerator() {
               className="min-h-[120px] resize-y border-border/70 bg-background/50"
               placeholder="Beschrijf je advertentie: product, doelgroep, tone of voice..."
             />
+            <BrandPromptPreview brand={brandKit.data} prompt={prompt} modelType="MARKETING_AD" />
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">

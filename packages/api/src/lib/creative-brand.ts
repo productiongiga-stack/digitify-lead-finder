@@ -31,6 +31,17 @@ const CREATIVE_BRAND_KEYS = [
   "creative.auto_import",
 ] as const;
 
+function resolvePublicAssetUrl(url: string | undefined): string | undefined {
+  const trimmed = url?.trim();
+  if (!trimmed) return undefined;
+  if (/^(https?:\/\/|data:)/i.test(trimmed)) return trimmed;
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://leads.digitify.be").replace(
+    /\/$/,
+    "",
+  );
+  return `${appUrl}${trimmed.startsWith("/") ? trimmed : `/${trimmed}`}`;
+}
+
 function parseBooleanSetting(raw: string | undefined, fallback: boolean): boolean {
   if (!raw) return fallback;
   const normalized = raw.trim().toLowerCase();
@@ -64,7 +75,7 @@ export async function loadCreativeBrandContext(
     brandSummary: getSettingString(settings, "creative.brand_summary") || undefined,
     trainingNotes: getSettingString(settings, "chatbot.training_notes") || undefined,
     businessContext: getSettingString(settings, "openclaw.business_context") || undefined,
-    logoUrl: getSettingString(settings, "branding.logo_url") || undefined,
+    logoUrl: resolvePublicAssetUrl(getSettingString(settings, "branding.logo_url")) || undefined,
     autoImport: parseBooleanSetting(getSettingString(settings, "creative.auto_import"), false),
   };
 }

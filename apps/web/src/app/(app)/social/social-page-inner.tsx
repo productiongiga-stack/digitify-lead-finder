@@ -70,6 +70,8 @@ import {
 } from "@/components/social/social-placement-editor";
 import { persistPlacementAssets } from "@/lib/persist-social-assets";
 import { FacebookPageAvatar, InstagramPageAvatar } from "@/components/social/social-platform-avatars";
+import { SocialComposerSection } from "@/components/social/social-composer-section";
+import { SocialPublishAccountPicker } from "@/components/social/social-publish-account-picker";
 import type { SocialAgendaPost } from "@/components/social/social-agenda";
 
 const SocialImageGenerator = dynamic(
@@ -1452,184 +1454,216 @@ export function SocialPageInner() {
               <CardTitle className="flex items-center gap-2 text-base"><Wand2 className="h-4 w-4 text-amber-600" /> Composer</CardTitle>
               <CardDescription>Schrijf de post, voeg custom elementen toe en bewaar als draft.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-5 pt-5">
-              <div className="grid gap-3 md:grid-cols-[1fr_220px]">
-                <div className="space-y-2">
-                  <Label htmlFor="social-template">Template prompt</Label>
-                  <Textarea
-                    id="social-template"
-                    value={template}
-                    onChange={(event) => setTemplate(event.target.value)}
-                    placeholder="Zomercampagne: focus op lokale zichtbaarheid en gratis intake call..."
-                    rows={3}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="social-tone">Tone of voice</Label>
-                  <Select value={tone} onValueChange={(value) => setTone(value as SocialTone)}>
-                    <SelectTrigger id="social-tone" className="h-8">
-                      <SelectValue placeholder="Kies tone of voice" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {SOCIAL_TONE_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    {SOCIAL_TONE_OPTIONS.find((option) => option.value === tone)?.description}
-                  </p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full"
-                    disabled={generateSuggestion.isPending || !template.trim()}
-                    onClick={() => generateSuggestion.mutate({ template: template.trim(), tone })}
-                  >
-                    {generateSuggestion.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Megaphone className="mr-2 h-3 w-3" />}
-                    AI caption
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="social-headline">Headline / hook</Label>
-                <Input id="social-headline" disabled={!canEditSelected} value={headline} onChange={(event) => setHeadline(event.target.value)} placeholder="Bijvoorbeeld: Meer leads zonder extra chaos" />
-              </div>
-
+            <CardContent className="space-y-4 pt-5">
               <div className="space-y-2">
                 <Label htmlFor="social-caption">Caption</Label>
-                <Textarea id="social-caption" disabled={!canEditSelected} value={caption} onChange={(event) => setCaption(event.target.value)} rows={7} placeholder="Schrijf je posttekst..." />
+                <Textarea
+                  id="social-caption"
+                  disabled={!canEditSelected}
+                  value={caption}
+                  onChange={(event) => setCaption(event.target.value)}
+                  rows={8}
+                  placeholder="Schrijf je posttekst..."
+                />
                 <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <span>{caption.length}/6000 tekens</span>
                   <span>{previewCaption.split(/\s+/).filter(Boolean).length} woorden in preview</span>
                 </div>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="social-cta">CTA</Label>
-                  <Input id="social-cta" disabled={!canEditSelected} value={cta} onChange={(event) => setCta(event.target.value)} placeholder="Plan een gratis intake" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="social-link">Link</Label>
-                  <div className="relative">
-                    <LinkIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input id="social-link" disabled={!canEditSelected} className="pl-9" value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://leads.digitify.be" />
+              <SocialComposerSection
+                title="AI-assistent"
+                description="Genereer een caption op basis van een prompt en tone of voice."
+                icon={Sparkles}
+                defaultOpen={Boolean(template.trim())}
+                badge={template.trim() ? "Prompt ingevuld" : undefined}
+              >
+                <div className="grid gap-3 md:grid-cols-[1fr_220px]">
+                  <div className="space-y-2">
+                    <Label htmlFor="social-template">Template prompt</Label>
+                    <Textarea
+                      id="social-template"
+                      value={template}
+                      onChange={(event) => setTemplate(event.target.value)}
+                      placeholder="Zomercampagne: focus op lokale zichtbaarheid en gratis intake call..."
+                      rows={3}
+                    />
                   </div>
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="social-hashtags">Hashtags</Label>
-                  <HashtagField id="social-hashtags" disabled={!canEditSelected} value={hashtags} onChange={setHashtags} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="social-brand-signature">Brand signature</Label>
-                  <Input id="social-brand-signature" disabled={!canEditSelected} value={brandSignature} onChange={(event) => setBrandSignature(event.target.value)} placeholder="Digitify · ..." />
-                </div>
-              </div>
-
-              <SocialImageGenerator
-                disabled={!canEditSelected}
-                caption={caption}
-                template={template}
-                feedFormat={feedFormat}
-                placements={placements}
-                socialPostId={selectedId ?? undefined}
-                onImageReady={(assets) => setPlacementAssets((current) => ({ ...current, ...assets }))}
-              />
-
-              <SocialPlacementEditor
-                placements={placements}
-                feedFormat={feedFormat}
-                assets={placementAssets}
-                disabled={!canEditSelected}
-                targetInstagram={targetInstagram}
-                onPlacementsChange={setPlacements}
-                onFeedFormatChange={setFeedFormat}
-                onAssetsChange={setPlacementAssets}
-              />
-
-              <div className="space-y-2">
-                <Label htmlFor="social-alt-text">Alt-tekst / interne notitie</Label>
-                <Textarea id="social-alt-text" disabled={!canEditSelected} value={altText} onChange={(event) => setAltText(event.target.value)} rows={3} placeholder="Beschrijf de afbeelding voor review en toegankelijkheid..." />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="social-first-comment">Eerste reactie preview</Label>
-                <Textarea id="social-first-comment" disabled={!canEditSelected} value={firstComment} onChange={(event) => setFirstComment(event.target.value)} rows={3} placeholder="Optioneel: extra hashtags of context. V1 toont dit als preview/notitie, niet als automatische comment." />
-                <p className="text-xs text-muted-foreground">V1 publiceert alleen de feed post zelf. Deze reactie blijft bewaard als review-notitie.</p>
-              </div>
-
-              <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
-                <div className="space-y-2">
-                  <Label htmlFor="social-publish-account">Publicatie-account</Label>
-                  {managedPagesQuery.isLoading ? (
-                    <Skeleton className="h-10 w-full rounded-xl" />
-                  ) : managedPages.length > 0 ? (
-                    <Select
-                      value={selectedPageId || undefined}
-                      onValueChange={setSelectedPageId}
-                      disabled={!canEditSelected}
-                    >
-                      <SelectTrigger id="social-publish-account" className="h-10">
-                        <SelectValue placeholder="Kies een Facebook-pagina" />
+                  <div className="space-y-2">
+                    <Label htmlFor="social-tone">Tone of voice</Label>
+                    <Select value={tone} onValueChange={(value) => setTone(value as SocialTone)}>
+                      <SelectTrigger id="social-tone" className="h-9">
+                        <SelectValue placeholder="Kies tone of voice" />
                       </SelectTrigger>
                       <SelectContent>
-                        {managedPages.map((page) => (
-                          <SelectItem key={page.id} value={page.id}>
-                            <span className="flex flex-col items-start gap-0.5">
-                              <span>{page.name}</span>
-                              <span className="text-xs text-muted-foreground">
-                                {page.instagramUsername
-                                  ? `Instagram @${page.instagramUsername.replace(/^@/, "")}`
-                                  : "Geen Instagram gekoppeld"}
-                              </span>
-                            </span>
+                        {SOCIAL_TONE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      Geen beheerde pagina&apos;s gevonden. Koppel Meta opnieuw via Integraties.
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {SOCIAL_TONE_OPTIONS.find((option) => option.value === tone)?.description}
                     </p>
-                  )}
-                  {selectedManagedPage ? (
-                    <p className="text-xs text-muted-foreground">
-                      Facebook: <span className="font-medium text-foreground">{selectedManagedPage.name}</span>
-                      {selectedManagedPage.instagramUsername
-                        ? ` · Instagram @${selectedManagedPage.instagramUsername.replace(/^@/, "")}`
-                        : " · Instagram niet gekoppeld"}
-                    </p>
-                  ) : null}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      disabled={generateSuggestion.isPending || !template.trim()}
+                      onClick={() => generateSuggestion.mutate({ template: template.trim(), tone })}
+                    >
+                      {generateSuggestion.isPending ? (
+                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                      ) : (
+                        <Megaphone className="mr-2 h-3 w-3" />
+                      )}
+                      Caption genereren
+                    </Button>
+                  </div>
                 </div>
+              </SocialComposerSection>
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="flex items-center gap-2 rounded-xl border bg-background px-3 py-2 text-sm">
-                    <input type="checkbox" checked={targetFacebook} disabled={!canEditSelected} onChange={(event) => setTargetFacebook(event.target.checked)} />
-                    Facebook Page
-                  </label>
-                  <label
-                    className={cn(
-                      "flex items-center gap-2 rounded-xl border bg-background px-3 py-2 text-sm",
-                      !selectedManagedPage?.instagramBusinessId && "opacity-60",
-                    )}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={targetInstagram}
-                      disabled={!canEditSelected || !selectedManagedPage?.instagramBusinessId}
-                      onChange={(event) => setTargetInstagram(event.target.checked)}
-                    />
-                    Instagram Business feed
-                  </label>
+              <SocialComposerSection
+                title="Beeld & plaatsingen"
+                description="Afbeelding genereren en feed-, story- of reel-formaten instellen."
+                icon={ImageIcon}
+                defaultOpen={Boolean(imageUrl) || Object.keys(placementAssets).length > 0}
+                badge={imageUrl ? "Beeld aanwezig" : undefined}
+                badgeVariant="success"
+              >
+                <SocialImageGenerator
+                  disabled={!canEditSelected}
+                  caption={caption}
+                  template={template}
+                  feedFormat={feedFormat}
+                  placements={placements}
+                  socialPostId={selectedId ?? undefined}
+                  onImageReady={(assets) => setPlacementAssets((current) => ({ ...current, ...assets }))}
+                />
+                <SocialPlacementEditor
+                  placements={placements}
+                  feedFormat={feedFormat}
+                  assets={placementAssets}
+                  disabled={!canEditSelected}
+                  targetInstagram={targetInstagram}
+                  onPlacementsChange={setPlacements}
+                  onFeedFormatChange={setFeedFormat}
+                  onAssetsChange={setPlacementAssets}
+                />
+              </SocialComposerSection>
+
+              <SocialComposerSection
+                title="Extra's"
+                description="Headline, CTA, link, hashtags en brand signature voor de preview."
+                icon={Settings2}
+                defaultOpen={Boolean(headline.trim() || cta.trim() || linkUrl.trim() || hashtags.trim() || brandSignature.trim())}
+                badge={
+                  [headline, cta, linkUrl, hashtags, brandSignature].filter((value) => value.trim()).length > 0
+                    ? `${[headline, cta, linkUrl, hashtags, brandSignature].filter((value) => value.trim()).length} velden`
+                    : undefined
+                }
+              >
+                <div className="space-y-2">
+                  <Label htmlFor="social-headline">Headline / hook</Label>
+                  <Input
+                    id="social-headline"
+                    disabled={!canEditSelected}
+                    value={headline}
+                    onChange={(event) => setHeadline(event.target.value)}
+                    placeholder="Bijvoorbeeld: Meer leads zonder extra chaos"
+                  />
                 </div>
-              </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="social-cta">CTA</Label>
+                    <Input
+                      id="social-cta"
+                      disabled={!canEditSelected}
+                      value={cta}
+                      onChange={(event) => setCta(event.target.value)}
+                      placeholder="Plan een gratis intake"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="social-link">Link</Label>
+                    <div className="relative">
+                      <LinkIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="social-link"
+                        disabled={!canEditSelected}
+                        className="pl-9"
+                        value={linkUrl}
+                        onChange={(event) => setLinkUrl(event.target.value)}
+                        placeholder="https://leads.digitify.be"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="social-hashtags">Hashtags</Label>
+                    <HashtagField id="social-hashtags" disabled={!canEditSelected} value={hashtags} onChange={setHashtags} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="social-brand-signature">Brand signature</Label>
+                    <Input
+                      id="social-brand-signature"
+                      disabled={!canEditSelected}
+                      value={brandSignature}
+                      onChange={(event) => setBrandSignature(event.target.value)}
+                      placeholder="Digitify · ..."
+                    />
+                  </div>
+                </div>
+              </SocialComposerSection>
+
+              <SocialComposerSection
+                title="Review & notities"
+                description="Alt-tekst en eerste reactie voor interne review (niet automatisch gepubliceerd)."
+                icon={MessageCircle}
+                defaultOpen={Boolean(altText.trim() || firstComment.trim())}
+                badge={altText.trim() || firstComment.trim() ? "Notitie aanwezig" : undefined}
+              >
+                <div className="space-y-2">
+                  <Label htmlFor="social-alt-text">Alt-tekst / interne notitie</Label>
+                  <Textarea
+                    id="social-alt-text"
+                    disabled={!canEditSelected}
+                    value={altText}
+                    onChange={(event) => setAltText(event.target.value)}
+                    rows={3}
+                    placeholder="Beschrijf de afbeelding voor review en toegankelijkheid..."
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="social-first-comment">Eerste reactie preview</Label>
+                  <Textarea
+                    id="social-first-comment"
+                    disabled={!canEditSelected}
+                    value={firstComment}
+                    onChange={(event) => setFirstComment(event.target.value)}
+                    rows={3}
+                    placeholder="Optioneel: extra hashtags of context."
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    V1 publiceert alleen de feed post zelf. Deze reactie blijft bewaard als review-notitie.
+                  </p>
+                </div>
+              </SocialComposerSection>
+
+              <SocialPublishAccountPicker
+                pages={managedPages}
+                selectedPageId={selectedPageId}
+                onSelectedPageIdChange={setSelectedPageId}
+                selectedPage={selectedManagedPage}
+                targetFacebook={targetFacebook}
+                onTargetFacebookChange={setTargetFacebook}
+                targetInstagram={targetInstagram}
+                onTargetInstagramChange={setTargetInstagram}
+                disabled={!canEditSelected}
+                isLoading={managedPagesQuery.isLoading}
+              />
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <Button onClick={handleCreateOrUpdate} disabled={isBusy || !canEditSelected}>

@@ -399,6 +399,7 @@ export const mediaRouter = router({
         imageUrl: enriched.imageUrl ?? input.imageUrl,
         imagesList: enriched.imagesList ?? input.imagesList,
         brandApplied: enriched.brandApplied,
+        enrichedPrompt: enriched.prompt,
       },
     });
 
@@ -487,6 +488,7 @@ export const mediaRouter = router({
         quality: input.quality,
         imageUrl: enriched.imageUrl ?? input.imageUrl,
         brandApplied: enriched.brandApplied,
+        enrichedPrompt: enriched.prompt,
       },
     });
 
@@ -570,6 +572,7 @@ export const mediaRouter = router({
         imagesList: enriched.imagesList ?? input.imagesList,
         videoFiles: input.videoFiles,
         brandApplied: enriched.brandApplied,
+        enrichedPrompt: enriched.prompt,
       },
     });
 
@@ -851,6 +854,13 @@ export const mediaRouter = router({
       throw new TRPCError({ code: "BAD_REQUEST", message: "Videobestand is verplicht voor dit model." });
     }
 
+    const brand = await loadCreativeBrandContext(ctx.db, ctx.user.workspaceId!);
+    const enriched = enrichGenerationWithBrand(brand, {
+      prompt: input.prompt?.trim() || "",
+      modelType: "LIP_SYNC",
+      imageUrl: input.imageUrl,
+    });
+
     const job = await createGenerationJob({
       db: ctx.db,
       workspaceId: ctx.user.workspaceId!,
@@ -861,10 +871,12 @@ export const mediaRouter = router({
       socialPostId: input.socialPostId,
       metadata: {
         resolution: input.resolution,
-        imageUrl: input.imageUrl,
+        imageUrl: enriched.imageUrl ?? input.imageUrl,
         videoUrl: input.videoUrl,
         audioUrl: input.audioUrl,
         lipSyncMode: model.lipSyncMode,
+        brandApplied: enriched.brandApplied,
+        enrichedPrompt: enriched.prompt,
       },
     });
 
@@ -874,7 +886,7 @@ export const mediaRouter = router({
         model.endpoint,
         buildLipSyncPayload({
           model: input.model,
-          prompt: input.prompt,
+          prompt: enriched.prompt || undefined,
           image_url: input.imageUrl,
           video_url: input.videoUrl,
           audio_url: input.audioUrl,

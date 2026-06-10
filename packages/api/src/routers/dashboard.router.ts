@@ -1060,10 +1060,11 @@ export const dashboardRouter = router({
   }),
 
   getDomainMonitor: protectedProcedure.query(async ({ ctx }) => {
+    const { enrichDomainRecord } = await import("../lib/domain-insights");
     const domains = await ctx.db.domain.findMany({
       where: { createdById: ctx.user.workspaceId! },
       orderBy: { updatedAt: "desc" },
-      take: 6,
+      take: 8,
       include: {
         lead: {
           select: {
@@ -1071,10 +1072,7 @@ export const dashboardRouter = router({
             companyName: true,
             enrichmentData: {
               where: {
-                OR: [
-                  { source: "domain_analysis" },
-                  { source: { startsWith: "website_tracker:" } },
-                ],
+                OR: [{ source: "domain_analysis" }, { source: { startsWith: "website_tracker:" } }],
               },
               orderBy: { fetchedAt: "desc" },
               select: { source: true, data: true, fetchedAt: true },
@@ -1085,33 +1083,18 @@ export const dashboardRouter = router({
     });
 
     return domains.map((domain) => {
-      const analysis = domain.lead?.enrichmentData.find((item) => item.source === "domain_analysis")?.data as
-        | { statusCode?: number; loadTimeMs?: number }
-        | undefined;
-      const tracker = domain.lead?.enrichmentData.find((item) => item.source === `website_tracker:${domain.id}`)?.data as
-        | { summary?: { uniqueVisitors?: number; lastSeen?: string | null } }
-        | undefined;
-
-      const statusCode = analysis?.statusCode ?? null;
-      const loadTimeMs = analysis?.loadTimeMs ?? null;
-      const websiteStatus =
-        statusCode === null
-          ? "unknown"
-          : statusCode >= 200 && statusCode < 400
-            ? loadTimeMs && loadTimeMs > 3000
-              ? "slow"
-              : "online"
-            : "offline";
-
+      const enriched = enrichDomainRecord(domain);
       return {
         id: domain.id,
         domainName: domain.domainName,
         sslStatus: domain.sslStatus,
-        websiteStatus,
-        statusCode,
-        loadTimeMs,
-        uniqueVisitors: tracker?.summary?.uniqueVisitors ?? 0,
-        lastSeen: tracker?.summary?.lastSeen ?? null,
+        websiteStatus: enriched.websiteStatus,
+        statusCode: enriched.analysis?.statusCode ?? null,
+        loadTimeMs: enriched.analysis?.loadTimeMs ?? null,
+        healthScore: enriched.healthScore,
+        uniqueVisitors: enriched.uniqueVisitors,
+        lastSeen: enriched.lastTrackerSeen,
+        leadName: domain.lead?.companyName ?? null,
       };
     });
   }),

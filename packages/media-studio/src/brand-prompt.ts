@@ -83,8 +83,6 @@ export function applyBrandToGeneration(
       imagesList = [brand.logoUrl, ...(imagesList ?? [])].filter(
         (url, index, urls) => urls.indexOf(url) === index,
       );
-    } else if (!imageUrl && (!imagesList || imagesList.length === 0)) {
-      imageUrl = brand.logoUrl;
     }
   }
 

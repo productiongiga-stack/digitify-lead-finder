@@ -25,6 +25,25 @@ describe("brand prompt", () => {
     ).toBe("");
   });
 
+  it("does not attach logo as image_url for text-to-image models", () => {
+    const result = applyBrandToGeneration(
+      {
+        enabled: true,
+        includeLogo: true,
+        companyName: "Digitify",
+        logoUrl: "https://example.com/logo.png",
+      },
+      {
+        prompt: "Product op marmer",
+        modelType: "IMAGE",
+      },
+    );
+
+    expect(result.brandApplied).toBe(true);
+    expect(result.imageUrl).toBeUndefined();
+    expect(result.prompt).toContain("Digitify");
+  });
+
   it("attaches logo for image-to-image models", () => {
     const result = applyBrandToGeneration(
       {

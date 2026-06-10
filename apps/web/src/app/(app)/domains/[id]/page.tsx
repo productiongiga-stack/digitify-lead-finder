@@ -49,6 +49,17 @@ type AnalysisResult = {
   socialLinks?: Record<string, string | null>;
   technologies?: string[];
   contactInfo?: { emails: string[]; phones: string[] };
+  uxAudit?: {
+    linkCount: number;
+    internalLinkCount: number;
+    buttonCount: number;
+    formCount: number;
+    imagesTotal: number;
+    imagesMissingAlt: number;
+    pagesChecked: number;
+    pagesBroken: number;
+    pageProbes?: Array<{ url: string; statusCode: number; ok: boolean; error?: string }>;
+  };
   errors?: string[];
 };
 
@@ -76,10 +87,6 @@ function formatDate(value?: string | Date | null) {
   });
 }
 
-function clampScore(value: number) {
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
-
 export default function DomainDetailPage() {
   const params = useParams();
   const id = params.id as string;
@@ -99,42 +106,20 @@ export default function DomainDetailPage() {
       showToast({ title: "Analyse mislukt", description: error.message, variant: "error" }),
   });
 
-  const analysis = data?.lead?.enrichmentData.find((item) => item.source === "domain_analysis")?.data as AnalysisResult | undefined;
-  const tracker = data?.lead?.enrichmentData.find((item) => item.source === `website_tracker:${data?.id}`)?.data as TrackerResult | undefined;
+  const analysis = data?.analysis as AnalysisResult | undefined;
+  const tracker = data?.tracker as TrackerResult | undefined;
   const trackerCode = data ? `<script async src="${getAppUrl()}/tracker.js?domain=${data.id}"></script>` : "";
   const websiteStatus =
-    analysis?.statusCode === undefined
-      ? "Onbekend"
-      : analysis.statusCode >= 200 && analysis.statusCode < 400
-        ? analysis.loadTimeMs && analysis.loadTimeMs > 3000
-          ? "Traag"
-          : "Online"
-        : "Offline";
-  const healthScore = (() => {
-    if (!analysis) return 0;
-    let score = 100;
-    if ((analysis.statusCode || 0) >= 400 || (analysis.statusCode || 0) < 200) score -= 35;
-    if ((analysis.loadTimeMs || 0) > 3500) score -= 18;
-    else if ((analysis.loadTimeMs || 0) > 2200) score -= 10;
-    if (!analysis.hasSSL) score -= 14;
-    if (!analysis.isMobileFriendly) score -= 10;
-    if (!analysis.hasMetaTitle) score -= 6;
-    if (!analysis.hasMetaDescription) score -= 6;
-    if (!analysis.hasH1) score -= 5;
-    if (!analysis.hasStructuredData) score -= 4;
-    if (!analysis.hasCTA) score -= 5;
-    return clampScore(score);
-  })();
-  const opportunities = [
-    !analysis?.hasMetaTitle ? "Meta title ontbreekt of is zwak. Optimaliseer title per pagina." : null,
-    !analysis?.hasMetaDescription ? "Meta beschrijving ontbreekt. Voeg converterende snippet toe." : null,
-    !analysis?.hasH1 ? "Geen H1 gevonden. Voorzie duidelijke primaire heading." : null,
-    !analysis?.isMobileFriendly ? "Mobielvriendelijkheid verbeteren voor hogere conversie op smartphone." : null,
-    !analysis?.hasCTA ? "Voeg een duidelijke CTA toe op de homepage." : null,
-    (analysis?.loadTimeMs || 0) > 2500 ? "Laadtijd is hoog. Optimaliseer afbeeldingen en scripts." : null,
-    !analysis?.hasStructuredData ? "Structured data ontbreekt. Voeg schema.org markup toe." : null,
-    !analysis?.hasAnalytics ? "Analytics detectie ontbreekt. Meet verkeer en conversies." : null,
-  ].filter((item): item is string => Boolean(item));
+    data?.websiteStatus === "online"
+      ? "Online"
+      : data?.websiteStatus === "slow"
+        ? "Traag"
+        : data?.websiteStatus === "offline"
+          ? "Offline"
+          : "Onbekend";
+  const healthScore = data?.healthScore ?? 0;
+  const opportunities = data?.opportunities ?? [];
+  const uxAudit = analysis?.uxAudit;
 
   const domainStatItems = useMemo<DomainStatItem[]>(() => {
     const loadMs = analysis?.loadTimeMs;
@@ -352,7 +337,7 @@ export default function DomainDetailPage() {
             <Copy className="mr-2 h-4 w-4" />
             Kopieer tracker
           </Button>
-          <Button variant="outline" onClick={() => analyzeMutation.mutate({ domainName: data.domainName })} disabled={analyzeMutation.isPending}>
+          <Button variant="outline" onClick={() => analyzeMutation.mutate({ id: data.id })} disabled={analyzeMutation.isPending}>
             <RefreshCcw className={`mr-2 h-4 w-4 ${analyzeMutation.isPending ? "animate-spin" : ""}`} />
             Analyseer opnieuw
           </Button>
@@ -371,17 +356,21 @@ export default function DomainDetailPage() {
       <DomainStatsCards items={domainStatItems} />
 
       <Tabs defaultValue="analysis" className="space-y-4">
-        <TabsList className="settings-domain-tabs settings-domain-tabs-cols-3 w-full max-w-2xl">
+        <TabsList className="settings-domain-tabs settings-domain-tabs-cols-4 w-full max-w-3xl">
           <TabsTrigger value="analysis" className="settings-domain-tab">
             <BarChart3 className="settings-domain-tab-icon" aria-hidden />
             <span>Analyse</span>
+          </TabsTrigger>
+          <TabsTrigger value="ux" className="settings-domain-tab">
+            <ListChecks className="settings-domain-tab-icon" aria-hidden />
+            <span>UX audit</span>
           </TabsTrigger>
           <TabsTrigger value="traffic" className="settings-domain-tab">
             <TrendingUp className="settings-domain-tab-icon" aria-hidden />
             <span>Verkeer</span>
           </TabsTrigger>
           <TabsTrigger value="actions" className="settings-domain-tab">
-            <ListChecks className="settings-domain-tab-icon" aria-hidden />
+            <Lightbulb className="settings-domain-tab-icon" aria-hidden />
             <span>Acties</span>
           </TabsTrigger>
         </TabsList>
@@ -563,6 +552,78 @@ export default function DomainDetailPage() {
       </div>
         </TabsContent>
 
+        <TabsContent value="ux" className="space-y-4">
+          {uxAudit && (uxAudit.pagesChecked ?? 0) > 0 ? (
+            <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Interactie & toegankelijkheid</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Pagina&apos;s gecontroleerd</p>
+                    <p className="mt-1 text-2xl font-semibold">{uxAudit.pagesChecked}</p>
+                  </div>
+                  <div className="rounded-xl border p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Problemen</p>
+                    <p className={`mt-1 text-2xl font-semibold ${uxAudit.pagesBroken > 0 ? "text-amber-600" : ""}`}>
+                      {uxAudit.pagesBroken}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Knoppen</p>
+                    <p className="mt-1 text-2xl font-semibold">{uxAudit.buttonCount}</p>
+                  </div>
+                  <div className="rounded-xl border p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Formulieren</p>
+                    <p className="mt-1 text-2xl font-semibold">{uxAudit.formCount}</p>
+                  </div>
+                  <div className="rounded-xl border p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Links</p>
+                    <p className="mt-1 text-2xl font-semibold">
+                      {uxAudit.internalLinkCount}/{uxAudit.linkCount}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">intern/totaal</p>
+                  </div>
+                  <div className="rounded-xl border p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Afbeeldingen zonder alt</p>
+                    <p className={`mt-1 text-2xl font-semibold ${uxAudit.imagesMissingAlt > 0 ? "text-amber-600" : ""}`}>
+                      {uxAudit.imagesMissingAlt}/{uxAudit.imagesTotal}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Subpagina-probes</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {uxAudit.pageProbes?.length ? (
+                    uxAudit.pageProbes.map((probe) => (
+                      <div key={probe.url} className="flex items-start justify-between gap-3 rounded-xl border px-3 py-2 text-sm">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{probe.url}</p>
+                          {probe.error ? <p className="mt-0.5 text-xs text-muted-foreground">{probe.error}</p> : null}
+                        </div>
+                        <Badge variant={probe.ok ? "success" : "destructive"}>{probe.statusCode}</Badge>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Geen subpagina-details beschikbaar.</p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                UX-audit verschijnt na een volledige domeinanalyse. Klik op &quot;Analyseer opnieuw&quot; om subpagina&apos;s te scannen.
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
         <TabsContent value="traffic" className="space-y-4">
           <DomainStatsCards items={trafficStatItems} columns={3} />
 
@@ -636,7 +697,7 @@ export default function DomainDetailPage() {
                 <CardTitle className="text-base">Aanbevolen volgende stappen</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-2">
-                <Button variant="outline" className="justify-between" onClick={() => analyzeMutation.mutate({ domainName: data.domainName })} disabled={analyzeMutation.isPending}>
+                <Button variant="outline" className="justify-between" onClick={() => analyzeMutation.mutate({ id: data.id })} disabled={analyzeMutation.isPending}>
                   Website opnieuw analyseren
                   <RefreshCcw className={`h-4 w-4 ${analyzeMutation.isPending ? "animate-spin" : ""}`} />
                 </Button>
