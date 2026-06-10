@@ -488,12 +488,76 @@ export async function resolveSocialPublishTarget(params: {
   };
 }
 
+export type SocialPublishedRef = {
+  id: string;
+  permalink?: string;
+  verified: boolean;
+};
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForInstagramMediaContainer(params: {
+  containerId: string;
+  pageAccessToken: string;
+  maxWaitMs?: number;
+  pollIntervalMs?: number;
+}) {
+  const maxWait = params.maxWaitMs ?? 120_000;
+  const pollInterval = params.pollIntervalMs ?? 3_000;
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < maxWait) {
+    const status = (await metaGet(params.containerId, {
+      fields: "status_code",
+      access_token: params.pageAccessToken,
+    })) as { status_code?: string };
+
+    const code = status.status_code;
+    if (code === "FINISHED" || code === "PUBLISHED") return;
+    if (code === "ERROR" || code === "EXPIRED") {
+      throw new Error(`Instagram media container mislukt (${code || "onbekend"}).`);
+    }
+
+    await sleep(pollInterval);
+  }
+
+  throw new Error("Instagram media verwerking duurde te lang. Probeer opnieuw met een kleinere afbeelding of video.");
+}
+
+export async function verifyFacebookPublishedPost(params: { postId: string; pageAccessToken: string }) {
+  const data = (await metaGet(params.postId, {
+    fields: "id,permalink_url,created_time",
+    access_token: params.pageAccessToken,
+  })) as { id?: string; permalink_url?: string };
+
+  return {
+    id: data.id || params.postId,
+    permalink: data.permalink_url,
+    verified: Boolean(data.id),
+  } satisfies SocialPublishedRef;
+}
+
+export async function verifyInstagramPublishedMedia(params: { mediaId: string; pageAccessToken: string }) {
+  const data = (await metaGet(params.mediaId, {
+    fields: "id,permalink,timestamp",
+    access_token: params.pageAccessToken,
+  })) as { id?: string; permalink?: string };
+
+  return {
+    id: data.id || params.mediaId,
+    permalink: data.permalink,
+    verified: Boolean(data.id),
+  } satisfies SocialPublishedRef;
+}
+
 export async function publishFacebookImagePost(params: {
   pageId: string;
   pageAccessToken: string;
   caption: string;
   imageUrl: string;
-}) {
+}): Promise<SocialPublishedRef> {
   const response = (await metaPost(`${params.pageId}/photos`, {
     access_token: params.pageAccessToken,
     url: params.imageUrl,
@@ -501,21 +565,33 @@ export async function publishFacebookImagePost(params: {
     published: "true",
   })) as { post_id?: string; id?: string };
 
-  return response.post_id || response.id || "";
+  const postId = response.post_id || response.id || "";
+  if (!postId) throw new Error("Facebook gaf geen post-ID terug na publicatie.");
+
+  return verifyFacebookPublishedPost({ postId, pageAccessToken: params.pageAccessToken });
 }
 
 export async function publishFacebookImageStory(params: {
   pageId: string;
   pageAccessToken: string;
   imageUrl: string;
-}) {
+}): Promise<SocialPublishedRef> {
   const response = (await metaPost(`${params.pageId}/photo_stories`, {
     access_token: params.pageAccessToken,
     url: params.imageUrl,
     published: "true",
   })) as { post_id?: string; id?: string; success?: boolean };
 
-  return response.post_id || response.id || (response.success ? "facebook_story_published" : "");
+  const postId = response.post_id || response.id || "";
+  if (!postId && !response.success) {
+    throw new Error("Facebook Story publicatie mislukt (geen post-ID).");
+  }
+
+  if (postId) {
+    return verifyFacebookPublishedPost({ postId, pageAccessToken: params.pageAccessToken });
+  }
+
+  return { id: "facebook_story_published", verified: Boolean(response.success) };
 }
 
 export async function publishInstagramImagePost(params: {
@@ -523,7 +599,7 @@ export async function publishInstagramImagePost(params: {
   pageAccessToken: string;
   caption: string;
   imageUrl: string;
-}) {
+}): Promise<SocialPublishedRef> {
   const created = (await metaPost(`${params.instagramBusinessId}/media`, {
     access_token: params.pageAccessToken,
     image_url: params.imageUrl,
@@ -532,19 +608,27 @@ export async function publishInstagramImagePost(params: {
 
   if (!created.id) throw new Error("Instagram media container kon niet worden aangemaakt.");
 
+  await waitForInstagramMediaContainer({
+    containerId: created.id,
+    pageAccessToken: params.pageAccessToken,
+  });
+
   const published = (await metaPost(`${params.instagramBusinessId}/media_publish`, {
     access_token: params.pageAccessToken,
     creation_id: created.id,
   })) as { id?: string };
 
-  return published.id || "";
+  const mediaId = published.id || "";
+  if (!mediaId) throw new Error("Instagram gaf geen media-ID terug na publicatie.");
+
+  return verifyInstagramPublishedMedia({ mediaId, pageAccessToken: params.pageAccessToken });
 }
 
 export async function publishInstagramImageStory(params: {
   instagramBusinessId: string;
   pageAccessToken: string;
   imageUrl: string;
-}) {
+}): Promise<SocialPublishedRef> {
   const created = (await metaPost(`${params.instagramBusinessId}/media`, {
     access_token: params.pageAccessToken,
     image_url: params.imageUrl,
@@ -553,12 +637,20 @@ export async function publishInstagramImageStory(params: {
 
   if (!created.id) throw new Error("Instagram Story media container kon niet worden aangemaakt.");
 
+  await waitForInstagramMediaContainer({
+    containerId: created.id,
+    pageAccessToken: params.pageAccessToken,
+  });
+
   const published = (await metaPost(`${params.instagramBusinessId}/media_publish`, {
     access_token: params.pageAccessToken,
     creation_id: created.id,
   })) as { id?: string };
 
-  return published.id || "";
+  const mediaId = published.id || "";
+  if (!mediaId) throw new Error("Instagram Story gaf geen media-ID terug na publicatie.");
+
+  return verifyInstagramPublishedMedia({ mediaId, pageAccessToken: params.pageAccessToken });
 }
 
 export async function publishInstagramReel(params: {
@@ -567,7 +659,7 @@ export async function publishInstagramReel(params: {
   caption: string;
   videoUrl: string;
   coverUrl?: string;
-}) {
+}): Promise<SocialPublishedRef> {
   const payload: Record<string, string> = {
     access_token: params.pageAccessToken,
     media_type: "REELS",
@@ -581,12 +673,22 @@ export async function publishInstagramReel(params: {
   const created = (await metaPost(`${params.instagramBusinessId}/media`, payload)) as { id?: string };
   if (!created.id) throw new Error("Instagram Reel media container kon niet worden aangemaakt.");
 
+  await waitForInstagramMediaContainer({
+    containerId: created.id,
+    pageAccessToken: params.pageAccessToken,
+    maxWaitMs: 300_000,
+    pollIntervalMs: 5_000,
+  });
+
   const published = (await metaPost(`${params.instagramBusinessId}/media_publish`, {
     access_token: params.pageAccessToken,
     creation_id: created.id,
   })) as { id?: string };
 
-  return published.id || "";
+  const mediaId = published.id || "";
+  if (!mediaId) throw new Error("Instagram Reel gaf geen media-ID terug na publicatie.");
+
+  return verifyInstagramPublishedMedia({ mediaId, pageAccessToken: params.pageAccessToken });
 }
 
 export function workspaceScopeFromAuthenticatedUser(user: { id: string; workspaceId?: string }) {

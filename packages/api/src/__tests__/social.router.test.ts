@@ -273,8 +273,16 @@ describe("social publish worker", () => {
       instagramBusinessId: "ig_123",
       instagramUsername: "digitify.be",
     });
-    mockedMeta.publishFacebookImageStory.mockResolvedValue("fb_story_1");
-    mockedMeta.publishInstagramImageStory.mockResolvedValue("ig_story_1");
+    mockedMeta.publishFacebookImageStory.mockResolvedValue({
+      id: "fb_story_1",
+      permalink: "https://facebook.com/story/1",
+      verified: true,
+    });
+    mockedMeta.publishInstagramImageStory.mockResolvedValue({
+      id: "ig_story_1",
+      permalink: "https://instagram.com/p/1",
+      verified: true,
+    });
 
     const result = await runDueSocialPostsWorker({
       socialPost: {
@@ -298,7 +306,10 @@ describe("social publish worker", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           status: "PUBLISHED",
-          externalPostIds: { facebookStory: "fb_story_1", instagramStory: "ig_story_1" },
+          externalPostIds: {
+            facebookStory: { id: "fb_story_1", permalink: "https://facebook.com/story/1", verified: true },
+            instagramStory: { id: "ig_story_1", permalink: "https://instagram.com/p/1", verified: true },
+          },
         }),
       }),
     );

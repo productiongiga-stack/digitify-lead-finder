@@ -19,6 +19,7 @@ import {
 import {
   AlertTriangle,
   CalendarDays,
+  ExternalLink,
   Megaphone,
   RefreshCcw,
   Wand2,
@@ -27,6 +28,12 @@ import {
 import { cn } from "@/lib/utils";
 
 type RowStatus = "DRAFT" | "PENDING_APPROVAL" | "SCHEDULED" | "PUBLISHING" | "PUBLISHED" | "FAILED" | "CANCELLED";
+
+type PublishedRef = {
+  id?: string;
+  permalink?: string;
+  verified?: boolean;
+};
 
 type QueueRow = {
   id: string;
@@ -38,7 +45,36 @@ type QueueRow = {
   scheduledFor?: string | Date | null;
   publishedAt?: string | Date | null;
   lastError?: string | null;
+  externalPostIds?: Record<string, PublishedRef | string> | null;
 };
+
+function metaPublishLinks(externalPostIds?: Record<string, PublishedRef | string> | null) {
+  if (!externalPostIds) return [];
+  return Object.entries(externalPostIds)
+    .map(([key, value]) => {
+      const ref = typeof value === "string" ? { id: value } : value;
+      if (!ref?.permalink) return null;
+      const label =
+        key === "facebook"
+          ? "Facebook"
+          : key === "instagram"
+            ? "Instagram"
+            : key === "facebookStory"
+              ? "FB Story"
+              : key === "instagramStory"
+                ? "IG Story"
+                : key === "instagramReel"
+                  ? "IG Reel"
+                  : key;
+      return { label, url: ref.permalink, verified: ref.verified !== false };
+    })
+    .filter(Boolean) as Array<{ label: string; url: string; verified: boolean }>;
+}
+
+function isOverdueScheduled(row: QueueRow) {
+  if (row.status !== "SCHEDULED" || !row.scheduledFor) return false;
+  return new Date(row.scheduledFor).getTime() <= Date.now();
+}
 
 function statusBadge(status: RowStatus) {
   if (status === "PUBLISHED") return <Badge variant="success">Gepubliceerd</Badge>;
@@ -99,6 +135,8 @@ export type SocialQueuePanelProps = {
   onOpenComposer: () => void;
   onOpenRow: (row: QueueRow) => void;
   onRetry: (id: string) => void;
+  onPublishNow?: (id: string) => void;
+  publishNowPending?: boolean;
   onCancel: (id: string) => void;
 };
 
@@ -112,6 +150,8 @@ export function SocialQueuePanel({
   onOpenComposer,
   onOpenRow,
   onRetry,
+  onPublishNow,
+  publishNowPending = false,
   onCancel,
 }: SocialQueuePanelProps) {
   return (
@@ -170,6 +210,8 @@ export function SocialQueuePanel({
             {rows.map((row) => {
               const errorHelp = row.lastError ? explainMetaError(row.lastError) : null;
               const isSelected = selectedId === row.id;
+              const overdue = isOverdueScheduled(row);
+              const publishLinks = metaPublishLinks(row.externalPostIds);
               return (
                 <div
                   key={row.id}
@@ -182,6 +224,7 @@ export function SocialQueuePanel({
                     <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
                         {statusBadge(row.status)}
+                        {overdue ? <Badge variant="warning">Wacht op Meta</Badge> : null}
                         <span className="text-xs text-muted-foreground">{row.targetPlatforms.join(" + ")}</span>
                         {row.retryCount ? <Badge variant="outline">Retry {row.retryCount}/3</Badge> : null}
                       </div>
@@ -192,6 +235,22 @@ export function SocialQueuePanel({
                       <p className="text-xs text-muted-foreground">
                         Gepland: {prettyDate(row.scheduledFor)} · Gepubliceerd: {prettyDate(row.publishedAt)}
                       </p>
+                      {publishLinks.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {publishLinks.map((link) => (
+                            <a
+                              key={link.url}
+                              href={link.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-800 hover:bg-emerald-500/15 dark:text-emerald-200"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              Live op {link.label}
+                            </a>
+                          ))}
+                        </div>
+                      ) : null}
                       {row.lastError ? (
                         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/25 dark:text-amber-100">
                           <p className="font-semibold">
@@ -200,12 +259,25 @@ export function SocialQueuePanel({
                           <p className="mt-1">{errorHelp?.description}</p>
                           <p className="mt-2 break-words font-mono text-[11px] opacity-80">{row.lastError}</p>
                         </div>
+                      ) : overdue ? (
+                        <p className="text-xs text-violet-700 dark:text-violet-300">
+                          Geplande tijd is voorbij — publicatie naar Meta loopt via de wachtrij.
+                        </p>
                       ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button size="sm" variant="outline" onClick={() => onOpenRow(row)}>
                         Open
                       </Button>
+                      {onPublishNow && ["SCHEDULED", "FAILED"].includes(row.status) ? (
+                        <Button
+                          size="sm"
+                          disabled={publishNowPending}
+                          onClick={() => onPublishNow(row.id)}
+                        >
+                          <RefreshCcw className="mr-2 h-3.5 w-3.5" /> Nu naar Meta
+                        </Button>
+                      ) : null}
                       {row.status === "FAILED" ? (
                         <Button size="sm" variant="outline" onClick={() => onRetry(row.id)}>
                           <RefreshCcw className="mr-2 h-3.5 w-3.5" /> Retry

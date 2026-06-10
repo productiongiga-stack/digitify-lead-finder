@@ -726,7 +726,7 @@ export function SocialPageInner() {
 
   const listQuery = trpc.social.list.useQuery(
     statusFilter === "ALL" ? undefined : { status: statusFilter as any },
-    { refetchInterval: 20_000 },
+    { refetchInterval: 15_000 },
   );
   const connectionStatus = trpc.social.connectionStatus.useQuery();
   const managedPagesQuery = trpc.social.listManagedPages.useQuery(undefined, {
@@ -936,6 +936,16 @@ export function SocialPageInner() {
     return match?.name || (selectedBrandKitId ? "Merkkit" : "Geen merkkit gekozen");
   }, [brandKitsQuery.data?.kits, selectedBrandKitId]);
 
+  const dueSoonScheduledCount = useMemo(
+    () =>
+      rows.filter((row: { status: string; scheduledFor?: string | Date | null }) => {
+        if (row.status !== "SCHEDULED" || !row.scheduledFor) return false;
+        const dueAt = new Date(row.scheduledFor).getTime();
+        return dueAt <= Date.now() + 2 * 60 * 1000;
+      }).length,
+    [rows],
+  );
+
   const overdueScheduledCount = useMemo(
     () =>
       rows.filter(
@@ -961,19 +971,28 @@ export function SocialPageInner() {
       showToast({ title: "Publiceren mislukt", description: error.message, variant: "error" }),
   });
 
+  const publishPostNow = trpc.social.publishPostNow.useMutation({
+    onSuccess: async () => {
+      await listQuery.refetch();
+      showToast({ title: "Post live op Meta", description: "Publicatie bevestigd." });
+    },
+    onError: (error) =>
+      showToast({ title: "Publiceren mislukt", description: error.message, variant: "error" }),
+  });
+
   useEffect(() => {
-    if (!canSchedule || !connectionStatus.data?.autopostEnabled || overdueScheduledCount === 0) return;
+    if (!canSchedule || !connectionStatus.data?.connected || dueSoonScheduledCount === 0) return;
     if (publishDuePosts.isPending) return;
 
     const timer = window.setInterval(() => {
       if (!publishDuePosts.isPending) publishDuePosts.mutate();
-    }, 60_000);
+    }, 45_000);
 
-    publishDuePosts.mutate();
+    if (overdueScheduledCount > 0) publishDuePosts.mutate();
 
     return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- poll only when overdue queue changes
-  }, [canSchedule, connectionStatus.data?.autopostEnabled, overdueScheduledCount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- poll when due queue changes
+  }, [canSchedule, connectionStatus.data?.connected, dueSoonScheduledCount, overdueScheduledCount]);
 
   function canProceedWizardStep(step: number) {
     if (step === 0) {
@@ -1371,7 +1390,8 @@ export function SocialPageInner() {
     rejectPost.isPending ||
     retryFailed.isPending ||
     cancelScheduled.isPending ||
-    publishDuePosts.isPending;
+    publishDuePosts.isPending ||
+    publishPostNow.isPending;
 
   const showPreviewPanel = wizardStep >= 3;
 
@@ -1471,13 +1491,6 @@ export function SocialPageInner() {
           <span className="text-amber-950/90 dark:text-amber-100">Meta niet gekoppeld.</span>
           <Button size="sm" variant="outline" asChild>
             <Link href="/settings/integrations">Koppelen</Link>
-          </Button>
-        </div>
-      ) : !connectionStatus.isLoading && connectionStatus.data?.connected && !connectionStatus.data.autopostEnabled ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-rose-200/70 bg-rose-50/80 px-3 py-2 text-sm dark:bg-rose-950/25">
-          <span className="text-rose-950/90 dark:text-rose-100">Autopost staat uit — ingeplande posts worden niet live gezet.</span>
-          <Button size="sm" variant="outline" asChild>
-            <Link href="/settings/integrations">Aanzetten</Link>
           </Button>
         </div>
       ) : canSchedule && overdueScheduledCount > 0 ? (
@@ -1889,6 +1902,8 @@ export function SocialPageInner() {
               onOpenComposer={() => handleTabChange("composer")}
               onOpenRow={loadRow}
               onRetry={(rowId) => retryFailed.mutate({ id: rowId })}
+              onPublishNow={(rowId) => publishPostNow.mutate({ id: rowId })}
+              publishNowPending={publishPostNow.isPending}
               onCancel={(rowId) => cancelScheduled.mutate({ id: rowId })}
             />
           ) : null}

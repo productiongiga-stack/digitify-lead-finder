@@ -66,14 +66,18 @@ export async function GET(request: Request) {
       ? new Date(Date.now() + token.expiresInSeconds * 1000).toISOString()
       : "";
 
-    await upsertMetaSettings(prisma as any, scope, [
+    const settingsToSave: Array<{ key: string; value: string }> = [
       { key: "social.meta_access_token", value: token.accessToken },
       { key: "social.meta_refresh_meta", value: token.accessToken },
       { key: "social.meta_page_id", value: selectedPage.id },
       { key: "social.meta_page_access_token", value: selectedPage.accessToken },
       { key: "social.meta_instagram_business_id", value: selectedPage.instagramBusinessId || "" },
       { key: "social.meta_token_expires_at", value: expiresAt },
-    ]);
+    ];
+    if (!metaConfig.autopostEnabled) {
+      settingsToSave.push({ key: "social.autopost_enabled", value: "true" });
+    }
+    await upsertMetaSettings(prisma as any, scope, settingsToSave);
 
     const response = NextResponse.redirect(new URL("/settings/integrations?meta=connected", request.url));
     response.cookies.set("digitify_meta_oauth_state", "", {
