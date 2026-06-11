@@ -1,4 +1,5 @@
 import type { PlacementAssets } from "@/components/social/social-placement-editor";
+import type { SocialCarouselState } from "@/components/social/social-carousel-editor";
 
 async function parseUploadResponse(response: Response) {
   const text = await response.text();
@@ -52,4 +53,29 @@ export async function persistPlacementAssets(assets: PlacementAssets): Promise<P
   }
 
   return next;
+}
+
+export async function persistCarouselAssets(carousel: SocialCarouselState): Promise<SocialCarouselState> {
+  if (!carousel.enabled) return { enabled: false, slides: [] };
+
+  const slides = await Promise.all(
+    carousel.slides.map(async (slide) => {
+      if (slide.mediaType === "IMAGE") {
+        const imageUrl = slide.imageUrl?.trim();
+        if (!imageUrl?.startsWith("data:")) return slide;
+        return { ...slide, imageUrl: await persistDataUrl(imageUrl) };
+      }
+
+      const videoUrl = slide.videoUrl?.trim();
+      if (!videoUrl) return slide;
+      if (!videoUrl.startsWith("data:") && !videoUrl.startsWith("blob:")) return slide;
+      const file = await dataUrlToFile(
+        videoUrl,
+        `social-carousel-video-${Date.now()}.${videoUrl.includes("quicktime") ? "mov" : "mp4"}`,
+      );
+      return { ...slide, videoUrl: await uploadSocialAssetFile(file) };
+    }),
+  );
+
+  return { ...carousel, slides };
 }

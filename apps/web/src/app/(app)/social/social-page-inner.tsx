@@ -59,15 +59,22 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
 import {
+  isFeedMediaReady,
   resolvePrimaryImageFromAssets,
   SocialPlacementEditor,
   type FeedAspectFormat,
   type PlacementAssets,
   type SocialPlacement,
 } from "@/components/social/social-placement-editor";
-import { persistPlacementAssets } from "@/lib/persist-social-assets";
+import {
+  applyCarouselImage,
+  applyCarouselVideo,
+  type SocialCarouselState,
+} from "@/components/social/social-carousel-editor";
+import { persistCarouselAssets, persistPlacementAssets } from "@/lib/persist-social-assets";
 import { FacebookPageAvatar, InstagramPageAvatar } from "@/components/social/social-platform-avatars";
 import { SocialBrandKitPicker, type SocialBrandKitApplyPayload } from "@/components/social/social-brand-kit-picker";
+import { DEFAULT_SOCIAL_TONE, SOCIAL_TONE_OPTIONS, type SocialTone } from "@/lib/social-tone-options";
 import { SocialComposerSection } from "@/components/social/social-composer-section";
 import { SocialComposerWizard, SOCIAL_WIZARD_STEPS } from "@/components/social/social-composer-wizard";
 import { SocialPublishAccountPicker } from "@/components/social/social-publish-account-picker";
@@ -109,6 +116,7 @@ type SocialMetadata = {
   publisherPageName?: string;
   publisherInstagramUsername?: string;
   assets?: PlacementAssets;
+  carousel?: SocialCarouselState;
 };
 
 type ManagedMetaPage = {
@@ -126,62 +134,6 @@ const FORMAT_OPTIONS: Array<{ value: PostFormat; label: string; description: str
   { value: "STORY", label: "Story", description: "9:16 · FB + IG Stories", className: "aspect-[9/16]" },
 ];
 
-const SOCIAL_TONE_OPTIONS = [
-  {
-    value: "warm en professioneel",
-    label: "Warm & professioneel",
-    description: "Vertrouwd en toegankelijk — ideaal voor B2B en KMO",
-  },
-  {
-    value: "kort en krachtig",
-    label: "Kort & krachtig",
-    description: "Punchy hooks, weinig woorden, sterke CTA",
-  },
-  {
-    value: "vriendelijk en toegankelijk",
-    label: "Vriendelijk & toegankelijk",
-    description: "Menselijk, laagdrempelig en conversationeel",
-  },
-  {
-    value: "zakelijk en betrouwbaar",
-    label: "Zakelijk & betrouwbaar",
-    description: "Formeel, geloofwaardig en resultaatgericht",
-  },
-  {
-    value: "inspirerend en motiverend",
-    label: "Inspirerend & motiverend",
-    description: "Energiek, positief en forward-looking",
-  },
-  {
-    value: "speels en creatief",
-    label: "Speels & creatief",
-    description: "Luchtig, onderscheidend en social-first",
-  },
-  {
-    value: "direct en actiegericht",
-    label: "Direct & actiegericht",
-    description: "Geen omwegen — focus op actie en conversie",
-  },
-  {
-    value: "premium en exclusief",
-    label: "Premium & exclusief",
-    description: "Verfijnd, high-end en selectief",
-  },
-  {
-    value: "educatief en informatief",
-    label: "Educatief & informatief",
-    description: "Tips, uitleg en thought leadership",
-  },
-  {
-    value: "lokaal en persoonlijk",
-    label: "Lokaal & persoonlijk",
-    description: "Belgisch, nabij en community-gevoel",
-  },
-] as const;
-
-type SocialTone = (typeof SOCIAL_TONE_OPTIONS)[number]["value"];
-
-const DEFAULT_SOCIAL_TONE: SocialTone = "warm en professioneel";
 
 function statusBadge(status: RowStatus) {
   if (status === "PUBLISHED") return <Badge variant="success">Gepubliceerd</Badge>;
@@ -408,7 +360,7 @@ function explainMetaError(message: string) {
 }
 
 type PreviewSlide = {
-  id: SocialPlacement;
+  id: string;
   label: string;
   subtitle: string;
   format: PostFormat;
@@ -420,20 +372,39 @@ function buildPreviewSlides(
   placements: SocialPlacement[],
   feedFormat: FeedAspectFormat,
   assets: PlacementAssets,
+  carousel: SocialCarouselState,
 ): PreviewSlide[] {
   const slides: PreviewSlide[] = [];
 
   if (placements.includes("FEED")) {
-    const imageUrl = assets.FEED?.imageUrl?.trim() || "";
-    if (imageUrl) {
-      const feedOption = FORMAT_OPTIONS.find((item) => item.value === feedFormat);
-      slides.push({
-        id: "FEED",
-        label: "Feed post",
-        subtitle: feedOption?.description || "Feed",
-        format: feedFormat,
-        imageUrl,
+    if (carousel.enabled && carousel.slides.length > 0) {
+      carousel.slides.forEach((slide, index) => {
+        const imageUrl = slide.mediaType === "IMAGE" ? slide.imageUrl?.trim() || "" : "";
+        const videoUrl = slide.mediaType === "VIDEO" ? slide.videoUrl?.trim() || "" : "";
+        if (!imageUrl && !videoUrl) return;
+        slides.push({
+          id: `carousel_${slide.id}`,
+          label: `Carousel ${index + 1}`,
+          subtitle: slide.mediaType === "VIDEO" ? "Video-slide" : "Foto-slide",
+          format: feedFormat,
+          imageUrl,
+          videoUrl: videoUrl || undefined,
+        });
       });
+    } else {
+      const imageUrl = assets.FEED?.imageUrl?.trim() || "";
+      const videoUrl = assets.FEED?.videoUrl?.trim() || "";
+      if (imageUrl || videoUrl) {
+        const feedOption = FORMAT_OPTIONS.find((item) => item.value === feedFormat);
+        slides.push({
+          id: "FEED",
+          label: videoUrl && !imageUrl ? "Feed video" : "Feed post",
+          subtitle: feedOption?.description || "Feed",
+          format: feedFormat,
+          imageUrl,
+          videoUrl: videoUrl && !imageUrl ? videoUrl : undefined,
+        });
+      }
     }
   }
 
@@ -441,7 +412,7 @@ function buildPreviewSlides(
     const imageUrl = assets.STORY?.imageUrl?.trim() || "";
     if (imageUrl) {
       slides.push({
-        id: "STORY",
+        id: "story",
         label: "Story",
         subtitle: "9:16 · FB + IG Stories",
         format: "STORY",
@@ -455,7 +426,7 @@ function buildPreviewSlides(
     const imageUrl = assets.REEL?.imageUrl?.trim() || "";
     if (videoUrl || imageUrl) {
       slides.push({
-        id: "REEL",
+        id: "reel",
         label: "Reel",
         subtitle: videoUrl ? "9:16 video · Instagram" : "9:16 cover · Instagram",
         format: "STORY",
@@ -518,11 +489,13 @@ function InstagramReelPreview({
 function FacebookPreview({
   caption,
   imageUrl,
+  videoUrl,
   format,
   pageName = "Digitify",
 }: {
   caption: string;
   imageUrl: string;
+  videoUrl?: string;
   format: PostFormat;
   pageName?: string;
 }) {
@@ -567,7 +540,9 @@ function FacebookPreview({
       </div>
       <p className="whitespace-pre-line px-4 pb-3 text-sm leading-relaxed">{caption}</p>
       <div className="bg-slate-100">
-        {imageUrl ? (
+        {videoUrl ? (
+          <video src={videoUrl} className="max-h-[420px] w-full object-cover" muted playsInline controls />
+        ) : imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={imageUrl} alt="Facebook preview" className="max-h-[420px] w-full object-cover" />
         ) : (
@@ -592,12 +567,14 @@ function FacebookPreview({
 function InstagramPreview({
   caption,
   imageUrl,
+  videoUrl,
   firstComment,
   format,
   username = "digitify.be",
 }: {
   caption: string;
   imageUrl: string;
+  videoUrl?: string;
   firstComment: string;
   format: PostFormat;
   username?: string;
@@ -649,7 +626,9 @@ function InstagramPreview({
         <MoreHorizontal className="h-5 w-5 text-zinc-500" />
       </div>
       <div className={cn("bg-zinc-100", formatClass)}>
-        {imageUrl ? (
+        {videoUrl ? (
+          <video src={videoUrl} className="h-full w-full object-cover" muted playsInline controls />
+        ) : imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={imageUrl} alt="Instagram preview" className="h-full w-full object-cover" />
         ) : (
@@ -721,6 +700,7 @@ export function SocialPageInner() {
   const [placements, setPlacements] = useState<SocialPlacement[]>(["FEED"]);
   const [feedFormat, setFeedFormat] = useState<FeedAspectFormat>("SQUARE");
   const [placementAssets, setPlacementAssets] = useState<PlacementAssets>({});
+  const [carousel, setCarousel] = useState<SocialCarouselState>({ enabled: false, slides: [] });
   const [previewSlideIndex, setPreviewSlideIndex] = useState(0);
   const [selectedPageId, setSelectedPageId] = useState("");
 
@@ -752,7 +732,10 @@ export function SocialPageInner() {
     return { pending, scheduled, failed };
   }, [rows]);
 
-  const imageUrl = useMemo(() => resolvePrimaryImageFromAssets(placementAssets), [placementAssets]);
+  const imageUrl = useMemo(
+    () => resolvePrimaryImageFromAssets(placementAssets, carousel),
+    [carousel, placementAssets],
+  );
 
   const previewFormat: PostFormat = useMemo(() => {
     if (placements.includes("FEED")) return feedFormat;
@@ -777,10 +760,12 @@ export function SocialPageInner() {
       publisherPageName: selectedManagedPage?.name || undefined,
       publisherInstagramUsername: selectedManagedPage?.instagramUsername || undefined,
       assets: placementAssets,
+      carousel: carousel.enabled ? carousel : undefined,
     }),
     [
       altText,
       brandSignature,
+      carousel,
       selectedBrandKitId,
       cta,
       firstComment,
@@ -828,8 +813,8 @@ export function SocialPageInner() {
   );
 
   const previewSlides = useMemo(
-    () => buildPreviewSlides(placements, feedFormat, placementAssets),
-    [feedFormat, placementAssets, placements],
+    () => buildPreviewSlides(placements, feedFormat, placementAssets, carousel),
+    [carousel, feedFormat, placementAssets, placements],
   );
 
   const activePreviewSlide = previewSlides[previewSlideIndex] ?? previewSlides[0] ?? null;
@@ -921,12 +906,12 @@ export function SocialPageInner() {
   });
 
   function applyBrandKitDefaults(payload: SocialBrandKitApplyPayload) {
-    if (payload.brandSignature) setBrandSignature(payload.brandSignature);
-    if (payload.hashtags) setHashtags(payload.hashtags);
+    setBrandSignature(payload.brandSignature);
+    if (payload.hashtags.trim()) setHashtags(payload.hashtags);
     if (payload.tone) setTone(payload.tone as SocialTone);
-    if (payload.cta) setCta(payload.cta);
-    if (payload.linkUrl) setLinkUrl(payload.linkUrl);
-    if (payload.template) setTemplate(payload.template);
+    setCta(payload.cta);
+    setLinkUrl(payload.linkUrl);
+    if (payload.template.trim()) setTemplate(payload.template);
   }
 
   const brandKitsQuery = trpc.social.listBrandKits.useQuery();
@@ -1006,10 +991,10 @@ export function SocialPageInner() {
     }
     if (step === 3) {
       if (!placements.length) return false;
-      if (placements.includes("FEED") && !placementAssets.FEED?.imageUrl?.trim()) return false;
+      if (placements.includes("FEED") && !isFeedMediaReady(placementAssets, carousel)) return false;
       if (placements.includes("STORY") && !placementAssets.STORY?.imageUrl?.trim()) return false;
       if (placements.includes("REEL") && !placementAssets.REEL?.videoUrl?.trim()) return false;
-      return Boolean(imageUrl.trim());
+      return true;
     }
     return true;
   }
@@ -1064,13 +1049,17 @@ export function SocialPageInner() {
         }
 
         if (cancelled) return;
-        setPlacementAssets((current) => {
-          const next = { ...current };
-          if (placements.includes("FEED")) next.FEED = { imageUrl };
-          if (placements.includes("STORY")) next.STORY = { imageUrl };
-          if (placements.includes("REEL") && !next.REEL?.videoUrl) next.REEL = { imageUrl };
-          return next;
-        });
+        if (carousel.enabled && placements.includes("FEED")) {
+          setCarousel((current) => applyCarouselImage(current, imageUrl));
+        } else {
+          setPlacementAssets((current) => {
+            const next = { ...current };
+            if (placements.includes("FEED")) next.FEED = { imageUrl };
+            if (placements.includes("STORY")) next.STORY = { imageUrl };
+            if (placements.includes("REEL") && !next.REEL?.videoUrl) next.REEL = { imageUrl };
+            return next;
+          });
+        }
         setAppliedImageJobId(pendingImageJobId);
         setActiveTab("composer");
         showToast({ title: "Creative Studio-afbeelding toegevoegd" });
@@ -1093,6 +1082,7 @@ export function SocialPageInner() {
     appliedImageJobId,
     creativeImageJob.data,
     importCreativeImage,
+    carousel.enabled,
     pendingImageJobId,
     placements,
     showToast,
@@ -1116,16 +1106,23 @@ export function SocialPageInner() {
         }
 
         if (cancelled) return;
-        setPlacementAssets((current) => {
-          const next = { ...current };
-          if (placements.includes("REEL")) next.REEL = { videoUrl };
-          if (placements.includes("STORY") && !next.STORY?.imageUrl) {
-            next.STORY = { videoUrl };
+        if (carousel.enabled && placements.includes("FEED")) {
+          setCarousel((current) => applyCarouselVideo(current, videoUrl));
+        } else {
+          setPlacementAssets((current) => {
+            const next = { ...current };
+            if (placements.includes("REEL")) next.REEL = { videoUrl };
+            if (placements.includes("STORY") && !next.STORY?.imageUrl) {
+              next.STORY = { videoUrl };
+            }
+            if (placements.includes("FEED") && !next.FEED?.imageUrl) {
+              next.FEED = { videoUrl };
+            }
+            return next;
+          });
+          if (!placements.includes("REEL") && !carousel.enabled) {
+            setPlacements((current) => (current.includes("REEL") ? current : [...current, "REEL"]));
           }
-          return next;
-        });
-        if (!placements.includes("REEL")) {
-          setPlacements((current) => (current.includes("REEL") ? current : [...current, "REEL"]));
         }
         setAppliedVideoJobId(pendingVideoJobId);
         setActiveTab("composer");
@@ -1147,6 +1144,7 @@ export function SocialPageInner() {
     };
   }, [
     appliedVideoJobId,
+    carousel.enabled,
     creativeVideoJob.data,
     importCreativeImage,
     pendingVideoJobId,
@@ -1204,8 +1202,14 @@ export function SocialPageInner() {
       return false;
     }
 
-    if (placements.includes("FEED") && !placementAssets.FEED?.imageUrl?.trim()) {
-      showToast({ title: "Feed-afbeelding ontbreekt", variant: "error" });
+    if (placements.includes("FEED") && !isFeedMediaReady(placementAssets, carousel)) {
+      showToast({
+        title: carousel.enabled ? "Carousel onvolledig" : "Feed-media ontbreekt",
+        description: carousel.enabled
+          ? "Voeg minstens 2 slides toe met foto of video."
+          : "Voeg een feed-foto of -video toe, of schakel carousel in.",
+        variant: "error",
+      });
       return false;
     }
     if (placements.includes("STORY") && !placementAssets.STORY?.imageUrl?.trim()) {
@@ -1221,8 +1225,32 @@ export function SocialPageInner() {
       return false;
     }
 
-    if (!imageUrl.trim()) {
-      showToast({ title: "Media ontbreekt", description: "Voeg minstens één afbeelding of reel-video toe.", variant: "error" });
+    if (
+      requireInstagramSafe &&
+      carousel.enabled &&
+      carousel.slides.some((slide) => slide.mediaType === "VIDEO" && slide.videoUrl && !/^https:\/\//i.test(slide.videoUrl))
+    ) {
+      showToast({
+        title: "Carousel-video moet publiek zijn",
+        description: "Gebruik publieke https-URL's of upload via Vercel Blob.",
+        variant: "error",
+      });
+      return false;
+    }
+
+    if (
+      requireInstagramSafe &&
+      placements.includes("FEED") &&
+      !carousel.enabled &&
+      placementAssets.FEED?.videoUrl?.trim() &&
+      !placementAssets.FEED?.imageUrl?.trim() &&
+      !/^https:\/\//i.test(placementAssets.FEED.videoUrl)
+    ) {
+      showToast({
+        title: "Feed-video moet publiek zijn",
+        description: "Gebruik een publieke https-MP4-URL of upload via Vercel Blob.",
+        variant: "error",
+      });
       return false;
     }
 
@@ -1244,14 +1272,19 @@ export function SocialPageInner() {
 
     try {
       const persistedAssets = await persistPlacementAssets(placementAssets);
+      const persistedCarousel = await persistCarouselAssets(carousel);
       if (JSON.stringify(persistedAssets) !== JSON.stringify(placementAssets)) {
         setPlacementAssets(persistedAssets);
       }
+      if (JSON.stringify(persistedCarousel) !== JSON.stringify(carousel)) {
+        setCarousel(persistedCarousel);
+      }
 
-      const persistedImageUrl = resolvePrimaryImageFromAssets(persistedAssets);
+      const persistedImageUrl = resolvePrimaryImageFromAssets(persistedAssets, persistedCarousel);
       const persistedMetadata: SocialMetadata = {
         ...metadataPayload,
         assets: persistedAssets,
+        carousel: persistedCarousel.enabled ? persistedCarousel : undefined,
       };
 
       if (!selected) {
@@ -1343,6 +1376,7 @@ export function SocialPageInner() {
         (legacyFormat === "PORTRAIT" || legacyFormat === "LANDSCAPE" || legacyFormat === "SQUARE" ? legacyFormat : "SQUARE"),
     );
     setPlacementAssets(metadata.assets || {});
+    setCarousel(metadata.carousel || { enabled: false, slides: [] });
     setTargetFacebook((row.targetPlatforms || []).includes("FACEBOOK"));
     setTargetInstagram((row.targetPlatforms || []).includes("INSTAGRAM"));
     setSelectedPageId(metadata.publisherPageId || managedPagesQuery.data?.selectedPageId || connectionStatus.data?.pageId || "");
@@ -1380,6 +1414,7 @@ export function SocialPageInner() {
     setPlacements(["FEED"]);
     setFeedFormat("SQUARE");
     setPlacementAssets({});
+    setCarousel({ enabled: false, slides: [] });
   }
 
   const isBusy =
@@ -1633,11 +1668,13 @@ export function SocialPageInner() {
                       placements={placements}
                       feedFormat={feedFormat}
                       assets={placementAssets}
+                      carousel={carousel}
                       disabled={!canEditSelected}
                       targetInstagram={targetInstagram}
                       onPlacementsChange={setPlacements}
                       onFeedFormatChange={setFeedFormat}
                       onAssetsChange={setPlacementAssets}
+                      onCarouselChange={setCarousel}
                     />
                     <SocialImageGenerator
                       disabled={!canEditSelected}
@@ -1645,9 +1682,17 @@ export function SocialPageInner() {
                       template={template}
                       feedFormat={feedFormat}
                       placements={placements}
+                      carouselEnabled={carousel.enabled}
                       socialPostId={selectedId ?? undefined}
                       brandKitId={selectedBrandKitId || undefined}
-                      onImageReady={(assets) => setPlacementAssets((current) => ({ ...current, ...assets }))}
+                      onImageReady={(assets) => {
+                        const feedImage = assets.FEED?.imageUrl?.trim();
+                        if (carousel.enabled && feedImage) {
+                          setCarousel((current) => applyCarouselImage(current, feedImage));
+                          return;
+                        }
+                        setPlacementAssets((current) => ({ ...current, ...assets }));
+                      }}
                     />
                   </div>
                 ) : null}
@@ -1661,7 +1706,9 @@ export function SocialPageInner() {
                         {" · "}
                         {selectedBrandKitName}
                         {" · "}
-                        {placements.join(", ") || "geen formaat"}
+                        {carousel.enabled
+                          ? `Carousel (${carousel.slides.length} slides)`
+                          : placements.join(", ") || "geen formaat"}
                       </p>
                       <p className="mt-2 line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">{caption || "Geen caption"}</p>
                     </div>
@@ -1817,7 +1864,7 @@ export function SocialPageInner() {
 
                   {activePreviewSlide ? (
                     <div className="space-y-2">
-                      {activePreviewSlide.id === "REEL" ? (
+                      {activePreviewSlide.id === "reel" ? (
                         <InstagramReelPreview
                           caption={previewCaption}
                           imageUrl={activePreviewSlide.imageUrl}
@@ -1834,17 +1881,19 @@ export function SocialPageInner() {
                         >
                           {targetFacebook ? (
                             <FacebookPreview
-                              caption={activePreviewSlide.id === "STORY" ? "" : previewCaption}
+                              caption={activePreviewSlide.id === "story" ? "" : previewCaption}
                               imageUrl={activePreviewSlide.imageUrl}
+                              videoUrl={activePreviewSlide.videoUrl}
                               format={activePreviewSlide.format}
                               pageName={previewPageName}
                             />
                           ) : null}
                           {targetInstagram ? (
-                            activePreviewSlide.id === "STORY" ? (
+                            activePreviewSlide.id === "story" ? (
                               <InstagramPreview
                                 caption=""
                                 imageUrl={activePreviewSlide.imageUrl}
+                                videoUrl={activePreviewSlide.videoUrl}
                                 firstComment={firstComment}
                                 format="STORY"
                                 username={previewInstagramUsername}
@@ -1853,6 +1902,7 @@ export function SocialPageInner() {
                               <InstagramPreview
                                 caption={previewCaption}
                                 imageUrl={activePreviewSlide.imageUrl}
+                                videoUrl={activePreviewSlide.videoUrl}
                                 firstComment={firstComment}
                                 format={activePreviewSlide.format}
                                 username={previewInstagramUsername}

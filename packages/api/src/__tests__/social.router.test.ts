@@ -4,11 +4,15 @@ const mockedMeta = vi.hoisted(() => ({
   clearMetaSettings: vi.fn(),
   loadMetaManagedPages: vi.fn(),
   loadMetaWorkspaceConfig: vi.fn(),
+  publishFacebookCarouselPost: vi.fn(),
   publishFacebookImagePost: vi.fn(),
   publishFacebookImageStory: vi.fn(),
+  publishFacebookVideoPost: vi.fn(),
+  publishInstagramCarouselPost: vi.fn(),
   publishInstagramImagePost: vi.fn(),
   publishInstagramImageStory: vi.fn(),
   publishInstagramReel: vi.fn(),
+  publishInstagramVideoPost: vi.fn(),
   resolveSocialPublishTarget: vi.fn(),
   upsertMetaSettings: vi.fn(),
   workspaceScopeFromAuthenticatedUser: vi.fn((user: { id: string; workspaceId?: string }) => ({
@@ -26,6 +30,7 @@ vi.mock("../lib/social-image", () => ({
     contentType: "image/jpeg",
     byteLength: 1000,
   }),
+  validateSocialVideoForPublish: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { socialRouter, runDueSocialPostsWorker } from "../routers/social.router";
@@ -179,6 +184,11 @@ describe("social publish worker", () => {
     mockedMeta.publishFacebookImageStory.mockReset();
     mockedMeta.publishInstagramImagePost.mockReset();
     mockedMeta.publishInstagramImageStory.mockReset();
+    mockedMeta.publishInstagramReel.mockReset();
+    mockedMeta.publishFacebookCarouselPost.mockReset();
+    mockedMeta.publishInstagramCarouselPost.mockReset();
+    mockedMeta.publishFacebookVideoPost.mockReset();
+    mockedMeta.publishInstagramVideoPost.mockReset();
   });
 
   it("retries failed post with exponential backoff", async () => {
@@ -235,6 +245,283 @@ describe("social publish worker", () => {
           retryCount: 2,
         }),
       }),
+    );
+  });
+
+  it("publishes feed posts through feed endpoints", async () => {
+    const post = {
+      id: "sp_feed",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Feed caption",
+      imageUrl: "https://example.com/feed.jpg",
+      targetPlatforms: ["FACEBOOK", "INSTAGRAM"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+      metadata: { placements: ["FEED"], feedFormat: "SQUARE" },
+    };
+
+    const socialPostFindMany = vi.fn().mockResolvedValue([post]);
+    const socialPostUpdate = vi.fn().mockResolvedValue({});
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "ig_123",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "ig_123",
+      instagramUsername: "digitify.be",
+    });
+    mockedMeta.publishFacebookImagePost.mockResolvedValue({
+      id: "fb_feed_1",
+      permalink: "https://facebook.com/post/1",
+      verified: true,
+    });
+    mockedMeta.publishInstagramImagePost.mockResolvedValue({
+      id: "ig_feed_1",
+      permalink: "https://instagram.com/p/feed1",
+      verified: true,
+    });
+
+    const result = await runDueSocialPostsWorker({
+      socialPost: {
+        findMany: socialPostFindMany,
+        update: socialPostUpdate,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      activity: { create: vi.fn().mockResolvedValue({ id: "act_feed" }) },
+    } as any);
+
+    expect(result.published).toBe(1);
+    expect(mockedMeta.publishFacebookImagePost).toHaveBeenCalledWith(
+      expect.objectContaining({ pageId: "123", imageUrl: post.imageUrl, caption: "Feed caption" }),
+    );
+    expect(mockedMeta.publishInstagramImagePost).toHaveBeenCalledWith(
+      expect.objectContaining({ instagramBusinessId: "ig_123", imageUrl: post.imageUrl }),
+    );
+    expect(mockedMeta.publishFacebookImageStory).not.toHaveBeenCalled();
+    expect(mockedMeta.publishInstagramReel).not.toHaveBeenCalled();
+  });
+
+  it("publishes reel posts through the reel endpoint", async () => {
+    const post = {
+      id: "sp_reel",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Reel caption",
+      imageUrl: "https://example.com/reel.mp4",
+      targetPlatforms: ["INSTAGRAM"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+      metadata: {
+        placements: ["REEL"],
+        assets: {
+          REEL: { videoUrl: "https://example.com/reel.mp4" },
+        },
+      },
+    };
+
+    const socialPostFindMany = vi.fn().mockResolvedValue([post]);
+    const socialPostUpdate = vi.fn().mockResolvedValue({});
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "ig_123",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "ig_123",
+      instagramUsername: "digitify.be",
+    });
+    mockedMeta.publishInstagramReel.mockResolvedValue({
+      id: "ig_reel_1",
+      permalink: "https://instagram.com/reel/1",
+      verified: true,
+    });
+
+    const result = await runDueSocialPostsWorker({
+      socialPost: {
+        findMany: socialPostFindMany,
+        update: socialPostUpdate,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      activity: { create: vi.fn().mockResolvedValue({ id: "act_reel" }) },
+    } as any);
+
+    expect(result.published).toBe(1);
+    expect(mockedMeta.publishInstagramReel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instagramBusinessId: "ig_123",
+        videoUrl: "https://example.com/reel.mp4",
+        caption: "Reel caption",
+      }),
+    );
+    expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
+    expect(mockedMeta.publishInstagramImagePost).not.toHaveBeenCalled();
+  });
+
+  it("publishes carousel feed posts through carousel endpoints", async () => {
+    const post = {
+      id: "sp_carousel",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Carousel caption",
+      imageUrl: "https://example.com/slide1.jpg",
+      targetPlatforms: ["FACEBOOK", "INSTAGRAM"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+      metadata: {
+        placements: ["FEED"],
+        feedFormat: "SQUARE",
+        carousel: {
+          enabled: true,
+          slides: [
+            { id: "s1", mediaType: "IMAGE", imageUrl: "https://example.com/slide1.jpg" },
+            { id: "s2", mediaType: "VIDEO", videoUrl: "https://example.com/slide2.mp4" },
+          ],
+        },
+      },
+    };
+
+    const socialPostFindMany = vi.fn().mockResolvedValue([post]);
+    const socialPostUpdate = vi.fn().mockResolvedValue({});
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "ig_123",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "ig_123",
+      instagramUsername: "digitify.be",
+    });
+    mockedMeta.publishFacebookCarouselPost.mockResolvedValue({
+      id: "fb_carousel_1",
+      permalink: "https://facebook.com/post/carousel",
+      verified: true,
+    });
+    mockedMeta.publishInstagramCarouselPost.mockResolvedValue({
+      id: "ig_carousel_1",
+      permalink: "https://instagram.com/p/carousel",
+      verified: true,
+    });
+
+    const result = await runDueSocialPostsWorker({
+      socialPost: {
+        findMany: socialPostFindMany,
+        update: socialPostUpdate,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      activity: { create: vi.fn().mockResolvedValue({ id: "act_carousel" }) },
+    } as any);
+
+    expect(result.published).toBe(1);
+    expect(mockedMeta.publishFacebookCarouselPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pageId: "123",
+        slides: expect.arrayContaining([
+          expect.objectContaining({ mediaType: "IMAGE" }),
+          expect.objectContaining({ mediaType: "VIDEO" }),
+        ]),
+      }),
+    );
+    expect(mockedMeta.publishInstagramCarouselPost).toHaveBeenCalled();
+    expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
+  });
+
+  it("publishes feed video posts through video endpoints", async () => {
+    const post = {
+      id: "sp_feed_video",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Video caption",
+      imageUrl: "https://example.com/feed.mp4",
+      targetPlatforms: ["FACEBOOK", "INSTAGRAM"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+      metadata: {
+        placements: ["FEED"],
+        assets: {
+          FEED: { videoUrl: "https://example.com/feed.mp4" },
+        },
+      },
+    };
+
+    const socialPostFindMany = vi.fn().mockResolvedValue([post]);
+    const socialPostUpdate = vi.fn().mockResolvedValue({});
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "ig_123",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "ig_123",
+      instagramUsername: "digitify.be",
+    });
+    mockedMeta.publishFacebookVideoPost.mockResolvedValue({ id: "fb_video_1", verified: true });
+    mockedMeta.publishInstagramVideoPost.mockResolvedValue({
+      id: "ig_video_1",
+      permalink: "https://instagram.com/p/video",
+      verified: true,
+    });
+
+    const result = await runDueSocialPostsWorker({
+      socialPost: {
+        findMany: socialPostFindMany,
+        update: socialPostUpdate,
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      activity: { create: vi.fn().mockResolvedValue({ id: "act_feed_video" }) },
+    } as any);
+
+    expect(result.published).toBe(1);
+    expect(mockedMeta.publishFacebookVideoPost).toHaveBeenCalledWith(
+      expect.objectContaining({ videoUrl: "https://example.com/feed.mp4" }),
+    );
+    expect(mockedMeta.publishInstagramVideoPost).toHaveBeenCalledWith(
+      expect.objectContaining({ videoUrl: "https://example.com/feed.mp4" }),
     );
   });
 

@@ -118,6 +118,53 @@ export function isMetaPublishableImageUrl(imageUrl: string) {
   }
 }
 
+export function isMetaPublishableVideoUrl(videoUrl: string) {
+  const trimmed = videoUrl.trim();
+  if (!trimmed) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export async function validateSocialVideoForPublish(videoUrl: string) {
+  if (!isMetaPublishableVideoUrl(videoUrl)) {
+    throw new Error("Reel-video moet een publieke https-URL zijn (MP4).");
+  }
+
+  const safeUrl = await assertPublicHttpUrl(videoUrl.trim());
+
+  let response: Response;
+  try {
+    response = await fetch(safeUrl, { method: "HEAD", signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) {
+      response = await fetch(safeUrl, {
+        method: "GET",
+        headers: { Range: "bytes=0-0" },
+        signal: AbortSignal.timeout(10_000),
+      });
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "onbekende netwerkfout";
+    throw new Error(`Reel-video kon niet opgehaald worden via de publieke URL. (${detail})`);
+  }
+
+  if (!response.ok) {
+    throw new Error(`Reel-video kon niet opgehaald worden via de publieke URL (HTTP ${response.status}).`);
+  }
+
+  const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() || "";
+  const parsedUrl = new URL(safeUrl);
+  const looksLikeVideo =
+    contentType.startsWith("video/") ||
+    /\.(mp4|mov)(\?|$)/i.test(parsedUrl.pathname + parsedUrl.search);
+  if (!looksLikeVideo) {
+    throw new Error("Reel-video moet een publiek bereikbare MP4 of MOV zijn.");
+  }
+}
+
 export function computeSocialImageValidity(dimensions: { width: number; height: number; aspectRatio: number }) {
   const { width, height, aspectRatio: ratio } = dimensions;
   return {

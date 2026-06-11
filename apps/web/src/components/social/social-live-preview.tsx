@@ -17,6 +17,7 @@ import {
   ThumbsUp,
 } from "lucide-react";
 import type { FeedAspectFormat, PlacementAssets, SocialPlacement } from "./social-placement-editor";
+import type { SocialCarouselState } from "./social-carousel-editor";
 import { FacebookPageAvatar, InstagramPageAvatar } from "./social-platform-avatars";
 
 type PostFormat = FeedAspectFormat | "STORY";
@@ -42,21 +43,41 @@ export function buildPreviewSlides(input: {
   placements: SocialPlacement[];
   feedFormat: FeedAspectFormat;
   assets: PlacementAssets;
+  carousel?: SocialCarouselState;
 }): PreviewSlide[] {
   const slides: PreviewSlide[] = [];
 
   if (input.placements.includes("FEED")) {
     const meta = FEED_FORMAT_META[input.feedFormat];
-    const imageUrl = input.assets.FEED?.imageUrl?.trim() || "";
-    slides.push({
-      id: "feed",
-      placement: "FEED",
-      label: `Feed · ${meta.label}`,
-      description: meta.description,
-      format: input.feedFormat,
-      imageUrl,
-      hasMedia: Boolean(imageUrl),
-    });
+    if (input.carousel?.enabled && input.carousel.slides.length > 0) {
+      input.carousel.slides.forEach((slide, index) => {
+        const imageUrl = slide.mediaType === "IMAGE" ? slide.imageUrl?.trim() || "" : "";
+        const videoUrl = slide.mediaType === "VIDEO" ? slide.videoUrl?.trim() || "" : "";
+        slides.push({
+          id: `carousel_${slide.id}`,
+          placement: "FEED",
+          label: `Carousel ${index + 1}`,
+          description: slide.mediaType === "VIDEO" ? "Video-slide" : "Foto-slide",
+          format: input.feedFormat,
+          imageUrl,
+          videoUrl: videoUrl || undefined,
+          hasMedia: Boolean(imageUrl || videoUrl),
+        });
+      });
+    } else {
+      const imageUrl = input.assets.FEED?.imageUrl?.trim() || "";
+      const videoUrl = input.assets.FEED?.videoUrl?.trim() || "";
+      slides.push({
+        id: "feed",
+        placement: "FEED",
+        label: videoUrl && !imageUrl ? "Feed video" : `Feed · ${meta.label}`,
+        description: meta.description,
+        format: input.feedFormat,
+        imageUrl,
+        videoUrl: videoUrl && !imageUrl ? videoUrl : undefined,
+        hasMedia: Boolean(imageUrl || videoUrl),
+      });
+    }
   }
 
   if (input.placements.includes("STORY")) {
@@ -186,7 +207,13 @@ function FacebookPreview({
         <MoreHorizontal className="h-5 w-5 text-slate-500" />
       </div>
       <p className="whitespace-pre-line px-4 pb-3 text-sm leading-relaxed">{caption}</p>
-      <MediaFrame format={slide.format} imageUrl={slide.imageUrl} alt="Facebook preview" storyLabel="Story" />
+      <MediaFrame
+        format={slide.format}
+        imageUrl={slide.imageUrl}
+        videoUrl={slide.videoUrl}
+        alt="Facebook preview"
+        storyLabel="Story"
+      />
       <div className="flex items-center justify-between px-4 py-3 text-xs text-slate-500">
         <span>12 vind-ik-leuks</span>
         <span>3 reacties · 1 keer gedeeld</span>
@@ -252,7 +279,13 @@ function InstagramPreview({
         </div>
         <MoreHorizontal className="h-5 w-5 text-zinc-500" />
       </div>
-      <MediaFrame format={slide.format} imageUrl={slide.imageUrl} alt="Instagram preview" storyLabel="Story" />
+      <MediaFrame
+        format={slide.format}
+        imageUrl={slide.imageUrl}
+        videoUrl={slide.videoUrl}
+        alt="Instagram preview"
+        storyLabel="Story"
+      />
       <div className="space-y-2 px-4 py-3">
         <div className="flex gap-3"><Heart className="h-5 w-5" /><MessageCircle className="h-5 w-5" /><Send className="h-5 w-5" /></div>
         {showCaption ? (
@@ -274,6 +307,7 @@ export function SocialLivePreview({
   placements,
   feedFormat,
   assets,
+  carousel,
   placementCount,
 }: {
   caption: string;
@@ -281,11 +315,12 @@ export function SocialLivePreview({
   placements: SocialPlacement[];
   feedFormat: FeedAspectFormat;
   assets: PlacementAssets;
+  carousel?: SocialCarouselState;
   placementCount: number;
 }) {
   const slides = useMemo(
-    () => buildPreviewSlides({ placements, feedFormat, assets }),
-    [placements, feedFormat, assets],
+    () => buildPreviewSlides({ placements, feedFormat, assets, carousel }),
+    [placements, feedFormat, assets, carousel],
   );
 
   const [activeIndex, setActiveIndex] = useState(0);

@@ -3,6 +3,7 @@ import {
   computeSocialImageValidity,
   fetchSocialImageInfo,
   isMetaPublishableImageUrl,
+  isMetaPublishableVideoUrl,
   parseImageDimensions,
   probeSocialImage,
 } from "../lib/social-image";
@@ -41,6 +42,12 @@ describe("social image parsing", () => {
     if (!result.ok) {
       expect(result.message.length).toBeGreaterThan(0);
     }
+  });
+
+  it("accepts only https video URLs for reels", () => {
+    expect(isMetaPublishableVideoUrl("https://cdn.example.com/reel.mp4")).toBe(true);
+    expect(isMetaPublishableVideoUrl("http://cdn.example.com/reel.mp4")).toBe(false);
+    expect(isMetaPublishableVideoUrl("not-a-url")).toBe(false);
   });
 
   it("blocks SSRF targets such as localhost", async () => {

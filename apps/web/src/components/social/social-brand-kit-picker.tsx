@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Badge,
@@ -17,9 +17,25 @@ import {
   Switch,
   Textarea,
 } from "@digitify/ui";
-import { Building2, Palette, Plus, Sparkles, Trash2 } from "lucide-react";
+import {
+  Building2,
+  Check,
+  Download,
+  Hash,
+  Link2,
+  Loader2,
+  Megaphone,
+  Palette,
+  Plus,
+  Sparkles,
+  Trash2,
+  Upload,
+  Wand2,
+} from "lucide-react";
 import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/components/feedback/toast-provider";
+import { uploadSocialAssetFile } from "@/lib/persist-social-assets";
+import { SOCIAL_TONE_OPTIONS } from "@/lib/social-tone-options";
 import { cn } from "@/lib/utils";
 
 export type SocialBrandKit = {
@@ -79,15 +95,99 @@ const EMPTY_FORM = {
   includeLogo: true,
 };
 
-function kitToApplyPayload(kit: SocialBrandKit): SocialBrandKitApplyPayload {
+export function kitToApplyPayload(kit: SocialBrandKit): SocialBrandKitApplyPayload {
   return {
-    brandSignature: kit.brandSignature || (kit.companyName ? `${kit.companyName}${kit.slogan ? ` · ${kit.slogan}` : ""}` : ""),
-    hashtags: kit.defaultHashtags,
+    brandSignature:
+      kit.brandSignature || (kit.companyName ? `${kit.companyName}${kit.slogan ? ` · ${kit.slogan}` : ""}` : ""),
+    hashtags: kit.defaultHashtags || "",
     tone: kit.defaultTone || kit.brandVoice || "warm en professioneel",
-    cta: kit.defaultCta,
-    linkUrl: kit.defaultLinkUrl || kit.website,
-    template: kit.brandSummary,
+    cta: kit.defaultCta || "",
+    linkUrl: kit.defaultLinkUrl || kit.website || "",
+    template: kit.brandSummary || "",
   };
+}
+
+function KitPreviewRow({ icon: Icon, label, value }: { icon: typeof Hash; label: string; value?: string }) {
+  if (!value?.trim()) return null;
+  return (
+    <div className="flex items-start gap-2 text-xs">
+      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <div className="min-w-0">
+        <p className="font-medium text-foreground">{label}</p>
+        <p className="truncate text-muted-foreground">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function BrandKitCard({
+  kit,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  kit: SocialBrandKit;
+  selected: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  const accent = kit.primaryColor || "#f9ae5a";
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onSelect}
+      className={cn(
+        "group relative w-full rounded-xl border p-3 text-left transition-all",
+        selected
+          ? "border-amber-500 bg-amber-50/80 shadow-sm ring-2 ring-amber-500/20 dark:bg-amber-950/25"
+          : "border-border bg-background/80 hover:border-amber-300 hover:bg-muted/30",
+      )}
+    >
+      {selected ? (
+        <span className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-white">
+          <Check className="h-3 w-3" />
+        </span>
+      ) : null}
+
+      <div className="flex items-start gap-3 pr-6">
+        {kit.logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={kit.logoUrl}
+            alt=""
+            className="h-12 w-12 shrink-0 rounded-lg border bg-white object-contain p-1"
+          />
+        ) : (
+          <div
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border text-[10px] font-bold text-white"
+            style={{ backgroundColor: accent }}
+          >
+            {(kit.companyName || kit.name).slice(0, 2).toUpperCase()}
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="truncate text-sm font-semibold">{kit.name}</p>
+            {kit.isDefault ? (
+              <Badge variant="secondary" className="text-[10px]">
+                Standaard
+              </Badge>
+            ) : null}
+          </div>
+          <p className="truncate text-xs text-muted-foreground">
+            {kit.companyName || "Geen bedrijfsnaam"}
+            {kit.slogan ? ` · ${kit.slogan}` : ""}
+          </p>
+          <div className="mt-2 flex items-center gap-1.5">
+            <span className="h-3 w-3 rounded-full ring-1 ring-border/60" style={{ backgroundColor: accent }} />
+            <span className="text-[10px] text-muted-foreground">{accent}</span>
+          </div>
+        </div>
+      </div>
+    </button>
+  );
 }
 
 export function SocialBrandKitPicker({
@@ -100,15 +200,25 @@ export function SocialBrandKitPicker({
   const { showToast } = useToast();
   const utils = trpc.useUtils();
   const kitsQuery = trpc.social.listBrandKits.useQuery();
+  const workspaceBranding = trpc.settings.getBranding.useQuery();
+  const creativeBrand = trpc.media.getBrandKit.useQuery();
+
   const kits = (kitsQuery.data?.kits ?? []) as SocialBrandKit[];
   const selectedKit = useMemo(
     () => kits.find((kit) => kit.id === selectedKitId) || kits.find((kit) => kit.isDefault) || kits[0] || null,
     [kits, selectedKitId],
   );
+  const applyPreview = useMemo(
+    () => (selectedKit ? kitToApplyPayload(selectedKit) : null),
+    [selectedKit],
+  );
 
   const [managerOpen, setManagerOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const autoAppliedRef = useRef(false);
 
   const upsertKit = trpc.social.upsertBrandKit.useMutation({
     onSuccess: async (kit) => {
@@ -124,8 +234,11 @@ export function SocialBrandKitPicker({
 
   const deleteKit = trpc.social.deleteBrandKit.useMutation({
     onSuccess: async (result) => {
-      await utils.social.listBrandKits.invalidate();
+      const refreshed = await utils.social.listBrandKits.fetch();
+      const nextKit = refreshed?.kits.find((kit) => kit.id === result.defaultBrandKitId);
       onSelectedKitIdChange(result.defaultBrandKitId);
+      if (nextKit) onApplyKit(kitToApplyPayload(nextKit as SocialBrandKit));
+      setManagerOpen(false);
       setEditingId(null);
       showToast({ title: "Merkkit verwijderd" });
     },
@@ -140,9 +253,10 @@ export function SocialBrandKitPicker({
   });
 
   useEffect(() => {
-    if (!kitsQuery.data || selectedKitId) return;
+    if (!kitsQuery.data || selectedKitId || autoAppliedRef.current) return;
     const defaultId = kitsQuery.data.defaultBrandKitId || kitsQuery.data.kits[0]?.id;
     if (!defaultId) return;
+    autoAppliedRef.current = true;
     onSelectedKitIdChange(defaultId);
     if (autoApplyDefaults) {
       const kit = kits.find((item) => item.id === defaultId);
@@ -185,129 +299,312 @@ export function SocialBrandKitPicker({
     if (kit) onApplyKit(kitToApplyPayload(kit));
   }
 
+  function readWorkspaceBranding() {
+    const settings = workspaceBranding.data as Record<string, unknown> | undefined;
+    if (!settings) return null;
+    const get = (key: string) => {
+      const value = settings[key];
+      return typeof value === "string" ? value.trim() : "";
+    };
+    const companyName = get("branding.company_name") || get("company.name");
+    const companySlogan = get("branding.company_slogan");
+    return {
+      companyName,
+      companySlogan,
+      primaryColor: get("branding.primary_color") || "#f9ae5a",
+      logoUrl: get("branding.logo_url"),
+      website: get("company.website") || get("branding.website"),
+      brandSignature: companyName ? `${companyName}${companySlogan ? ` · ${companySlogan}` : ""}` : "",
+    };
+  }
+
+  function importFromWorkspace() {
+    const branding = readWorkspaceBranding();
+    const creative = creativeBrand.data;
+    if (!branding?.companyName && !branding?.logoUrl && !creative) {
+      showToast({ title: "Geen branding gevonden", description: "Stel eerst branding in via Instellingen.", variant: "error" });
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      companyName: branding?.companyName || current.companyName,
+      slogan: branding?.companySlogan || current.slogan,
+      primaryColor: branding?.primaryColor || current.primaryColor,
+      logoUrl: branding?.logoUrl || current.logoUrl,
+      website: branding?.website || current.website,
+      brandVoice: creative?.brandVoice || current.brandVoice,
+      brandKeywords: creative?.brandKeywords || current.brandKeywords,
+      brandAvoid: creative?.brandAvoid || current.brandAvoid,
+      brandSummary:
+        creative?.brandSummary ||
+        [creative?.trainingNotes, creative?.businessContext].filter(Boolean).join("\n\n") ||
+        current.brandSummary,
+      brandSignature: current.brandSignature || branding?.brandSignature || current.brandSignature,
+      defaultLinkUrl: branding?.website || current.defaultLinkUrl,
+      includeLogo: creative?.includeLogo ?? current.includeLogo,
+    }));
+
+    showToast({ title: "Workspace-branding geïmporteerd" });
+  }
+
+  async function uploadLogo(file: File) {
+    setLogoUploading(true);
+    try {
+      const url = await uploadSocialAssetFile(file);
+      setForm((current) => ({ ...current, logoUrl: url }));
+      showToast({ title: "Logo geüpload" });
+    } catch (error) {
+      showToast({
+        title: "Logo upload mislukt",
+        description: error instanceof Error ? error.message : "Onbekende fout",
+        variant: "error",
+      });
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
   if (kitsQuery.isLoading) {
-    return <Skeleton className="h-24 w-full rounded-xl" />;
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-8 w-40" />
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Skeleton className="h-24 rounded-xl" />
+          <Skeleton className="h-24 rounded-xl" />
+        </div>
+      </div>
+    );
   }
 
   return (
     <>
-      <div className="space-y-3">
-          <div className="min-w-0 flex-1 space-y-3">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <p className="text-sm font-semibold text-foreground">Merkkit</p>
-                <p className="text-xs text-muted-foreground">Optioneel — vult hashtags, tone en CTA automatisch in.</p>
-              </div>
-              <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={openCreate}>
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                Nieuw
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Merkkit</p>
+            <p className="text-xs text-muted-foreground">
+              Kies een merkprofiel — hashtags, tone, CTA en AI-context worden automatisch ingevuld.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={openCreate}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Nieuw merkkit
+            </Button>
+            {selectedKit ? (
+              <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={() => openEdit(selectedKit)}>
+                Beheren
               </Button>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-              <Select value={selectedKit?.id || undefined} onValueChange={handleKitChange} disabled={disabled || !kits.length}>
-                <SelectTrigger className="h-10 bg-background/80">
-                  <SelectValue placeholder="Kies een merkkit" />
-                </SelectTrigger>
-                <SelectContent>
-                  {kits.map((kit) => (
-                    <SelectItem key={kit.id} value={kit.id}>
-                      <span className="flex items-center gap-2">
-                        <span
-                          className="h-3 w-3 rounded-full ring-1 ring-border/60"
-                          style={{ backgroundColor: kit.primaryColor || "#f9ae5a" }}
-                        />
-                        <span>{kit.name}</span>
-                        {kit.isDefault ? <Badge variant="secondary" className="text-[10px]">Standaard</Badge> : null}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {selectedKit ? (
-                <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={() => openEdit(selectedKit)}>
-                  Beheren
-                </Button>
-              ) : null}
-            </div>
-
-            {selectedKit?.companyName ? (
-              <p className="text-[11px] text-muted-foreground">{selectedKit.companyName}</p>
             ) : null}
           </div>
+        </div>
+
+        {kits.length ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {kits.map((kit) => (
+              <BrandKitCard
+                key={kit.id}
+                kit={kit}
+                selected={selectedKit?.id === kit.id}
+                disabled={disabled}
+                onSelect={() => handleKitChange(kit.id)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+            Nog geen merkkit. Maak er een aan of importeer vanuit je workspace-branding.
+          </div>
+        )}
+
+        {selectedKit && applyPreview ? (
+          <div className="rounded-xl border bg-gradient-to-br from-muted/20 to-amber-50/40 p-4 dark:from-muted/10 dark:to-amber-950/20">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <Sparkles className="h-3.5 w-3.5" />
+                Wordt toegepast op je post
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8"
+                disabled={disabled}
+                onClick={() => onApplyKit(applyPreview)}
+              >
+                <Wand2 className="mr-1.5 h-3.5 w-3.5" />
+                Opnieuw toepassen
+              </Button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <KitPreviewRow icon={Building2} label="Brand signature" value={applyPreview.brandSignature} />
+              <KitPreviewRow icon={Megaphone} label="Tone of voice" value={applyPreview.tone} />
+              <KitPreviewRow icon={Hash} label="Hashtags" value={applyPreview.hashtags} />
+              <KitPreviewRow icon={Sparkles} label="CTA" value={applyPreview.cta} />
+              <KitPreviewRow icon={Link2} label="Link" value={applyPreview.linkUrl} />
+              <KitPreviewRow icon={Wand2} label="AI-template" value={applyPreview.template} />
+            </div>
+            {!applyPreview.hashtags && !applyPreview.cta && !applyPreview.template ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Dit merkkit heeft nog weinig standaardvelden. Open <strong>Beheren</strong> om hashtags, CTA en AI-context in te stellen.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <CreateModal
         open={managerOpen}
         onOpenChange={setManagerOpen}
         title={editingId ? "Merkkit bewerken" : "Nieuw merkkit"}
-        description="Stel merknaam, tone of voice, standaardvelden en AI-context in voor Social Planner."
+        description="Stel merknaam, tone of voice en standaard postvelden in. Deze worden gebruikt in de Social Planner en AI-generatie."
         submitLabel={editingId ? "Opslaan" : "Merkkit aanmaken"}
+        submitDisabled={!form.name.trim()}
         pending={upsertKit.isPending}
+        asForm
         onSubmit={() => upsertKit.mutate({ id: editingId || undefined, ...form })}
+        contentClassName="max-w-2xl"
       >
-        <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-2 sm:col-span-2">
-              <Label>Naam</Label>
-              <Input value={form.name} onChange={(e) => setForm((c) => ({ ...c, name: e.target.value }))} placeholder="Bijv. Digitify hoofdmerk" />
-            </div>
-            <div className="space-y-2">
-              <Label>Bedrijfsnaam</Label>
-              <Input value={form.companyName} onChange={(e) => setForm((c) => ({ ...c, companyName: e.target.value }))} />
-            </div>
-            <div className="space-y-2">
-              <Label>Slogan</Label>
-              <Input value={form.slogan} onChange={(e) => setForm((c) => ({ ...c, slogan: e.target.value }))} />
-            </div>
-            <div className="space-y-2">
-              <Label>Primaire kleur</Label>
-              <div className="flex gap-2">
-                <Input type="color" className="h-10 w-14 px-1" value={form.primaryColor} onChange={(e) => setForm((c) => ({ ...c, primaryColor: e.target.value }))} />
-                <Input value={form.primaryColor} onChange={(e) => setForm((c) => ({ ...c, primaryColor: e.target.value }))} className="font-mono text-sm" />
+        <div className="max-h-[65vh] space-y-5 overflow-y-auto pr-1">
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={importFromWorkspace}>
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              Importeer workspace-branding
+            </Button>
+            <Button type="button" size="sm" variant="ghost" asChild>
+              <Link href="/settings/branding">Instellingen → Branding</Link>
+            </Button>
+          </div>
+
+          <div className="rounded-xl border bg-muted/10 p-4">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identiteit</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Naam merkkit *</Label>
+                <Input
+                  value={form.name}
+                  onChange={(e) => setForm((c) => ({ ...c, name: e.target.value }))}
+                  placeholder="Bijv. Digitify hoofdmerk"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Bedrijfsnaam</Label>
+                <Input value={form.companyName} onChange={(e) => setForm((c) => ({ ...c, companyName: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Slogan</Label>
+                <Input value={form.slogan} onChange={(e) => setForm((c) => ({ ...c, slogan: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Primaire kleur</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="color"
+                    className="h-10 w-14 px-1"
+                    value={form.primaryColor}
+                    onChange={(e) => setForm((c) => ({ ...c, primaryColor: e.target.value }))}
+                  />
+                  <Input
+                    value={form.primaryColor}
+                    onChange={(e) => setForm((c) => ({ ...c, primaryColor: e.target.value }))}
+                    className="font-mono text-sm"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Website</Label>
+                <Input value={form.website} onChange={(e) => setForm((c) => ({ ...c, website: e.target.value }))} placeholder="https://..." />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Logo</Label>
+                <div className="flex flex-wrap items-center gap-3">
+                  {form.logoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={form.logoUrl} alt="" className="h-14 w-14 rounded-lg border bg-white object-contain p-1" />
+                  ) : (
+                    <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-dashed text-[10px] text-muted-foreground">
+                      Geen logo
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Input
+                      value={form.logoUrl}
+                      onChange={(e) => setForm((c) => ({ ...c, logoUrl: e.target.value }))}
+                      placeholder="https://... of upload"
+                    />
+                    <input
+                      ref={logoInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) void uploadLogo(file);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={logoUploading}
+                      onClick={() => logoInputRef.current?.click()}
+                    >
+                      {logoUploading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}
+                      Logo uploaden
+                    </Button>
+                  </div>
+                </div>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>Website</Label>
-              <Input value={form.website} onChange={(e) => setForm((c) => ({ ...c, website: e.target.value }))} placeholder="https://..." />
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label>Logo URL</Label>
-              <Input value={form.logoUrl} onChange={(e) => setForm((c) => ({ ...c, logoUrl: e.target.value }))} placeholder="https://... of /uploads/..." />
-              <p className="text-xs text-muted-foreground">
-                Logo en algemene branding beheer je ook via{" "}
-                <Link href="/settings/branding" className="text-primary hover:underline">
-                  Instellingen → Branding
-                </Link>
-                .
-              </p>
+          </div>
+
+          <div className="rounded-xl border bg-muted/10 p-4">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">AI &amp; tone of voice</p>
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label>Merkomschrijving (AI-context)</Label>
+                <Textarea
+                  value={form.brandSummary}
+                  onChange={(e) => setForm((c) => ({ ...c, brandSummary: e.target.value }))}
+                  rows={3}
+                  placeholder="Wat doet je bedrijf, voor wie, en welke boodschap wil je uitdragen?"
+                />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Tone of voice (vrij)</Label>
+                  <Input value={form.brandVoice} onChange={(e) => setForm((c) => ({ ...c, brandVoice: e.target.value }))} placeholder="Bijv. warm, deskundig, Belgisch" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Standaard AI-tone</Label>
+                  <Select value={form.defaultTone} onValueChange={(value) => setForm((c) => ({ ...c, defaultTone: value }))}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SOCIAL_TONE_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label>Keywords</Label>
+                  <Input value={form.brandKeywords} onChange={(e) => setForm((c) => ({ ...c, brandKeywords: e.target.value }))} placeholder="kmo, marketing, belgië" />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label>Vermijd in content</Label>
+                  <Input value={form.brandAvoid} onChange={(e) => setForm((c) => ({ ...c, brandAvoid: e.target.value }))} placeholder="Bijv. goedkoop, agressieve sales" />
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Merkomschrijving (AI-context)</Label>
-            <Textarea value={form.brandSummary} onChange={(e) => setForm((c) => ({ ...c, brandSummary: e.target.value }))} rows={3} />
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Tone of voice</Label>
-              <Input value={form.brandVoice} onChange={(e) => setForm((c) => ({ ...c, brandVoice: e.target.value }))} />
-            </div>
-            <div className="space-y-2">
-              <Label>Standaard AI-tone</Label>
-              <Input value={form.defaultTone} onChange={(e) => setForm((c) => ({ ...c, defaultTone: e.target.value }))} />
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label>Keywords</Label>
-              <Input value={form.brandKeywords} onChange={(e) => setForm((c) => ({ ...c, brandKeywords: e.target.value }))} />
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label>Vermijd</Label>
-              <Input value={form.brandAvoid} onChange={(e) => setForm((c) => ({ ...c, brandAvoid: e.target.value }))} />
-            </div>
-          </div>
-
-          <div className="rounded-xl border bg-muted/15 p-3">
+          <div className="rounded-xl border bg-muted/10 p-4">
             <p className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               <Palette className="h-3.5 w-3.5" />
               Standaard postvelden
@@ -315,24 +612,28 @@ export function SocialBrandKitPicker({
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
                 <Label>Brand signature</Label>
-                <Input value={form.brandSignature} onChange={(e) => setForm((c) => ({ ...c, brandSignature: e.target.value }))} />
+                <Input value={form.brandSignature} onChange={(e) => setForm((c) => ({ ...c, brandSignature: e.target.value }))} placeholder="Digitify · digitale groei voor KMO's" />
               </div>
               <div className="space-y-2">
                 <Label>Standaard CTA</Label>
-                <Input value={form.defaultCta} onChange={(e) => setForm((c) => ({ ...c, defaultCta: e.target.value }))} />
+                <Input value={form.defaultCta} onChange={(e) => setForm((c) => ({ ...c, defaultCta: e.target.value }))} placeholder="Plan een gratis intake" />
               </div>
               <div className="space-y-2">
                 <Label>Standaard link</Label>
-                <Input value={form.defaultLinkUrl} onChange={(e) => setForm((c) => ({ ...c, defaultLinkUrl: e.target.value }))} />
+                <Input value={form.defaultLinkUrl} onChange={(e) => setForm((c) => ({ ...c, defaultLinkUrl: e.target.value }))} placeholder="https://..." />
               </div>
               <div className="space-y-2 sm:col-span-2">
                 <Label>Standaard hashtags</Label>
-                <Input value={form.defaultHashtags} onChange={(e) => setForm((c) => ({ ...c, defaultHashtags: e.target.value }))} placeholder="marketing belgie kmo" />
+                <Input
+                  value={form.defaultHashtags}
+                  onChange={(e) => setForm((c) => ({ ...c, defaultHashtags: e.target.value }))}
+                  placeholder="marketing belgie kmo digitalegroei"
+                />
               </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+          <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
             <div>
               <p className="text-sm font-medium">Logo meenemen in AI-beelden</p>
               <p className="text-xs text-muted-foreground">Gebruikt het logo als referentie bij beeldgeneratie.</p>

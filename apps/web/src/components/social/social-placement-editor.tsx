@@ -8,6 +8,11 @@ import { cn } from "@/lib/utils";
 import { Badge, Button, Input, Label } from "@digitify/ui";
 import { Film, ImageIcon, LayoutGrid, Loader2, Smartphone, Upload } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
+import {
+  isCarouselReady,
+  SocialCarouselEditor,
+  type SocialCarouselState,
+} from "./social-carousel-editor";
 
 export type SocialPlacement = "FEED" | "STORY" | "REEL";
 export type FeedAspectFormat = "SQUARE" | "PORTRAIT" | "LANDSCAPE";
@@ -224,9 +229,11 @@ function PlacementAssetField({
         </Badge>
       </div>
 
-      {placement === "REEL" ? (
+      {placement === "FEED" || placement === "REEL" ? (
         <div className="space-y-2">
-          <Label className="text-xs">Video (MP4, verplicht voor publicatie)</Label>
+          <Label className="text-xs">
+            {placement === "REEL" ? "Video (MP4, verplicht voor publicatie)" : "Video (optioneel — feed video post)"}
+          </Label>
           <div className="flex gap-2">
             <Input
               disabled={disabled}
@@ -257,8 +264,20 @@ function PlacementAssetField({
         </div>
       ) : null}
 
+      {placement === "FEED" && asset?.videoUrl?.trim() && !asset?.imageUrl?.trim() ? (
+        <p className="text-xs text-muted-foreground">
+          Alleen video geselecteerd — dit wordt een feed-videopost (geen carousel).
+        </p>
+      ) : null}
+
       <div className="space-y-2">
-        <Label className="text-xs">{placement === "REEL" ? "Cover-afbeelding (optioneel)" : "Afbeelding"}</Label>
+        <Label className="text-xs">
+          {placement === "REEL"
+            ? "Cover-afbeelding (optioneel)"
+            : placement === "FEED" && asset?.videoUrl?.trim() && !asset?.imageUrl?.trim()
+              ? "Cover-afbeelding (optioneel)"
+              : "Afbeelding"}
+        </Label>
         <div className="flex gap-2">
           <Input
             disabled={disabled}
@@ -308,20 +327,24 @@ export function SocialPlacementEditor({
   placements,
   feedFormat,
   assets,
+  carousel,
   disabled,
   targetInstagram,
   onPlacementsChange,
   onFeedFormatChange,
   onAssetsChange,
+  onCarouselChange,
 }: {
   placements: SocialPlacement[];
   feedFormat: FeedAspectFormat;
   assets: PlacementAssets;
+  carousel: SocialCarouselState;
   disabled?: boolean;
   targetInstagram: boolean;
   onPlacementsChange: (placements: SocialPlacement[]) => void;
   onFeedFormatChange: (format: FeedAspectFormat) => void;
   onAssetsChange: (assets: PlacementAssets) => void;
+  onCarouselChange: (carousel: SocialCarouselState) => void;
 }) {
   function togglePlacement(placement: SocialPlacement) {
     if (placements.includes(placement)) {
@@ -377,45 +400,82 @@ export function SocialPlacementEditor({
       </div>
 
       {placements.includes("FEED") ? (
-        <div className="space-y-2">
-          <Label>Feed-beeldverhouding</Label>
-          <div className="grid grid-cols-3 gap-2">
-            {FEED_FORMAT_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                disabled={disabled}
-                onClick={() => onFeedFormatChange(option.value)}
-                className={cn(
-                  "rounded-xl border p-2 text-left text-xs transition",
-                  feedFormat === option.value && "border-amber-500 bg-amber-50 dark:bg-amber-950/30",
-                )}
-              >
-                <span className="font-semibold">{option.label}</span>
-                <span className="mt-0.5 block text-[10px] text-muted-foreground">{option.description}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+        <>
+          <SocialCarouselEditor
+            carousel={carousel}
+            feedFormat={feedFormat}
+            disabled={disabled}
+            onChange={onCarouselChange}
+          />
+          {!carousel.enabled ? (
+            <div className="space-y-2">
+              <Label>Feed-beeldverhouding</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {FEED_FORMAT_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onFeedFormatChange(option.value)}
+                    className={cn(
+                      "rounded-xl border p-2 text-left text-xs transition",
+                      feedFormat === option.value && "border-amber-500 bg-amber-50 dark:bg-amber-950/30",
+                    )}
+                  >
+                    <span className="font-semibold">{option.label}</span>
+                    <span className="mt-0.5 block text-[10px] text-muted-foreground">{option.description}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       <div className="grid gap-3 lg:grid-cols-2">
-        {placements.map((placement) => (
-          <PlacementAssetField
-            key={placement}
-            placement={placement}
-            feedFormat={feedFormat}
-            asset={assets[placement]}
-            disabled={disabled}
-            onImageChange={(url) => updateAsset(placement, { imageUrl: url })}
-            onVideoChange={(url) => updateAsset(placement, { videoUrl: url })}
-          />
-        ))}
+        {placements.map((placement) => {
+          if (placement === "FEED" && carousel.enabled) return null;
+          return (
+            <PlacementAssetField
+              key={placement}
+              placement={placement}
+              feedFormat={feedFormat}
+              asset={assets[placement]}
+              disabled={disabled}
+              onImageChange={(url) => updateAsset(placement, { imageUrl: url })}
+              onVideoChange={(url) => updateAsset(placement, { videoUrl: url })}
+            />
+          );
+        })}
       </div>
     </div>
   );
 }
 
-export function resolvePrimaryImageFromAssets(assets: PlacementAssets) {
-  return assets.FEED?.imageUrl?.trim() || assets.STORY?.imageUrl?.trim() || assets.REEL?.imageUrl?.trim() || "";
+export function resolvePrimaryImageFromAssets(
+  assets: PlacementAssets,
+  carousel?: SocialCarouselState,
+) {
+  if (carousel?.enabled && carousel.slides[0]) {
+    const first = carousel.slides[0];
+    if (first.mediaType === "IMAGE") return first.imageUrl?.trim() || "";
+    return first.videoUrl?.trim() || "";
+  }
+
+  return (
+    assets.FEED?.imageUrl?.trim() ||
+    assets.FEED?.videoUrl?.trim() ||
+    assets.STORY?.imageUrl?.trim() ||
+    assets.REEL?.imageUrl?.trim() ||
+    assets.REEL?.videoUrl?.trim() ||
+    ""
+  );
 }
+
+export function isFeedMediaReady(assets: PlacementAssets, carousel: SocialCarouselState) {
+  if (carousel.enabled) return isCarouselReady(carousel);
+  const imageUrl = assets.FEED?.imageUrl?.trim();
+  const videoUrl = assets.FEED?.videoUrl?.trim();
+  return Boolean(imageUrl || videoUrl);
+}
+

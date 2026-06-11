@@ -4,16 +4,20 @@ import { OpenClawClient } from "@digitify/openclaw";
 import { z } from "zod";
 import { adminProcedure, protectedProcedure, aiRateLimitedProcedure, router, mutationProcedure } from "../trpc";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
-import { probeSocialImage, validateSocialImageForPublish } from "../lib/social-image";
+import { probeSocialImage, validateSocialImageForPublish, validateSocialVideoForPublish } from "../lib/social-image";
 import {
   clearMetaSettings,
   loadMetaManagedPages,
   loadMetaWorkspaceConfig,
+  publishFacebookCarouselPost,
   publishFacebookImagePost,
   publishFacebookImageStory,
+  publishFacebookVideoPost,
+  publishInstagramCarouselPost,
   publishInstagramImagePost,
   publishInstagramImageStory,
   publishInstagramReel,
+  publishInstagramVideoPost,
   resolveMetaOAuthScopeSummary,
   resolveSocialPublishTarget,
   type SocialPublishedRef,
@@ -23,12 +27,18 @@ import {
   workspaceScopeFromAuthenticatedUser,
 } from "../lib/social-meta";
 import {
+  CAROUSEL_MAX_SLIDES,
+  CAROUSEL_MIN_SLIDES,
+  normalizeCarousel,
+  normalizeCarouselMetadata,
   normalizeFeedFormat,
   normalizePlacementAssets,
   normalizePlacements,
   probeFormatForPlacement,
+  resolveFeedPublishKind,
   resolvePlacementImageUrl,
   resolvePrimaryImageUrl,
+  type SocialCarouselSlide,
   type SocialPlacement,
 } from "../lib/social-placements";
 import {
@@ -81,6 +91,18 @@ const socialPlacementAssetSchema = z.object({
   videoUrl: socialVideoUrlSchema.optional(),
 });
 
+const socialCarouselSlideSchema = z.object({
+  id: z.string().max(64).optional(),
+  mediaType: z.enum(["IMAGE", "VIDEO"]),
+  imageUrl: z.union([socialImageUrlSchema, z.literal("")]).optional(),
+  videoUrl: z.union([socialVideoUrlSchema, z.literal("")]).optional(),
+});
+
+const socialCarouselSchema = z.object({
+  enabled: z.boolean(),
+  slides: z.array(socialCarouselSlideSchema).max(CAROUSEL_MAX_SLIDES),
+});
+
 const socialPostMetadataSchema = z
   .object({
     headline: z.string().max(160).optional(),
@@ -104,6 +126,7 @@ const socialPostMetadataSchema = z
         REEL: socialPlacementAssetSchema.optional(),
       })
       .optional(),
+    carousel: socialCarouselSchema.optional(),
   })
   .optional();
 
@@ -156,6 +179,7 @@ function normalizeSocialMetadata(metadata?: z.infer<typeof socialPostMetadataSch
   const placements = normalizePlacements(metadata);
   const feedFormat = normalizeFeedFormat(metadata);
   const assets = normalizePlacementAssets(metadata);
+  const carousel = normalizeCarouselMetadata({ ...metadata, assets, placements, feedFormat });
   return {
     headline: cleanOptionalText(metadata.headline),
     cta: cleanOptionalText(metadata.cta),
@@ -172,6 +196,7 @@ function normalizeSocialMetadata(metadata?: z.infer<typeof socialPostMetadataSch
     publisherPageName: cleanOptionalText(metadata.publisherPageName),
     publisherInstagramUsername: cleanOptionalText(metadata.publisherInstagramUsername),
     assets,
+    carousel,
   };
 }
 
@@ -233,12 +258,72 @@ async function ensurePostCanPublish(
   }
 
   for (const placement of placements) {
+    if (placement === "FEED") {
+      const feedKind = resolveFeedPublishKind(metadata);
+      if (feedKind === "CAROUSEL") {
+        const carousel = normalizeCarousel(metadata);
+        if (!carousel.enabled || carousel.slides.length < CAROUSEL_MIN_SLIDES) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Carousel vereist minstens ${CAROUSEL_MIN_SLIDES} volledige slides met foto of video.`,
+          });
+        }
+        for (const slide of carousel.slides) {
+          if (slide.mediaType === "IMAGE" && slide.imageUrl) {
+            await validateSocialImageForPublish({
+              imageUrl: slide.imageUrl,
+              targetPlatforms: post.targetPlatforms,
+              placement: "FEED",
+            });
+          }
+          if (slide.mediaType === "VIDEO" && slide.videoUrl) {
+            try {
+              await validateSocialVideoForPublish(slide.videoUrl);
+            } catch (error) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: error instanceof Error ? error.message : "Carousel-video is ongeldig.",
+              });
+            }
+          }
+        }
+        continue;
+      }
+
+      if (feedKind === "VIDEO") {
+        const videoUrl = assets.FEED?.videoUrl?.trim();
+        if (!videoUrl) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Feed-video vereist een publieke MP4-video-URL.",
+          });
+        }
+        try {
+          await validateSocialVideoForPublish(videoUrl);
+        } catch (error) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: error instanceof Error ? error.message : "Feed-video is ongeldig.",
+          });
+        }
+        continue;
+      }
+    }
+
     if (placement === "REEL") {
       const videoUrl = assets.REEL?.videoUrl?.trim();
       if (!videoUrl) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Reel vereist een publieke MP4-video-URL.",
+        });
+      }
+      try {
+        await validateSocialVideoForPublish(videoUrl);
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: error instanceof Error ? error.message : "Reel-video is ongeldig.",
         });
       }
       const coverUrl = resolvePlacementImageUrl("REEL", metadata, post.imageUrl);
@@ -407,23 +492,67 @@ async function publishSocialPostRecord(db: PrismaClient, post: SocialPostRecord)
 
   for (const placement of placements) {
     if (placement === "FEED") {
-      const imageUrl = resolvePlacementImageUrl("FEED", metadata, post.imageUrl);
       const publishCaption = buildPublishedCaption(post.caption, metadata, "FEED");
-      if (post.targetPlatforms.includes("FACEBOOK")) {
-        externalIds.facebook = await publishFacebookImagePost({
-          pageId: publishTarget.pageId,
-          pageAccessToken: publishTarget.pageAccessToken,
-          caption: publishCaption,
-          imageUrl,
-        });
-      }
-      if (post.targetPlatforms.includes("INSTAGRAM")) {
-        externalIds.instagram = await publishInstagramImagePost({
-          instagramBusinessId: publishTarget.instagramBusinessId,
-          pageAccessToken: publishTarget.pageAccessToken,
-          caption: publishCaption,
-          imageUrl,
-        });
+      const feedKind = resolveFeedPublishKind(metadata);
+      const carouselSlides = normalizeCarousel(metadata).slides as SocialCarouselSlide[];
+
+      if (feedKind === "CAROUSEL") {
+        if (!carouselSlides.length || carouselSlides.length < CAROUSEL_MIN_SLIDES) {
+          throw new Error(`Carousel vereist minstens ${CAROUSEL_MIN_SLIDES} volledige slides.`);
+        }
+        if (post.targetPlatforms.includes("FACEBOOK")) {
+          externalIds.facebookCarousel = await publishFacebookCarouselPost({
+            pageId: publishTarget.pageId,
+            pageAccessToken: publishTarget.pageAccessToken,
+            caption: publishCaption,
+            slides: carouselSlides,
+          });
+        }
+        if (post.targetPlatforms.includes("INSTAGRAM")) {
+          externalIds.instagramCarousel = await publishInstagramCarouselPost({
+            instagramBusinessId: publishTarget.instagramBusinessId,
+            pageAccessToken: publishTarget.pageAccessToken,
+            caption: publishCaption,
+            slides: carouselSlides,
+          });
+        }
+      } else if (feedKind === "VIDEO") {
+        const videoUrl = assets.FEED?.videoUrl?.trim() || "";
+        if (!videoUrl) throw new Error("Feed-video ontbreekt.");
+        if (post.targetPlatforms.includes("FACEBOOK")) {
+          externalIds.facebook = await publishFacebookVideoPost({
+            pageId: publishTarget.pageId,
+            pageAccessToken: publishTarget.pageAccessToken,
+            caption: publishCaption,
+            videoUrl,
+          });
+        }
+        if (post.targetPlatforms.includes("INSTAGRAM")) {
+          externalIds.instagram = await publishInstagramVideoPost({
+            instagramBusinessId: publishTarget.instagramBusinessId,
+            pageAccessToken: publishTarget.pageAccessToken,
+            caption: publishCaption,
+            videoUrl,
+          });
+        }
+      } else {
+        const imageUrl = resolvePlacementImageUrl("FEED", metadata, post.imageUrl);
+        if (post.targetPlatforms.includes("FACEBOOK")) {
+          externalIds.facebook = await publishFacebookImagePost({
+            pageId: publishTarget.pageId,
+            pageAccessToken: publishTarget.pageAccessToken,
+            caption: publishCaption,
+            imageUrl,
+          });
+        }
+        if (post.targetPlatforms.includes("INSTAGRAM")) {
+          externalIds.instagram = await publishInstagramImagePost({
+            instagramBusinessId: publishTarget.instagramBusinessId,
+            pageAccessToken: publishTarget.pageAccessToken,
+            caption: publishCaption,
+            imageUrl,
+          });
+        }
       }
     }
 

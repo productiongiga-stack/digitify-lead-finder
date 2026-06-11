@@ -1,9 +1,23 @@
 export type SocialPlacement = "FEED" | "STORY" | "REEL";
 export type FeedAspectFormat = "SQUARE" | "PORTRAIT" | "LANDSCAPE";
+export type SocialCarouselSlideMediaType = "IMAGE" | "VIDEO";
+export type FeedPublishKind = "IMAGE" | "VIDEO" | "CAROUSEL";
 
 export type SocialPlacementAsset = {
   imageUrl?: string;
   videoUrl?: string;
+};
+
+export type SocialCarouselSlide = {
+  id?: string;
+  mediaType: SocialCarouselSlideMediaType;
+  imageUrl?: string;
+  videoUrl?: string;
+};
+
+export type SocialCarouselSpec = {
+  enabled: boolean;
+  slides: SocialCarouselSlide[];
 };
 
 export type SocialPlacementsMetadata = {
@@ -19,7 +33,11 @@ export type SocialPlacementsMetadata = {
   placements?: SocialPlacement[];
   feedFormat?: FeedAspectFormat;
   assets?: Partial<Record<SocialPlacement, SocialPlacementAsset>>;
+  carousel?: SocialCarouselSpec;
 };
+
+export const CAROUSEL_MIN_SLIDES = 2;
+export const CAROUSEL_MAX_SLIDES = 10;
 
 const PLACEMENT_ORDER: SocialPlacement[] = ["FEED", "STORY", "REEL"];
 
@@ -61,11 +79,67 @@ export function resolvePlacementImageUrl(
   return "";
 }
 
+export function normalizeCarouselMetadata(metadata?: SocialPlacementsMetadata | null): SocialCarouselSpec {
+  const carousel = metadata?.carousel;
+  if (!carousel?.enabled) {
+    return { enabled: false, slides: [] };
+  }
+
+  return {
+    enabled: true,
+    slides: (carousel.slides || []).slice(0, CAROUSEL_MAX_SLIDES).map((slide, index) => ({
+      id: slide.id?.trim() || `slide_${index + 1}`,
+      mediaType: slide.mediaType,
+      imageUrl: slide.imageUrl?.trim() || undefined,
+      videoUrl: slide.videoUrl?.trim() || undefined,
+    })),
+  };
+}
+
+export function normalizeCarousel(metadata?: SocialPlacementsMetadata | null): SocialCarouselSpec {
+  const carousel = normalizeCarouselMetadata(metadata);
+  if (!carousel.enabled) return carousel;
+
+  const slides = carousel.slides.filter((slide) =>
+    slide.mediaType === "IMAGE" ? Boolean(slide.imageUrl) : Boolean(slide.videoUrl),
+  );
+
+  return {
+    enabled: slides.length >= CAROUSEL_MIN_SLIDES,
+    slides,
+  };
+}
+
+export function isCarouselFeed(metadata?: SocialPlacementsMetadata | null) {
+  const carousel = normalizeCarousel(metadata);
+  return carousel.enabled && carousel.slides.length >= CAROUSEL_MIN_SLIDES;
+}
+
+export function resolveFeedPublishKind(metadata?: SocialPlacementsMetadata | null): FeedPublishKind {
+  if (metadata?.carousel?.enabled) return "CAROUSEL";
+  if (isCarouselFeed(metadata)) return "CAROUSEL";
+
+  const assets = normalizePlacementAssets(metadata);
+  const feedVideo = assets.FEED?.videoUrl?.trim();
+  const feedImage = assets.FEED?.imageUrl?.trim();
+  if (feedVideo && !feedImage) return "VIDEO";
+  return "IMAGE";
+}
+
 export function resolvePrimaryImageUrl(metadata?: SocialPlacementsMetadata | null, fallbackImageUrl?: string) {
+  const carousel = normalizeCarousel(metadata);
+  if (carousel.enabled && carousel.slides[0]) {
+    const first = carousel.slides[0];
+    if (first.mediaType === "IMAGE") return first.imageUrl || "";
+    return first.videoUrl || "";
+  }
+
   for (const placement of PLACEMENT_ORDER) {
     const url = resolvePlacementImageUrl(placement, metadata, fallbackImageUrl);
     if (url) return url;
   }
+  const feedVideo = metadata?.assets?.FEED?.videoUrl?.trim();
+  if (feedVideo) return feedVideo;
   const reelVideo = metadata?.assets?.REEL?.videoUrl?.trim();
   if (reelVideo) return reelVideo;
   return fallbackImageUrl?.trim() || "";

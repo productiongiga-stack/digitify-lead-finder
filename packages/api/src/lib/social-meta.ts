@@ -576,10 +576,20 @@ export async function publishFacebookImageStory(params: {
   pageAccessToken: string;
   imageUrl: string;
 }): Promise<SocialPublishedRef> {
-  const response = (await metaPost(`${params.pageId}/photo_stories`, {
+  const uploaded = (await metaPost(`${params.pageId}/photos`, {
     access_token: params.pageAccessToken,
     url: params.imageUrl,
-    published: "true",
+    published: "false",
+  })) as { id?: string };
+
+  const photoId = uploaded.id?.trim() || "";
+  if (!photoId) {
+    throw new Error("Facebook Story foto kon niet worden geüpload.");
+  }
+
+  const response = (await metaPost(`${params.pageId}/photo_stories`, {
+    access_token: params.pageAccessToken,
+    photo_id: photoId,
   })) as { post_id?: string; id?: string; success?: boolean };
 
   const postId = response.post_id || response.id || "";
@@ -591,7 +601,7 @@ export async function publishFacebookImageStory(params: {
     return verifyFacebookPublishedPost({ postId, pageAccessToken: params.pageAccessToken });
   }
 
-  return { id: "facebook_story_published", verified: Boolean(response.success) };
+  return { id: photoId, verified: Boolean(response.success) };
 }
 
 export async function publishInstagramImagePost(params: {
@@ -649,6 +659,222 @@ export async function publishInstagramImageStory(params: {
 
   const mediaId = published.id || "";
   if (!mediaId) throw new Error("Instagram Story gaf geen media-ID terug na publicatie.");
+
+  return verifyInstagramPublishedMedia({ mediaId, pageAccessToken: params.pageAccessToken });
+}
+
+export type SocialCarouselPublishSlide = {
+  mediaType: "IMAGE" | "VIDEO";
+  imageUrl?: string;
+  videoUrl?: string;
+};
+
+export async function publishFacebookVideoPost(params: {
+  pageId: string;
+  pageAccessToken: string;
+  caption: string;
+  videoUrl: string;
+}): Promise<SocialPublishedRef> {
+  const response = (await metaPost(`${params.pageId}/videos`, {
+    access_token: params.pageAccessToken,
+    file_url: params.videoUrl,
+    description: params.caption,
+    published: "true",
+  })) as { id?: string };
+
+  const videoId = response.id?.trim() || "";
+  if (!videoId) throw new Error("Facebook gaf geen video-ID terug na publicatie.");
+
+  return { id: videoId, verified: true };
+}
+
+export async function publishInstagramVideoPost(params: {
+  instagramBusinessId: string;
+  pageAccessToken: string;
+  caption: string;
+  videoUrl: string;
+}): Promise<SocialPublishedRef> {
+  const created = (await metaPost(`${params.instagramBusinessId}/media`, {
+    access_token: params.pageAccessToken,
+    video_url: params.videoUrl,
+    media_type: "VIDEO",
+    caption: params.caption,
+  })) as { id?: string };
+
+  if (!created.id) throw new Error("Instagram video container kon niet worden aangemaakt.");
+
+  await waitForInstagramMediaContainer({
+    containerId: created.id,
+    pageAccessToken: params.pageAccessToken,
+    maxWaitMs: 300_000,
+    pollIntervalMs: 5_000,
+  });
+
+  const published = (await metaPost(`${params.instagramBusinessId}/media_publish`, {
+    access_token: params.pageAccessToken,
+    creation_id: created.id,
+  })) as { id?: string };
+
+  const mediaId = published.id || "";
+  if (!mediaId) throw new Error("Instagram gaf geen media-ID terug na video-publicatie.");
+
+  return verifyInstagramPublishedMedia({ mediaId, pageAccessToken: params.pageAccessToken });
+}
+
+async function uploadFacebookCarouselMedia(params: {
+  pageId: string;
+  pageAccessToken: string;
+  slide: SocialCarouselPublishSlide;
+}) {
+  if (params.slide.mediaType === "IMAGE") {
+    const imageUrl = params.slide.imageUrl?.trim();
+    if (!imageUrl) throw new Error("Carousel-foto ontbreekt.");
+
+    const uploaded = (await metaPost(`${params.pageId}/photos`, {
+      access_token: params.pageAccessToken,
+      url: imageUrl,
+      published: "false",
+    })) as { id?: string };
+
+    const mediaId = uploaded.id?.trim() || "";
+    if (!mediaId) throw new Error("Facebook carousel-foto kon niet worden geüpload.");
+    return mediaId;
+  }
+
+  const videoUrl = params.slide.videoUrl?.trim();
+  if (!videoUrl) throw new Error("Carousel-video ontbreekt.");
+
+  const uploaded = (await metaPost(`${params.pageId}/videos`, {
+    access_token: params.pageAccessToken,
+    file_url: videoUrl,
+    published: "false",
+  })) as { id?: string };
+
+  const mediaId = uploaded.id?.trim() || "";
+  if (!mediaId) throw new Error("Facebook carousel-video kon niet worden geüpload.");
+  return mediaId;
+}
+
+export async function publishFacebookCarouselPost(params: {
+  pageId: string;
+  pageAccessToken: string;
+  caption: string;
+  slides: SocialCarouselPublishSlide[];
+}): Promise<SocialPublishedRef> {
+  if (params.slides.length < 2) {
+    throw new Error("Carousel vereist minstens 2 slides.");
+  }
+
+  const mediaIds: string[] = [];
+  for (const slide of params.slides) {
+    mediaIds.push(
+      await uploadFacebookCarouselMedia({
+        pageId: params.pageId,
+        pageAccessToken: params.pageAccessToken,
+        slide,
+      }),
+    );
+  }
+
+  const body: Record<string, string | undefined> = {
+    access_token: params.pageAccessToken,
+    message: params.caption,
+  };
+  mediaIds.forEach((mediaId, index) => {
+    body[`attached_media[${index}]`] = JSON.stringify({ media_fbid: mediaId });
+  });
+
+  const response = (await metaPost(`${params.pageId}/feed`, body)) as { id?: string };
+  const postId = response.id?.trim() || "";
+  if (!postId) throw new Error("Facebook carousel gaf geen post-ID terug na publicatie.");
+
+  return verifyFacebookPublishedPost({ postId, pageAccessToken: params.pageAccessToken });
+}
+
+async function createInstagramCarouselChildContainer(params: {
+  instagramBusinessId: string;
+  pageAccessToken: string;
+  slide: SocialCarouselPublishSlide;
+}) {
+  if (params.slide.mediaType === "IMAGE") {
+    const imageUrl = params.slide.imageUrl?.trim();
+    if (!imageUrl) throw new Error("Carousel-foto ontbreekt.");
+
+    const created = (await metaPost(`${params.instagramBusinessId}/media`, {
+      access_token: params.pageAccessToken,
+      image_url: imageUrl,
+      is_carousel_item: "true",
+    })) as { id?: string };
+
+    if (!created.id) throw new Error("Instagram carousel-foto container kon niet worden aangemaakt.");
+    return created.id;
+  }
+
+  const videoUrl = params.slide.videoUrl?.trim();
+  if (!videoUrl) throw new Error("Carousel-video ontbreekt.");
+
+  const created = (await metaPost(`${params.instagramBusinessId}/media`, {
+    access_token: params.pageAccessToken,
+    video_url: videoUrl,
+    media_type: "VIDEO",
+    is_carousel_item: "true",
+  })) as { id?: string };
+
+  if (!created.id) throw new Error("Instagram carousel-video container kon niet worden aangemaakt.");
+  return created.id;
+}
+
+export async function publishInstagramCarouselPost(params: {
+  instagramBusinessId: string;
+  pageAccessToken: string;
+  caption: string;
+  slides: SocialCarouselPublishSlide[];
+}): Promise<SocialPublishedRef> {
+  if (params.slides.length < 2) {
+    throw new Error("Carousel vereist minstens 2 slides.");
+  }
+
+  const childIds: string[] = [];
+  for (const slide of params.slides) {
+    const childId = await createInstagramCarouselChildContainer({
+      instagramBusinessId: params.instagramBusinessId,
+      pageAccessToken: params.pageAccessToken,
+      slide,
+    });
+
+    await waitForInstagramMediaContainer({
+      containerId: childId,
+      pageAccessToken: params.pageAccessToken,
+      maxWaitMs: slide.mediaType === "VIDEO" ? 300_000 : 120_000,
+      pollIntervalMs: slide.mediaType === "VIDEO" ? 5_000 : 3_000,
+    });
+
+    childIds.push(childId);
+  }
+
+  const parent = (await metaPost(`${params.instagramBusinessId}/media`, {
+    access_token: params.pageAccessToken,
+    media_type: "CAROUSEL",
+    children: childIds.join(","),
+    caption: params.caption,
+  })) as { id?: string };
+
+  if (!parent.id) throw new Error("Instagram carousel container kon niet worden aangemaakt.");
+
+  await waitForInstagramMediaContainer({
+    containerId: parent.id,
+    pageAccessToken: params.pageAccessToken,
+    maxWaitMs: 120_000,
+    pollIntervalMs: 3_000,
+  });
+
+  const published = (await metaPost(`${params.instagramBusinessId}/media_publish`, {
+    access_token: params.pageAccessToken,
+    creation_id: parent.id,
+  })) as { id?: string };
+
+  const mediaId = published.id || "";
+  if (!mediaId) throw new Error("Instagram carousel gaf geen media-ID terug na publicatie.");
 
   return verifyInstagramPublishedMedia({ mediaId, pageAccessToken: params.pageAccessToken });
 }
