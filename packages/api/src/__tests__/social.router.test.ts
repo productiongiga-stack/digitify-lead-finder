@@ -176,6 +176,34 @@ describe("social router flow", () => {
   });
 });
 
+function makePublishWorkerDb(post: Record<string, unknown>, options?: { lockFails?: boolean }) {
+  const socialPostUpdate = vi.fn().mockResolvedValue({});
+  const socialPostFindUnique = vi.fn().mockResolvedValue(post);
+  const socialPostFindMany = vi.fn(async (args: { where?: { status?: string } }) => {
+    if (args?.where?.status === "PUBLISHING") return [];
+    return [post];
+  });
+  const socialPostUpdateMany = vi.fn(async (args: { data?: { status?: string } }) => {
+    if (args?.data?.status === "PUBLISHING") {
+      return { count: options?.lockFails ? 0 : 1 };
+    }
+    return { count: 0 };
+  });
+
+  return {
+    db: {
+      socialPost: {
+        findMany: socialPostFindMany,
+        findUnique: socialPostFindUnique,
+        update: socialPostUpdate,
+        updateMany: socialPostUpdateMany,
+      },
+      activity: { create: vi.fn().mockResolvedValue({ id: "act_worker" }) },
+    },
+    socialPostUpdate,
+  };
+}
+
 describe("social publish worker", () => {
   beforeEach(() => {
     mockedMeta.loadMetaWorkspaceConfig.mockReset();
@@ -204,8 +232,7 @@ describe("social publish worker", () => {
       retryCount: 1,
     };
 
-    const socialPostFindMany = vi.fn().mockResolvedValue([post]);
-    const socialPostUpdate = vi.fn().mockResolvedValue({});
+    const { db, socialPostUpdate } = makePublishWorkerDb(post);
 
     mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
       appId: "1",
@@ -227,14 +254,7 @@ describe("social publish worker", () => {
     });
     mockedMeta.publishFacebookImagePost.mockRejectedValue(new Error("Meta publish failed"));
 
-    const result = await runDueSocialPostsWorker({
-      socialPost: {
-        findMany: socialPostFindMany,
-        update: socialPostUpdate,
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-      },
-      activity: { create: vi.fn().mockResolvedValue({ id: "act_2" }) },
-    } as any);
+    const result = await runDueSocialPostsWorker(db as any);
 
     expect(result.due).toBe(1);
     expect(result.failed).toBe(1);
@@ -262,8 +282,7 @@ describe("social publish worker", () => {
       metadata: { placements: ["FEED"], feedFormat: "SQUARE" },
     };
 
-    const socialPostFindMany = vi.fn().mockResolvedValue([post]);
-    const socialPostUpdate = vi.fn().mockResolvedValue({});
+    const { db, socialPostUpdate } = makePublishWorkerDb(post);
 
     mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
       appId: "1",
@@ -294,14 +313,7 @@ describe("social publish worker", () => {
       verified: true,
     });
 
-    const result = await runDueSocialPostsWorker({
-      socialPost: {
-        findMany: socialPostFindMany,
-        update: socialPostUpdate,
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-      },
-      activity: { create: vi.fn().mockResolvedValue({ id: "act_feed" }) },
-    } as any);
+    const result = await runDueSocialPostsWorker(db as any);
 
     expect(result.published).toBe(1);
     expect(mockedMeta.publishFacebookImagePost).toHaveBeenCalledWith(
@@ -333,8 +345,7 @@ describe("social publish worker", () => {
       },
     };
 
-    const socialPostFindMany = vi.fn().mockResolvedValue([post]);
-    const socialPostUpdate = vi.fn().mockResolvedValue({});
+    const { db } = makePublishWorkerDb(post);
 
     mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
       appId: "1",
@@ -360,14 +371,7 @@ describe("social publish worker", () => {
       verified: true,
     });
 
-    const result = await runDueSocialPostsWorker({
-      socialPost: {
-        findMany: socialPostFindMany,
-        update: socialPostUpdate,
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-      },
-      activity: { create: vi.fn().mockResolvedValue({ id: "act_reel" }) },
-    } as any);
+    const result = await runDueSocialPostsWorker(db as any);
 
     expect(result.published).toBe(1);
     expect(mockedMeta.publishInstagramReel).toHaveBeenCalledWith(
@@ -405,8 +409,7 @@ describe("social publish worker", () => {
       },
     };
 
-    const socialPostFindMany = vi.fn().mockResolvedValue([post]);
-    const socialPostUpdate = vi.fn().mockResolvedValue({});
+    const { db } = makePublishWorkerDb(post);
 
     mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
       appId: "1",
@@ -437,14 +440,7 @@ describe("social publish worker", () => {
       verified: true,
     });
 
-    const result = await runDueSocialPostsWorker({
-      socialPost: {
-        findMany: socialPostFindMany,
-        update: socialPostUpdate,
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-      },
-      activity: { create: vi.fn().mockResolvedValue({ id: "act_carousel" }) },
-    } as any);
+    const result = await runDueSocialPostsWorker(db as any);
 
     expect(result.published).toBe(1);
     expect(mockedMeta.publishFacebookCarouselPost).toHaveBeenCalledWith(
@@ -479,8 +475,7 @@ describe("social publish worker", () => {
       },
     };
 
-    const socialPostFindMany = vi.fn().mockResolvedValue([post]);
-    const socialPostUpdate = vi.fn().mockResolvedValue({});
+    const { db } = makePublishWorkerDb(post);
 
     mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
       appId: "1",
@@ -507,14 +502,7 @@ describe("social publish worker", () => {
       verified: true,
     });
 
-    const result = await runDueSocialPostsWorker({
-      socialPost: {
-        findMany: socialPostFindMany,
-        update: socialPostUpdate,
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-      },
-      activity: { create: vi.fn().mockResolvedValue({ id: "act_feed_video" }) },
-    } as any);
+    const result = await runDueSocialPostsWorker(db as any);
 
     expect(result.published).toBe(1);
     expect(mockedMeta.publishFacebookVideoPost).toHaveBeenCalledWith(
@@ -539,8 +527,7 @@ describe("social publish worker", () => {
       metadata: { postFormat: "STORY" },
     };
 
-    const socialPostFindMany = vi.fn().mockResolvedValue([post]);
-    const socialPostUpdate = vi.fn().mockResolvedValue({});
+    const { db, socialPostUpdate } = makePublishWorkerDb(post);
 
     mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
       appId: "1",
@@ -571,14 +558,7 @@ describe("social publish worker", () => {
       verified: true,
     });
 
-    const result = await runDueSocialPostsWorker({
-      socialPost: {
-        findMany: socialPostFindMany,
-        update: socialPostUpdate,
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-      },
-      activity: { create: vi.fn().mockResolvedValue({ id: "act_story" }) },
-    } as any);
+    const result = await runDueSocialPostsWorker(db as any);
 
     expect(result.published).toBe(1);
     expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
@@ -600,5 +580,28 @@ describe("social publish worker", () => {
         }),
       }),
     );
+  });
+
+  it("does not republish when external ids already exist", async () => {
+    const post = {
+      id: "sp_locked",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Already live",
+      imageUrl: "https://example.com/x.jpg",
+      targetPlatforms: ["FACEBOOK"],
+      status: "FAILED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 1,
+      externalPostIds: {
+        facebook: { id: "fb_existing", verified: true },
+      },
+    };
+
+    const { db } = makePublishWorkerDb(post);
+    const result = await runDueSocialPostsWorker(db as any);
+
+    expect(result.published).toBe(1);
+    expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
   });
 });

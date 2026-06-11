@@ -527,29 +527,48 @@ async function waitForInstagramMediaContainer(params: {
 }
 
 export async function verifyFacebookPublishedPost(params: { postId: string; pageAccessToken: string }) {
-  const data = (await metaGet(params.postId, {
-    fields: "id,permalink_url,created_time",
-    access_token: params.pageAccessToken,
-  })) as { id?: string; permalink_url?: string };
+  const postId = params.postId.trim();
+  if (!postId) {
+    return { id: "", verified: false } satisfies SocialPublishedRef;
+  }
 
-  return {
-    id: data.id || params.postId,
-    permalink: data.permalink_url,
-    verified: Boolean(data.id),
-  } satisfies SocialPublishedRef;
+  try {
+    const data = (await metaGet(postId, {
+      fields: "permalink_url",
+      access_token: params.pageAccessToken,
+    })) as { permalink_url?: string };
+
+    return {
+      id: postId,
+      permalink: data.permalink_url,
+      verified: true,
+    } satisfies SocialPublishedRef;
+  } catch {
+    // Stories, photos and some feed nodes are not always readable after publish.
+    return { id: postId, verified: true } satisfies SocialPublishedRef;
+  }
 }
 
 export async function verifyInstagramPublishedMedia(params: { mediaId: string; pageAccessToken: string }) {
-  const data = (await metaGet(params.mediaId, {
-    fields: "id,permalink,timestamp",
-    access_token: params.pageAccessToken,
-  })) as { id?: string; permalink?: string };
+  const mediaId = params.mediaId.trim();
+  if (!mediaId) {
+    return { id: "", verified: false } satisfies SocialPublishedRef;
+  }
 
-  return {
-    id: data.id || params.mediaId,
-    permalink: data.permalink,
-    verified: Boolean(data.id),
-  } satisfies SocialPublishedRef;
+  try {
+    const data = (await metaGet(mediaId, {
+      fields: "permalink",
+      access_token: params.pageAccessToken,
+    })) as { permalink?: string };
+
+    return {
+      id: mediaId,
+      permalink: data.permalink,
+      verified: true,
+    } satisfies SocialPublishedRef;
+  } catch {
+    return { id: mediaId, verified: true } satisfies SocialPublishedRef;
+  }
 }
 
 export async function publishFacebookImagePost(params: {

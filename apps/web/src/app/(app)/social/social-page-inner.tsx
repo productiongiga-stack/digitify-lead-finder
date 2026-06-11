@@ -723,7 +723,9 @@ export function SocialPageInner() {
 
   const rows = useMemo(() => listQuery.data?.items ?? [], [listQuery.data?.items]);
   const selected = rows.find((row: any) => row.id === selectedId) || null;
-  const canEditSelected = !selected || ["DRAFT", "FAILED", "CANCELLED"].includes(selected.status);
+  const canEditSelected =
+    !selected || ["DRAFT", "FAILED", "CANCELLED", "SCHEDULED", "PENDING_APPROVAL"].includes(selected.status);
+  const isPublishedLocked = selected?.status === "PUBLISHED";
 
   const stats = useMemo(() => {
     const pending = rows.filter((row: any) => row.status === "PENDING_APPROVAL").length;
@@ -856,6 +858,14 @@ export function SocialPageInner() {
     onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
   });
 
+  const updateQueuedPost = trpc.social.updateQueuedPost.useMutation({
+    onSuccess: async () => {
+      await listQuery.refetch();
+      showToast({ title: "Post bijgewerkt", description: "Wijzigingen opgeslagen in de wachtrij." });
+    },
+    onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
+  });
+
   const submitApproval = trpc.social.submitForApproval.useMutation({
     onSuccess: async () => {
       await listQuery.refetch();
@@ -956,13 +966,25 @@ export function SocialPageInner() {
       showToast({ title: "Publiceren mislukt", description: error.message, variant: "error" }),
   });
 
+  const [publishingPostId, setPublishingPostId] = useState<string | null>(null);
+
   const publishPostNow = trpc.social.publishPostNow.useMutation({
     onSuccess: async () => {
+      setPublishingPostId(null);
       await listQuery.refetch();
       showToast({ title: "Post live op Meta", description: "Publicatie bevestigd." });
     },
-    onError: (error) =>
-      showToast({ title: "Publiceren mislukt", description: error.message, variant: "error" }),
+    onError: (error) => {
+      setPublishingPostId(null);
+      const message = error.message;
+      const alreadyLive = /al live|al gepubliceerd|wordt al gepubliceerd/i.test(message);
+      showToast({
+        title: alreadyLive ? "Post al live" : "Publiceren mislukt",
+        description: message,
+        variant: alreadyLive ? "default" : "error",
+      });
+      void listQuery.refetch();
+    },
   });
 
   useEffect(() => {
@@ -1296,8 +1318,31 @@ export function SocialPageInner() {
         });
       }
 
+      if (isPublishedLocked) {
+        showToast({
+          title: "Post vergrendeld",
+          description: "Deze post is al live op Meta en kan niet meer bewerkt worden.",
+          variant: "error",
+        });
+        return selected;
+      }
+
+      if (selected.status === "SCHEDULED" || selected.status === "PENDING_APPROVAL") {
+        return updateQueuedPost.mutateAsync({
+          id: selected.id,
+          caption: caption.trim(),
+          imageUrl: persistedImageUrl.trim(),
+          targetPlatforms: targets,
+          metadata: persistedMetadata,
+        });
+      }
+
       if (!canEditSelected) {
-        showToast({ title: "Niet bewerkbaar", description: "Deze post is al ingediend of ingepland. Maak een nieuw draft voor wijzigingen.", variant: "error" });
+        showToast({
+          title: "Niet bewerkbaar",
+          description: "Deze post kan niet meer bewerkt worden.",
+          variant: "error",
+        });
         return selected;
       }
 
@@ -1420,6 +1465,7 @@ export function SocialPageInner() {
   const isBusy =
     createDraft.isPending ||
     updateDraft.isPending ||
+    updateQueuedPost.isPending ||
     submitApproval.isPending ||
     approveAndSchedule.isPending ||
     rejectPost.isPending ||
@@ -1952,8 +1998,12 @@ export function SocialPageInner() {
               onOpenComposer={() => handleTabChange("composer")}
               onOpenRow={loadRow}
               onRetry={(rowId) => retryFailed.mutate({ id: rowId })}
-              onPublishNow={(rowId) => publishPostNow.mutate({ id: rowId })}
-              publishNowPending={publishPostNow.isPending}
+              onPublishNow={(rowId) => {
+                if (publishPostNow.isPending || publishingPostId) return;
+                setPublishingPostId(rowId);
+                publishPostNow.mutate({ id: rowId });
+              }}
+              publishingPostId={publishingPostId}
               onCancel={(rowId) => cancelScheduled.mutate({ id: rowId })}
             />
           ) : null}

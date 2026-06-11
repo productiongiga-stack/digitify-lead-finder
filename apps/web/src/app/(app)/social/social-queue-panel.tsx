@@ -119,6 +119,13 @@ function explainMetaError(message: string) {
       description: "Koppel Meta opnieuw via Integraties en controleer of de app de juiste Pages/Instagram publishing scopes heeft.",
     };
   }
+  if (/code\s+100|nonexisting field/i.test(message)) {
+    return {
+      title: "Post waarschijnlijk wel live",
+      description:
+        "Meta gaf een leesfout terug na publicatie. Controleer je pagina op Meta — de post staat vaak al online. Gebruik niet opnieuw publiceren.",
+    };
+  }
   return {
     title: "Publicatiefout",
     description: "Controleer de post-inhoud, afbeeldingen en Meta-koppeling.",
@@ -136,7 +143,7 @@ export type SocialQueuePanelProps = {
   onOpenRow: (row: QueueRow) => void;
   onRetry: (id: string) => void;
   onPublishNow?: (id: string) => void;
-  publishNowPending?: boolean;
+  publishingPostId?: string | null;
   onCancel: (id: string) => void;
 };
 
@@ -151,7 +158,7 @@ export function SocialQueuePanel({
   onOpenRow,
   onRetry,
   onPublishNow,
-  publishNowPending = false,
+  publishingPostId = null,
   onCancel,
 }: SocialQueuePanelProps) {
   return (
@@ -267,15 +274,21 @@ export function SocialQueuePanel({
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button size="sm" variant="outline" onClick={() => onOpenRow(row)}>
-                        Open
+                        {["SCHEDULED", "PENDING_APPROVAL", "FAILED"].includes(row.status) ? "Bewerken" : "Open"}
                       </Button>
                       {onPublishNow && ["SCHEDULED", "FAILED"].includes(row.status) ? (
                         <Button
                           size="sm"
-                          disabled={publishNowPending}
+                          disabled={Boolean(publishingPostId)}
                           onClick={() => onPublishNow(row.id)}
                         >
-                          <RefreshCcw className="mr-2 h-3.5 w-3.5" /> Nu naar Meta
+                          <RefreshCcw
+                            className={cn(
+                              "mr-2 h-3.5 w-3.5",
+                              publishingPostId === row.id && "animate-spin",
+                            )}
+                          />
+                          {publishingPostId === row.id ? "Publiceren..." : "Nu naar Meta"}
                         </Button>
                       ) : null}
                       {row.status === "FAILED" ? (

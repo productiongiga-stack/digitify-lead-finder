@@ -450,10 +450,126 @@ type SocialPostRecord = {
   targetPlatforms: string[];
   metadata?: unknown;
   retryCount?: number | null;
+  status?: string;
+  externalPostIds?: unknown;
+  publishedAt?: Date | string | null;
 };
+
+function parseStoredExternalIds(raw: unknown): Record<string, SocialPublishedRef> {
+  if (!raw || typeof raw !== "object") return {};
+  const result: Record<string, SocialPublishedRef> = {};
+
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === "string" && value.trim()) {
+      result[key] = { id: value.trim(), verified: true };
+      continue;
+    }
+    if (value && typeof value === "object" && "id" in value) {
+      const ref = value as SocialPublishedRef;
+      if (ref.id?.trim()) {
+        result[key] = {
+          id: ref.id.trim(),
+          permalink: ref.permalink,
+          verified: ref.verified !== false,
+        };
+      }
+    }
+  }
+
+  return result;
+}
+
+function hasPublishedExternally(externalIds: Record<string, SocialPublishedRef>) {
+  return Object.keys(externalIds).length > 0;
+}
+
+function normalizePublishedRefs(externalIds: Record<string, SocialPublishedRef>) {
+  return Object.fromEntries(
+    Object.entries(externalIds).map(([key, ref]) => [
+      key,
+      {
+        ...ref,
+        verified: Boolean(ref.id),
+      },
+    ]),
+  );
+}
+
+async function persistPartialExternalIds(
+  socialDb: { socialPost: { update: (...args: unknown[]) => Promise<unknown> } },
+  postId: string,
+  externalIds: Record<string, SocialPublishedRef>,
+) {
+  await socialDb.socialPost.update({
+    where: { id: postId },
+    data: { externalPostIds: externalIds },
+  });
+}
+
+async function finalizePublishedPost(
+  db: PrismaClient,
+  post: SocialPostRecord,
+  externalIds: Record<string, SocialPublishedRef>,
+) {
+  const socialDb = db as any;
+  const normalized = normalizePublishedRefs(externalIds);
+
+  await socialDb.socialPost.update({
+    where: { id: post.id },
+    data: {
+      status: "PUBLISHED",
+      publishedAt: post.publishedAt ? new Date(post.publishedAt) : new Date(),
+      lastError: null,
+      externalPostIds: normalized,
+      retryCount: 0,
+    },
+  });
+
+  await createSocialActivity(db, {
+    userId: post.approvedById || post.createdById,
+    type: "SOCIAL_POST_PUBLISHED",
+    title: "Social post live op Meta",
+    metadata: { socialPostId: post.id, platforms: post.targetPlatforms, externalIds: normalized },
+  });
+
+  return normalized;
+}
+
+async function acquirePublishLock(socialDb: any, postId: string) {
+  const result = await socialDb.socialPost.updateMany({
+    where: {
+      id: postId,
+      status: { in: ["SCHEDULED", "FAILED"] },
+    },
+    data: {
+      status: "PUBLISHING",
+      lastError: null,
+    },
+  });
+
+  return Number(result.count || 0) === 1;
+}
 
 async function publishSocialPostRecord(db: PrismaClient, post: SocialPostRecord) {
   const socialDb = db as any;
+  const existingExternalIds = parseStoredExternalIds(post.externalPostIds);
+
+  if (post.status === "PUBLISHED" || hasPublishedExternally(existingExternalIds)) {
+    return finalizePublishedPost(db, post, existingExternalIds);
+  }
+
+  const locked = await acquirePublishLock(socialDb, post.id);
+  if (!locked) {
+    const current = await socialDb.socialPost.findUnique({ where: { id: post.id } });
+    if (current?.status === "PUBLISHED") {
+      return parseStoredExternalIds(current.externalPostIds);
+    }
+    if (current?.status === "PUBLISHING") {
+      throw new Error("Deze post wordt al gepubliceerd. Even geduld.");
+    }
+    throw new Error("Post kan niet meer gepubliceerd worden.");
+  }
+
   const scope = { workspaceId: post.createdById, memberId: post.createdById };
   const config = await loadMetaWorkspaceConfig(db, scope);
 
@@ -469,15 +585,7 @@ async function publishSocialPostRecord(db: PrismaClient, post: SocialPostRecord)
     publisherPageId: metadata.publisherPageId,
   });
 
-  await socialDb.socialPost.update({
-    where: { id: post.id },
-    data: {
-      status: "PUBLISHING",
-      lastError: null,
-    },
-  });
-
-  const externalIds: Record<string, SocialPublishedRef> = {};
+  const externalIds: Record<string, SocialPublishedRef> = { ...existingExternalIds };
   const placements = metadata.placements || ["FEED"];
   const assets = metadata.assets || normalizePlacementAssets(metadata);
 
@@ -500,122 +608,123 @@ async function publishSocialPostRecord(db: PrismaClient, post: SocialPostRecord)
         if (!carouselSlides.length || carouselSlides.length < CAROUSEL_MIN_SLIDES) {
           throw new Error(`Carousel vereist minstens ${CAROUSEL_MIN_SLIDES} volledige slides.`);
         }
-        if (post.targetPlatforms.includes("FACEBOOK")) {
+        if (post.targetPlatforms.includes("FACEBOOK") && !externalIds.facebookCarousel) {
           externalIds.facebookCarousel = await publishFacebookCarouselPost({
             pageId: publishTarget.pageId,
             pageAccessToken: publishTarget.pageAccessToken,
             caption: publishCaption,
             slides: carouselSlides,
           });
+          await persistPartialExternalIds(socialDb, post.id, externalIds);
         }
-        if (post.targetPlatforms.includes("INSTAGRAM")) {
+        if (post.targetPlatforms.includes("INSTAGRAM") && !externalIds.instagramCarousel) {
           externalIds.instagramCarousel = await publishInstagramCarouselPost({
             instagramBusinessId: publishTarget.instagramBusinessId,
             pageAccessToken: publishTarget.pageAccessToken,
             caption: publishCaption,
             slides: carouselSlides,
           });
+          await persistPartialExternalIds(socialDb, post.id, externalIds);
         }
       } else if (feedKind === "VIDEO") {
         const videoUrl = assets.FEED?.videoUrl?.trim() || "";
         if (!videoUrl) throw new Error("Feed-video ontbreekt.");
-        if (post.targetPlatforms.includes("FACEBOOK")) {
+        if (post.targetPlatforms.includes("FACEBOOK") && !externalIds.facebook) {
           externalIds.facebook = await publishFacebookVideoPost({
             pageId: publishTarget.pageId,
             pageAccessToken: publishTarget.pageAccessToken,
             caption: publishCaption,
             videoUrl,
           });
+          await persistPartialExternalIds(socialDb, post.id, externalIds);
         }
-        if (post.targetPlatforms.includes("INSTAGRAM")) {
+        if (post.targetPlatforms.includes("INSTAGRAM") && !externalIds.instagram) {
           externalIds.instagram = await publishInstagramVideoPost({
             instagramBusinessId: publishTarget.instagramBusinessId,
             pageAccessToken: publishTarget.pageAccessToken,
             caption: publishCaption,
             videoUrl,
           });
+          await persistPartialExternalIds(socialDb, post.id, externalIds);
         }
       } else {
         const imageUrl = resolvePlacementImageUrl("FEED", metadata, post.imageUrl);
-        if (post.targetPlatforms.includes("FACEBOOK")) {
+        if (post.targetPlatforms.includes("FACEBOOK") && !externalIds.facebook) {
           externalIds.facebook = await publishFacebookImagePost({
             pageId: publishTarget.pageId,
             pageAccessToken: publishTarget.pageAccessToken,
             caption: publishCaption,
             imageUrl,
           });
+          await persistPartialExternalIds(socialDb, post.id, externalIds);
         }
-        if (post.targetPlatforms.includes("INSTAGRAM")) {
+        if (post.targetPlatforms.includes("INSTAGRAM") && !externalIds.instagram) {
           externalIds.instagram = await publishInstagramImagePost({
             instagramBusinessId: publishTarget.instagramBusinessId,
             pageAccessToken: publishTarget.pageAccessToken,
             caption: publishCaption,
             imageUrl,
           });
+          await persistPartialExternalIds(socialDb, post.id, externalIds);
         }
       }
     }
 
     if (placement === "STORY") {
       const imageUrl = resolvePlacementImageUrl("STORY", metadata, post.imageUrl);
-      if (post.targetPlatforms.includes("FACEBOOK")) {
+      if (post.targetPlatforms.includes("FACEBOOK") && !externalIds.facebookStory) {
         externalIds.facebookStory = await publishFacebookImageStory({
           pageId: publishTarget.pageId,
           pageAccessToken: publishTarget.pageAccessToken,
           imageUrl,
         });
+        await persistPartialExternalIds(socialDb, post.id, externalIds);
       }
-      if (post.targetPlatforms.includes("INSTAGRAM")) {
+      if (post.targetPlatforms.includes("INSTAGRAM") && !externalIds.instagramStory) {
         externalIds.instagramStory = await publishInstagramImageStory({
           instagramBusinessId: publishTarget.instagramBusinessId,
           pageAccessToken: publishTarget.pageAccessToken,
           imageUrl,
         });
+        await persistPartialExternalIds(socialDb, post.id, externalIds);
       }
     }
 
     if (placement === "REEL") {
       const videoUrl = assets.REEL?.videoUrl?.trim();
       if (!videoUrl) throw new Error("Reel-video ontbreekt.");
-      const coverUrl = resolvePlacementImageUrl("REEL", metadata, post.imageUrl);
-      const publishCaption = buildPublishedCaption(post.caption, metadata, "REEL");
-      externalIds.instagramReel = await publishInstagramReel({
-        instagramBusinessId: publishTarget.instagramBusinessId,
-        pageAccessToken: publishTarget.pageAccessToken,
-        caption: publishCaption,
-        videoUrl,
-        coverUrl: coverUrl || undefined,
-      });
+      if (!externalIds.instagramReel) {
+        const coverUrl = resolvePlacementImageUrl("REEL", metadata, post.imageUrl);
+        const publishCaption = buildPublishedCaption(post.caption, metadata, "REEL");
+        externalIds.instagramReel = await publishInstagramReel({
+          instagramBusinessId: publishTarget.instagramBusinessId,
+          pageAccessToken: publishTarget.pageAccessToken,
+          caption: publishCaption,
+          videoUrl,
+          coverUrl: coverUrl || undefined,
+        });
+        await persistPartialExternalIds(socialDb, post.id, externalIds);
+      }
     }
   }
 
-  const unverified = Object.values(externalIds).filter((entry) => !entry.verified);
-  if (unverified.length > 0) {
-    throw new Error("Meta publicatie niet bevestigd. Controleer je koppeling en probeer opnieuw.");
+  if (!hasPublishedExternally(externalIds)) {
+    throw new Error("Geen Meta publicatie-ID ontvangen.");
   }
 
-  await socialDb.socialPost.update({
-    where: { id: post.id },
-    data: {
-      status: "PUBLISHED",
-      publishedAt: new Date(),
-      lastError: null,
-      externalPostIds: externalIds,
-    },
-  });
-
-  await createSocialActivity(db, {
-    userId: post.approvedById || post.createdById,
-    type: "SOCIAL_POST_PUBLISHED",
-    title: "Social post live op Meta",
-    metadata: { socialPostId: post.id, platforms: post.targetPlatforms, externalIds },
-  });
-
-  return externalIds;
+  return finalizePublishedPost(db, post, externalIds);
 }
 
 async function markSocialPostPublishFailure(db: PrismaClient, post: SocialPostRecord, error: unknown) {
   const socialDb = db as any;
+  const refreshed = await socialDb.socialPost.findUnique({ where: { id: post.id } });
+  const partialIds = parseStoredExternalIds(refreshed?.externalPostIds);
+
+  if (hasPublishedExternally(partialIds)) {
+    await finalizePublishedPost(db, { ...post, publishedAt: refreshed?.publishedAt }, partialIds);
+    return;
+  }
+
   const currentRetries = Number(post.retryCount || 0);
   const canRetry = currentRetries < 3;
   const nextRetryAt = canRetry ? new Date(Date.now() + computeRetryDelayMs(currentRetries)) : null;
@@ -639,21 +748,39 @@ async function markSocialPostPublishFailure(db: PrismaClient, post: SocialPostRe
   });
 }
 
-export async function runDueSocialPostsWorker(db: PrismaClient, options?: { postId?: string }) {
-  const now = new Date();
+async function recoverStuckPublishingPosts(db: PrismaClient) {
   const socialDb = db as any;
-
   const stuckThreshold = new Date(Date.now() - 10 * 60 * 1000);
-  await socialDb.socialPost.updateMany({
+  const stuckPosts = await socialDb.socialPost.findMany({
     where: {
       status: "PUBLISHING",
       updatedAt: { lt: stuckThreshold },
     },
-    data: {
-      status: "SCHEDULED",
-      lastError: "Publicatie onderbroken — wordt opnieuw geprobeerd.",
-    },
+    take: 50,
   });
+
+  for (const stuck of stuckPosts) {
+    const partialIds = parseStoredExternalIds(stuck.externalPostIds);
+    if (hasPublishedExternally(partialIds)) {
+      await finalizePublishedPost(db, stuck, partialIds);
+      continue;
+    }
+
+    await socialDb.socialPost.update({
+      where: { id: stuck.id },
+      data: {
+        status: "FAILED",
+        lastError: "Publicatie onderbroken. Controleer Meta of gebruik opnieuw publiceren.",
+      },
+    });
+  }
+}
+
+export async function runDueSocialPostsWorker(db: PrismaClient, options?: { postId?: string }) {
+  const now = new Date();
+  const socialDb = db as any;
+
+  await recoverStuckPublishingPosts(db);
 
   const duePosts = await socialDb.socialPost.findMany({
     where: options?.postId
@@ -893,6 +1020,56 @@ export const socialRouter = router({
       });
     }),
 
+  updateQueuedPost: mutationProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        caption: z.string().min(1).max(6000).optional(),
+        imageUrl: socialImageUrlSchema.optional(),
+        targetPlatforms: z.array(socialPlatformEnum).min(1).max(2).optional(),
+        metadata: socialPostMetadataSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const socialDb = ctx.db as any;
+      const row = await socialDb.socialPost.findUnique({ where: { id: input.id } });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Social post niet gevonden." });
+      ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+
+      if (!["SCHEDULED", "PENDING_APPROVAL"].includes(row.status)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Alleen ingeplande of wachtende posts kunnen bewerkt worden.",
+        });
+      }
+
+      if (hasPublishedExternally(parseStoredExternalIds(row.externalPostIds))) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Deze post is al live op Meta en kan niet meer bewerkt worden.",
+        });
+      }
+
+      const metadata = input.metadata === undefined ? undefined : normalizeSocialMetadata(input.metadata);
+      const nextImageUrl =
+        metadata && input.imageUrl !== undefined
+          ? resolvePrimaryImageUrl(metadata, input.imageUrl.trim()) || input.imageUrl.trim()
+          : input.imageUrl?.trim();
+
+      const updated = await socialDb.socialPost.update({
+        where: { id: input.id },
+        data: {
+          caption: input.caption?.trim(),
+          imageUrl: nextImageUrl,
+          targetPlatforms: input.targetPlatforms,
+          metadata,
+          lastError: null,
+        },
+      });
+
+      return updated;
+    }),
+
   submitForApproval: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
@@ -1044,6 +1221,10 @@ export const socialRouter = router({
       ensureWorkspaceAccess(row, ctx.user.workspaceId!);
       if (row.status !== "FAILED") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen FAILED posts kunnen opnieuw ingepland worden." });
+      }
+
+      if (hasPublishedExternally(parseStoredExternalIds(row.externalPostIds))) {
+        return finalizePublishedPost(ctx.db, row, parseStoredExternalIds(row.externalPostIds));
       }
 
       return socialDb.socialPost.update({
@@ -1224,6 +1405,24 @@ export const socialRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Social post niet gevonden." });
       ensureWorkspaceAccess(row, ctx.user.workspaceId!);
 
+      if (row.status === "PUBLISHED") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Deze post is al live op Meta.",
+        });
+      }
+
+      if (row.status === "PUBLISHING") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Deze post wordt al gepubliceerd. Even geduld.",
+        });
+      }
+
+      if (hasPublishedExternally(parseStoredExternalIds(row.externalPostIds))) {
+        return finalizePublishedPost(ctx.db, row, parseStoredExternalIds(row.externalPostIds));
+      }
+
       if (!["SCHEDULED", "FAILED"].includes(row.status)) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -1245,6 +1444,10 @@ export const socialRouter = router({
 
       const summary = await runDueSocialPostsWorker(ctx.db, { postId: input.id });
       const refreshed = await socialDb.socialPost.findUnique({ where: { id: input.id } });
+
+      if (refreshed?.status === "PUBLISHED") {
+        return refreshed;
+      }
 
       if (summary.published === 0) {
         throw new TRPCError({
