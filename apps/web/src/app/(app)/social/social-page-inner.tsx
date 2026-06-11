@@ -981,7 +981,7 @@ export function SocialPageInner() {
       showToast({
         title: alreadyLive ? "Post al live" : "Publiceren mislukt",
         description: message,
-        variant: alreadyLive ? "default" : "error",
+        variant: alreadyLive ? "info" : "error",
       });
       void listQuery.refetch();
     },

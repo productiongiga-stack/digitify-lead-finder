@@ -493,7 +493,9 @@ export function SocialBrandKitPicker({
         submitDisabled={!form.name.trim()}
         pending={upsertKit.isPending}
         asForm
-        onSubmit={() => upsertKit.mutateAsync({ id: editingId || undefined, ...form })}
+        onSubmit={async () => {
+          await upsertKit.mutateAsync({ id: editingId || undefined, ...form });
+        }}
         contentClassName="z-[100] max-w-2xl"
       >
         <div className="max-h-[65vh] space-y-5 overflow-y-auto pr-1">

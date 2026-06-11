@@ -494,7 +494,9 @@ export function SocialPlacementEditor({
 }) {
   const feedImage = assets.FEED?.imageUrl?.trim() || "";
   const hasFeedAndStory = placements.includes("FEED") && placements.includes("STORY");
-  const storyMatchesFeed = hasFeedAndStory && feedImage && assets.STORY?.imageUrl?.trim() === feedImage;
+  const storyMatchesFeed = Boolean(
+    hasFeedAndStory && feedImage && assets.STORY?.imageUrl?.trim() === feedImage,
+  );
 
   const [storyUsesFeedImage, setStoryUsesFeedImage] = useState(
     () => !assets.STORY?.imageUrl?.trim() || storyMatchesFeed,
