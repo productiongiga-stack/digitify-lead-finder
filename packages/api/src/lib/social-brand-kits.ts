@@ -170,12 +170,18 @@ export async function upsertSocialBrandKit(
   workspaceId: string,
   input: SocialBrandKitInput & { id?: string },
 ) {
-  const { kits, defaultBrandKitId } = await listSocialBrandKits(db, workspaceId);
+  let { kits, defaultBrandKitId } = await readBrandKitSettings(db, workspaceId);
+  if (!kits.length) {
+    kits = await seedWorkspaceBrandKit(db, workspaceId);
+    defaultBrandKitId = kits[0]?.id || "";
+  }
+
   const now = new Date().toISOString();
   const fields = emptyKitFields();
+  const isCreate = !input.id?.trim();
 
   const nextKit: SocialBrandKit = {
-    id: input.id?.trim() || `kit_${Date.now()}`,
+    id: input.id?.trim() || `kit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     name: input.name.trim() || "Merkkit",
     isDefault: false,
     companyName: input.companyName?.trim() ?? fields.companyName,
@@ -205,9 +211,9 @@ export async function upsertSocialBrandKit(
     kits.push(nextKit);
   }
 
-  const activeDefaultId = defaultBrandKitId || nextKit.id;
+  const activeDefaultId = isCreate ? defaultBrandKitId || nextKit.id : defaultBrandKitId || kits[0]?.id || nextKit.id;
   await writeBrandKits(db, workspaceId, kits, activeDefaultId);
-  return nextKit;
+  return { ...nextKit, isDefault: nextKit.id === activeDefaultId };
 }
 
 export async function deleteSocialBrandKit(db: PrismaClient, workspaceId: string, kitId: string) {

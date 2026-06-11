@@ -221,13 +221,18 @@ export function SocialBrandKitPicker({
   const autoAppliedRef = useRef(false);
 
   const upsertKit = trpc.social.upsertBrandKit.useMutation({
-    onSuccess: async (kit) => {
+    onSuccess: async (kit, variables) => {
       await utils.social.listBrandKits.invalidate();
+      const refreshed = await utils.social.listBrandKits.fetch();
+      const kitCount = refreshed?.kits.length ?? 0;
       onSelectedKitIdChange(kit.id);
       onApplyKit(kitToApplyPayload(kit as SocialBrandKit));
       setManagerOpen(false);
       setEditingId(null);
-      showToast({ title: "Merkkit opgeslagen", description: `"${kit.name}" is klaar voor gebruik.` });
+      showToast({
+        title: variables.id ? "Merkkit opgeslagen" : "Merkkit aangemaakt",
+        description: `"${kit.name}" · ${kitCount} merkkit${kitCount === 1 ? "" : "s"} beschikbaar.`,
+      });
     },
     onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
   });
@@ -292,6 +297,10 @@ export function SocialBrandKitPicker({
     setEditingId(null);
     setForm(buildCreateFormDefaults());
     setManagerOpen(true);
+  }
+
+  async function saveBrandKit() {
+    await upsertKit.mutateAsync({ id: editingId || undefined, ...form });
   }
 
   function openEdit(kit: SocialBrandKit) {
@@ -412,7 +421,15 @@ export function SocialBrandKitPicker({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={openCreate}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={(event) => {
+                event.stopPropagation();
+                openCreate();
+              }}
+            >
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               Nieuw merkkit
             </Button>
@@ -425,7 +442,11 @@ export function SocialBrandKitPicker({
         </div>
 
         {kits.length ? (
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              {kits.length} merkkit{kits.length === 1 ? "" : "s"} — klik om te selecteren
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
             {kits.map((kit) => (
               <BrandKitCard
                 key={kit.id}
@@ -435,6 +456,7 @@ export function SocialBrandKitPicker({
                 onSelect={() => handleKitChange(kit.id)}
               />
             ))}
+            </div>
           </div>
         ) : (
           <div className="rounded-xl border border-dashed px-4 py-8 text-center">
@@ -493,10 +515,8 @@ export function SocialBrandKitPicker({
         submitDisabled={!form.name.trim()}
         pending={upsertKit.isPending}
         asForm
-        onSubmit={async () => {
-          await upsertKit.mutateAsync({ id: editingId || undefined, ...form });
-        }}
-        contentClassName="z-[100] max-w-2xl"
+        onSubmit={saveBrandKit}
+        contentClassName="z-[200] max-w-2xl"
       >
         <div className="max-h-[65vh] space-y-5 overflow-y-auto pr-1">
           <div className="flex flex-wrap gap-2">
@@ -615,7 +635,7 @@ export function SocialBrandKitPicker({
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent position="popper" className="z-[110]">
+                    <SelectContent position="popper" className="z-[210]">
                       {SOCIAL_TONE_OPTIONS.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}

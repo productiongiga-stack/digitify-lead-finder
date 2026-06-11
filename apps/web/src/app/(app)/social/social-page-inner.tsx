@@ -1577,7 +1577,7 @@ export function SocialPageInner() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="composer" className="mt-0 space-y-3">
+        <TabsContent value="composer" forceMount className="mt-0 space-y-3 data-[state=inactive]:hidden">
       {!connectionStatus.isLoading && !connectionStatus.data?.connected ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-sm dark:bg-amber-950/25">
           <span className="text-amber-950/90 dark:text-amber-100">Meta niet gekoppeld.</span>
@@ -1629,7 +1629,7 @@ export function SocialPageInner() {
                   </div>
                 }
               >
-                {wizardStep === 0 ? (
+                <div className={cn(wizardStep !== 0 && "hidden")}>
                   <SocialPublishAccountPicker
                     pages={managedPages}
                     selectedPageId={selectedPageId}
@@ -1642,9 +1642,9 @@ export function SocialPageInner() {
                     disabled={!canEditSelected}
                     isLoading={managedPagesQuery.isLoading}
                   />
-                ) : null}
+                </div>
 
-                {wizardStep === 1 ? (
+                <div className={cn(wizardStep !== 1 && "hidden")}>
                   <SocialBrandKitPicker
                     selectedKitId={selectedBrandKitId}
                     onSelectedKitIdChange={setSelectedBrandKitId}
@@ -1652,9 +1652,9 @@ export function SocialPageInner() {
                     autoApplyDefaults={!selectedId}
                     disabled={!canEditSelected}
                   />
-                ) : null}
+                </div>
 
-                {wizardStep === 2 ? (
+                <div className={cn(wizardStep !== 2 && "hidden")}>
                   <div className="space-y-3">
                     <div className="space-y-2">
                       <Label htmlFor="social-caption">Caption</Label>
@@ -1717,9 +1717,9 @@ export function SocialPageInner() {
                       </div>
                     </SocialComposerSection>
                   </div>
-                ) : null}
+                </div>
 
-                {wizardStep === 3 ? (
+                <div className={cn(wizardStep !== 3 && "hidden")}>
                   <div className="space-y-4">
                     <SocialPlacementEditor
                       placements={placements}
@@ -1752,9 +1752,9 @@ export function SocialPageInner() {
                       }}
                     />
                   </div>
-                ) : null}
+                </div>
 
-                {wizardStep === 4 ? (
+                <div className={cn(wizardStep !== 4 && "hidden")}>
                   <div className="space-y-3">
                     <div className="rounded-lg border bg-muted/10 px-3 py-2.5 text-sm">
                       <p className="font-medium">{selectedManagedPage?.name || "Geen pagina"}</p>
@@ -1862,7 +1862,7 @@ export function SocialPageInner() {
                       <p className="text-xs text-muted-foreground">Status: {selected.status}. Een beheerder plant deze post in.</p>
                     ) : null}
                   </div>
-                ) : null}
+                </div>
               </SocialComposerWizard>
             </CardContent>
           </Card>
