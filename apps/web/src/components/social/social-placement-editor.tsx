@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { friendlySocialProbeError, probeDataUrlImage } from "@/lib/social-image-client";
 import { cropImageSourceToPlacement, describePlacementCrop } from "@/lib/social-image-crop";
 import { uploadSocialAssetFile } from "@/lib/persist-social-assets";
@@ -14,6 +14,7 @@ import {
   SocialCarouselEditor,
   type SocialCarouselState,
 } from "./social-carousel-editor";
+import { SocialComposerSection } from "./social-composer-section";
 
 export type SocialPlacement = "FEED" | "STORY" | "REEL";
 export type FeedAspectFormat = "SQUARE" | "PORTRAIT" | "LANDSCAPE";
@@ -69,23 +70,107 @@ type AssetProbeState =
     }
   | { status: "error"; message: string };
 
-function AssetProbeStatus({ probe }: { probe: AssetProbeState }) {
+function AssetProbeStatus({
+  probe,
+  placement,
+  feedFormat,
+  targetPlatforms,
+}: {
+  probe: AssetProbeState;
+  placement: SocialPlacement;
+  feedFormat: FeedAspectFormat;
+  targetPlatforms: string[];
+}) {
   if (probe.status === "idle") return null;
   if (probe.status === "loading") {
     return (
-      <span className="inline-flex items-center text-xs text-muted-foreground">
-        <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> Controleren...
-      </span>
+      <div className="flex items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Afbeelding controleren...
+      </div>
     );
   }
   if (probe.status === "error") {
-    return <p className="text-xs text-destructive">{probe.message}</p>;
+    return (
+      <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        {probe.message}
+      </div>
+    );
   }
+
+  const needsInstagram = targetPlatforms.includes("INSTAGRAM");
+  const valid =
+    placement === "STORY" || placement === "REEL"
+      ? probe.validForStory
+      : needsInstagram
+        ? probe.validForInstagram
+        : true;
+
   return (
-    <p className="text-xs text-muted-foreground">
-      {probe.width}×{probe.height} · {formatRatio(probe.ratio)}
-      {!probe.publishableUrl ? " · upload of publieke URL nodig" : ""}
-    </p>
+    <div
+      className={cn(
+        "flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs",
+        valid
+          ? "border-emerald-500/25 bg-emerald-500/5 text-emerald-800 dark:text-emerald-200"
+          : "border-amber-500/25 bg-amber-500/5 text-amber-900 dark:text-amber-100",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        {valid ? <Check className="h-3.5 w-3.5 shrink-0" /> : <ImageIcon className="h-3.5 w-3.5 shrink-0" />}
+        <span>
+          {probe.width}×{probe.height} · {formatRatio(probe.ratio)}
+        </span>
+      </div>
+      <span className="text-[11px] opacity-80">
+        {valid
+          ? "Geschikt voor publicatie"
+          : `Wordt bij upload bijgeknipt naar ${describePlacementCrop(placement, feedFormat)}`}
+        {!probe.publishableUrl ? " · upload of publieke URL" : ""}
+      </span>
+    </div>
+  );
+}
+
+type FeedMediaMode = "photo" | "video";
+
+function FeedMediaModeToggle({
+  mode,
+  disabled,
+  onChange,
+}: {
+  mode: FeedMediaMode;
+  disabled?: boolean;
+  onChange: (mode: FeedMediaMode) => void;
+}) {
+  return (
+    <div className="inline-flex rounded-lg border bg-muted/20 p-1">
+      {(
+        [
+          { id: "photo" as const, label: "Foto", icon: ImageIcon },
+          { id: "video" as const, label: "Video", icon: Film },
+        ] as const
+      ).map((option) => {
+        const Icon = option.icon;
+        const active = mode === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(option.id)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition",
+              active
+                ? "bg-amber-500 text-white shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -125,35 +210,67 @@ function PlacementTypePill({
   );
 }
 
-function MediaUploadZone({
-  imageUrl,
+function MediaDropZone({
+  mediaUrl,
+  mediaKind,
   aspectClass,
   disabled,
   uploading,
-  emptyLabel,
+  emptyTitle,
+  emptyHint,
   onPickFile,
   onClear,
+  onDropFile,
 }: {
-  imageUrl: string;
+  mediaUrl: string;
+  mediaKind: "image" | "video";
   aspectClass: string;
   disabled?: boolean;
   uploading: boolean;
-  emptyLabel: string;
+  emptyTitle: string;
+  emptyHint: string;
   onPickFile: () => void;
   onClear?: () => void;
+  onDropFile?: (file: File) => void;
 }) {
+  const [dragOver, setDragOver] = useState(false);
+  const EmptyIcon = mediaKind === "image" ? ImageIcon : Film;
+
   return (
-    <div className="overflow-hidden rounded-xl border bg-background">
-      {imageUrl ? (
+    <div
+      className={cn(
+        "overflow-hidden rounded-xl border-2 border-dashed bg-background transition",
+        dragOver ? "border-amber-500 bg-amber-50/40 dark:bg-amber-950/20" : "border-border/70",
+        !mediaUrl && !disabled && "hover:border-amber-300",
+      )}
+      onDragOver={(event) => {
+        if (disabled || !onDropFile) return;
+        event.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(event) => {
+        if (disabled || !onDropFile) return;
+        event.preventDefault();
+        setDragOver(false);
+        const file = event.dataTransfer.files?.[0];
+        if (file) onDropFile(file);
+      }}
+    >
+      {mediaUrl ? (
         <div className="group relative">
-          <div className={cn("max-h-44 bg-muted", aspectClass)}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+          <div className={cn("max-h-56 bg-muted", aspectClass)}>
+            {mediaKind === "image" ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={mediaUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <video src={mediaUrl} className="h-full w-full object-cover" muted playsInline controls />
+            )}
           </div>
           {!disabled ? (
-            <div className="absolute inset-x-0 bottom-0 flex gap-2 bg-gradient-to-t from-black/70 to-transparent p-2 pt-6 opacity-0 transition group-hover:opacity-100">
+            <div className="absolute inset-x-0 bottom-0 flex gap-2 bg-gradient-to-t from-black/75 to-transparent p-3 pt-10 opacity-0 transition group-hover:opacity-100">
               <Button type="button" size="sm" variant="secondary" disabled={uploading} onClick={onPickFile}>
-                {uploading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Upload className="mr-1 h-3 w-3" />}
+                {uploading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}
                 Vervangen
               </Button>
               {onClear ? (
@@ -169,14 +286,19 @@ function MediaUploadZone({
           type="button"
           disabled={disabled || uploading}
           onClick={onPickFile}
-          className={cn("flex w-full flex-col items-center justify-center gap-1.5 p-8 text-center", aspectClass, "max-h-44")}
+          className={cn(
+            "flex w-full flex-col items-center justify-center gap-2 px-4 py-10 text-center",
+            aspectClass,
+            "max-h-56 min-h-[10rem]",
+          )}
         >
           {uploading ? (
-            <Loader2 className="h-7 w-7 animate-spin text-amber-500" />
+            <Loader2 className="h-8 w-8 animate-spin text-amber-500" />
           ) : (
-            <ImageIcon className="h-7 w-7 text-muted-foreground/40" />
+            <EmptyIcon className="h-8 w-8 text-muted-foreground/45" />
           )}
-          <span className="text-xs font-medium">{uploading ? "Uploaden..." : emptyLabel}</span>
+          <span className="text-sm font-medium text-foreground">{uploading ? "Uploaden..." : emptyTitle}</span>
+          <span className="max-w-xs text-xs text-muted-foreground">{emptyHint}</span>
         </button>
       )}
     </div>
@@ -206,10 +328,18 @@ function PlacementMediaEditor({
   const fileRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState<"image" | "video" | null>(null);
-  const [showUrlInput, setShowUrlInput] = useState(false);
   const [debouncedImageUrl, setDebouncedImageUrl] = useState("");
   const imageUrl = asset?.imageUrl?.trim() || "";
   const videoUrl = asset?.videoUrl?.trim() || "";
+  const [feedMode, setFeedMode] = useState<FeedMediaMode>(() =>
+    placement === "FEED" && videoUrl && !imageUrl ? "video" : "photo",
+  );
+
+  useEffect(() => {
+    if (placement !== "FEED") return;
+    if (videoUrl && !imageUrl) setFeedMode("video");
+    else if (imageUrl && !videoUrl) setFeedMode("photo");
+  }, [imageUrl, placement, videoUrl]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => setDebouncedImageUrl(imageUrl), 450);
@@ -332,70 +462,122 @@ function PlacementMediaEditor({
     }
   }
 
+  function handleDroppedFile(file: File, kind: "image" | "video") {
+    const isImage = file.type.startsWith("image/");
+    const isVideo = file.type.startsWith("video/");
+    if (kind === "image" && !isImage) {
+      showToast({ title: "Ongeldig bestand", description: "Gebruik JPG, PNG of WebP.", variant: "error" });
+      return;
+    }
+    if (kind === "video" && !isVideo) {
+      showToast({ title: "Ongeldig bestand", description: "Gebruik MP4 of MOV.", variant: "error" });
+      return;
+    }
+    void uploadFile(file, kind);
+  }
+
   const aspectClass =
     placement === "FEED"
       ? FEED_FORMAT_OPTIONS.find((item) => item.value === feedFormat)?.className || "aspect-square"
       : "aspect-[9/16]";
 
-  const showVideo = placement === "FEED" || placement === "REEL";
-  const feedVideoOnly = placement === "FEED" && videoUrl && !imageUrl;
+  const cropLabel = describePlacementCrop(placement, feedFormat);
+  const showFeedModeToggle = placement === "FEED";
+  const showReelVideo = placement === "REEL";
+  const showImageUpload = placement === "STORY" || placement === "REEL" || (placement === "FEED" && feedMode === "photo");
+  const showVideoUpload = showReelVideo || (placement === "FEED" && feedMode === "video");
+
+  const imageEmptyTitle =
+    placement === "REEL" ? "Cover toevoegen" : placement === "STORY" ? "Story-foto toevoegen" : "Feed-foto toevoegen";
+  const imageEmptyHint = `Sleep een bestand of klik · ${cropLabel} · JPG, PNG, WebP`;
+  const videoEmptyTitle = placement === "REEL" ? "Reel-video toevoegen" : "Feed-video toevoegen";
+  const videoEmptyHint = "Sleep een MP4/MOV of klik om te uploaden";
 
   return (
-    <div className="space-y-3">
-      {!compactHeader ? (
-        <p className="text-xs text-muted-foreground">
-          {placement === "FEED"
-            ? feedVideoOnly
-              ? "Feed wordt een videopost."
-              : "Upload een afbeelding of video voor je feed."
-            : placement === "STORY"
-              ? "Verticale afbeelding (9:16) werkt het best."
-              : "Upload je reel-video. Cover is optioneel."}
-        </p>
-      ) : null}
-
-      {showVideo ? (
-        <div className="space-y-1.5">
-          <p className="text-xs font-medium text-foreground">
-            {placement === "REEL" ? "Video *" : "Video (optioneel)"}
+    <div className="space-y-4 rounded-xl border bg-muted/10 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-foreground">
+            {placement === "FEED" ? "Feed-media" : placement === "STORY" ? "Story-beeld" : "Reel-media"}
           </p>
+          {!compactHeader ? (
+            <p className="text-xs text-muted-foreground">
+              {placement === "FEED"
+                ? "Kies foto of video. Verkeerde verhouding? Wij knippen automatisch bij."
+                : placement === "STORY"
+                  ? "Verticaal 9:16 — ook vierkante uploads worden automatisch bijgeknipt."
+                  : "Upload je reel-video. Cover is optioneel."}
+            </p>
+          ) : null}
+        </div>
+        {showFeedModeToggle ? (
+          <FeedMediaModeToggle
+            mode={feedMode}
+            disabled={disabled}
+            onChange={setFeedMode}
+          />
+        ) : null}
+        {placement === "STORY" || (placement === "FEED" && feedMode === "photo") ? (
+          <Badge variant="outline" className="text-[10px] font-normal">
+            {cropLabel}
+          </Badge>
+        ) : null}
+      </div>
+
+      {showVideoUpload ? (
+        <div className="space-y-2">
+          {showReelVideo ? (
+            <p className="text-xs font-medium text-foreground">
+              Video <span className="text-destructive">*</span>
+            </p>
+          ) : null}
+
+          <input
+            ref={videoRef}
+            type="file"
+            accept="video/mp4,video/quicktime"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadFile(file, "video");
+              event.currentTarget.value = "";
+            }}
+          />
+
+          <MediaDropZone
+            mediaUrl={videoUrl}
+            mediaKind="video"
+            aspectClass={placement === "REEL" ? "aspect-[9/16]" : "aspect-video"}
+            disabled={disabled}
+            uploading={uploading === "video"}
+            emptyTitle={videoEmptyTitle}
+            emptyHint={videoEmptyHint}
+            onPickFile={() => videoRef.current?.click()}
+            onClear={videoUrl ? () => onVideoChange?.("") : undefined}
+            onDropFile={(file) => handleDroppedFile(file, "video")}
+          />
+
           <div className="flex gap-2">
-            <Input
-              disabled={disabled}
-              value={videoUrl}
-              onChange={(event) => onVideoChange?.(event.target.value)}
-              placeholder="https://...video.mp4"
-              className="h-9"
-            />
-            <input
-              ref={videoRef}
-              type="file"
-              accept="video/mp4,video/quicktime"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void uploadFile(file, "video");
-                event.currentTarget.value = "";
-              }}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              className="shrink-0"
-              disabled={disabled || uploading === "video"}
-              onClick={() => videoRef.current?.click()}
-            >
-              {uploading === "video" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Film className="h-4 w-4" />}
-            </Button>
+            <div className="relative min-w-0 flex-1">
+              <Link2 className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                disabled={disabled}
+                value={videoUrl}
+                onChange={(event) => onVideoChange?.(event.target.value)}
+                placeholder="Of plak een publieke video-URL (https://...mp4)"
+                className="h-9 pl-9"
+              />
+            </div>
           </div>
+          {videoUrl && !/^https:\/\//i.test(videoUrl) ? (
+            <p className="text-xs text-destructive">Video-URL moet publiek bereikbaar zijn via https.</p>
+          ) : null}
         </div>
       ) : null}
 
-      {!feedVideoOnly ? (
+      {showImageUpload ? (
         <div className="space-y-2">
-          <p className="text-xs font-medium text-foreground">
-            {placement === "REEL" ? "Cover (optioneel)" : "Afbeelding"}
-          </p>
+          {showReelVideo ? <p className="text-xs font-medium text-foreground">Cover (optioneel)</p> : null}
 
           <input
             ref={fileRef}
@@ -409,64 +591,74 @@ function PlacementMediaEditor({
             }}
           />
 
-          <MediaUploadZone
-            imageUrl={imageUrl}
+          <MediaDropZone
+            mediaUrl={imageUrl}
+            mediaKind="image"
             aspectClass={aspectClass}
             disabled={disabled}
             uploading={uploading === "image"}
-            emptyLabel="Klik om afbeelding te uploaden"
+            emptyTitle={imageEmptyTitle}
+            emptyHint={imageEmptyHint}
             onPickFile={() => fileRef.current?.click()}
             onClear={imageUrl ? () => onImageChange("") : undefined}
+            onDropFile={(file) => handleDroppedFile(file, "image")}
           />
 
-          {showUrlInput ? (
-            <Input
-              disabled={disabled}
-              value={imageUrl}
-              onChange={(event) => onImageChange(event.target.value)}
-              placeholder="https://...afbeelding.jpg"
-              className="h-9"
-            />
-          ) : (
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => setShowUrlInput(true)}
-            >
-              <Link2 className="h-3 w-3" />
-              Of plak een URL
-            </button>
-          )}
+          <div className="flex gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Link2 className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                disabled={disabled}
+                value={imageUrl}
+                onChange={(event) => onImageChange(event.target.value)}
+                placeholder="Of plak een publieke afbeeldings-URL"
+                className="h-9 pl-9"
+              />
+            </div>
+            {!imageUrl ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0"
+                disabled={disabled || uploading === "image"}
+                onClick={() => fileRef.current?.click()}
+              >
+                {uploading === "image" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              </Button>
+            ) : null}
+          </div>
 
-          <AssetProbeStatus probe={probe} />
+          <AssetProbeStatus
+            probe={probe}
+            placement={placement}
+            feedFormat={feedFormat}
+            targetPlatforms={targetPlatforms}
+          />
         </div>
       ) : null}
     </div>
   );
 }
 
-function PlacementSection({
-  title,
-  badge,
-  children,
-}: {
-  title: string;
-  badge?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-xl border bg-background/90 p-4 shadow-sm">
-      <div className="mb-3 flex items-center gap-2">
-        <h3 className="text-sm font-semibold">{title}</h3>
-        {badge ? (
-          <Badge variant="outline" className="text-[10px] font-normal">
-            {badge}
-          </Badge>
-        ) : null}
-      </div>
-      {children}
-    </section>
-  );
+function primaryPlacementForOpen(placements: SocialPlacement[]) {
+  const order: SocialPlacement[] = ["FEED", "STORY", "REEL"];
+  return order.find((placement) => placements.includes(placement));
+}
+
+function feedSectionDescription(carousel: SocialCarouselState, assets: PlacementAssets) {
+  if (carousel.enabled) {
+    const count = carousel.slides.filter((slide) =>
+      slide.mediaType === "IMAGE" ? Boolean(slide.imageUrl?.trim()) : Boolean(slide.videoUrl?.trim()),
+    ).length;
+    return `Carousel · ${count} slide${count === 1 ? "" : "s"}`;
+  }
+  const hasImage = Boolean(assets.FEED?.imageUrl?.trim());
+  const hasVideo = Boolean(assets.FEED?.videoUrl?.trim());
+  if (hasVideo && !hasImage) return "Videopost";
+  if (hasImage && hasVideo) return "Foto en video";
+  if (hasImage) return "Feed-foto toegevoegd";
+  if (hasVideo) return "Feed-video toegevoegd";
+  return "Foto, video of carousel instellen";
 }
 
 export function SocialPlacementEditor({
@@ -545,6 +737,11 @@ export function SocialPlacementEditor({
     .filter(Boolean)
     .join(" + ");
 
+  const openPlacement = primaryPlacementForOpen(placements);
+  const feedBadge = carousel.enabled ? "Carousel" : FEED_FORMAT_OPTIONS.find((f) => f.value === feedFormat)?.ratio;
+  const storyImage = assets.STORY?.imageUrl?.trim();
+  const reelVideo = assets.REEL?.videoUrl?.trim();
+
   return (
     <div className="space-y-4 md:col-span-2">
       <div className="space-y-3">
@@ -579,7 +776,13 @@ export function SocialPlacementEditor({
       </div>
 
       {placements.includes("FEED") ? (
-        <PlacementSection title="Post" badge={carousel.enabled ? "Carousel" : FEED_FORMAT_OPTIONS.find((f) => f.value === feedFormat)?.ratio}>
+        <SocialComposerSection
+          title="Post"
+          description={feedSectionDescription(carousel, assets)}
+          icon={LayoutGrid}
+          badge={feedBadge}
+          defaultOpen={openPlacement === "FEED"}
+        >
           <div className="space-y-4">
             <SocialCarouselEditor
               carousel={carousel}
@@ -591,7 +794,10 @@ export function SocialPlacementEditor({
             {!carousel.enabled ? (
               <>
                 <div className="space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">Beeldverhouding feed</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-muted-foreground">Beeldverhouding feed</p>
+                    <p className="text-[11px] text-muted-foreground">Verkeerde verhouding? Automatisch bijgeknipt.</p>
+                  </div>
                   <div className="inline-flex flex-wrap gap-1.5 rounded-lg border bg-muted/20 p-1">
                     {FEED_FORMAT_OPTIONS.map((option) => (
                       <button
@@ -625,11 +831,23 @@ export function SocialPlacementEditor({
               </>
             ) : null}
           </div>
-        </PlacementSection>
+        </SocialComposerSection>
       ) : null}
 
       {placements.includes("STORY") ? (
-        <PlacementSection title="Story" badge="9:16">
+        <SocialComposerSection
+          title="Story"
+          description={
+            storyUsesFeedImage && feedImage && !carousel.enabled
+              ? "Gebruikt feed-foto · automatisch 9:16"
+              : storyImage
+                ? "Story-beeld toegevoegd"
+                : "Verticale 9:16 afbeelding"
+          }
+          icon={Smartphone}
+          badge="9:16"
+          defaultOpen={openPlacement === "STORY"}
+        >
           {hasFeedAndStory && feedImage && !carousel.enabled ? (
             <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border bg-muted/15 px-3 py-2.5">
               <div className="min-w-0">
@@ -650,17 +868,23 @@ export function SocialPlacementEditor({
           ) : null}
 
           {storyUsesFeedImage && feedImage && !carousel.enabled ? (
-            <div className="space-y-2">
-              <MediaUploadZone
-                imageUrl={feedImage}
-                aspectClass="aspect-[9/16] max-h-48"
+            <div className="space-y-2 rounded-xl border bg-muted/10 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">Voorbeeld vanuit feed</p>
+                <Badge variant="outline" className="text-[10px]">9:16 bij publicatie</Badge>
+              </div>
+              <MediaDropZone
+                mediaUrl={feedImage}
+                mediaKind="image"
+                aspectClass="aspect-[9/16] max-h-52"
                 disabled
                 uploading={false}
-                emptyLabel=""
+                emptyTitle=""
+                emptyHint=""
                 onPickFile={() => undefined}
               />
               <p className="text-xs text-muted-foreground">
-                Story gebruikt je feed-afbeelding en knipt die automatisch bij naar 9:16 bij opslaan of publiceren.
+                Story gebruikt je feed-foto. Bij opslaan maken we automatisch een verticale 9:16-versie.
               </p>
             </div>
           ) : (
@@ -674,11 +898,17 @@ export function SocialPlacementEditor({
               onImageChange={(url) => updateAsset("STORY", { imageUrl: url })}
             />
           )}
-        </PlacementSection>
+        </SocialComposerSection>
       ) : null}
 
       {placements.includes("REEL") ? (
-        <PlacementSection title="Reel" badge="Instagram">
+        <SocialComposerSection
+          title="Reel"
+          description={reelVideo ? "Reel-video toegevoegd" : "Instagram reel-video uploaden"}
+          icon={Film}
+          badge="Instagram"
+          defaultOpen={openPlacement === "REEL"}
+        >
           <PlacementMediaEditor
             placement="REEL"
             feedFormat={feedFormat}
@@ -689,7 +919,7 @@ export function SocialPlacementEditor({
             onImageChange={(url) => updateAsset("REEL", { imageUrl: url })}
             onVideoChange={(url) => updateAsset("REEL", { videoUrl: url })}
           />
-        </PlacementSection>
+        </SocialComposerSection>
       ) : null}
     </div>
   );

@@ -33,6 +33,7 @@ import {
   Wand2,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc/client";
+import { useBranding } from "@/lib/branding";
 import { useToast } from "@/components/feedback/toast-provider";
 import { uploadSocialAssetFile } from "@/lib/persist-social-assets";
 import { SOCIAL_TONE_OPTIONS } from "@/lib/social-tone-options";
@@ -72,6 +73,8 @@ type Props = {
   selectedKitId: string;
   onSelectedKitIdChange: (kitId: string) => void;
   onApplyKit: (payload: SocialBrandKitApplyPayload) => void;
+  kits?: SocialBrandKit[];
+  kitsLoading?: boolean;
   autoApplyDefaults?: boolean;
   disabled?: boolean;
 };
@@ -194,16 +197,20 @@ export function SocialBrandKitPicker({
   selectedKitId,
   onSelectedKitIdChange,
   onApplyKit,
+  kits: kitsProp,
+  kitsLoading = false,
   autoApplyDefaults = true,
   disabled = false,
 }: Props) {
   const { showToast } = useToast();
   const utils = trpc.useUtils();
-  const kitsQuery = trpc.social.listBrandKits.useQuery();
-  const workspaceBranding = trpc.settings.getBranding.useQuery();
-  const creativeBrand = trpc.media.getBrandKit.useQuery();
+  const { branding: workspaceBranding } = useBranding();
+  const [managerOpen, setManagerOpen] = useState(false);
+  const kitsQuery = trpc.social.listBrandKits.useQuery(undefined, { enabled: kitsProp === undefined });
+  const creativeBrand = trpc.media.getBrandKit.useQuery(undefined, { enabled: managerOpen });
 
-  const kits = (kitsQuery.data?.kits ?? []) as SocialBrandKit[];
+  const kits = (kitsProp ?? kitsQuery.data?.kits ?? []) as SocialBrandKit[];
+  const kitsData = kitsQuery.data ?? (kitsProp ? { kits: kitsProp, defaultBrandKitId: kitsProp.find((kit) => kit.isDefault)?.id || kitsProp[0]?.id || "" } : undefined);
   const selectedKit = useMemo(
     () => kits.find((kit) => kit.id === selectedKitId) || kits.find((kit) => kit.isDefault) || kits[0] || null,
     [kits, selectedKitId],
@@ -212,8 +219,6 @@ export function SocialBrandKitPicker({
     () => (selectedKit ? kitToApplyPayload(selectedKit) : null),
     [selectedKit],
   );
-
-  const [managerOpen, setManagerOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [logoUploading, setLogoUploading] = useState(false);
@@ -258,8 +263,8 @@ export function SocialBrandKitPicker({
   });
 
   useEffect(() => {
-    if (!kitsQuery.data || selectedKitId || autoAppliedRef.current) return;
-    const defaultId = kitsQuery.data.defaultBrandKitId || kitsQuery.data.kits[0]?.id;
+    if (!kitsData || selectedKitId || autoAppliedRef.current) return;
+    const defaultId = kitsData.defaultBrandKitId || kitsData.kits[0]?.id;
     if (!defaultId) return;
     autoAppliedRef.current = true;
     onSelectedKitIdChange(defaultId);
@@ -267,19 +272,21 @@ export function SocialBrandKitPicker({
       const kit = kits.find((item) => item.id === defaultId);
       if (kit) onApplyKit(kitToApplyPayload(kit));
     }
-  }, [autoApplyDefaults, kits, kitsQuery.data, onApplyKit, onSelectedKitIdChange, selectedKitId]);
+  }, [autoApplyDefaults, kits, kitsData, onApplyKit, onSelectedKitIdChange, selectedKitId]);
 
   function buildCreateFormDefaults() {
-    const branding = readWorkspaceBranding();
     const creative = creativeBrand.data;
+    const brandSignature = workspaceBranding.companyName
+      ? `${workspaceBranding.companyName}${workspaceBranding.companySlogan ? ` · ${workspaceBranding.companySlogan}` : ""}`
+      : "";
     return {
       ...EMPTY_FORM,
       name: `Merkkit ${kits.length + 1}`,
-      companyName: branding?.companyName || "",
-      slogan: branding?.companySlogan || "",
-      primaryColor: branding?.primaryColor || EMPTY_FORM.primaryColor,
-      logoUrl: branding?.logoUrl || "",
-      website: branding?.website || "",
+      companyName: workspaceBranding.companyName || "",
+      slogan: workspaceBranding.companySlogan || "",
+      primaryColor: workspaceBranding.primaryColor || EMPTY_FORM.primaryColor,
+      logoUrl: workspaceBranding.logoUrl || "",
+      website: workspaceBranding.website || "",
       brandVoice: creative?.brandVoice || "",
       brandKeywords: creative?.brandKeywords || "",
       brandAvoid: creative?.brandAvoid || "",
@@ -287,8 +294,8 @@ export function SocialBrandKitPicker({
         creative?.brandSummary ||
         [creative?.trainingNotes, creative?.businessContext].filter(Boolean).join("\n\n") ||
         "",
-      brandSignature: branding?.brandSignature || "",
-      defaultLinkUrl: branding?.website || "",
+      brandSignature,
+      defaultLinkUrl: workspaceBranding.website || "",
       includeLogo: creative?.includeLogo ?? true,
     };
   }
@@ -332,40 +339,23 @@ export function SocialBrandKitPicker({
     if (kit) onApplyKit(kitToApplyPayload(kit));
   }
 
-  function readWorkspaceBranding() {
-    const settings = workspaceBranding.data as Record<string, unknown> | undefined;
-    if (!settings) return null;
-    const get = (key: string) => {
-      const value = settings[key];
-      return typeof value === "string" ? value.trim() : "";
-    };
-    const companyName = get("branding.company_name") || get("company.name");
-    const companySlogan = get("branding.company_slogan");
-    return {
-      companyName,
-      companySlogan,
-      primaryColor: get("branding.primary_color") || "#f9ae5a",
-      logoUrl: get("branding.logo_url"),
-      website: get("company.website") || get("branding.website"),
-      brandSignature: companyName ? `${companyName}${companySlogan ? ` · ${companySlogan}` : ""}` : "",
-    };
-  }
-
   function importFromWorkspace() {
-    const branding = readWorkspaceBranding();
     const creative = creativeBrand.data;
-    if (!branding?.companyName && !branding?.logoUrl && !creative) {
+    const brandSignature = workspaceBranding.companyName
+      ? `${workspaceBranding.companyName}${workspaceBranding.companySlogan ? ` · ${workspaceBranding.companySlogan}` : ""}`
+      : "";
+    if (!workspaceBranding.companyName && !workspaceBranding.logoUrl && !creative) {
       showToast({ title: "Geen branding gevonden", description: "Stel eerst branding in via Instellingen.", variant: "error" });
       return;
     }
 
     setForm((current) => ({
       ...current,
-      companyName: branding?.companyName || current.companyName,
-      slogan: branding?.companySlogan || current.slogan,
-      primaryColor: branding?.primaryColor || current.primaryColor,
-      logoUrl: branding?.logoUrl || current.logoUrl,
-      website: branding?.website || current.website,
+      companyName: workspaceBranding.companyName || current.companyName,
+      slogan: workspaceBranding.companySlogan || current.slogan,
+      primaryColor: workspaceBranding.primaryColor || current.primaryColor,
+      logoUrl: workspaceBranding.logoUrl || current.logoUrl,
+      website: workspaceBranding.website || current.website,
       brandVoice: creative?.brandVoice || current.brandVoice,
       brandKeywords: creative?.brandKeywords || current.brandKeywords,
       brandAvoid: creative?.brandAvoid || current.brandAvoid,
@@ -373,8 +363,8 @@ export function SocialBrandKitPicker({
         creative?.brandSummary ||
         [creative?.trainingNotes, creative?.businessContext].filter(Boolean).join("\n\n") ||
         current.brandSummary,
-      brandSignature: current.brandSignature || branding?.brandSignature || current.brandSignature,
-      defaultLinkUrl: branding?.website || current.defaultLinkUrl,
+      brandSignature: current.brandSignature || brandSignature || current.brandSignature,
+      defaultLinkUrl: workspaceBranding.website || current.defaultLinkUrl,
       includeLogo: creative?.includeLogo ?? current.includeLogo,
     }));
 
@@ -398,7 +388,7 @@ export function SocialBrandKitPicker({
     }
   }
 
-  if (kitsQuery.isLoading) {
+  if (kitsLoading || kitsQuery.isLoading) {
     return (
       <div className="space-y-3">
         <Skeleton className="h-8 w-40" />

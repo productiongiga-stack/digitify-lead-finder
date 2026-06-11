@@ -61,7 +61,6 @@ import { useToast } from "@/components/feedback/toast-provider";
 import {
   isFeedMediaReady,
   resolvePrimaryImageFromAssets,
-  SocialPlacementEditor,
   type FeedAspectFormat,
   type PlacementAssets,
   type SocialPlacement,
@@ -73,7 +72,7 @@ import {
 } from "@/components/social/social-carousel-editor";
 import { persistCarouselAssets, persistPlacementAssets } from "@/lib/persist-social-assets";
 import { FacebookPageAvatar, InstagramPageAvatar } from "@/components/social/social-platform-avatars";
-import { SocialBrandKitPicker, type SocialBrandKitApplyPayload } from "@/components/social/social-brand-kit-picker";
+import { type SocialBrandKitApplyPayload } from "@/components/social/social-brand-kit-picker";
 import { DEFAULT_SOCIAL_TONE, SOCIAL_TONE_OPTIONS, type SocialTone } from "@/lib/social-tone-options";
 import { SocialComposerSection } from "@/components/social/social-composer-section";
 import { SocialComposerWizard, SOCIAL_WIZARD_STEPS } from "@/components/social/social-composer-wizard";
@@ -94,6 +93,16 @@ const SocialAgenda = dynamic(
 const SocialQueuePanel = dynamic(
   () => import("./social-queue-panel").then((module) => module.SocialQueuePanel),
   { ssr: false, loading: () => <Skeleton className="h-64 w-full rounded-xl" /> },
+);
+
+const SocialPlacementEditor = dynamic(
+  () => import("@/components/social/social-placement-editor").then((module) => module.SocialPlacementEditor),
+  { ssr: false, loading: () => <Skeleton className="h-64 w-full rounded-xl" /> },
+);
+
+const SocialBrandKitPicker = dynamic(
+  () => import("@/components/social/social-brand-kit-picker").then((module) => module.SocialBrandKitPicker),
+  { ssr: false, loading: () => <Skeleton className="h-40 w-full rounded-xl" /> },
 );
 
 type Platform = "FACEBOOK" | "INSTAGRAM";
@@ -145,9 +154,9 @@ function statusBadge(status: RowStatus) {
   return <Badge variant="secondary">Draft</Badge>;
 }
 
-function toDateTimeLocal(value?: string | null) {
+function toDateTimeLocal(value?: string | Date | null) {
   if (!value) return "";
-  const d = new Date(value);
+  const d = value instanceof Date ? value : new Date(value);
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
@@ -499,6 +508,8 @@ function FacebookPreview({
   format: PostFormat;
   pageName?: string;
 }) {
+  const formatClass = FORMAT_OPTIONS.find((item) => item.value === format)?.className || "aspect-square";
+
   if (format === "STORY") {
     return (
       <div className="overflow-hidden rounded-[1.6rem] border border-slate-200 bg-slate-950 text-white shadow-[0_22px_55px_rgba(15,23,42,0.18)]">
@@ -539,14 +550,14 @@ function FacebookPreview({
         <MoreHorizontal className="h-5 w-5 text-slate-500" />
       </div>
       <p className="whitespace-pre-line px-4 pb-3 text-sm leading-relaxed">{caption}</p>
-      <div className="bg-slate-100">
+      <div className={cn("bg-slate-100", formatClass)}>
         {videoUrl ? (
-          <video src={videoUrl} className="max-h-[420px] w-full object-cover" muted playsInline controls />
+          <video src={videoUrl} className="h-full w-full object-cover" muted playsInline controls />
         ) : imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={imageUrl} alt="Facebook preview" className="max-h-[420px] w-full object-cover" />
+          <img src={imageUrl} alt="Facebook preview" className="block h-full w-full object-cover" />
         ) : (
-          <div className="flex aspect-[1.91/1] items-center justify-center text-sm text-slate-500">
+          <div className="flex h-full min-h-[180px] items-center justify-center text-sm text-slate-500">
             <ImageIcon className="mr-2 h-4 w-4" /> Afbeelding preview
           </div>
         )}
@@ -655,6 +666,7 @@ type SocialTab = (typeof SOCIAL_TABS)[number];
 
 export function SocialPageInner() {
   const { showToast } = useToast();
+  const utils = trpc.useUtils();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session } = useSession();
@@ -704,17 +716,17 @@ export function SocialPageInner() {
   const [previewSlideIndex, setPreviewSlideIndex] = useState(0);
   const [selectedPageId, setSelectedPageId] = useState("");
 
-  const listQuery = trpc.social.list.useQuery(
-    statusFilter === "ALL" ? undefined : { status: statusFilter as any },
-    { refetchInterval: 15_000 },
-  );
-  const connectionStatus = trpc.social.connectionStatus.useQuery();
-  const managedPagesQuery = trpc.social.listManagedPages.useQuery(undefined, {
-    enabled: Boolean(connectionStatus.data?.connected),
+  const listQuery = trpc.social.list.useQuery(statusFilter === "ALL" ? undefined : { status: statusFilter as any }, {
+    staleTime: 30_000,
+    refetchInterval: activeTab === "queue" ? 60_000 : false,
+  });
+  const connectionStatus = trpc.social.connectionStatus.useQuery(undefined, {
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: true,
   });
   const managedPages = useMemo(
-    () => (managedPagesQuery.data?.pages ?? []) as ManagedMetaPage[],
-    [managedPagesQuery.data?.pages],
+    () => (connectionStatus.data?.pages ?? []) as ManagedMetaPage[],
+    [connectionStatus.data?.pages],
   );
   const selectedManagedPage = useMemo(
     () => managedPages.find((page) => page.id === selectedPageId) || null,
@@ -791,15 +803,15 @@ export function SocialPageInner() {
   useEffect(() => {
     if (selectedPageId || !managedPages.length) return;
     const defaultPageId =
-      managedPagesQuery.data?.selectedPageId ||
+      connectionStatus.data?.selectedPageId ||
       connectionStatus.data?.pageId ||
       managedPages[0]?.id ||
       "";
     if (defaultPageId) setSelectedPageId(defaultPageId);
   }, [
     connectionStatus.data?.pageId,
+    connectionStatus.data?.selectedPageId,
     managedPages,
-    managedPagesQuery.data?.selectedPageId,
     selectedPageId,
   ]);
 
@@ -924,7 +936,10 @@ export function SocialPageInner() {
     if (payload.template.trim()) setTemplate(payload.template);
   }
 
-  const brandKitsQuery = trpc.social.listBrandKits.useQuery();
+  const brandKitsQuery = trpc.social.listBrandKits.useQuery(undefined, {
+    enabled: activeTab === "composer",
+    staleTime: 5 * 60_000,
+  });
   const selectedBrandKitName = useMemo(() => {
     const kits = brandKitsQuery.data?.kits ?? [];
     const match = kits.find((kit) => kit.id === selectedBrandKitId);
@@ -1416,15 +1431,23 @@ export function SocialPageInner() {
   }
 
   function openAgendaPost(post: SocialAgendaPost) {
-    loadRow(post);
+    void loadRow(post);
   }
 
-  function loadRow(row: any) {
-    const metadata = (row.metadata || {}) as SocialMetadata;
+  async function loadRow(row: { id: string; caption?: string | null; metadata?: unknown; targetPlatforms?: string[]; scheduledFor?: string | Date | null }) {
+    let source = row;
+    if (!row.metadata) {
+      try {
+        source = await utils.social.getById.fetch({ id: row.id });
+      } catch {
+        // Keep partial list row when full fetch fails.
+      }
+    }
+    const metadata = (source.metadata || {}) as SocialMetadata;
     setActiveTab("composer");
     router.replace("/social?tab=composer");
     setSelectedId(row.id);
-    setCaption(row.caption || "");
+    setCaption(source.caption || "");
     setPlacements(metadata.placements?.length ? metadata.placements : metadata.postFormat === "STORY" ? ["STORY"] : ["FEED"]);
     const legacyFormat = metadata.postFormat;
     setFeedFormat(
@@ -1433,10 +1456,10 @@ export function SocialPageInner() {
     );
     setPlacementAssets(metadata.assets || {});
     setCarousel(metadata.carousel || { enabled: false, slides: [] });
-    setTargetFacebook((row.targetPlatforms || []).includes("FACEBOOK"));
-    setTargetInstagram((row.targetPlatforms || []).includes("INSTAGRAM"));
-    setSelectedPageId(metadata.publisherPageId || managedPagesQuery.data?.selectedPageId || connectionStatus.data?.pageId || "");
-    setScheduledFor(toDateTimeLocal(row.scheduledFor));
+    setTargetFacebook((source.targetPlatforms || []).includes("FACEBOOK"));
+    setTargetInstagram((source.targetPlatforms || []).includes("INSTAGRAM"));
+    setSelectedPageId(metadata.publisherPageId || connectionStatus.data?.selectedPageId || connectionStatus.data?.pageId || "");
+    setScheduledFor(toDateTimeLocal(source.scheduledFor));
     setHeadline(metadata.headline || "");
     setCta(metadata.cta || "");
     setHashtags(metadata.hashtags || "");
@@ -1457,7 +1480,7 @@ export function SocialPageInner() {
     setScheduledFor("");
     setTargetFacebook(true);
     setTargetInstagram(true);
-    setSelectedPageId(managedPagesQuery.data?.selectedPageId || connectionStatus.data?.pageId || managedPages[0]?.id || "");
+    setSelectedPageId(connectionStatus.data?.selectedPageId || connectionStatus.data?.pageId || managedPages[0]?.id || "");
     setHeadline("");
     setCta("");
     setHashtags("");
@@ -1577,7 +1600,7 @@ export function SocialPageInner() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="composer" forceMount className="mt-0 space-y-3 data-[state=inactive]:hidden">
+        <TabsContent value="composer" className="mt-0 space-y-3">
       {!connectionStatus.isLoading && !connectionStatus.data?.connected ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-sm dark:bg-amber-950/25">
           <span className="text-amber-950/90 dark:text-amber-100">Meta niet gekoppeld.</span>
@@ -1640,7 +1663,7 @@ export function SocialPageInner() {
                     targetInstagram={targetInstagram}
                     onTargetInstagramChange={setTargetInstagram}
                     disabled={!canEditSelected}
-                    isLoading={managedPagesQuery.isLoading}
+                    isLoading={connectionStatus.isLoading}
                   />
                 </div>
 
@@ -1649,6 +1672,8 @@ export function SocialPageInner() {
                     selectedKitId={selectedBrandKitId}
                     onSelectedKitIdChange={setSelectedBrandKitId}
                     onApplyKit={applyBrandKitDefaults}
+                    kits={(brandKitsQuery.data?.kits ?? []) as any}
+                    kitsLoading={brandKitsQuery.isLoading}
                     autoApplyDefaults={!selectedId}
                     disabled={!canEditSelected}
                   />

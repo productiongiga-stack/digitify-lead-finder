@@ -878,6 +878,20 @@ export const socialRouter = router({
         orderBy: { updatedAt: "desc" },
         skip: (page - 1) * pageSize,
         take: pageSize,
+        select: {
+          id: true,
+          caption: true,
+          imageUrl: true,
+          scheduledFor: true,
+          status: true,
+          targetPlatforms: true,
+          retryCount: true,
+          publishedAt: true,
+          lastError: true,
+          externalPostIds: true,
+          updatedAt: true,
+          createdAt: true,
+        },
       }),
       socialDb.socialPost.count({ where }),
     ]);
@@ -1407,10 +1421,11 @@ export const socialRouter = router({
     const oauthScopes = resolveMetaOAuthScopeSummary();
     let pageName: string | null = null;
     let instagramUsername: string | null = null;
+    let pages: Awaited<ReturnType<typeof loadMetaManagedPages>> = [];
 
-    if (config.accessToken && config.pageId) {
-      const pages = await loadMetaManagedPages(config.accessToken).catch(() => []);
-      const selectedPage = pages.find((page) => page.id === config.pageId);
+    if (config.accessToken) {
+      pages = await loadMetaManagedPages(config.accessToken).catch(() => []);
+      const selectedPage = config.pageId ? pages.find((page) => page.id === config.pageId) : null;
       pageName = selectedPage?.name || null;
       instagramUsername = selectedPage?.instagramUsername || null;
     }
@@ -1420,6 +1435,8 @@ export const socialRouter = router({
       connected: Boolean(config.pageId && config.pageAccessToken),
       pageId: config.pageId || null,
       pageName,
+      pages,
+      selectedPageId: config.pageId || null,
       instagramBusinessId: config.instagramBusinessId || null,
       instagramUsername,
       autopostEnabled: config.autopostEnabled,

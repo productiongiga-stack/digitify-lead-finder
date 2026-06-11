@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import QRCode from "qrcode";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@digitify/ui";
 import { Check, Copy, Download, ExternalLink, QrCode } from "lucide-react";
 import { safeExternalUrl } from "@/lib/utils";
@@ -31,14 +30,17 @@ export function ReviewQrCodeCard({
     }
 
     let cancelled = false;
-    QRCode.toDataURL(normalizedUrl, {
-      width: 240,
-      margin: 1,
-      color: {
-        dark: "#0f172a",
-        light: "#ffffff",
-      },
-    })
+    void import("qrcode")
+      .then(({ default: QRCode }) =>
+        QRCode.toDataURL(normalizedUrl, {
+          width: 240,
+          margin: 1,
+          color: {
+            dark: "#0f172a",
+            light: "#ffffff",
+          },
+        }),
+      )
       .then((dataUrl: string) => {
         if (!cancelled) setQrDataUrl(dataUrl);
       })

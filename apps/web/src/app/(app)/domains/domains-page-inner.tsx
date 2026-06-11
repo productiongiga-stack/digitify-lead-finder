@@ -56,13 +56,25 @@ export function DomainsPageInner() {
   const { showToast } = useToast();
   const utils = trpc.useUtils();
 
+  const pollWhenVisible = () =>
+    typeof document !== "undefined" && document.visibilityState === "visible" ? 120_000 : false;
+
   const listQuery = trpc.domain.list.useQuery(
     { status: statusFilter, search: search || undefined, sort, page, pageSize: 12 },
-    { refetchInterval: 60_000 },
+    { staleTime: 60_000, refetchInterval: pollWhenVisible },
   );
-  const statsQuery = trpc.domain.getPortfolioStats.useQuery(undefined, { refetchInterval: 60_000 });
-  const monitorQuery = trpc.dashboard.getDomainMonitor.useQuery(undefined, { refetchInterval: 60_000 });
-  const { data: leadOptions } = trpc.lead.options.useQuery({ limit: 100 });
+  const statsQuery = trpc.domain.getPortfolioStats.useQuery(undefined, {
+    staleTime: 60_000,
+    refetchInterval: pollWhenVisible,
+  });
+  const monitorQuery = trpc.dashboard.getDomainMonitor.useQuery(undefined, {
+    staleTime: 60_000,
+    refetchInterval: pollWhenVisible,
+  });
+  const { data: leadOptions } = trpc.lead.options.useQuery(
+    { limit: 100 },
+    { enabled: open || Boolean(editDomain) },
+  );
 
   const createMutation = trpc.domain.create.useMutation({
     onSuccess: () => {

@@ -14,7 +14,7 @@ import { workspaceMemberUserIds } from "../lib/workspace-members";
 import { invalidateWorkspaceOwnerIdCache } from "../lib/workspace";
 import { passwordPolicySchema } from "../lib/password-policy";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
-import { invalidateUserSettingsCache, loadUserSettingRows } from "../lib/user-settings";
+import { invalidateUserSettingsCache, loadUserSettingRows, stripUserSettingRows, userSettingKey } from "../lib/user-settings";
 import { filterReadableSettingsForRole } from "../lib/permissions";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 import { redactSecretSettingValue } from "@digitify/db";
@@ -221,31 +221,40 @@ export const userRouter = router({
       },
       orderBy: { createdAt: "asc" },
     });
-    const googleStatuses = await Promise.all(
-      users.map(async (user) => {
-        const rows = await loadUserSettingRows(ctx.db, user.id, [
-          "bookings.google_sync_enabled",
-          "bookings.google_calendar_id",
-          "bookings.google_calendar_timezone",
-          "bookings.google_oauth_account_email",
-          "bookings.google_oauth_refresh_token",
-        ]);
-        const settings = settingsRowsToMap(rows);
-        const oauthEmail = getSettingString(settings, "bookings.google_oauth_account_email");
-        const calendarId = getSettingString(settings, "bookings.google_calendar_id");
-        const refreshToken = getSettingString(settings, "bookings.google_oauth_refresh_token");
-        return {
-          userId: user.id,
-          googleCalendar: {
-            connected: Boolean(oauthEmail && refreshToken),
-            syncEnabled: String(settings["bookings.google_sync_enabled"] ?? "").toLowerCase() === "true",
-            accountEmail: oauthEmail,
-            calendarId,
-            timezone: getSettingString(settings, "bookings.google_calendar_timezone", "Europe/Brussels"),
-          },
-        };
-      }),
+    const googleSettingKeys = [
+      "bookings.google_sync_enabled",
+      "bookings.google_calendar_id",
+      "bookings.google_calendar_timezone",
+      "bookings.google_oauth_account_email",
+      "bookings.google_oauth_refresh_token",
+    ];
+    const googleSettingDbKeys = users.flatMap((user) =>
+      googleSettingKeys.map((key) => userSettingKey(user.id, key)),
     );
+    const googleSettingRows = googleSettingDbKeys.length
+      ? await ctx.db.setting.findMany({ where: { key: { in: googleSettingDbKeys } } })
+      : [];
+    const googleStatuses = users.map((user) => {
+      const prefix = `user:${user.id}:`;
+      const rows = stripUserSettingRows(
+        user.id,
+        googleSettingRows.filter((row) => row.key.startsWith(prefix)),
+      );
+      const settings = settingsRowsToMap(rows);
+      const oauthEmail = getSettingString(settings, "bookings.google_oauth_account_email");
+      const calendarId = getSettingString(settings, "bookings.google_calendar_id");
+      const refreshToken = getSettingString(settings, "bookings.google_oauth_refresh_token");
+      return {
+        userId: user.id,
+        googleCalendar: {
+          connected: Boolean(oauthEmail && refreshToken),
+          syncEnabled: String(settings["bookings.google_sync_enabled"] ?? "").toLowerCase() === "true",
+          accountEmail: oauthEmail,
+          calendarId,
+          timezone: getSettingString(settings, "bookings.google_calendar_timezone", "Europe/Brussels"),
+        },
+      };
+    });
     const statusByUserId = new Map(googleStatuses.map((status) => [status.userId, status.googleCalendar]));
     return users.map((user) => ({
       ...user,
