@@ -264,9 +264,33 @@ export function SocialBrandKitPicker({
     }
   }, [autoApplyDefaults, kits, kitsQuery.data, onApplyKit, onSelectedKitIdChange, selectedKitId]);
 
+  function buildCreateFormDefaults() {
+    const branding = readWorkspaceBranding();
+    const creative = creativeBrand.data;
+    return {
+      ...EMPTY_FORM,
+      name: `Merkkit ${kits.length + 1}`,
+      companyName: branding?.companyName || "",
+      slogan: branding?.companySlogan || "",
+      primaryColor: branding?.primaryColor || EMPTY_FORM.primaryColor,
+      logoUrl: branding?.logoUrl || "",
+      website: branding?.website || "",
+      brandVoice: creative?.brandVoice || "",
+      brandKeywords: creative?.brandKeywords || "",
+      brandAvoid: creative?.brandAvoid || "",
+      brandSummary:
+        creative?.brandSummary ||
+        [creative?.trainingNotes, creative?.businessContext].filter(Boolean).join("\n\n") ||
+        "",
+      brandSignature: branding?.brandSignature || "",
+      defaultLinkUrl: branding?.website || "",
+      includeLogo: creative?.includeLogo ?? true,
+    };
+  }
+
   function openCreate() {
     setEditingId(null);
-    setForm({ ...EMPTY_FORM, name: `Merkkit ${kits.length + 1}` });
+    setForm(buildCreateFormDefaults());
     setManagerOpen(true);
   }
 
@@ -388,12 +412,12 @@ export function SocialBrandKitPicker({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={openCreate}>
+            <Button type="button" size="sm" variant="outline" onClick={openCreate}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               Nieuw merkkit
             </Button>
             {selectedKit ? (
-              <Button type="button" size="sm" variant="ghost" disabled={disabled} onClick={() => openEdit(selectedKit)}>
+              <Button type="button" size="sm" variant="ghost" onClick={() => openEdit(selectedKit)}>
                 Beheren
               </Button>
             ) : null}
@@ -413,8 +437,14 @@ export function SocialBrandKitPicker({
             ))}
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-            Nog geen merkkit. Maak er een aan of importeer vanuit je workspace-branding.
+          <div className="rounded-xl border border-dashed px-4 py-8 text-center">
+            <p className="text-sm text-muted-foreground">
+              Nog geen merkkit. Maak er een aan of importeer vanuit je workspace-branding.
+            </p>
+            <Button type="button" size="sm" className="mt-4" onClick={openCreate}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Nieuw merkkit
+            </Button>
           </div>
         )}
 
@@ -463,8 +493,8 @@ export function SocialBrandKitPicker({
         submitDisabled={!form.name.trim()}
         pending={upsertKit.isPending}
         asForm
-        onSubmit={() => upsertKit.mutate({ id: editingId || undefined, ...form })}
-        contentClassName="max-w-2xl"
+        onSubmit={() => upsertKit.mutateAsync({ id: editingId || undefined, ...form })}
+        contentClassName="z-[100] max-w-2xl"
       >
         <div className="max-h-[65vh] space-y-5 overflow-y-auto pr-1">
           <div className="flex flex-wrap gap-2">
@@ -583,7 +613,7 @@ export function SocialBrandKitPicker({
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent position="popper" className="z-[110]">
                       {SOCIAL_TONE_OPTIONS.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}

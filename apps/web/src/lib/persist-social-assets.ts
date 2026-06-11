@@ -1,5 +1,6 @@
-import type { PlacementAssets } from "@/components/social/social-placement-editor";
+import type { PlacementAssets, SocialPlacement, FeedAspectFormat } from "@/components/social/social-placement-editor";
 import type { SocialCarouselState } from "@/components/social/social-carousel-editor";
+import { cropImageSourceToPlacement } from "@/lib/social-image-crop";
 
 async function parseUploadResponse(response: Response) {
   const text = await response.text();
@@ -36,20 +37,91 @@ async function persistDataUrl(dataUrl: string) {
   return uploadSocialAssetFile(file);
 }
 
-export async function persistPlacementAssets(assets: PlacementAssets): Promise<PlacementAssets> {
-  const next: PlacementAssets = { ...assets };
+async function preparePlacementImageUrl(input: {
+  imageUrl: string;
+  placement: SocialPlacement;
+  feedFormat: FeedAspectFormat;
+  targetPlatforms: string[];
+  forceCrop?: boolean;
+}) {
+  const trimmed = input.imageUrl.trim();
+  if (!trimmed) return { url: "", cropped: false };
 
-  for (const placement of ["FEED", "STORY", "REEL"] as const) {
+  let source: string | File = trimmed;
+  if (trimmed.startsWith("data:")) {
+    source = await dataUrlToFile(trimmed, `social-${input.placement.toLowerCase()}.png`);
+  }
+
+  try {
+    const prepared = await cropImageSourceToPlacement({
+      source,
+      placement: input.placement,
+      feedFormat: input.feedFormat,
+      targetPlatforms: input.targetPlatforms,
+      forceCrop: input.forceCrop,
+    });
+
+    if (!prepared.cropped && !prepared.file && trimmed.startsWith("data:")) {
+      return { url: await persistDataUrl(trimmed), cropped: false };
+    }
+
+    if (!prepared.cropped && typeof source === "string" && !trimmed.startsWith("data:")) {
+      return { url: trimmed, cropped: false };
+    }
+
+    if (!prepared.file) {
+      return { url: trimmed, cropped: false };
+    }
+
+    return { url: await uploadSocialAssetFile(prepared.file), cropped: prepared.cropped };
+  } catch {
+    if (trimmed.startsWith("data:")) {
+      return { url: await persistDataUrl(trimmed), cropped: false };
+    }
+    return { url: trimmed, cropped: false };
+  }
+}
+
+export type PersistPlacementAssetsOptions = {
+  placements: SocialPlacement[];
+  feedFormat: FeedAspectFormat;
+  targetPlatforms: string[];
+  storyUsesFeedImage?: boolean;
+};
+
+export async function persistPlacementAssets(
+  assets: PlacementAssets,
+  options?: PersistPlacementAssetsOptions,
+): Promise<PlacementAssets> {
+  const next: PlacementAssets = { ...assets };
+  const placements = options?.placements || (["FEED", "STORY", "REEL"] as const);
+  const feedFormat = options?.feedFormat || "SQUARE";
+  const targetPlatforms = options?.targetPlatforms || ["FACEBOOK", "INSTAGRAM"];
+  const feedImageUrl = next.FEED?.imageUrl?.trim() || "";
+
+  for (const placement of placements) {
     const asset = next[placement];
     if (!asset) continue;
 
-    const imageUrl = asset.imageUrl?.trim();
-    if (imageUrl?.startsWith("data:")) {
-      next[placement] = {
-        ...asset,
-        imageUrl: await persistDataUrl(imageUrl),
-      };
+    let imageUrl = asset.imageUrl?.trim();
+    if (!imageUrl && placement === "STORY" && options?.storyUsesFeedImage && feedImageUrl) {
+      imageUrl = feedImageUrl;
     }
+    if (!imageUrl) continue;
+
+    const sameAsFeed = Boolean(placement === "STORY" && feedImageUrl && imageUrl === feedImageUrl);
+    const prepared = await preparePlacementImageUrl({
+      imageUrl,
+      placement,
+      feedFormat,
+      targetPlatforms,
+      forceCrop: sameAsFeed || Boolean(options?.storyUsesFeedImage && placement === "STORY"),
+    });
+
+    next[placement] = {
+      ...asset,
+      imageUrl: prepared.url,
+    };
   }
 
   return next;

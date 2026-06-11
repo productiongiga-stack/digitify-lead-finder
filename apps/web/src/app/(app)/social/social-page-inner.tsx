@@ -1293,7 +1293,18 @@ export function SocialPageInner() {
     if (!ensureEditorReady({ requireInstagramSafe: false })) return null;
 
     try {
-      const persistedAssets = await persistPlacementAssets(placementAssets);
+      const persistedAssets = await persistPlacementAssets(placementAssets, {
+        placements,
+        feedFormat,
+        targetPlatforms: targets,
+        storyUsesFeedImage:
+          placements.includes("STORY") &&
+          placements.includes("FEED") &&
+          !carousel.enabled &&
+          Boolean(placementAssets.FEED?.imageUrl?.trim()) &&
+          (placementAssets.STORY?.imageUrl?.trim() === placementAssets.FEED?.imageUrl?.trim() ||
+            !placementAssets.STORY?.imageUrl?.trim()),
+      });
       const persistedCarousel = await persistCarouselAssets(carousel);
       if (JSON.stringify(persistedAssets) !== JSON.stringify(placementAssets)) {
         setPlacementAssets(persistedAssets);

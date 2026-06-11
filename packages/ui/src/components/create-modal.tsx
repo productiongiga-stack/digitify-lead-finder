@@ -91,7 +91,7 @@ export function CreateModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={cn(contentClassName)}>
+      <DialogContent className={cn("z-[100]", contentClassName)}>
         {asForm && onSubmit ? <form onSubmit={handleSubmit}>{body}</form> : body}
       </DialogContent>
     </Dialog>

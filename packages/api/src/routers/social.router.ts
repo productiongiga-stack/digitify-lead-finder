@@ -5,6 +5,7 @@ import { z } from "zod";
 import { adminProcedure, protectedProcedure, aiRateLimitedProcedure, router, mutationProcedure } from "../trpc";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import { probeSocialImage, validateSocialImageForPublish, validateSocialVideoForPublish } from "../lib/social-image";
+import { prepareSocialPostAssetsForPublish } from "../lib/social-prepare-assets";
 import {
   clearMetaSettings,
   loadMetaManagedPages,
@@ -353,6 +354,49 @@ async function ensurePostCanPublish(
   }
 }
 
+async function prepareAndValidatePostForPublish(
+  socialDb: any,
+  post: { id: string; imageUrl: string; targetPlatforms: string[]; metadata?: unknown },
+  scope: { workspaceId: string; memberId: string },
+  publishTarget?: { pageId: string; pageAccessToken: string; instagramBusinessId: string },
+) {
+  const prepared = await prepareSocialPostAssetsForPublish({
+    imageUrl: post.imageUrl,
+    targetPlatforms: post.targetPlatforms,
+    metadata: (post.metadata || undefined) as z.infer<typeof socialPostMetadataSchema>,
+    workspaceId: scope.workspaceId,
+    userId: scope.memberId,
+  });
+
+  const normalizedMetadata = normalizeSocialMetadata(
+    prepared.metadata as z.infer<typeof socialPostMetadataSchema>,
+  );
+
+  if (prepared.changed) {
+    await socialDb.socialPost.update({
+      where: { id: post.id },
+      data: {
+        imageUrl: prepared.imageUrl,
+        metadata: normalizedMetadata,
+      },
+    });
+  }
+
+  await ensurePostCanPublish(
+    {
+      imageUrl: prepared.imageUrl,
+      targetPlatforms: post.targetPlatforms,
+      metadata: normalizedMetadata,
+    },
+    publishTarget,
+  );
+
+  return {
+    imageUrl: prepared.imageUrl,
+    metadata: normalizedMetadata,
+  };
+}
+
 async function resolvePostPublishTarget(
   db: PrismaClient,
   scope: { workspaceId: string; memberId: string },
@@ -577,26 +621,25 @@ async function publishSocialPostRecord(db: PrismaClient, post: SocialPostRecord)
     throw new Error("Meta is niet gekoppeld. Ga naar Instellingen → Integraties en koppel je Facebook-pagina.");
   }
 
-  const metadata = normalizeSocialMetadata(
-    (post.metadata || undefined) as z.infer<typeof socialPostMetadataSchema>,
-  );
   const publishTarget = await resolveSocialPublishTarget({
     config,
-    publisherPageId: metadata.publisherPageId,
+    publisherPageId: normalizeSocialMetadata(
+      (post.metadata || undefined) as z.infer<typeof socialPostMetadataSchema>,
+    ).publisherPageId,
   });
+
+  const prepared = await prepareAndValidatePostForPublish(
+    socialDb,
+    post,
+    scope,
+    publishTarget,
+  );
+  const metadata = prepared.metadata;
+  const primaryImageUrl = prepared.imageUrl;
 
   const externalIds: Record<string, SocialPublishedRef> = { ...existingExternalIds };
   const placements = metadata.placements || ["FEED"];
   const assets = metadata.assets || normalizePlacementAssets(metadata);
-
-  await ensurePostCanPublish(
-    {
-      imageUrl: post.imageUrl,
-      targetPlatforms: post.targetPlatforms,
-      metadata,
-    },
-    publishTarget,
-  );
 
   for (const placement of placements) {
     if (placement === "FEED") {
@@ -648,7 +691,7 @@ async function publishSocialPostRecord(db: PrismaClient, post: SocialPostRecord)
           await persistPartialExternalIds(socialDb, post.id, externalIds);
         }
       } else {
-        const imageUrl = resolvePlacementImageUrl("FEED", metadata, post.imageUrl);
+        const imageUrl = resolvePlacementImageUrl("FEED", metadata, primaryImageUrl);
         if (post.targetPlatforms.includes("FACEBOOK") && !externalIds.facebook) {
           externalIds.facebook = await publishFacebookImagePost({
             pageId: publishTarget.pageId,
@@ -671,7 +714,7 @@ async function publishSocialPostRecord(db: PrismaClient, post: SocialPostRecord)
     }
 
     if (placement === "STORY") {
-      const imageUrl = resolvePlacementImageUrl("STORY", metadata, post.imageUrl);
+      const imageUrl = resolvePlacementImageUrl("STORY", metadata, primaryImageUrl);
       if (post.targetPlatforms.includes("FACEBOOK") && !externalIds.facebookStory) {
         externalIds.facebookStory = await publishFacebookImageStory({
           pageId: publishTarget.pageId,
@@ -694,7 +737,7 @@ async function publishSocialPostRecord(db: PrismaClient, post: SocialPostRecord)
       const videoUrl = assets.REEL?.videoUrl?.trim();
       if (!videoUrl) throw new Error("Reel-video ontbreekt.");
       if (!externalIds.instagramReel) {
-        const coverUrl = resolvePlacementImageUrl("REEL", metadata, post.imageUrl);
+        const coverUrl = resolvePlacementImageUrl("REEL", metadata, primaryImageUrl);
         const publishCaption = buildPublishedCaption(post.caption, metadata, "REEL");
         externalIds.instagramReel = await publishInstagramReel({
           instagramBusinessId: publishTarget.instagramBusinessId,
@@ -1082,12 +1125,10 @@ export const socialRouter = router({
       }
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
       const publishTarget = await resolvePostPublishTarget(ctx.db, scope, row.metadata);
-      await ensurePostCanPublish(
-        {
-          imageUrl: row.imageUrl,
-          targetPlatforms: row.targetPlatforms,
-          metadata: row.metadata,
-        },
+      await prepareAndValidatePostForPublish(
+        socialDb,
+        row,
+        scope,
         publishTarget,
       );
 
@@ -1142,12 +1183,10 @@ export const socialRouter = router({
       ensureSchedulableStatus(row.status);
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
       const publishTarget = await resolvePostPublishTarget(ctx.db, scope, row.metadata);
-      await ensurePostCanPublish(
-        {
-          imageUrl: row.imageUrl,
-          targetPlatforms: row.targetPlatforms,
-          metadata: row.metadata,
-        },
+      await prepareAndValidatePostForPublish(
+        socialDb,
+        row,
+        scope,
         publishTarget,
       );
 

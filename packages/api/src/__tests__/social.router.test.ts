@@ -32,6 +32,16 @@ vi.mock("../lib/social-image", () => ({
   }),
   validateSocialVideoForPublish: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("../lib/social-prepare-assets", () => ({
+  prepareSocialPostAssetsForPublish: vi.fn(async (input: {
+    imageUrl: string;
+    metadata?: Record<string, unknown>;
+  }) => ({
+    imageUrl: input.imageUrl,
+    metadata: input.metadata || {},
+    changed: false,
+  })),
+}));
 
 import { socialRouter, runDueSocialPostsWorker } from "../routers/social.router";
 
