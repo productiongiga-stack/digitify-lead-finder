@@ -241,7 +241,7 @@ export function BookingsPageInner() {
   });
   const { data: eventTypes } = trpc.booking.listEventTypes.useQuery();
   type EventType = NonNullable<NonNullable<typeof eventTypes>[number]>;
-  const eventTypeItems = (eventTypes ?? []).filter((item): item is EventType => Boolean(item));
+  const eventTypeItems = (eventTypes ?? []).filter((item): item is EventType => item != null);
   const { data: overview } = trpc.dashboard.getOverview.useQuery(undefined, {
     staleTime: 60_000,
     refetchOnMount: false,
