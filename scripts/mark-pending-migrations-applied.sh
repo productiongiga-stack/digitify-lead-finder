@@ -50,6 +50,10 @@ MIGRATIONS=(
   20260607170000_lead_query_indexes
   20260607200000_workspace_analytics_events
   20260607210000_domain_workspace_unique
+  20260615140000_rls_extended_coverage
+  20260615160000_rls_remaining_coverage
+  20260615170000_schema_hardening
+  20260615180000_fix_openclaw_logs_rls
 )
 
 for name in "${MIGRATIONS[@]}"; do

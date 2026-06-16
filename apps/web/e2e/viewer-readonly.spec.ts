@@ -42,4 +42,11 @@ test.describe("VIEWER read-only RBAC", () => {
     expect(response.status()).toBeGreaterThanOrEqual(400);
     await expect(page.getByText("Leads verwijderen")).toBeVisible();
   });
+
+  test("VIEWER settings index hides owner-only sections", async ({ page }) => {
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: "Instellingen" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("link", { name: /weergave/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /team & rollen/i })).toHaveCount(0);
+  });
 });

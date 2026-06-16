@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { OpenClawPageAssist } from "@/components/openclaw/openclaw-page-assist";
-import { useSession } from "next-auth/react";
+import { useEffectiveAppRole } from "@/lib/use-effective-app-role";
 import { SETTINGS_PAGE_QUERY_OPTS } from "@/lib/settings-query-options";
 import {
   AlertCircle,
@@ -559,8 +559,7 @@ function BookingSetupChecklist({
 export function BookingsSettingsInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { data: session } = useSession();
-  const role = (session?.user as { role?: string } | undefined)?.role;
+  const role = useEffectiveAppRole();
   const isWorkspaceOwner = hasRole(role, ["OWNER"]);
   const { data: settings, isLoading, error, refetch } = trpc.settings.getBookingsSettings.useQuery(undefined, {
     retry: 1,

@@ -7,7 +7,7 @@
   "scripts": {
     "lint": "eslint src/",
     "test": "vitest run",
-    "test:integration": "RUN_DB_INTEGRATION=1 vitest run src/__tests__/workspace-rls.integration.test.ts src/__tests__/idor-smoke.integration.test.ts",
+    "test:integration": "RUN_DB_INTEGRATION=1 vitest run src/__tests__/workspace-rls.integration.test.ts src/__tests__/idor-smoke.integration.test.ts src/__tests__/settings-rbac.integration.test.ts",
     "test:redis": "RUN_REDIS_INTEGRATION=1 vitest run src/__tests__/rate-limit-redis.integration.test.ts",
     "test:watch": "vitest"
   },

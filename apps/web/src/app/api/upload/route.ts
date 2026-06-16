@@ -2,18 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth/session";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 import { storeUploadedImage } from "@/lib/upload-storage";
+import { UPLOAD_ALLOWED_IMAGE_TYPES, UPLOAD_ALLOWED_VIDEO_TYPES, UPLOAD_MAX_VIDEO_BYTES } from "@/lib/upload-constants";
 import { log } from "@digitify/api/src/lib/logger";
 
-const ALLOWED_IMAGE_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/svg+xml",
-  "image/x-icon",
-  "image/vnd.microsoft.icon",
-  "image/webp",
-];
-
-const ALLOWED_VIDEO_TYPES = ["video/mp4", "video/quicktime"];
+const ALLOWED_IMAGE_TYPES: string[] = [...UPLOAD_ALLOWED_IMAGE_TYPES];
+const ALLOWED_VIDEO_TYPES: string[] = [...UPLOAD_ALLOWED_VIDEO_TYPES];
 
 export async function POST(req: NextRequest) {
   const currentUser = await getCurrentUser();
@@ -39,7 +32,7 @@ export async function POST(req: NextRequest) {
   }
 
   const isVideo = ALLOWED_VIDEO_TYPES.includes(file.type);
-  const maxSize = isVideo ? 100 * 1024 * 1024 : 2 * 1024 * 1024;
+  const maxSize = isVideo ? UPLOAD_MAX_VIDEO_BYTES : 2 * 1024 * 1024;
   if (file.size > maxSize) {
     return NextResponse.json(
       { error: isVideo ? "Video is te groot (max 100MB)." : "Bestand is te groot (max 2MB)." },

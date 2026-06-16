@@ -17,6 +17,11 @@ import { googleAdsRouter } from "../routers/google-ads.router";
 
 const TEST_USER_ID = "ws_1";
 
+function planDb(delegate: Record<string, unknown>) {
+  const findUnique = delegate.findUnique as ReturnType<typeof vi.fn> | undefined;
+  return { ...delegate, findFirst: delegate.findFirst ?? findUnique };
+}
+
 function makeCtx(db: Record<string, unknown>, role = "OWNER") {
   return {
     db: {
@@ -89,7 +94,7 @@ describe("googleAds router flow", () => {
 
     const caller = googleAdsRouter.createCaller(
       makeCtx({
-        googleAdPlan: { create, findUnique, update },
+        googleAdPlan: planDb({ create, findUnique, update }),
         activity: { create: vi.fn().mockResolvedValue({ id: "act_1" }) },
       }),
     );

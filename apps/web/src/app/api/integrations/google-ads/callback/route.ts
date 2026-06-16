@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma, revealSettingValue } from "@digitify/db";
 import { getCurrentUser } from "@/lib/auth/session";
+import { canManageIntegrations } from "@/lib/auth/integration-access";
 import {
   isValidGoogleOAuthClientId,
   isValidGoogleOAuthClientSecret,
@@ -19,10 +20,10 @@ export async function GET(request: Request) {
   if (!user) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
-  if (!["OWNER", "ADMIN"].includes(String(user.role || ""))) {
+  if (!canManageIntegrations(user)) {
     return NextResponse.redirect(new URL("/settings/integrations?googleAds=forbidden", request.url));
   }
-  const userId = (user as { id?: string }).id;
+  const userId = user.id;
   if (!userId) {
     return NextResponse.redirect(new URL("/login", request.url));
   }

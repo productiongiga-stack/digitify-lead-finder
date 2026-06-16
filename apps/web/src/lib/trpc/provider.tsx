@@ -24,6 +24,12 @@ export function TRPCProvider({ children }: { children: React.ReactNode }) {
             refetchOnMount: false,
             retry: 1,
           },
+          dehydrate: {
+            serializeData: superjson.serialize,
+          },
+          hydrate: {
+            deserializeData: superjson.deserialize,
+          },
         },
       })
   );

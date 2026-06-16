@@ -210,7 +210,7 @@ export function QuoteIconPicker({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+        accept="image/png,image/jpeg,image/webp,image/gif"
         className="hidden"
         onChange={(event) => void handleFileChange(event)}
       />
@@ -290,7 +290,7 @@ export function QuoteIconLibraryPanel({ iconLibrary, onChange, onUploadFile }: Q
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+        accept="image/png,image/jpeg,image/webp,image/gif"
         className="hidden"
         onChange={(event) => void handleUpload(event)}
       />

@@ -1,19 +1,7 @@
 import type { PlacementAssets, SocialPlacement, FeedAspectFormat } from "@/components/social/social-placement-editor";
 import type { SocialCarouselState } from "@/components/social/social-carousel-editor";
 import { cropImageSourceToPlacement } from "@/lib/social-image-crop";
-
-async function parseUploadResponse(response: Response) {
-  const text = await response.text();
-  try {
-    return JSON.parse(text) as { url?: string; error?: string };
-  } catch {
-    throw new Error(
-      text.trim().startsWith("Request")
-        ? "Bestand te groot voor de server. Upload kleinere afbeeldingen of stel Vercel Blob in."
-        : text.slice(0, 160) || "Upload mislukt",
-    );
-  }
-}
+import { uploadClientAsset } from "@/lib/upload-client-asset";
 
 async function dataUrlToFile(dataUrl: string, filename: string) {
   const response = await fetch(dataUrl);
@@ -22,14 +10,7 @@ async function dataUrlToFile(dataUrl: string, filename: string) {
 }
 
 export async function uploadSocialAssetFile(file: File) {
-  const form = new FormData();
-  form.append("file", file);
-  const response = await fetch("/api/upload", { method: "POST", body: form });
-  const payload = await parseUploadResponse(response);
-  if (!response.ok || !payload.url) {
-    throw new Error(payload.error || "Upload mislukt");
-  }
-  return payload.url;
+  return uploadClientAsset(file);
 }
 
 async function persistDataUrl(dataUrl: string) {

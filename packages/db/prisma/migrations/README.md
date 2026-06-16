@@ -12,6 +12,10 @@
 | `20260523140000_workspace_invoices` | Facturen (`workspace_invoices` + regels) + RLS |
 | `20260523160000_workspace_saved_searches` | Opgeslagen lead-zoekopdrachten + RLS |
 | `20260523200000_scoring_workspace_and_rls` | Scoring per workspace + RLS enrichment/chat |
+| `20260615140000_rls_extended_coverage` | RLS notes, activities, social_posts, settings, campaign_leads, … |
+| `20260615160000_rls_remaining_coverage` | RLS meta/google ads, booking children, analytics, openclaw |
+| `20260615170000_schema_hardening` | quoteNumber unique per workspace; media/analytics FK |
+| `20260615180000_fix_openclaw_logs_rls` | Fix openclaw_logs policy for workspace members |
 
 ## Nieuwe / lege database
 

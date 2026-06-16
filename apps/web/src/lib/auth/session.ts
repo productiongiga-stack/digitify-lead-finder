@@ -10,6 +10,8 @@ type SessionUser = {
   name?: string | null;
   role?: string;
   workspaceId?: string;
+  workspaceRole?: string;
+  isPersonalWorkspace?: boolean;
 };
 
 export const getSession = cache(async () => getServerSession(authOptions));
@@ -33,6 +35,12 @@ export const getCurrentUser = cache(async () => {
       name: sessionUser.name ?? null,
       role: sessionUser.role,
       workspaceId: workspaceIdFromSession,
+      workspaceRole:
+        typeof sessionUser.workspaceRole === "string" ? sessionUser.workspaceRole : sessionUser.role,
+      isPersonalWorkspace:
+        typeof sessionUser.isPersonalWorkspace === "boolean"
+          ? sessionUser.isPersonalWorkspace
+          : workspaceIdFromSession === userId,
     };
   }
 
@@ -50,6 +58,8 @@ export const getCurrentUser = cache(async () => {
     name: user.name,
     role: user.role,
     workspaceId,
+    workspaceRole: user.role,
+    isPersonalWorkspace: workspaceId === user.id,
   };
 });
 

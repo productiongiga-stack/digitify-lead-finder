@@ -54,13 +54,48 @@ const NEW_MODEL_IDS = new Set([
   "ltx-2.3-lipsync",
 ]);
 
+const REMOTE_MEDIA_ALLOWED_HOSTS = new Set(["api.muapi.ai", "cdn.muapi.ai"]);
+
+function isAllowedRemoteMediaHost(hostname: string) {
+  if (REMOTE_MEDIA_ALLOWED_HOSTS.has(hostname)) return true;
+  return hostname.endsWith(".public.blob.vercel-storage.com");
+}
+
+function validateRemoteMediaUrl(url: string, label = "Media-URL") {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `${label} is ongeldig.` });
+  }
+  if (parsed.protocol !== "https:") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `${label} moet een https-URL zijn.` });
+  }
+  if (!isAllowedRemoteMediaHost(parsed.hostname)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `${label} host is niet toegestaan.` });
+  }
+}
+
+const remoteMediaUrl = z
+  .string()
+  .url()
+  .superRefine((value, ctx) => {
+    try {
+      validateRemoteMediaUrl(value);
+    } catch (error) {
+      if (error instanceof TRPCError) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: error.message });
+      }
+    }
+  });
+
 const startLipSyncInput = z.object({
   prompt: z.string().trim().max(4000).optional(),
   model: z.string().trim().min(1),
   resolution: z.string().trim().optional(),
-  imageUrl: z.string().url().optional(),
-  videoUrl: z.string().url().optional(),
-  audioUrl: z.string().url().min(1),
+  imageUrl: remoteMediaUrl.optional(),
+  videoUrl: remoteMediaUrl.optional(),
+  audioUrl: remoteMediaUrl,
   socialPostId: z.string().optional(),
 });
 
@@ -71,8 +106,8 @@ const startImageInput = z.object({
   placementFormat: placementFormatEnum.optional(),
   resolution: z.string().trim().optional(),
   quality: z.string().trim().optional(),
-  imageUrl: z.string().url().optional(),
-  imagesList: z.array(z.string().url()).max(14).optional(),
+  imageUrl: remoteMediaUrl.optional(),
+  imagesList: z.array(remoteMediaUrl).max(14).optional(),
   socialPostId: z.string().optional(),
   brandKitId: z.string().max(80).optional(),
 });
@@ -85,7 +120,7 @@ const startVideoInput = z.object({
   duration: z.number().int().min(1).max(60).optional(),
   resolution: z.string().trim().optional(),
   quality: z.string().trim().optional(),
-  imageUrl: z.string().url().optional(),
+  imageUrl: remoteMediaUrl.optional(),
   socialPostId: z.string().optional(),
 });
 
@@ -95,8 +130,8 @@ const startMarketingAdInput = z.object({
   aspectRatio: z.string().trim().optional(),
   duration: z.number().int().min(4).max(15).optional(),
   resolution: z.enum(["720p", "1080p"]).optional(),
-  imagesList: z.array(z.string().url()).min(1).max(8),
-  videoFiles: z.array(z.string().url()).max(2).optional(),
+  imagesList: z.array(remoteMediaUrl).min(1).max(8),
+  videoFiles: z.array(remoteMediaUrl).max(2).optional(),
   socialPostId: z.string().optional(),
 });
 

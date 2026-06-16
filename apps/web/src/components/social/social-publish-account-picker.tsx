@@ -3,6 +3,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
+  Badge,
   Button,
   Select,
   SelectContent,
@@ -21,10 +22,7 @@ import {
   RefreshCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  FacebookPageAvatar,
-  InstagramPageAvatar,
-} from "@/components/social/social-platform-avatars";
+import { FacebookPageAvatar } from "@/components/social/social-platform-avatars";
 
 export type SocialManagedPage = {
   id: string;
@@ -53,44 +51,101 @@ function instagramHandle(username?: string) {
   return `@${username.replace(/^@/, "")}`;
 }
 
-function avatarLabel(name: string, username?: string) {
-  const source = username?.replace(/^@/, "") || name;
-  return source.charAt(0).toUpperCase() || "D";
-}
-
 function hasInstagram(page?: SocialManagedPage | null) {
   return Boolean(page?.instagramBusinessId?.trim());
 }
 
-function ChannelPill({
+function FacebookMark({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        "flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#1877F2] text-white shadow-[0_2px_8px_rgba(24,119,242,0.28)]",
+        className,
+      )}
+      aria-hidden
+    >
+      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M13.5 22v-8h2.7l.4-3.1h-3.1V9.1c0-.9.2-1.5 1.5-1.5H17V5.1c-.3 0-1.3-.1-2.4-.1-2.4 0-4 1.4-4 4v2.9H8.2v3.1h2.4V22h2.9z" />
+      </svg>
+    </span>
+  );
+}
+
+function InstagramMark({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        "flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-[#f9ce34] via-[#ee2a7b] to-[#6228d7] p-[2px] shadow-[0_2px_10px_rgba(221,42,123,0.22)]",
+        className,
+      )}
+      aria-hidden
+    >
+      <span className="flex h-full w-full items-center justify-center rounded-full bg-white dark:bg-slate-950">
+        <svg className="h-4 w-4 stroke-[#ee2a7b]" viewBox="0 0 24 24" fill="none" strokeWidth="2">
+          <rect x="3" y="3" width="18" height="18" rx="5" />
+          <circle cx="12" cy="12" r="4" />
+          <circle cx="17.2" cy="6.8" r="1.2" fill="#ee2a7b" stroke="none" />
+        </svg>
+      </span>
+    </span>
+  );
+}
+
+function ChannelToggle({
   active,
   disabled,
   label,
+  description,
   icon,
+  accent,
   onClick,
 }: {
   active: boolean;
   disabled?: boolean;
   label: string;
+  description: string;
   icon: ReactNode;
+  accent: "facebook" | "instagram";
   onClick: () => void;
 }) {
+  const accentStyles =
+    accent === "facebook"
+      ? active
+        ? "border-[#1877F2]/45 bg-[#1877F2]/[0.07] ring-1 ring-[#1877F2]/20"
+        : "border-border/60 bg-background hover:border-[#1877F2]/25 hover:bg-[#1877F2]/[0.04]"
+      : active
+        ? "border-[#ee2a7b]/40 bg-gradient-to-br from-[#f9ce34]/10 via-[#ee2a7b]/8 to-[#6228d7]/10 ring-1 ring-[#ee2a7b]/15"
+        : "border-border/60 bg-background hover:border-[#ee2a7b]/25 hover:bg-[#ee2a7b]/[0.04]";
+
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={onClick}
+      aria-pressed={active}
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium transition-colors",
-        active
-          ? "border-primary bg-primary text-primary-foreground shadow-sm"
-          : "border-border/70 bg-background text-foreground hover:bg-muted/40",
+        "group flex min-h-[4.25rem] flex-1 items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-all",
+        accentStyles,
         disabled && "cursor-not-allowed opacity-45",
       )}
     >
-      <span className="shrink-0">{icon}</span>
-      <span>{label}</span>
-      {active ? <Check className="h-3.5 w-3.5 opacity-90" strokeWidth={3} /> : null}
+      {icon}
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-foreground">{label}</span>
+        <span className="block text-[11px] text-muted-foreground">{description}</span>
+      </span>
+      <span
+        className={cn(
+          "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
+          active
+            ? accent === "facebook"
+              ? "border-[#1877F2] bg-[#1877F2] text-white"
+              : "border-[#ee2a7b] bg-gradient-to-tr from-[#f9ce34] via-[#ee2a7b] to-[#6228d7] text-white"
+            : "border-muted-foreground/25 bg-transparent group-hover:border-muted-foreground/40",
+        )}
+      >
+        {active ? <Check className="h-3 w-3" strokeWidth={3} /> : null}
+      </span>
     </button>
   );
 }
@@ -99,11 +154,11 @@ function MetaConnectionTroubleshoot({ pagesWithoutInstagram }: { pagesWithoutIns
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="rounded-lg border border-border/60 bg-muted/10">
+    <div className="overflow-hidden rounded-xl border border-border/50 bg-background/60">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs text-muted-foreground hover:text-foreground"
+        className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground"
       >
         <HelpCircle className="h-3.5 w-3.5 shrink-0" />
         <span className="flex-1">Instagram ontbreekt? Hulp bij koppelen</span>
@@ -111,7 +166,7 @@ function MetaConnectionTroubleshoot({ pagesWithoutInstagram }: { pagesWithoutIns
       </button>
 
       {open ? (
-        <div className="space-y-3 border-t border-border/50 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
+        <div className="space-y-3 border-t border-border/50 bg-muted/10 px-3.5 py-3 text-xs leading-relaxed text-muted-foreground">
           <p>
             Koppel Instagram aan je Facebook Page in{" "}
             <a
@@ -183,28 +238,33 @@ export function SocialPublishAccountPicker({
   return (
     <div className="space-y-3">
       <div>
-        <p className="text-sm font-semibold text-foreground">Waar publiceer je?</p>
-        <p className="text-xs text-muted-foreground">Kies je account en welke kanalen actief zijn.</p>
+        <p className="text-sm font-semibold tracking-tight text-foreground">Waar publiceer je?</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">Kies je account en welke kanalen actief zijn.</p>
       </div>
 
       {isLoading ? (
-        <Skeleton className="h-28 w-full rounded-xl" />
+        <Skeleton className="h-36 w-full rounded-2xl" />
       ) : pages.length > 0 ? (
-        <div className="space-y-3 rounded-xl border border-border/70 bg-muted/10 p-3 sm:p-4">
-          <div className="space-y-1.5">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Account</p>
+        <div className="space-y-4 rounded-2xl border border-border/60 bg-gradient-to-b from-muted/25 via-background to-background p-3.5 sm:p-4">
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Account</p>
             <Select value={selectedPageId || undefined} onValueChange={onSelectedPageIdChange} disabled={disabled}>
-              <SelectTrigger id="social-publish-account" className="h-11 bg-background">
+              <SelectTrigger
+                id="social-publish-account"
+                className="h-auto min-h-12 rounded-xl border-border/60 bg-background/90 py-2.5 shadow-sm"
+              >
                 <SelectValue placeholder="Kies een pagina">
                   {selectedPage ? (
-                    <span className="flex min-w-0 items-center gap-2.5">
+                    <span className="flex min-w-0 items-center gap-3 text-left">
                       <FacebookPageAvatar size="sm" alt={selectedPage.name} />
-                      <span className="min-w-0 truncate font-medium">{selectedPage.name}</span>
-                      {instagramUser ? (
-                        <span className="hidden truncate text-xs text-muted-foreground sm:inline">{instagramUser}</span>
-                      ) : (
-                        <span className="hidden text-xs text-amber-700 sm:inline">Geen Instagram</span>
-                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-foreground">{selectedPage.name}</span>
+                        {instagramUser ? (
+                          <span className="block truncate text-xs text-muted-foreground">{instagramUser}</span>
+                        ) : (
+                          <span className="block text-xs text-amber-700 dark:text-amber-300">Geen Instagram gekoppeld</span>
+                        )}
+                      </span>
                     </span>
                   ) : null}
                 </SelectValue>
@@ -215,11 +275,13 @@ export function SocialPublishAccountPicker({
                   const handle = instagramHandle(page.instagramUsername);
                   return (
                     <SelectItem key={page.id} value={page.id}>
-                      <span className="flex w-full items-center gap-2">
+                      <span className="flex w-full items-center gap-2.5 py-0.5">
                         <FacebookPageAvatar size="sm" alt={page.name} />
-                        <span className="min-w-0 flex-1 truncate font-medium">{page.name}</span>
-                        <span className={cn("text-[11px]", pageInstagram ? "text-muted-foreground" : "text-amber-700")}>
-                          {handle || "Geen IG"}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium">{page.name}</span>
+                          <span className={cn("block text-[11px]", pageInstagram ? "text-muted-foreground" : "text-amber-700 dark:text-amber-300")}>
+                            {handle || "Geen Instagram"}
+                          </span>
                         </span>
                       </span>
                     </SelectItem>
@@ -229,47 +291,62 @@ export function SocialPublishAccountPicker({
             </Select>
           </div>
 
-          <div className="border-t border-border/50 pt-3">
-            <p className="mb-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Kanalen</p>
-            <div className="flex flex-wrap gap-2">
-              <ChannelPill
+          <div className="space-y-2.5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Kanalen</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <ChannelToggle
                 active={targetFacebook}
                 disabled={disabled}
                 label="Facebook"
-                icon={<FacebookPageAvatar size="sm" alt={selectedPage?.name} />}
+                description={targetFacebook ? "Wordt meegenomen" : "Niet geselecteerd"}
+                accent="facebook"
+                icon={<FacebookMark />}
                 onClick={() => onTargetFacebookChange(!targetFacebook)}
               />
-              <ChannelPill
+              <ChannelToggle
                 active={targetInstagram}
                 disabled={disabled || !instagramLinked}
                 label="Instagram"
-                icon={
-                  <InstagramPageAvatar
-                    size="sm"
-                    label={avatarLabel(selectedPage?.name || "D", selectedPage?.instagramUsername)}
-                  />
+                description={
+                  !instagramLinked
+                    ? "Niet gekoppeld aan pagina"
+                    : targetInstagram
+                      ? "Wordt meegenomen"
+                      : "Niet geselecteerd"
                 }
+                accent="instagram"
+                icon={<InstagramMark />}
                 onClick={() => onTargetInstagramChange(!targetInstagram)}
               />
             </div>
           </div>
 
           {selectedPage ? (
-            <p className="text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-1.5 border-t border-border/40 pt-3">
               {activeChannels.length === 0 ? (
-                <span className="text-amber-700 dark:text-amber-300">Kies minstens één kanaal om verder te gaan.</span>
+                <span className="text-xs text-amber-700 dark:text-amber-300">Kies minstens één kanaal om verder te gaan.</span>
               ) : (
                 <>
-                  <span className="font-medium text-foreground">{selectedPage.name}</span>
-                  {" · "}
-                  {activeChannels.join(" + ")}
+                  <Badge variant="outline" className="font-normal text-muted-foreground">
+                    {selectedPage.name}
+                  </Badge>
+                  {targetFacebook ? (
+                    <Badge className="border-[#1877F2]/30 bg-[#1877F2]/10 font-normal text-[#1877F2] hover:bg-[#1877F2]/10">
+                      Facebook
+                    </Badge>
+                  ) : null}
+                  {targetInstagram ? (
+                    <Badge className="border-[#ee2a7b]/25 bg-[#ee2a7b]/10 font-normal text-[#c13584] hover:bg-[#ee2a7b]/10 dark:text-[#ee2a7b]">
+                      Instagram
+                    </Badge>
+                  ) : null}
                 </>
               )}
-            </p>
+            </div>
           ) : null}
         </div>
       ) : (
-        <div className="rounded-lg border border-dashed px-4 py-4 text-center">
+        <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-5 text-center">
           <p className="text-sm text-muted-foreground">Geen Facebook-pagina gevonden.</p>
           <Button variant="outline" size="sm" className="mt-3" asChild>
             <Link href={INTEGRATIONS_META_URL}>
@@ -281,7 +358,7 @@ export function SocialPublishAccountPicker({
       )}
 
       {!isLoading && selectedPage && !instagramLinked ? (
-        <p className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-xs text-amber-950 dark:text-amber-100">
+        <p className="flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 px-3.5 py-2.5 text-xs text-amber-950 dark:text-amber-100">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           Instagram is niet gekoppeld aan deze pagina. Je kunt wel op Facebook posten.
         </p>

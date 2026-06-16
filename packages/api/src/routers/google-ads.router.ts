@@ -1,8 +1,8 @@
 import { TRPCError } from "@trpc/server";
-import { type PrismaClient } from "@digitify/db";
+import { type PrismaClient, Prisma } from "@digitify/db";
 import { OpenClawClient } from "@digitify/openclaw";
 import { z } from "zod";
-import { adminProcedure, protectedProcedure, aiRateLimitedProcedure, router, mutationProcedure } from "../trpc";
+import { adminProcedure, protectedProcedure, aiRateLimitedProcedure, router, mutationProcedure, type Context } from "../trpc";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import {
   defaultSearchTargeting,
@@ -33,6 +33,7 @@ import {
   upsertGoogleAdsSettings,
 } from "../lib/google-ads-oauth";
 import { workspaceScopeFromAuthenticatedUser } from "../lib/social-meta";
+import { findWorkspaceRecord } from "../lib/workspace-record";
 
 const PLAN_STATUS = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "PUSHING", "PUSHED_PAUSED", "FAILED", "CANCELLED"] as const;
 const CAMPAIGN_TYPES = ["SEARCH", "PERFORMANCE_MAX"] as const;
@@ -53,23 +54,17 @@ const draftInputSchema = z.object({
   creatives: jsonRecord.optional().nullable(),
 });
 
-function ensureWorkspaceAccess(row: { createdById: string }, workspaceId: string) {
-  if (row.createdById !== workspaceId) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang tot dit Google Ads plan." });
-  }
-}
-
 async function createGoogleAdsActivity(
   db: PrismaClient,
-  input: { userId: string; type: string; title: string; metadata?: Record<string, unknown> },
+  input: { userId: string; type: Prisma.ActivityCreateInput["type"]; title: string; metadata?: Record<string, unknown> },
 ) {
-  await (db as any).activity
+  await db.activity
     .create({
       data: {
         userId: input.userId,
         type: input.type,
         title: input.title,
-        metadata: input.metadata || {},
+        metadata: (input.metadata || {}) as Prisma.InputJsonValue,
       },
     })
     .catch(() => null);
@@ -272,13 +267,10 @@ async function renderSearchKeywordsSuggestion(
 }
 
 async function pushPlanToGoogle(
-  ctx: { db: PrismaClient; user: NonNullable<Parameters<typeof workspaceScopeFromAuthenticatedUser>[0]> },
+  ctx: Pick<Context, "db" | "user"> & { user: NonNullable<Context["user"]> },
   id: string,
 ) {
-  const adsDb = ctx.db as any;
-  const plan = await adsDb.googleAdPlan.findUnique({ where: { id } });
-  if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "Google Ads draft niet gevonden." });
-  ensureWorkspaceAccess(plan, ctx.user.workspaceId!);
+  const plan = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, id, "Google Ads draft");
   if (!["APPROVED", "FAILED"].includes(plan.status)) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen approved/failed drafts kunnen naar Google gepusht worden." });
   }
@@ -290,11 +282,11 @@ async function pushPlanToGoogle(
   }
   validateBudgetGuard(plan, config.maxDailyBudgetCents);
 
-  await adsDb.googleAdPlan.update({ where: { id }, data: { status: "PUSHING", lastError: null } });
+  await ctx.db.googleAdPlan.update({ where: { id }, data: { status: "PUSHING", lastError: null } });
 
   try {
     const externalIds = await pushPausedGoogleAdPlan({ config, plan });
-    const updated = await adsDb.googleAdPlan.update({
+    const updated = await ctx.db.googleAdPlan.update({
       where: { id },
       data: {
         status: "PUSHED_PAUSED",
@@ -320,7 +312,7 @@ async function pushPlanToGoogle(
       title: "Google Ads push mislukt",
       metadata: { googleAdPlanId: id, error: message },
     });
-    return adsDb.googleAdPlan.update({
+    return ctx.db.googleAdPlan.update({
       where: { id },
       data: { status: "FAILED", retryCount: Number(plan.retryCount || 0) + 1, lastError: message },
     });
@@ -332,7 +324,7 @@ export const googleAdsRouter = router({
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadGoogleAdsWorkspaceConfig(ctx.db, scope);
     const selected = config.customerId
-      ? await (ctx.db as any).googleAdAccount
+      ? await ctx.db.googleAdAccount
           .findFirst({
             where: {
               createdById: ctx.user.workspaceId!,
@@ -387,11 +379,11 @@ export const googleAdsRouter = router({
         { key: "ads.google_customer_id", value: customerId },
         { key: "ads.google_login_customer_id", value: normalizeGoogleCustomerId(input.loginCustomerId || "") },
       ]);
-      await (ctx.db as any).googleAdAccount.updateMany({
+      await ctx.db.googleAdAccount.updateMany({
         where: { createdById: ctx.user.workspaceId! },
         data: { isSelected: false },
       });
-      return (ctx.db as any).googleAdAccount.upsert({
+      return ctx.db.googleAdAccount.upsert({
         where: {
           createdById_externalCustomerId: { createdById: ctx.user.workspaceId!, externalCustomerId: customerId },
         },
@@ -464,11 +456,11 @@ export const googleAdsRouter = router({
     .query(async ({ ctx, input }) => {
       const where: Record<string, unknown> = { createdById: ctx.user.workspaceId! };
       if (input?.status) where.status = input.status;
-      return (ctx.db as any).googleAdPlan.findMany({ where, orderBy: { updatedAt: "desc" }, take: 100 });
+      return ctx.db.googleAdPlan.findMany({ where, orderBy: { updatedAt: "desc" }, take: 100 });
     }),
 
   createDraft: mutationProcedure.input(draftInputSchema).mutation(async ({ ctx, input }) => {
-    const row = await (ctx.db as any).googleAdPlan.create({
+    const row = await ctx.db.googleAdPlan.create({
       data: {
         createdById: ctx.user.workspaceId!,
         name: input.name.trim(),
@@ -495,14 +487,11 @@ export const googleAdsRouter = router({
   updateDraft: mutationProcedure
     .input(z.object({ id: z.string() }).merge(draftInputSchema.partial()))
     .mutation(async ({ ctx, input }) => {
-      const adsDb = ctx.db as any;
-      const row = await adsDb.googleAdPlan.findUnique({ where: { id: input.id } });
-      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Google Ads draft niet gevonden." });
-      ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+      const row = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, input.id, "Google Ads draft");
       if (!["DRAFT", "FAILED", "CANCELLED"].includes(row.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen drafts, failed of cancelled plannen kunnen aangepast worden." });
       }
-      return adsDb.googleAdPlan.update({
+      return ctx.db.googleAdPlan.update({
         where: { id: input.id },
         data: {
           name: input.name?.trim(),
@@ -570,14 +559,11 @@ export const googleAdsRouter = router({
     ),
 
   submitForApproval: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-    const adsDb = ctx.db as any;
-    const row = await adsDb.googleAdPlan.findUnique({ where: { id: input.id } });
-    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Google Ads draft niet gevonden." });
-    ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    const row = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, input.id, "Google Ads draft");
     if (!["DRAFT", "FAILED", "CANCELLED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Deze draft kan niet ter goedkeuring worden aangeboden." });
     }
-    const updated = await adsDb.googleAdPlan.update({
+    const updated = await ctx.db.googleAdPlan.update({
       where: { id: input.id },
       data: { status: "PENDING_APPROVAL", lastError: null },
     });
@@ -591,17 +577,14 @@ export const googleAdsRouter = router({
   }),
 
   approveDraft: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-    const adsDb = ctx.db as any;
-    const row = await adsDb.googleAdPlan.findUnique({ where: { id: input.id } });
-    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Google Ads draft niet gevonden." });
-    ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    const row = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, input.id, "Google Ads draft");
     if (!["PENDING_APPROVAL", "DRAFT", "FAILED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Deze draft kan niet goedgekeurd worden." });
     }
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadGoogleAdsWorkspaceConfig(ctx.db, scope);
     validateBudgetGuard(row, config.maxDailyBudgetCents);
-    const updated = await adsDb.googleAdPlan.update({
+    const updated = await ctx.db.googleAdPlan.update({
       where: { id: input.id },
       data: { status: "APPROVED", approvedById: ctx.user.id, approvedAt: new Date(), lastError: null, retryCount: 0 },
     });
@@ -617,12 +600,9 @@ export const googleAdsRouter = router({
   rejectDraft: adminProcedure
     .input(z.object({ id: z.string(), reason: z.string().max(1000).optional() }))
     .mutation(async ({ ctx, input }) => {
-      const adsDb = ctx.db as any;
-      const row = await adsDb.googleAdPlan.findUnique({ where: { id: input.id } });
-      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Google Ads draft niet gevonden." });
-      ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+      const row = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, input.id, "Google Ads draft");
       const reason = input.reason?.trim();
-      const updated = await adsDb.googleAdPlan.update({
+      const updated = await ctx.db.googleAdPlan.update({
         where: { id: input.id },
         data: { status: "DRAFT", approvedById: null, approvedAt: null, lastError: reason ? `Afgekeurd: ${reason}` : "Afgekeurd" },
       });
@@ -635,18 +615,15 @@ export const googleAdsRouter = router({
       return updated;
     }),
 
-  pushPausedToGoogle: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToGoogle(ctx as any, input.id)),
+  pushPausedToGoogle: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToGoogle(ctx, input.id)),
 
   cancelDraft: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-    const adsDb = ctx.db as any;
-    const row = await adsDb.googleAdPlan.findUnique({ where: { id: input.id } });
-    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Google Ads draft niet gevonden." });
-    ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    const row = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, input.id, "Google Ads draft");
     if (["PUSHING", "PUSHED_PAUSED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Een gepushte Google-campagne kan niet lokaal geannuleerd worden." });
     }
-    return adsDb.googleAdPlan.update({ where: { id: input.id }, data: { status: "CANCELLED" } });
+    return ctx.db.googleAdPlan.update({ where: { id: input.id }, data: { status: "CANCELLED" } });
   }),
 
-  retryFailed: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToGoogle(ctx as any, input.id)),
+  retryFailed: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToGoogle(ctx, input.id)),
 });

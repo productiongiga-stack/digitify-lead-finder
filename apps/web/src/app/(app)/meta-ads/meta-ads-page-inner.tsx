@@ -14,6 +14,7 @@ import { MetaAdsDraftsPanel } from "@/components/ads/meta-ads-drafts-panel";
 import { MetaAdsStudioSummary } from "@/components/ads/meta-ads-studio-summary";
 import { AdsModuleSetupNotice, adsModuleSetupToneStyles } from "@/components/ads/ads-module-setup-notice";
 import { FacebookPageAvatar, MetaAdsBrandMark } from "@/components/social/social-platform-avatars";
+import { eur, numberValue, budgetCentsOrNull, normalizeCampaignNameKey, asRecord } from "./meta-ads-format-utils";
 import {
   Badge,
   Button,
@@ -272,24 +273,6 @@ const META_GEO_MAX_LOCATIONS = 25;
 const META_DEFAULT_AGE_MIN = "13";
 const META_DEFAULT_AGE_MAX = "65";
 
-function eur(cents?: number | null, currency = "EUR") {
-  return new Intl.NumberFormat("nl-BE", { style: "currency", currency }).format(Number(cents || 0) / 100);
-}
-
-function numberValue(value: string) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function budgetCentsOrNull(value: string) {
-  const cents = numberValue(value);
-  return cents >= 100 ? cents : null;
-}
-
-function normalizeCampaignNameKey(name: string) {
-  return name.trim().toLowerCase();
-}
-
 function metaPlanStatusLabelClient(status: string) {
   if (status === "PUSHED_PAUSED") return "online in Meta";
   if (status === "APPROVED") return "goedgekeurd";
@@ -312,10 +295,6 @@ function statusBadge(status: PlanStatus) {
   if (status === "PENDING_APPROVAL") return <Badge variant="warning">Wacht op approval</Badge>;
   if (status === "CANCELLED") return <Badge variant="outline">Geannuleerd</Badge>;
   return <Badge variant="secondary">Draft</Badge>;
-}
-
-function asRecord(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};
 }
 
 function csvToList(value: string, upper = true) {

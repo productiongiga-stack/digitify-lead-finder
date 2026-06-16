@@ -49,6 +49,7 @@ import {
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { useEffectiveAppRole } from "@/lib/use-effective-app-role";
 import { useToast } from "@/components/feedback/toast-provider";
 import { hasRole } from "@/lib/permissions";
 import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
@@ -513,8 +514,8 @@ function DnsCheckResult({ result }: { result: DnsCheckData | null | undefined })
 export function IntegrationsSettingsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { data: session, status: sessionStatus } = useSession();
-  const role = (session?.user as { role?: string } | undefined)?.role;
+  const { status: sessionStatus } = useSession();
+  const role = useEffectiveAppRole();
   const canManageWorkspaceIntegrations = hasRole(role, ["OWNER"]);
   const { data: settings, isLoading, error, refetch } = trpc.settings.getIntegrationsSettings.useQuery(undefined, {
     enabled: sessionStatus === "authenticated" && canManageWorkspaceIntegrations,

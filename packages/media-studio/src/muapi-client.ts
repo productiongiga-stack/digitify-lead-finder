@@ -119,27 +119,42 @@ export async function fetchMuapiResultOnce(apiKey: string, requestId: string): P
 export async function pollMuapiResult(
   apiKey: string,
   requestId: string,
-  options?: { maxAttempts?: number; intervalMs?: number },
+  options?: { maxAttempts?: number; intervalMs?: number; signal?: AbortSignal },
 ): Promise<MuapiPollResult> {
   const maxAttempts = options?.maxAttempts ?? 900;
   const intervalMs = options?.intervalMs ?? 2000;
   const pollUrl = `/api/v1/predictions/${requestId}/result`;
+  let consecutive5xx = 0;
+  const maxConsecutive5xx = 5;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (options?.signal?.aborted) {
+      throw new MuapiError("Generatie geannuleerd.");
+    }
     if (attempt > 1 || intervalMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
 
-    const response = await muapiFetch(apiKey, pollUrl, { method: "GET" });
+    const response = await muapiFetch(apiKey, pollUrl, { method: "GET", signal: options?.signal });
     if (!response.ok) {
       const errText = await response.text();
-      if (response.status >= 500) continue;
+      if (response.status >= 500) {
+        consecutive5xx += 1;
+        if (consecutive5xx >= maxConsecutive5xx) {
+          throw new MuapiError(
+            `MuAPI poll mislukt na ${maxConsecutive5xx} serverfouten: ${errText.slice(0, 200)}`,
+            response.status,
+          );
+        }
+        continue;
+      }
       throw new MuapiError(
         `MuAPI poll mislukt (${response.status}): ${errText.slice(0, 200)}`,
         response.status,
       );
     }
 
+    consecutive5xx = 0;
     const data = (await response.json()) as Record<string, unknown>;
     const status = normalizeStatus(data.status);
 
@@ -383,12 +398,33 @@ export async function getUserBalance(apiKey: string): Promise<{ balance?: number
   return { balance, raw: data };
 }
 
+const REMOTE_ASSET_MAX_BYTES = 5 * 1024 * 1024;
+const REMOTE_ASSET_ALLOWED_HOSTS = new Set(["api.muapi.ai", "cdn.muapi.ai"]);
+
 export async function fetchRemoteAsset(url: string): Promise<{ bytes: Buffer; contentType: string }> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new MuapiError(`Asset download mislukt (${response.status}) voor ${url}`, response.status);
+  const parsed = new URL(url);
+  if (!REMOTE_ASSET_ALLOWED_HOSTS.has(parsed.hostname)) {
+    throw new MuapiError(`Asset host niet toegestaan: ${parsed.hostname}`);
   }
-  const contentType = response.headers.get("content-type") || "application/octet-stream";
-  const arrayBuffer = await response.arrayBuffer();
-  return { bytes: Buffer.from(arrayBuffer), contentType };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw new MuapiError(`Asset download mislukt (${response.status}) voor ${url}`, response.status);
+    }
+    const contentType = response.headers.get("content-type") || "application/octet-stream";
+    const contentLength = Number(response.headers.get("content-length") || 0);
+    if (contentLength > REMOTE_ASSET_MAX_BYTES) {
+      throw new MuapiError("Asset is te groot.");
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength > REMOTE_ASSET_MAX_BYTES) {
+      throw new MuapiError("Asset is te groot.");
+    }
+    return { bytes: Buffer.from(arrayBuffer), contentType };
+  } finally {
+    clearTimeout(timeout);
+  }
 }

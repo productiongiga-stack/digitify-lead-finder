@@ -43,9 +43,18 @@ vi.mock("../lib/social-prepare-assets", () => ({
   })),
 }));
 
-import { socialRouter, runDueSocialPostsWorker } from "../routers/social.router";
+import { socialRouter } from "../routers/social.router";
+import { runDueSocialPostsWorker } from "../lib/social-publish";
 
 const TEST_USER_ID = "user_owner";
+
+function socialPostDb(delegate: Record<string, unknown>) {
+  const findUnique = delegate.findUnique as ReturnType<typeof vi.fn> | undefined;
+  return {
+    ...delegate,
+    findFirst: delegate.findFirst ?? findUnique,
+  };
+}
 
 function makeCtx(db: Record<string, unknown>, role: string = "OWNER") {
   return {
@@ -114,11 +123,11 @@ describe("social router flow", () => {
 
     const caller = socialRouter.createCaller(
       makeCtx({
-        socialPost: {
+        socialPost: socialPostDb({
           create: socialPostCreate,
           findUnique: socialPostFindUnique,
           update: socialPostUpdate,
-        },
+        }),
         activity: { create: vi.fn().mockResolvedValue({ id: "act_1" }) },
       }),
     );
@@ -162,10 +171,10 @@ describe("social router flow", () => {
 
     const caller = socialRouter.createCaller(
       makeCtx({
-        socialPost: {
+        socialPost: socialPostDb({
           findUnique: socialPostFindUnique,
           update: socialPostUpdate,
-        },
+        }),
         activity: { create: vi.fn().mockResolvedValue({ id: "act_2" }) },
       }),
     );
@@ -202,12 +211,12 @@ function makePublishWorkerDb(post: Record<string, unknown>, options?: { lockFail
 
   return {
     db: {
-      socialPost: {
+      socialPost: socialPostDb({
         findMany: socialPostFindMany,
         findUnique: socialPostFindUnique,
         update: socialPostUpdate,
         updateMany: socialPostUpdateMany,
-      },
+      }),
       activity: { create: vi.fn().mockResolvedValue({ id: "act_worker" }) },
     },
     socialPostUpdate,
@@ -613,5 +622,24 @@ describe("social publish worker", () => {
 
     expect(result.published).toBe(1);
     expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
+  });
+
+  it("scopes due posts to workspaceId when provided", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const db = {
+      socialPost: socialPostDb({
+        findMany,
+        update: vi.fn(),
+        findUnique: vi.fn(),
+      }),
+    };
+
+    await runDueSocialPostsWorker(db as any, { workspaceId: TEST_USER_ID });
+
+    const scheduledCalls = findMany.mock.calls.filter(
+      (call) => call[0]?.where?.status === "SCHEDULED",
+    );
+    expect(scheduledCalls.length).toBeGreaterThan(0);
+    expect(scheduledCalls[0][0].where.createdById).toBe(TEST_USER_ID);
   });
 });

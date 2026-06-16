@@ -334,7 +334,7 @@ export default function BrandingSettingsPage() {
                     <input
                       ref={logoInputRef}
                       type="file"
-                      accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                      accept="image/png,image/jpeg,image/webp"
                       className="hidden"
                       onChange={(e) => {
                         const file = e.target.files?.[0];
@@ -377,7 +377,7 @@ export default function BrandingSettingsPage() {
                     <input
                       ref={faviconInputRef}
                       type="file"
-                      accept="image/png,image/x-icon,image/svg+xml"
+                      accept="image/png,image/x-icon"
                       className="hidden"
                       onChange={(e) => {
                         const file = e.target.files?.[0];

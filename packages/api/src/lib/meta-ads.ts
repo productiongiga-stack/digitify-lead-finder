@@ -37,6 +37,7 @@ export type MetaLiveCampaign = {
   id?: string;
   name?: string;
   status?: string;
+  configured_status?: string;
   effective_status?: string;
   objective?: string;
 };

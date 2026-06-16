@@ -1316,10 +1316,6 @@ export const campaignRouter = router({
       };
     }),
 
-  runAllDueDrip: mutationProcedure.mutation(async ({ ctx }) => {
-    return runAllDueDripsWorker(ctx.db, { workspaceId: ctx.user.workspaceId! });
-  }),
-
   searchLeads: protectedProcedure
     .input(z.object({ query: z.string().min(1), excludeCampaignId: z.string().optional() }))
     .query(async ({ ctx, input }) => {

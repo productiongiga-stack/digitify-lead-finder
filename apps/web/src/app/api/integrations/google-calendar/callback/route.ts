@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma, protectSettingValue, revealSettingValue } from "@digitify/db";
 import { getCurrentUser } from "@/lib/auth/session";
+import { canManageIntegrations } from "@/lib/auth/integration-access";
 import { userSettingKey } from "@digitify/api/src/lib/user-settings";
 import {
   isValidGoogleOAuthClientId,
@@ -16,10 +17,10 @@ export async function GET(request: Request) {
   if (!user) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
-  if (!["OWNER", "ADMIN"].includes(String(user.role || ""))) {
+  if (!canManageIntegrations(user)) {
     return NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=forbidden", request.url));
   }
-  const userId = (user as any).id as string | undefined;
+  const userId = user.id;
   if (!userId) {
     return NextResponse.redirect(new URL("/login", request.url));
   }

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { Prisma } from "@digitify/db";
 import { router, ownerProcedure, protectedProcedure, publicRateLimitedProcedure, mutationProcedure } from "../trpc";
+import { effectiveWorkspaceRole } from "../lib/effective-role";
 import { sendTemplatedEmail } from "../lib/send-templated-email";
 import { ensureUserWorkspace } from "../lib/user-workspace";
 import {
@@ -397,7 +398,7 @@ export const registrationRouter = router({
     }),
 
   listFeedback: protectedProcedure.query(async ({ ctx }) => {
-    if (!["OWNER", "ADMIN", "MODERATOR", "MEMBER"].includes(ctx.user.role)) {
+    if (!["OWNER", "ADMIN", "MODERATOR", "MEMBER"].includes(effectiveWorkspaceRole(ctx))) {
       throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang tot feedbackbeheer." });
     }
     try {
@@ -438,7 +439,7 @@ export const registrationRouter = router({
   updateFeedbackStatus: mutationProcedure
     .input(z.object({ id: z.string(), status: z.enum(["OPEN", "TRIAGED", "CLOSED"]) }))
     .mutation(async ({ ctx, input }) => {
-      if (!["OWNER", "ADMIN", "MODERATOR", "MEMBER"].includes(ctx.user.role)) {
+      if (!["OWNER", "ADMIN", "MODERATOR", "MEMBER"].includes(effectiveWorkspaceRole(ctx))) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang tot feedbackbeheer." });
       }
       const workspaceUserIds = await getFeedbackWorkspaceUserIds(ctx);

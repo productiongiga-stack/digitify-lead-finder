@@ -1,5 +1,6 @@
 import { prisma } from "@digitify/db";
 import { log } from "@digitify/api/src/lib/logger";
+import { verifyEmailTrackingToken } from "@digitify/api/src/lib/email-tracking-token";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
 const PIXEL_GIF = Buffer.from(
@@ -32,6 +33,12 @@ export async function GET(
   if (limiter) return gifResponse();
 
   if (!id || id.length > 100) return gifResponse();
+
+  const url = new URL(request.url);
+  const token = url.searchParams.get("t");
+  if (!verifyEmailTrackingToken(id, token)) {
+    return gifResponse();
+  }
 
   try {
     const updated = await prisma.emailDraft.updateMany({

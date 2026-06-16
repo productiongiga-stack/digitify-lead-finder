@@ -38,7 +38,7 @@ Details en commando’s voor 1–5 staan onderaan dit document.
 |---|------|--------|-------------------|--------|
 | 6.1 | **Team-API workspace-scopen** — `user.list` alleen leden van huidige workspace; `updateRole` / `deleteUser` / modules alleen binnen workspace | Nu zie je RLS-test-users in team; cross-tenant admin mogelijk | `user.router.ts`, `workspace-members.ts` | ✅ |
 | 6.2 | **Drip-cron per workspace** — drafts filteren op `lead.createdById`; SMTP via workspace-eigenaar | Verkeerde SMTP/branding tussen tenants | `campaign.router.ts`, `api/cron/drip/route.ts` | ✅ |
-| 6.3 | **RLS op staging, daarna productie** — `ENABLE_WORKSPACE_RLS=true` na `pnpm rls:smoke` + browser-check met 2 OWNERs | App-filters alleen zijn onvoldoende | env + `e2e/rls-cross-tenant.spec.ts` | 👤 |
+| 6.3 | **RLS op staging, daarna productie** — `ENABLE_WORKSPACE_RLS=true` na `pnpm rls:smoke` + browser-check met 2 OWNERs | App-filters alleen zijn onvoldoende | env + `e2e/rls-cross-tenant.spec.ts` | ✅ lokaal + openclaw_logs fix / 👤 staging deploy |
 | 6.4 | **RLS uitbreiden** — `enrichment_data`, `chat_sessions`, `chat_messages` | Gaten in RLS-migraties | `20260523200000_scoring_workspace_and_rls` | ✅ |
 | 6.5 | **Publieke tracker** — ACTIVE domain + lead/workspace-koppeling | Data-vervuiling | `api/public/tracker/route.ts` | ✅ |
 | 6.6 | **Publieke tenant-token verplicht** — geen fallback naar eerste OWNER | Kosten + data-lek | `public-tenant.ts` (bookings/chatbot/quotes al 400) | ✅ |
@@ -47,6 +47,10 @@ Details en commando’s voor 1–5 staan onderaan dit document.
 | 6.9 | **Tests** — `workspace-members.test.ts`; bestaande suite groen | Regressie | `packages/api/src/__tests__/` | ✅ |
 
 **Acceptatie:** Twee OWNERs in staging; B ziet 0 leads van A; team-lijst alleen eigen leden; drip gebruikt juiste afzender.
+
+### Workspace-id vs. `workspaces`-tabel (bewuste keuze)
+
+In de app is `workspaceId` / `createdById` op tenant-rijen de **owner user id** (`users.id`), niet `workspaces.id`. Prisma-FK's verwijzen daarom naar `users(id)` waar het plan oorspronkelijk `workspaces` noemde. Teamleden hebben `workspaceOwnerId` gezet; RLS gebruikt `app_workspace_id()` = die owner id. Geen schema-migratie naar een apart `Workspace`-FK tenzij je het `Workspace`-model centraal wilt maken.
 
 ---
 

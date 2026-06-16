@@ -67,29 +67,98 @@ async function main() {
     },
   });
 
-  const viewerEmail = process.env.SEED_VIEWER_EMAIL?.trim().toLowerCase() || "";
+  const viewerEmail = process.env.SEED_VIEWER_EMAIL?.trim().toLowerCase() || "viewer@digitify.local";
   const viewerPassword = process.env.SEED_VIEWER_PASSWORD?.trim() || adminPassword;
-  if (viewerEmail) {
-    if (viewerPassword.length < 12) {
-      throw new Error("SEED_VIEWER_PASSWORD must be at least 12 characters when SEED_VIEWER_EMAIL is set.");
-    }
-    await prisma.user.upsert({
-      where: { email: viewerEmail },
-      update: {
-        role: UserRole.VIEWER,
-        workspaceOwnerId: admin.id,
-        passwordHash: hashPassword(viewerPassword),
-      },
-      create: {
-        email: viewerEmail,
-        name: "Viewer (read-only)",
-        passwordHash: hashPassword(viewerPassword),
-        emailVerified: new Date(),
-        role: UserRole.VIEWER,
-        workspaceOwnerId: admin.id,
-      },
-    });
+  if (viewerPassword.length < 12) {
+    throw new Error("SEED_VIEWER_PASSWORD must be at least 12 characters.");
   }
+  await prisma.user.upsert({
+    where: { email: viewerEmail },
+    update: {
+      role: UserRole.VIEWER,
+      workspaceOwnerId: admin.id,
+      passwordHash: hashPassword(viewerPassword),
+    },
+    create: {
+      email: viewerEmail,
+      name: "Viewer (read-only)",
+      passwordHash: hashPassword(viewerPassword),
+      emailVerified: new Date(),
+      role: UserRole.VIEWER,
+      workspaceOwnerId: admin.id,
+    },
+  });
+
+  const moderatorEmail = process.env.SEED_MODERATOR_EMAIL?.trim().toLowerCase() || "moderator@digitify.local";
+  const memberEmail = process.env.SEED_MEMBER_EMAIL?.trim().toLowerCase() || "member@digitify.local";
+  const moduleRestrictedEmail =
+    process.env.SEED_MODULE_RESTRICTED_EMAIL?.trim().toLowerCase() || "module-restricted@digitify.local";
+  const teamPassword = process.env.SEED_TEAM_PASSWORD?.trim() || adminPassword;
+  if (teamPassword.length < 12) {
+    throw new Error("SEED_TEAM_PASSWORD must be at least 12 characters.");
+  }
+
+  const moderator = await prisma.user.upsert({
+    where: { email: moderatorEmail },
+    update: {
+      role: UserRole.MODERATOR,
+      workspaceOwnerId: admin.id,
+      passwordHash: hashPassword(teamPassword),
+    },
+    create: {
+      email: moderatorEmail,
+      name: "Moderator (E2E)",
+      passwordHash: hashPassword(teamPassword),
+      emailVerified: new Date(),
+      role: UserRole.MODERATOR,
+      workspaceOwnerId: admin.id,
+    },
+  });
+
+  await prisma.user.upsert({
+    where: { email: memberEmail },
+    update: {
+      role: UserRole.MEMBER,
+      workspaceOwnerId: admin.id,
+      passwordHash: hashPassword(teamPassword),
+    },
+    create: {
+      email: memberEmail,
+      name: "Member (E2E)",
+      passwordHash: hashPassword(teamPassword),
+      emailVerified: new Date(),
+      role: UserRole.MEMBER,
+      workspaceOwnerId: admin.id,
+    },
+  });
+
+  const moduleRestricted = await prisma.user.upsert({
+    where: { email: moduleRestrictedEmail },
+    update: {
+      role: UserRole.MEMBER,
+      workspaceOwnerId: admin.id,
+      passwordHash: hashPassword(teamPassword),
+    },
+    create: {
+      email: moduleRestrictedEmail,
+      name: "Member (social disabled)",
+      passwordHash: hashPassword(teamPassword),
+      emailVerified: new Date(),
+      role: UserRole.MEMBER,
+      workspaceOwnerId: admin.id,
+    },
+  });
+
+  await prisma.setting.upsert({
+    where: { key: userSettingKey(moduleRestricted.id, "modules.disabled") },
+    update: { value: "social" },
+    create: {
+      key: userSettingKey(moduleRestricted.id, "modules.disabled"),
+      value: "social",
+    },
+  });
+
+  void moderator;
 
   // Create pipeline stages
   const stages = [
@@ -839,6 +908,8 @@ async function main() {
 
   console.log("Seed completed!");
   console.log(`  - 2 owner users (${adminEmail}, ${rlsOwnerBEmail})`);
+  console.log(`  - E2E RBAC: viewer=${viewerEmail}, moderator=${moderatorEmail}, member=${memberEmail}`);
+  console.log(`  - E2E module guard: ${moduleRestrictedEmail} (social disabled)`);
   console.log(`  - RLS smoke: ENABLE_WORKSPACE_RLS=true pnpm rls:smoke`);
   console.log(`  - ${stages.length} pipeline stages`);
   console.log(`  - ${weights.length} scoring weights`);

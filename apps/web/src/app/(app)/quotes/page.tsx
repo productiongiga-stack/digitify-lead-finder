@@ -1,16 +1,17 @@
-"use client";
+import { HydrateClient, getServerHelpers } from "@/lib/trpc/server";
+import { QuotesPageInner } from "./quotes-page-inner";
 
-import dynamic from "next/dynamic";
-import { RouteLoading } from "@/components/layout/route-states";
+export default async function QuotesPage() {
+  const helpers = await getServerHelpers();
+  await helpers.quote.list.prefetch({
+    page: 1,
+    perPage: 20,
+  });
+  await helpers.quote.getStats.prefetch();
 
-const QuotesPageView = dynamic(
-  () => import("./quotes-page-inner").then((module) => module.QuotesPageInner),
-  {
-    ssr: false,
-    loading: () => <RouteLoading label="Offertes laden..." />,
-  },
-);
-
-export default function QuotesPage() {
-  return <QuotesPageView />;
+  return (
+    <HydrateClient>
+      <QuotesPageInner />
+    </HydrateClient>
+  );
 }

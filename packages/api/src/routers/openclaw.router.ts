@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { router, aiRateLimitedProcedure } from "../trpc";
-import { OpenClawClient, type OpenClawContext } from "@digitify/openclaw";
+import { OpenClawClient, type LeadAnalysis, type OpenClawContext } from "@digitify/openclaw";
 import { normalizeAiPlaceholderSyntax } from "../lib/email-utils";
-import { type PrismaClient } from "@digitify/db";
+import { type PrismaClient, Prisma } from "@digitify/db";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
 import { assertLeadAccess } from "../lib/tenant";
@@ -413,7 +413,7 @@ export const openclawRouter = router({
           content: analysis.summary,
           confidence: analysis.confidence,
           status: "PENDING",
-          metadata: analysis as any,
+          metadata: analysis as unknown as Prisma.InputJsonValue,
         },
       });
 

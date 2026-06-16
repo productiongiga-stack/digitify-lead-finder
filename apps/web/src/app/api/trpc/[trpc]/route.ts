@@ -30,7 +30,15 @@ const handler = async (req: Request) => {
   const requestId = randomUUID();
   const session = await getServerSession(authOptions);
   const sessionUser = session?.user as
-    | { id?: string; email?: string; name?: string | null; role?: string; workspaceId?: string }
+    | {
+        id?: string;
+        email?: string;
+        name?: string | null;
+        role?: string;
+        workspaceId?: string;
+        workspaceRole?: string;
+        isPersonalWorkspace?: boolean;
+      }
     | undefined;
   const sessionUserId = typeof sessionUser?.id === "string" ? sessionUser.id : "";
 
@@ -40,6 +48,8 @@ const handler = async (req: Request) => {
     name: string | null;
     role: string;
     workspaceId?: string;
+    workspaceRole?: string;
+    isPersonalWorkspace?: boolean;
   } | null = null;
 
   if (
@@ -54,6 +64,12 @@ const handler = async (req: Request) => {
       name: sessionUser.name ?? null,
       role: sessionUser.role,
       workspaceId: sessionUser.workspaceId,
+      workspaceRole:
+        typeof sessionUser.workspaceRole === "string" ? sessionUser.workspaceRole : sessionUser.role,
+      isPersonalWorkspace:
+        typeof sessionUser.isPersonalWorkspace === "boolean"
+          ? sessionUser.isPersonalWorkspace
+          : sessionUser.workspaceId === sessionUserId,
     };
   } else if (sessionUserId) {
     const userRecord = await prisma.user.findUnique({
@@ -67,6 +83,8 @@ const handler = async (req: Request) => {
         name: userRecord.name ?? null,
         role: userRecord.role,
         workspaceId: resolveWorkspaceOwnerIdSync(userRecord),
+        workspaceRole: userRecord.role,
+        isPersonalWorkspace: true,
       };
     }
   }

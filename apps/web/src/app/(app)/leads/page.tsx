@@ -1,16 +1,20 @@
-"use client";
+import { HydrateClient, getServerHelpers } from "@/lib/trpc/server";
+import { LeadsPageInner } from "./leads-page-inner";
 
-import dynamic from "next/dynamic";
-import { RouteLoading } from "@/components/layout/route-states";
+export default async function LeadsPage() {
+  const helpers = await getServerHelpers();
+  await helpers.lead.listSummary.prefetch({
+    filters: {},
+    sortBy: "createdAt",
+    sortDir: "desc",
+    page: 1,
+    pageSize: 25,
+  });
+  await helpers.tag.list.prefetch();
 
-const LeadsPageView = dynamic(
-  () => import("./leads-page-inner").then((module) => module.LeadsPageInner),
-  {
-    ssr: false,
-    loading: () => <RouteLoading label="Leads laden..." />,
-  },
-);
-
-export default function LeadsPage() {
-  return <LeadsPageView />;
+  return (
+    <HydrateClient>
+      <LeadsPageInner />
+    </HydrateClient>
+  );
 }

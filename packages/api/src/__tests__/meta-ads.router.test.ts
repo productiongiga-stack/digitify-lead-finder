@@ -18,6 +18,11 @@ import { metaAdsRouter } from "../routers/meta-ads.router";
 
 const TEST_USER_ID = "user_owner";
 
+function planDb(delegate: Record<string, unknown>) {
+  const findUnique = delegate.findUnique as ReturnType<typeof vi.fn> | undefined;
+  return { ...delegate, findFirst: delegate.findFirst ?? findUnique };
+}
+
 function makeCtx(db: Record<string, unknown>, role = "OWNER") {
   return {
     db: {
@@ -105,7 +110,7 @@ describe("metaAds router flow", () => {
 
     const caller = metaAdsRouter.createCaller(
       makeCtx({
-        metaAdPlan: { create, findUnique, findMany: vi.fn().mockResolvedValue([]), update },
+        metaAdPlan: planDb({ create, findUnique, findMany: vi.fn().mockResolvedValue([]), update }),
         activity: { create: vi.fn().mockResolvedValue({ id: "act_1" }) },
       }),
     );
@@ -144,7 +149,7 @@ describe("metaAds router flow", () => {
 
     const caller = metaAdsRouter.createCaller(
       makeCtx({
-        metaAdPlan: { findUnique: vi.fn().mockResolvedValue(row), update: vi.fn() },
+        metaAdPlan: planDb({ findUnique: vi.fn().mockResolvedValue(row), update: vi.fn() }),
         activity: { create: vi.fn().mockResolvedValue({ id: "act_2" }) },
       }),
     );

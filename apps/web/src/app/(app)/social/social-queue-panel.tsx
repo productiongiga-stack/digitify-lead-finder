@@ -45,12 +45,12 @@ type QueueRow = {
   scheduledFor?: string | Date | null;
   publishedAt?: string | Date | null;
   lastError?: string | null;
-  externalPostIds?: Record<string, PublishedRef | string> | null;
+  externalPostIds?: unknown;
 };
 
-function metaPublishLinks(externalPostIds?: Record<string, PublishedRef | string> | null) {
-  if (!externalPostIds) return [];
-  return Object.entries(externalPostIds)
+function metaPublishLinks(externalPostIds?: unknown) {
+  if (!externalPostIds || typeof externalPostIds !== "object") return [];
+  return Object.entries(externalPostIds as Record<string, PublishedRef | string>)
     .map(([key, value]) => {
       const ref = typeof value === "string" ? { id: value } : value;
       if (!ref?.permalink) return null;

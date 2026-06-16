@@ -2,7 +2,7 @@
   "name": "digitify-lead-search",
   "private": true,
   "scripts": {
-    "dev": "turbo dev",
+    "dev": "bash scripts/dev-with-env.sh",
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "pnpm --filter @digitify/web exec tsc --noEmit",

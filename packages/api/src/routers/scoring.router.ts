@@ -6,6 +6,11 @@ import { analyzeWebsite } from "@digitify/connectors";
 import { assertLeadAccess } from "../lib/tenant";
 import { loadMergedScoringWeights } from "../lib/scoring-weights";
 import { buildWebsiteAuditPayload, websiteAnalysisToEnrichment } from "../lib/website-audit";
+import {
+  loadEnabledScoringWeights,
+  persistLeadScore,
+  scoreLeadRecord,
+} from "../lib/scoring-pipeline";
 
 type ScoringWeightRow = {
   id: string;
@@ -419,54 +424,18 @@ export const scoringRouter = router({
         include: { enrichmentData: true },
       });
 
-      const merged = await loadMergedScoringWeights(ctx.db, ctx.user.workspaceId!);
-      const weights = merged.filter((w) => w.enabled);
+      const weights = await loadEnabledScoringWeights(ctx.db, ctx.user.workspaceId!);
+      const scoreResult = await scoreLeadRecord(ctx.db, enrichedLead, weights);
+      const result = await persistLeadScore(
+        ctx.db,
+        input.leadId,
+        scoreResult,
+        scoreResult.factors,
+        weights,
+        upsertLeadScoringFactors,
+      );
 
-      const enrichmentRaw = enrichedLead.enrichmentData?.[0]?.data as Record<string, unknown> | null;
-
-      const leadData: LeadData = {
-        companyName: enrichedLead.companyName,
-        website: enrichedLead.website,
-        email: enrichedLead.email,
-        phone: enrichedLead.phone,
-        gmbRating: enrichedLead.gmbRating ? Number(enrichedLead.gmbRating) : null,
-        gmbReviewCount: enrichedLead.gmbReviewCount,
-        gmbCategories: (enrichedLead.gmbCategories as string[]) || [],
-        facebookUrl: enrichedLead.facebookUrl,
-        instagramUrl: enrichedLead.instagramUrl,
-        linkedinUrl: enrichedLead.linkedinUrl,
-        twitterUrl: enrichedLead.twitterUrl,
-        tiktokUrl: enrichedLead.tiktokUrl,
-        youtubeUrl: enrichedLead.youtubeUrl,
-      };
-
-      const enrichment: EnrichmentPayload = {
-        website_analysis: enrichmentRaw?.website_analysis as EnrichmentPayload["website_analysis"],
-        social_analysis: enrichmentRaw?.social_analysis as EnrichmentPayload["social_analysis"],
-      };
-
-      const weightConfigs: ScoringWeightConfig[] = weights.map((w) => ({
-        factorKey: w.factorKey,
-        label: w.label,
-        weight: w.weight,
-        maxPoints: w.maxPoints,
-        enabled: w.enabled,
-        category: w.category,
-      }));
-
-      const result = computeScore({ lead: leadData, enrichment, weights: weightConfigs });
-
-      // Update lead scores
-      await ctx.db.lead.update({
-        where: { id: input.leadId },
-        data: {
-          overallScore: result.overallScore,
-          scorePriority: result.priority,
-          scoreComputedAt: new Date(),
-        },
-      });
-
-      await upsertLeadScoringFactors(ctx.db, input.leadId, result.factors, weights);
+      const enrichmentRaw = enrichedLead.enrichmentData?.[0]?.data ?? null;
 
       await ctx.db.activity.create({
         data: {
@@ -560,41 +529,8 @@ export const scoringRouter = router({
             include: { enrichmentData: true },
           });
 
-          const merged = await loadMergedScoringWeights(ctx.db, ctx.user.workspaceId!);
-      const weights = merged.filter((w) => w.enabled);
-          const enrichmentRaw = enrichedLead.enrichmentData?.[0]?.data as Record<string, unknown> | null;
-
-          const leadData: LeadData = {
-            companyName: enrichedLead.companyName,
-            website: enrichedLead.website,
-            email: enrichedLead.email,
-            phone: enrichedLead.phone,
-            gmbRating: enrichedLead.gmbRating ? Number(enrichedLead.gmbRating) : null,
-            gmbReviewCount: enrichedLead.gmbReviewCount,
-            gmbCategories: (enrichedLead.gmbCategories as string[]) || [],
-            facebookUrl: enrichedLead.facebookUrl,
-            instagramUrl: enrichedLead.instagramUrl,
-            linkedinUrl: enrichedLead.linkedinUrl,
-            twitterUrl: enrichedLead.twitterUrl,
-            tiktokUrl: enrichedLead.tiktokUrl,
-            youtubeUrl: enrichedLead.youtubeUrl,
-          };
-
-          const enrichment: EnrichmentPayload = {
-            website_analysis: enrichmentRaw?.website_analysis as EnrichmentPayload["website_analysis"],
-            social_analysis: enrichmentRaw?.social_analysis as EnrichmentPayload["social_analysis"],
-          };
-
-          const weightConfigs: ScoringWeightConfig[] = weights.map((w) => ({
-            factorKey: w.factorKey,
-            label: w.label,
-            weight: w.weight,
-            maxPoints: w.maxPoints,
-            enabled: w.enabled,
-            category: w.category,
-          }));
-
-          const scoreResult = computeScore({ lead: leadData, enrichment, weights: weightConfigs });
+          const weights = await loadEnabledScoringWeights(ctx.db, ctx.user.workspaceId!);
+          const scoreResult = await scoreLeadRecord(ctx.db, enrichedLead, weights);
 
           await ctx.db.lead.update({
             where: { id: leadId },
@@ -604,6 +540,8 @@ export const scoringRouter = router({
               scoreComputedAt: new Date(),
             },
           });
+
+          await upsertLeadScoringFactors(ctx.db, leadId, scoreResult.factors, weights);
 
           results.push({ leadId, score: scoreResult.overallScore, priority: scoreResult.priority });
         } catch (error: any) {

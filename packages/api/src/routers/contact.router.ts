@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure, mutationProcedure } from "../trpc";
+import { effectiveWorkspaceRole } from "../lib/effective-role";
 import { TRPCError } from "@trpc/server";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { sendApprovedQuoteDraft } from "../lib/quote-outbound-email";
@@ -359,7 +360,7 @@ export const contactRouter = router({
         select: { id: true, status: true, leadId: true, subject: true, authorId: true },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "E-mail niet gevonden." });
-      if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(ctx.user.role)) {
+      if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(effectiveWorkspaceRole(ctx))) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang om deze planning aan te passen." });
       }
       if (!(RESCHEDULABLE_OUTBOUND_STATUSES as readonly string[]).includes(draft.status)) {
@@ -590,7 +591,7 @@ export const contactRouter = router({
         select: { id: true, status: true, authorId: true },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
-      if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(ctx.user.role)) {
+      if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(effectiveWorkspaceRole(ctx))) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang om dit concept te bewerken." });
       }
       const editableStatuses = ["DRAFT", "REJECTED", "PENDING_APPROVAL", "APPROVED", "FAILED"];
@@ -622,7 +623,7 @@ export const contactRouter = router({
         select: { id: true, status: true, authorId: true },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
-      if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(ctx.user.role)) {
+      if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(effectiveWorkspaceRole(ctx))) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang om dit concept in te dienen." });
       }
       if (draft.status !== "DRAFT") {

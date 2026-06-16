@@ -242,12 +242,12 @@ export function BookingsPageInner() {
   const { data: eventTypes } = trpc.booking.listEventTypes.useQuery();
   type EventType = NonNullable<NonNullable<typeof eventTypes>[number]>;
   const eventTypeItems = (eventTypes ?? []).filter((item): item is EventType => Boolean(item));
-  const { data: unifiedReminders } = trpc.dashboard.getUnifiedReminders.useQuery(undefined, {
+  const { data: overview } = trpc.dashboard.getOverview.useQuery(undefined, {
     staleTime: 60_000,
+    refetchOnMount: false,
   });
-  const { data: recentActivity } = trpc.dashboard.getRecentActivity.useQuery(undefined, {
-    staleTime: 30_000,
-  });
+  const unifiedReminders = overview?.reminders;
+  const recentActivity = overview?.recentActivity;
 
   const createMutation = trpc.booking.create.useMutation({
     onSuccess: (result) => {

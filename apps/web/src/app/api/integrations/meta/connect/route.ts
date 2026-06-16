@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { getCurrentUser } from "@/lib/auth/session";
+import { canManageIntegrations, integrationAccessDeniedUrl } from "@/lib/auth/integration-access";
 import { isValidMetaAppId } from "@digitify/api/src/lib/oauth-credentials";
 import { resolveOAuthAppUrl } from "@digitify/api/src/lib/oauth-app-url";
 import {
@@ -14,17 +15,15 @@ import {
 export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("callbackUrl", "/settings/integrations?meta=login");
-    return NextResponse.redirect(loginUrl);
+    return NextResponse.redirect(integrationAccessDeniedUrl(request.url, "meta", "login"));
   }
 
-  if (!["OWNER", "ADMIN"].includes(String(user.role || ""))) {
-    return NextResponse.redirect(new URL("/settings/integrations?meta=forbidden", request.url));
+  if (!canManageIntegrations(user)) {
+    return NextResponse.redirect(integrationAccessDeniedUrl(request.url, "meta"));
   }
 
   const scope = workspaceScopeFromAuthenticatedUser({ id: user.id, workspaceId: user.workspaceId });
-  const config = await loadMetaWorkspaceConfig(prisma as any, scope);
+  const config = await loadMetaWorkspaceConfig(prisma, scope);
 
   if (!config.appId || !config.appSecret) {
     return NextResponse.redirect(new URL("/settings/integrations?meta=missing-config", request.url));

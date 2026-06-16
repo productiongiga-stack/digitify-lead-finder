@@ -8,6 +8,9 @@ import { enforceRateLimit } from "./lib/rate-limit";
 import { invalidateDashboardCacheForUser } from "./lib/dashboard-cache";
 import { log } from "./lib/logger";
 import { resolveWorkspaceContext } from "./lib/workspace-registry";
+import { effectiveWorkspaceRole } from "./lib/effective-role";
+
+export { effectiveWorkspaceRole } from "./lib/effective-role";
 
 export type Context = {
   db: PrismaClient;
@@ -171,10 +174,6 @@ const isAuthenticated = t.middleware(({ ctx, next }) => {
   }
   return next({ ctx: { ...ctx, user: ctx.user } });
 });
-
-function effectiveWorkspaceRole(ctx: Context) {
-  return ctx.user?.workspaceRole ?? ctx.user?.role;
-}
 
 const enforceTrialAccess = t.middleware(async ({ ctx, next }) => {
   if (!ctx.user || effectiveWorkspaceRole(ctx) !== "TRIAL") return next();

@@ -8,6 +8,7 @@ import {
 import { loadGoogleOAuthClientConfig } from "@digitify/api/src/lib/google-calendar";
 import { resolveOAuthAppUrl } from "@digitify/api/src/lib/oauth-app-url";
 import { getCurrentUser } from "@/lib/auth/session";
+import { canManageIntegrations } from "@/lib/auth/integration-access";
 
 export async function GET(request: Request) {
   const user = await getCurrentUser();
@@ -16,15 +17,12 @@ export async function GET(request: Request) {
     loginUrl.searchParams.set("callbackUrl", "/settings/integrations?tab=google-oauth");
     return NextResponse.redirect(loginUrl);
   }
-  if (!["OWNER", "ADMIN"].includes(String(user.role || ""))) {
+  if (!canManageIntegrations(user)) {
     return NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=forbidden", request.url));
   }
 
-  const userId = (user as { id?: string }).id;
-  const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(
-    prisma as any,
-    userId ? { userId } : undefined,
-  );
+  const userId = user.id;
+  const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(prisma, { userId });
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(new URL("/settings/integrations?tab=google-oauth&google=missing-config", request.url));
   }

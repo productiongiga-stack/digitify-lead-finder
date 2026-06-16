@@ -25,7 +25,7 @@ Set these in **Vercel → Project → Settings → Environment Variables**:
 | `SETTINGS_ENCRYPTION_KEY` | Min. 32 characters (production) |
 | `CRON_SECRET` | Min. 16 characters; Vercel Cron sends `Authorization: Bearer …` |
 | `REDIS_URL` or Upstash | `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` for Edge rate limits |
-| `BLOB_READ_WRITE_TOKEN` | Vercel Blob — logo/branding uploads (avoid data URLs in prod) |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob — logo/branding + **social video uploads** (required for videos >4MB on Vercel) |
 | `SENTRY_DSN` | Sentry project DSN (server errors + tRPC 500s) |
 | `NEXT_PUBLIC_SENTRY_DSN` | Same DSN for client `global-error` boundary |
 
@@ -34,6 +34,16 @@ Optional staging:
 | Variable | Notes |
 |----------|--------|
 | `ENABLE_WORKSPACE_RLS` | `true` only after `pnpm rls:smoke` on staging DB |
+
+**Staging RLS checklist (after seed + migrate):**
+```bash
+ENABLE_WORKSPACE_RLS=true pnpm rls:smoke
+# Vercel Preview/Staging env: ENABLE_WORKSPACE_RLS=true
+# Browser: owner-b@digitify.local vs admin@digitify.local — geen cross-tenant leads
+PLAYWRIGHT_BASE_URL=https://<staging-url> pnpm test:e2e e2e/rls-cross-tenant.spec.ts
+```
+
+OAuth integration routes gebruiken `workspaceRole` (niet globale `user.role`) — team-ADMIN in een workspace kan Meta/Google koppelen.
 
 ## Local development (first run / after pull)
 
@@ -87,6 +97,34 @@ bash scripts/mark-pending-migrations-applied.sh
 Or run `pnpm db:migrate` when `DATABASE_URL` / `DIRECT_URL` point at the direct connection.
 
 Do **not** run seed on production unless intentional.
+
+## Cross-tenant cron jobs
+
+Several Vercel Cron routes intentionally process **all workspaces** in one invocation. They are idempotent and scope writes per row (`createdById` / `workspaceId`):
+
+| Cron route | Purpose | Tenant scoping |
+|------------|---------|----------------|
+| `/api/cron/social-publish` | Publishes due `SCHEDULED` social posts | Each post belongs to one `createdById` (workspace owner id) |
+| `/api/cron/drip` | Sends drip campaign emails | Drafts filtered on `lead.createdById`; SMTP/branding from workspace owner |
+| `/api/cron/bookings-sync` | Syncs Google Calendar bookings | Credentials resolved per workspace owner |
+
+**Per-workspace alternative:** authenticated admins can call `social.publishDuePosts` (tRPC) which runs `runDueSocialPostsWorker` scoped to `ctx.user.workspaceId` only.
+
+When debugging tenant leaks, verify cron handlers never reuse a single SMTP token or Meta token across workspaces without re-loading config per `createdById`.
+
+## Integration tests in CI
+
+From the repo root:
+
+```bash
+# RLS + IDOR + settings RBAC (requires DATABASE_URL)
+pnpm --filter @digitify/api test:integration
+
+# RLS smoke (set ENABLE_WORKSPACE_RLS=true on staging first)
+ENABLE_WORKSPACE_RLS=true pnpm rls:smoke
+```
+
+`test:integration` runs `workspace-rls`, `idor-smoke`, and `settings-rbac` specs. IDOR smoke covers lead/social/meta/google `getById` cross-tenant rejection.
 
 ## Google Ads module
 

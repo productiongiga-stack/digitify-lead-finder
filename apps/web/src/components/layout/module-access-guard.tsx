@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useMyModules } from "@/components/layout/modules-provider";
 import { isModuleDisabled, moduleLabel, resolveModuleIdForPath } from "@/lib/module-access";
 import { Button, Card, CardContent } from "@digitify/ui";
+import { RouteLoading } from "@/components/layout/route-states";
 import { Lock } from "lucide-react";
 import Link from "next/link";
 
@@ -11,9 +12,13 @@ export function ModuleAccessGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { data, isLoading } = useMyModules();
 
+  if (isLoading) {
+    return <RouteLoading />;
+  }
+
   const disabled = new Set(data?.disabled ?? []);
   const moduleId = resolveModuleIdForPath(pathname);
-  const blocked = !isLoading && isModuleDisabled(pathname, disabled);
+  const blocked = isModuleDisabled(pathname, disabled);
 
   if (!blocked) {
     return <>{children}</>;

@@ -1,16 +1,13 @@
-"use client";
+import { HydrateClient, getServerHelpers } from "@/lib/trpc/server";
+import { DashboardPageInner } from "./dashboard-page-inner";
 
-import dynamic from "next/dynamic";
-import { RouteLoading } from "@/components/layout/route-states";
+export default async function DashboardPage() {
+  const helpers = await getServerHelpers();
+  await helpers.dashboard.getOverview.prefetch();
 
-const DashboardPageView = dynamic(
-  () => import("./dashboard-page-inner").then((module) => module.DashboardPageInner),
-  {
-    ssr: false,
-    loading: () => <RouteLoading label="Dashboard laden..." />,
-  },
-);
-
-export default function DashboardPage() {
-  return <DashboardPageView />;
+  return (
+    <HydrateClient>
+      <DashboardPageInner />
+    </HydrateClient>
+  );
 }

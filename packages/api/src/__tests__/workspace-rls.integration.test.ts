@@ -120,6 +120,64 @@ describe.skipIf(!runIntegration)("workspace RLS (integration)", () => {
     process.env.ENABLE_WORKSPACE_RLS = previous;
   });
 
+  it("shows openclaw logs for workspace members under RLS", async () => {
+    const previous = process.env.ENABLE_WORKSPACE_RLS;
+    process.env.ENABLE_WORKSPACE_RLS = "true";
+
+    const stamp = Date.now();
+    const owner = await prisma.user.create({
+      data: {
+        email: `rls-openclaw-owner-${stamp}@digitify.local`,
+        name: "RLS OpenClaw Owner",
+        role: "OWNER",
+        passwordHash: "ci-no-login",
+      },
+      select: { id: true },
+    });
+    const member = await prisma.user.create({
+      data: {
+        email: `rls-openclaw-member-${stamp}@digitify.local`,
+        name: "RLS OpenClaw Member",
+        role: "MEMBER",
+        workspaceOwnerId: owner.id,
+        passwordHash: "ci-no-login",
+      },
+      select: { id: true },
+    });
+
+    const log = await prisma.openClawLog.create({
+      data: {
+        userId: member.id,
+        prompt: "test prompt",
+        response: "test response",
+        model: "test-model",
+      },
+      select: { id: true },
+    });
+
+    const visibleToOwner = await withWorkspaceRls(prisma, owner.id, async (db) =>
+      db.openClawLog.findFirst({ where: { id: log.id }, select: { id: true } }),
+    );
+    expect(visibleToOwner?.id).toBe(log.id);
+
+    const otherOwner = await prisma.user.create({
+      data: {
+        email: `rls-openclaw-other-${stamp}@digitify.local`,
+        name: "RLS Other Owner",
+        role: "OWNER",
+        passwordHash: "ci-no-login",
+      },
+      select: { id: true },
+    });
+
+    const hiddenFromOther = await withWorkspaceRls(prisma, otherOwner.id, async (db) =>
+      db.openClawLog.findFirst({ where: { id: log.id }, select: { id: true } }),
+    );
+    expect(hiddenFromOther).toBeNull();
+
+    process.env.ENABLE_WORKSPACE_RLS = previous;
+  });
+
   it("reports RLS flag from environment", () => {
     const prev = process.env.ENABLE_WORKSPACE_RLS;
     process.env.ENABLE_WORKSPACE_RLS = "true";

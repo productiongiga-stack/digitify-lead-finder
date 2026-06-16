@@ -4,13 +4,15 @@ import Link from "next/link";
 import { ChevronRight, Mail, Settings2, SlidersHorizontal } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Tabs, TabsContent, TabsList, TabsTrigger } from "@digitify/ui";
-import { SETTINGS_SECTIONS } from "@/lib/navigation";
-import { hasRole } from "@/lib/permissions";
+import { filterSettingsSections } from "@/lib/navigation";
+import { effectiveAppRole } from "@/lib/permissions";
 
 export default function SettingsPage() {
   const { data: session } = useSession();
-  const role = (session?.user as { role?: string } | undefined)?.role;
-  const visibleSections = SETTINGS_SECTIONS.filter((section) => !section.allowedRoles || hasRole(role, section.allowedRoles));
+  const role = effectiveAppRole(
+    session?.user as { role?: string; workspaceRole?: string } | undefined,
+  );
+  const visibleSections = filterSettingsSections(role);
   const featuredHrefs = [
     "/settings/account",
     "/settings/integrations",

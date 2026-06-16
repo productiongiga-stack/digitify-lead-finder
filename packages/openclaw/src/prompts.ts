@@ -121,14 +121,16 @@ ONDERWERP: [onderwerpregel]
 ---
 REDENERING: [korte uitleg waarom je deze aanpak koos]`;
 
-export const LEAD_ANALYSIS_PROMPT = `Analyseer deze lead grondig. Geef:
-1. Een korte samenvatting (2-3 zinnen)
-2. De belangrijkste kansen (max 5)
-3. Mogelijke risico's of aandachtspunten
-4. Voorgestelde aanpak
-5. Je vertrouwensniveau (0-100)
+export const LEAD_ANALYSIS_PROMPT = `Analyseer deze lead grondig en antwoord uitsluitend met geldig JSON in dit formaat:
+{
+  "summary": "korte samenvatting (2-3 zinnen)",
+  "opportunities": ["kans 1", "kans 2"],
+  "risks": ["risico 1"],
+  "suggestedApproach": "concrete aanpak",
+  "confidence": 75
+}
 
-Wees concreet en actionable.`;
+Wees concreet en actionable. confidence is een getal tussen 0 en 100.`;
 
 export const NICHE_SUGGESTION_PROMPT = `Op basis van je kennis van de Belgische markt, stel 5 niches voor met hoog potentieel voor digitale marketing diensten. Per niche:
 1. Niche naam

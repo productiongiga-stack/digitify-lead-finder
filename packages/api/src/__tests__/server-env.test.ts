@@ -53,8 +53,17 @@ describe("validateServerEnv", () => {
     expect(() => validateServerEnv({ force: true })).toThrow(/CRON_SECRET/);
 
     process.env.CRON_SECRET = "production-cron-secret";
+    process.env.ENABLE_WORKSPACE_RLS = "true";
     const env = validateServerEnv({ force: true });
     expect(env.CRON_SECRET).toBe("production-cron-secret");
+  });
+
+  it("requires ENABLE_WORKSPACE_RLS in production", () => {
+    process.env.NODE_ENV = "production";
+    process.env.SETTINGS_ENCRYPTION_KEY = "production-settings-encryption-key-32";
+    process.env.CRON_SECRET = "production-cron-secret";
+    delete process.env.ENABLE_WORKSPACE_RLS;
+    expect(() => validateServerEnv({ force: true })).toThrow(/ENABLE_WORKSPACE_RLS/);
   });
 
   it("skips validation in test runtime by default", () => {

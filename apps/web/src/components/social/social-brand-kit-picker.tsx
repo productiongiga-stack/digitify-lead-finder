@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import {
   Badge,
@@ -69,13 +77,17 @@ export type SocialBrandKitApplyPayload = {
   template: string;
 };
 
-type Props = {
+type ProviderProps = {
+  children: ReactNode;
   selectedKitId: string;
   onSelectedKitIdChange: (kitId: string) => void;
   onApplyKit: (payload: SocialBrandKitApplyPayload) => void;
   kits?: SocialBrandKit[];
   kitsLoading?: boolean;
   autoApplyDefaults?: boolean;
+};
+
+type PickerProps = {
   disabled?: boolean;
 };
 
@@ -97,6 +109,29 @@ const EMPTY_FORM = {
   defaultLinkUrl: "",
   includeLogo: true,
 };
+
+type BrandKitPickerContextValue = {
+  kits: SocialBrandKit[];
+  kitsLoading: boolean;
+  selectedKit: SocialBrandKit | null;
+  applyPreview: SocialBrandKitApplyPayload | null;
+  disabled: boolean;
+  openCreate: () => void;
+  openEdit: (kit: SocialBrandKit) => void;
+  handleKitChange: (kitId: string) => void;
+  reapplyKit: () => void;
+  setDisabled: (disabled: boolean) => void;
+};
+
+const BrandKitPickerContext = createContext<BrandKitPickerContextValue | null>(null);
+
+function useBrandKitPickerContext() {
+  const context = useContext(BrandKitPickerContext);
+  if (!context) {
+    throw new Error("SocialBrandKitPicker must be used within SocialBrandKitPickerProvider.");
+  }
+  return context;
+}
 
 export function kitToApplyPayload(kit: SocialBrandKit): SocialBrandKitApplyPayload {
   return {
@@ -193,32 +228,34 @@ function BrandKitCard({
   );
 }
 
-export function SocialBrandKitPicker({
+export function SocialBrandKitPickerProvider({
+  children,
   selectedKitId,
   onSelectedKitIdChange,
   onApplyKit,
   kits: kitsProp,
   kitsLoading = false,
   autoApplyDefaults = true,
-  disabled = false,
-}: Props) {
+}: ProviderProps) {
   const { showToast } = useToast();
   const utils = trpc.useUtils();
   const { branding: workspaceBranding } = useBranding();
   const [managerOpen, setManagerOpen] = useState(false);
+  const [pickerDisabled, setPickerDisabled] = useState(false);
   const kitsQuery = trpc.social.listBrandKits.useQuery(undefined, { enabled: kitsProp === undefined });
-  const creativeBrand = trpc.media.getBrandKit.useQuery(undefined, { enabled: managerOpen });
+  const creativeBrand = trpc.media.getBrandKit.useQuery(undefined, { staleTime: 5 * 60_000 });
 
   const kits = (kitsProp ?? kitsQuery.data?.kits ?? []) as SocialBrandKit[];
-  const kitsData = kitsQuery.data ?? (kitsProp ? { kits: kitsProp, defaultBrandKitId: kitsProp.find((kit) => kit.isDefault)?.id || kitsProp[0]?.id || "" } : undefined);
+  const kitsData =
+    kitsQuery.data ??
+    (kitsProp
+      ? { kits: kitsProp, defaultBrandKitId: kitsProp.find((kit) => kit.isDefault)?.id || kitsProp[0]?.id || "" }
+      : undefined);
   const selectedKit = useMemo(
     () => kits.find((kit) => kit.id === selectedKitId) || kits.find((kit) => kit.isDefault) || kits[0] || null,
     [kits, selectedKitId],
   );
-  const applyPreview = useMemo(
-    () => (selectedKit ? kitToApplyPayload(selectedKit) : null),
-    [selectedKit],
-  );
+  const applyPreview = useMemo(() => (selectedKit ? kitToApplyPayload(selectedKit) : null), [selectedKit]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [logoUploading, setLogoUploading] = useState(false);
@@ -244,6 +281,7 @@ export function SocialBrandKitPicker({
 
   const deleteKit = trpc.social.deleteBrandKit.useMutation({
     onSuccess: async (result) => {
+      await utils.social.listBrandKits.invalidate();
       const refreshed = await utils.social.listBrandKits.fetch();
       const nextKit = refreshed?.kits.find((kit) => kit.id === result.defaultBrandKitId);
       onSelectedKitIdChange(result.defaultBrandKitId);
@@ -388,113 +426,24 @@ export function SocialBrandKitPicker({
     }
   }
 
-  if (kitsLoading || kitsQuery.isLoading) {
-    return (
-      <div className="space-y-3">
-        <Skeleton className="h-8 w-40" />
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Skeleton className="h-24 rounded-xl" />
-          <Skeleton className="h-24 rounded-xl" />
-        </div>
-      </div>
-    );
-  }
+  const contextValue: BrandKitPickerContextValue = {
+    kits,
+    kitsLoading: kitsLoading || kitsQuery.isLoading,
+    selectedKit,
+    applyPreview,
+    disabled: pickerDisabled,
+    openCreate,
+    openEdit,
+    handleKitChange,
+    reapplyKit: () => {
+      if (applyPreview) onApplyKit(applyPreview);
+    },
+    setDisabled: setPickerDisabled,
+  };
 
   return (
-    <>
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-foreground">Merkkit</p>
-            <p className="text-xs text-muted-foreground">
-              Kies een merkprofiel — hashtags, tone, CTA en AI-context worden automatisch ingevuld.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={(event) => {
-                event.stopPropagation();
-                openCreate();
-              }}
-            >
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              Nieuw merkkit
-            </Button>
-            {selectedKit ? (
-              <Button type="button" size="sm" variant="ghost" onClick={() => openEdit(selectedKit)}>
-                Beheren
-              </Button>
-            ) : null}
-          </div>
-        </div>
-
-        {kits.length ? (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              {kits.length} merkkit{kits.length === 1 ? "" : "s"} — klik om te selecteren
-            </p>
-            <div className="grid gap-2 sm:grid-cols-2">
-            {kits.map((kit) => (
-              <BrandKitCard
-                key={kit.id}
-                kit={kit}
-                selected={selectedKit?.id === kit.id}
-                disabled={disabled}
-                onSelect={() => handleKitChange(kit.id)}
-              />
-            ))}
-            </div>
-          </div>
-        ) : (
-          <div className="rounded-xl border border-dashed px-4 py-8 text-center">
-            <p className="text-sm text-muted-foreground">
-              Nog geen merkkit. Maak er een aan of importeer vanuit je workspace-branding.
-            </p>
-            <Button type="button" size="sm" className="mt-4" onClick={openCreate}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              Nieuw merkkit
-            </Button>
-          </div>
-        )}
-
-        {selectedKit && applyPreview ? (
-          <div className="rounded-xl border bg-gradient-to-br from-muted/20 to-amber-50/40 p-4 dark:from-muted/10 dark:to-amber-950/20">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <Sparkles className="h-3.5 w-3.5" />
-                Wordt toegepast op je post
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-8"
-                disabled={disabled}
-                onClick={() => onApplyKit(applyPreview)}
-              >
-                <Wand2 className="mr-1.5 h-3.5 w-3.5" />
-                Opnieuw toepassen
-              </Button>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <KitPreviewRow icon={Building2} label="Brand signature" value={applyPreview.brandSignature} />
-              <KitPreviewRow icon={Megaphone} label="Tone of voice" value={applyPreview.tone} />
-              <KitPreviewRow icon={Hash} label="Hashtags" value={applyPreview.hashtags} />
-              <KitPreviewRow icon={Sparkles} label="CTA" value={applyPreview.cta} />
-              <KitPreviewRow icon={Link2} label="Link" value={applyPreview.linkUrl} />
-              <KitPreviewRow icon={Wand2} label="AI-template" value={applyPreview.template} />
-            </div>
-            {!applyPreview.hashtags && !applyPreview.cta && !applyPreview.template ? (
-              <p className="mt-2 text-xs text-muted-foreground">
-                Dit merkkit heeft nog weinig standaardvelden. Open <strong>Beheren</strong> om hashtags, CTA en AI-context in te stellen.
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+    <BrandKitPickerContext.Provider value={contextValue}>
+      {children}
 
       <CreateModal
         open={managerOpen}
@@ -506,7 +455,7 @@ export function SocialBrandKitPicker({
         pending={upsertKit.isPending}
         asForm
         onSubmit={saveBrandKit}
-        contentClassName="z-[200] max-w-2xl"
+        contentClassName="z-[250] max-w-2xl"
       >
         <div className="max-h-[65vh] space-y-5 overflow-y-auto pr-1">
           <div className="flex flex-wrap gap-2">
@@ -578,7 +527,7 @@ export function SocialBrandKitPicker({
                     <input
                       ref={logoInputRef}
                       type="file"
-                      accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                      accept="image/png,image/jpeg,image/webp"
                       className="hidden"
                       onChange={(event) => {
                         const file = event.target.files?.[0];
@@ -625,7 +574,7 @@ export function SocialBrandKitPicker({
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent position="popper" className="z-[210]">
+                    <SelectContent position="popper" className="z-[260]">
                       {SOCIAL_TONE_OPTIONS.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
@@ -709,6 +658,120 @@ export function SocialBrandKitPicker({
           ) : null}
         </div>
       </CreateModal>
-    </>
+    </BrandKitPickerContext.Provider>
+  );
+}
+
+export function SocialBrandKitPicker({ disabled = false }: PickerProps) {
+  const {
+    kits,
+    kitsLoading,
+    selectedKit,
+    applyPreview,
+    disabled: pickerDisabled,
+    openCreate,
+    openEdit,
+    handleKitChange,
+    reapplyKit,
+    setDisabled,
+  } = useBrandKitPickerContext();
+
+  useEffect(() => {
+    setDisabled(disabled);
+  }, [disabled, setDisabled]);
+
+  const isDisabled = pickerDisabled || disabled;
+
+  if (kitsLoading) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-8 w-40" />
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Skeleton className="h-24 rounded-xl" />
+          <Skeleton className="h-24 rounded-xl" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Merkkit</p>
+          <p className="text-xs text-muted-foreground">
+            Kies een merkprofiel — hashtags, tone, CTA en AI-context worden automatisch ingevuld.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="outline" disabled={isDisabled} onClick={openCreate}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            Nieuw merkkit
+          </Button>
+          {selectedKit ? (
+            <Button type="button" size="sm" variant="ghost" disabled={isDisabled} onClick={() => openEdit(selectedKit)}>
+              Beheren
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      {kits.length ? (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            {kits.length} merkkit{kits.length === 1 ? "" : "s"} — klik om te selecteren
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {kits.map((kit) => (
+              <BrandKitCard
+                key={kit.id}
+                kit={kit}
+                selected={selectedKit?.id === kit.id}
+                disabled={isDisabled}
+                onSelect={() => handleKitChange(kit.id)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed px-4 py-8 text-center">
+          <p className="text-sm text-muted-foreground">
+            Nog geen merkkit. Maak er een aan of importeer vanuit je workspace-branding.
+          </p>
+          <Button type="button" size="sm" className="mt-4" disabled={isDisabled} onClick={openCreate}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            Nieuw merkkit
+          </Button>
+        </div>
+      )}
+
+      {selectedKit && applyPreview ? (
+        <div className="rounded-xl border bg-gradient-to-br from-muted/20 to-amber-50/40 p-4 dark:from-muted/10 dark:to-amber-950/20">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <Sparkles className="h-3.5 w-3.5" />
+              Wordt toegepast op je post
+            </p>
+            <Button type="button" size="sm" variant="outline" className="h-8" disabled={isDisabled} onClick={reapplyKit}>
+              <Wand2 className="mr-1.5 h-3.5 w-3.5" />
+              Opnieuw toepassen
+            </Button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <KitPreviewRow icon={Building2} label="Brand signature" value={applyPreview.brandSignature} />
+            <KitPreviewRow icon={Megaphone} label="Tone of voice" value={applyPreview.tone} />
+            <KitPreviewRow icon={Hash} label="Hashtags" value={applyPreview.hashtags} />
+            <KitPreviewRow icon={Sparkles} label="CTA" value={applyPreview.cta} />
+            <KitPreviewRow icon={Link2} label="Link" value={applyPreview.linkUrl} />
+            <KitPreviewRow icon={Wand2} label="AI-template" value={applyPreview.template} />
+          </div>
+          {!applyPreview.hashtags && !applyPreview.cta && !applyPreview.template ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Dit merkkit heeft nog weinig standaardvelden. Open <strong>Beheren</strong> om hashtags, CTA en AI-context in te stellen.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }

@@ -268,7 +268,15 @@ export async function analyzeWebsite(url: string): Promise<WebsiteAnalysis> {
       // Check if redirected to HTTPS
       if (response.url.startsWith("https://")) hasSSL = true;
 
+      const contentLength = Number(response.headers.get("content-length") || 0);
+      if (contentLength > 2_000_000) {
+        errors.push("Pagina te groot om te analyseren");
+        return blockedWebsiteAnalysis(url, errors);
+      }
       html = await response.text();
+      if (html.length > 2_000_000) {
+        html = html.slice(0, 2_000_000);
+      }
     } catch (fetchError: any) {
       clearTimeout(timeout);
       loadTimeMs = Date.now() - start;

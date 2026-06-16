@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { verifyQuotePdfToken } from "@/lib/quote-pdf";
 import { enforceRateLimit } from "@/lib/http-security";
+import { storePortalUpload } from "@/lib/portal-upload";
 
 function parseJson(value: unknown) {
   if (typeof value !== "string") return value;
@@ -155,28 +156,29 @@ export async function POST(request: Request, { params }: { params: Promise<{ quo
     if (!dataUrl.startsWith("data:")) {
       return NextResponse.json({ error: "Ongeldig bestand." }, { status: 400 });
     }
-    if (dataUrl.length > 3_000_000) {
-      return NextResponse.json({ error: "Bestand is te groot." }, { status: 400 });
+    try {
+      const entry = await storePortalUpload({
+        workspaceId: quote.createdById,
+        quoteId: quote.id,
+        name,
+        type,
+        dataUrl,
+      });
+      const key = `user:${quote.createdById}:portal.files_json`;
+      const row = await prisma.setting.findUnique({ where: { key }, select: { value: true } });
+      const current = parseJson(row?.value);
+      const list = Array.isArray(current) ? current : [];
+      list.unshift(entry);
+      await prisma.setting.upsert({
+        where: { key },
+        create: { key, value: JSON.stringify(list.slice(0, 100)) },
+        update: { value: JSON.stringify(list.slice(0, 100)) },
+      });
+      return NextResponse.json({ success: true, file: entry });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Upload mislukt.";
+      return NextResponse.json({ error: message }, { status: 400 });
     }
-    const key = `user:${quote.createdById}:portal.files_json`;
-    const row = await prisma.setting.findUnique({ where: { key }, select: { value: true } });
-    const current = parseJson(row?.value);
-    const list = Array.isArray(current) ? current : [];
-    const entry = {
-      id: `file_${Math.random().toString(36).slice(2, 10)}`,
-      quoteId: quote.id,
-      name,
-      type,
-      dataUrl,
-      uploadedAt: new Date().toISOString(),
-    };
-    list.unshift(entry);
-    await prisma.setting.upsert({
-      where: { key },
-      create: { key, value: JSON.stringify(list.slice(0, 100)) },
-      update: { value: JSON.stringify(list.slice(0, 100)) },
-    });
-    return NextResponse.json({ success: true, file: entry });
   }
 
   return NextResponse.json({ error: "Onbekende actie." }, { status: 400 });

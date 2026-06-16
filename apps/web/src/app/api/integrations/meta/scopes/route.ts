@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveMetaOAuthScopeSummary } from "@digitify/api/src/lib/social-meta";
 import { getCurrentUser } from "@/lib/auth/session";
+import { canManageIntegrations } from "@/lib/auth/integration-access";
 import { resolveOAuthAppUrl } from "@digitify/api/src/lib/oauth-app-url";
 
 export async function GET(request: Request) {
@@ -8,7 +9,7 @@ export async function GET(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Niet ingelogd" }, { status: 401 });
   }
-  if (!["OWNER", "ADMIN"].includes(String(user.role || ""))) {
+  if (!canManageIntegrations(user)) {
     return NextResponse.json({ error: "Geen toegang" }, { status: 403 });
   }
 

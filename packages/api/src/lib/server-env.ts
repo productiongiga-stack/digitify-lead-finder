@@ -37,6 +37,11 @@ const productionServerEnvSchema = z.object({
       message: "SETTINGS_ENCRYPTION_KEY must not use the placeholder value",
     }),
   CRON_SECRET: z.string().min(16, "CRON_SECRET is required in production"),
+  ENABLE_WORKSPACE_RLS: z.literal("true", {
+    errorMap: () => ({
+      message: "ENABLE_WORKSPACE_RLS must be true in production for tenant isolation",
+    }),
+  }),
 });
 
 export type CoreServerEnv = z.infer<typeof coreServerEnvSchema>;

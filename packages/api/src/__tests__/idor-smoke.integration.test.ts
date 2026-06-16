@@ -93,7 +93,7 @@ describe.skipIf(!runIntegration)("idor smoke (integration)", () => {
     );
 
     await expect(caller.updateDraft({ id: planB.id, name: "Hacked" })).rejects.toMatchObject({
-      code: "FORBIDDEN",
+      code: "NOT_FOUND",
     });
   });
 
@@ -127,7 +127,42 @@ describe.skipIf(!runIntegration)("idor smoke (integration)", () => {
     );
 
     await expect(caller.updateDraft({ id: planB.id, name: "Hacked" })).rejects.toMatchObject({
-      code: "FORBIDDEN",
+      code: "NOT_FOUND",
     });
+  });
+
+  it("workspace A cannot get social post from workspace B", async () => {
+    const ownerA = await prisma.user.create({
+      data: {
+        email: `idor-soc-a-${stamp}@digitify.local`,
+        name: "IDOR Social A",
+        role: "OWNER",
+        passwordHash: "ci-no-login",
+      },
+    });
+    const ownerB = await prisma.user.create({
+      data: {
+        email: `idor-soc-b-${stamp}@digitify.local`,
+        name: "IDOR Social B",
+        role: "OWNER",
+        passwordHash: "ci-no-login",
+      },
+    });
+    const postB = await prisma.socialPost.create({
+      data: {
+        createdById: ownerB.id,
+        caption: "Tenant B post",
+        imageUrl: "https://cdn.muapi.ai/test.png",
+        targetPlatforms: ["FACEBOOK"],
+        status: "DRAFT",
+      },
+    });
+
+    const { socialRouter } = await import("../routers/social.router");
+    const caller = socialRouter.createCaller(
+      callerCtx(prisma, { ...ownerA, workspaceId: ownerA.id }),
+    );
+
+    await expect(caller.getById({ id: postB.id })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });

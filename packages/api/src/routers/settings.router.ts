@@ -10,6 +10,7 @@ import {
   SECRET_REDACTION_MASK,
 } from "@digitify/db";
 import { router, publicRateLimitedProcedure, protectedProcedure, adminProcedure, ownerProcedure, mutationProcedure, aiRateLimitedProcedure } from "../trpc";
+import { effectiveWorkspaceRole } from "../lib/effective-role";
 import { generateMasterShellHtml } from "../lib/generate-email-shell";
 import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
 import { formatSmtpErrorMessage, normalizeTlsOptions } from "../lib/email-utils";
@@ -75,7 +76,7 @@ async function loadSettingsBundle(
   await ensureUserWorkspace(ctx.db, scope.workspaceId, ctx.user.name);
   const rows = await loadWorkspaceSettingRows(ctx.db, scope, [...keys]);
   const map = settingsRowsToMap(rows);
-  return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
+  return sanitizeSettingsForViewer(filterReadableSettingsForRole(effectiveWorkspaceRole(ctx), map));
 }
 
 function getDomainFromEmail(value: string) {
@@ -303,7 +304,7 @@ export const settingsRouter = router({
       const setting = await ctx.db.setting.findUnique({
         where: { key: resolveSettingDbKey(scope, key) },
       });
-      if (!canReadSettingKey(ctx.user.role, key)) return null;
+      if (!canReadSettingKey(effectiveWorkspaceRole(ctx), key)) return null;
       if (!setting) return null;
       const settingsMap = settingsRowsToMap([{ key, value: setting.value }]);
       const value = settingsMap[key];
@@ -343,7 +344,7 @@ export const settingsRouter = router({
     ];
     const rows = await loadWorkspaceSettingRows(ctx.db, scope, keys);
     const map = settingsRowsToMap(rows);
-    return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
+    return sanitizeSettingsForViewer(filterReadableSettingsForRole(effectiveWorkspaceRole(ctx), map));
   }),
 
   /** Settings used on the bookings list page (avoids getAll). */
@@ -353,7 +354,7 @@ export const settingsRouter = router({
     const keys = ["ui.bookings_compact", "chatbot.public_tenant_token"];
     const rows = await loadWorkspaceSettingRows(ctx.db, scope, keys);
     const map = settingsRowsToMap(rows);
-    return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
+    return sanitizeSettingsForViewer(filterReadableSettingsForRole(effectiveWorkspaceRole(ctx), map));
   }),
 
   /** Display / density settings only */
@@ -363,7 +364,7 @@ export const settingsRouter = router({
     const keys = ["ui.density", "display.typography_mode"];
     const rows = await loadWorkspaceSettingRows(ctx.db, scope, keys);
     const map = settingsRowsToMap(rows);
-    return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
+    return sanitizeSettingsForViewer(filterReadableSettingsForRole(effectiveWorkspaceRole(ctx), map));
   }),
 
   /** Mail-opmaak / afzender settings (avoids getAll). */
@@ -444,7 +445,7 @@ export const settingsRouter = router({
     ];
     const rows = await loadWorkspaceSettingRows(ctx.db, scope, keys);
     const map = settingsRowsToMap(rows);
-    return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
+    return sanitizeSettingsForViewer(filterReadableSettingsForRole(effectiveWorkspaceRole(ctx), map));
   }),
 
   generateMasterShellHtml: aiRateLimitedProcedure
@@ -462,7 +463,7 @@ export const settingsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      assertCanManageSettingKey(ctx.user.role, "email.master_shell_html");
+      assertCanManageSettingKey(effectiveWorkspaceRole(ctx), "email.master_shell_html");
       const scope = workspaceScopeFromUser(ctx.user);
       return generateMasterShellHtml({
         db: ctx.db,
@@ -486,7 +487,7 @@ export const settingsRouter = router({
     await ensureUserWorkspace(ctx.db, scope.workspaceId, ctx.user.name);
     const rows = await loadWorkspaceSettingRows(ctx.db, scope);
     const map = settingsRowsToMap(rows);
-    return sanitizeSettingsForViewer(filterReadableSettingsForRole(ctx.user.role, map));
+    return sanitizeSettingsForViewer(filterReadableSettingsForRole(effectiveWorkspaceRole(ctx), map));
   }),
 
   update: mutationProcedure
@@ -494,7 +495,7 @@ export const settingsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const key = normalizeSettingKey(input.key);
       const scope = workspaceScopeFromUser(ctx.user);
-      assertCanManageSettingKey(ctx.user.role, key);
+      assertCanManageSettingKey(effectiveWorkspaceRole(ctx), key);
       const scopedKey = resolveSettingDbKey(scope, key);
       if (isSecretNoopUpdate(key, input.value)) {
         const current = await ctx.db.setting.findUnique({ where: { key: scopedKey } });
@@ -532,7 +533,7 @@ export const settingsRouter = router({
       }));
 
       for (const item of normalizedEntries) {
-        assertCanManageSettingKey(ctx.user.role, item.key);
+        assertCanManageSettingKey(effectiveWorkspaceRole(ctx), item.key);
       }
       const uniqueEntries = Array.from(
         new Map(
@@ -583,7 +584,7 @@ export const settingsRouter = router({
       const normalizedKeys = [...new Set(input.keys.map((key) => normalizeSettingKey(key)))];
 
       for (const key of normalizedKeys) {
-        assertCanManageSettingKey(ctx.user.role, key);
+        assertCanManageSettingKey(effectiveWorkspaceRole(ctx), key);
       }
 
       const storageKeys = normalizedKeys.map((key) => resolveSettingDbKey(scope, key));

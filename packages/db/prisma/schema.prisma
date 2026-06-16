@@ -62,7 +62,9 @@ model User {
   googleAdAccounts     GoogleAdAccount[] @relation("GoogleAdAccountCreatedBy")
   googleAdPlans        GoogleAdPlan[]    @relation("GoogleAdPlanCreatedBy")
   approvedGoogleAdPlans GoogleAdPlan[]   @relation("GoogleAdPlanApprovedBy")
-  mediaGenerations      MediaGeneration[]
+  authoredMediaGenerations MediaGeneration[] @relation("MediaGenerationAuthor")
+  tenantMediaGenerations   MediaGeneration[] @relation("MediaGenerationWorkspace")
+  workspaceAnalyticsEvents WorkspaceAnalyticsEvent[] @relation("WorkspaceAnalyticsOwner")
 
   @@index([workspaceOwnerId])
   @@index([activeWorkspaceId])
@@ -1404,7 +1406,7 @@ model ReviewRequest {
 // OFFERTES (QUOTES)
 model Quote {
   id            String      @id @default(cuid())
-  quoteNumber   String      @unique
+  quoteNumber   String
   leadId        String?
   clientName    String
   clientEmail   String?
@@ -1444,6 +1446,7 @@ model Quote {
   @@index([createdById])
   @@index([createdById, status])
   @@index([createdById, createdAt(sort: Desc)])
+  @@unique([createdById, quoteNumber])
   @@map("quotes")
 }
 
@@ -1578,7 +1581,8 @@ model MediaGeneration {
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User @relation("MediaGenerationAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  workspace User @relation("MediaGenerationWorkspace", fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([userId, createdAt(sort: Desc)])
@@ -1596,6 +1600,8 @@ model WorkspaceAnalyticsEvent {
   sessionId   String?
   metadata    Json?
   createdAt   DateTime @default(now())
+
+  workspace User @relation("WorkspaceAnalyticsOwner", fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, createdAt(sort: Desc)])
   @@index([workspaceId, category, createdAt(sort: Desc)])

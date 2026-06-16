@@ -1,42 +1,36 @@
 "use client";
 
 import { useEffect } from "react";
+import * as Sentry from "@sentry/nextjs";
+import { Button } from "@digitify/ui";
 
 export default function GlobalError({
   error,
   reset,
 }: {
   error: Error & { digest?: string };
-  reset?: () => void;
+  reset: () => void;
 }) {
   useEffect(() => {
-    if (process.env.NODE_ENV !== "production") {
-      console.error(error);
-    }
+    console.error(error);
+    Sentry.captureException(error);
   }, [error]);
-
-  const tryAgain = () => {
-    if (typeof reset === "function") {
-      reset();
-      return;
-    }
-    window.location.reload();
-  };
 
   return (
     <html lang="nl">
-      <body className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 font-sans">
-        <h1 className="text-xl font-semibold">Er ging iets mis</h1>
-        <p className="max-w-md text-center text-sm text-muted-foreground">
-          De fout is geregistreerd. Probeer de pagina te vernieuwen of neem contact op met support.
-        </p>
-        <button
-          type="button"
-          onClick={tryAgain}
-          className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
-        >
-          Opnieuw proberen
-        </button>
+      <body className="flex min-h-screen items-center justify-center bg-background p-6">
+        <div className="max-w-md space-y-4 text-center">
+          <h1 className="text-2xl font-semibold">Er ging iets mis</h1>
+          <p className="text-sm text-muted-foreground">
+            De applicatie kon deze pagina niet laden. Probeer opnieuw of ga terug naar het dashboard.
+          </p>
+          <div className="flex justify-center gap-3">
+            <Button onClick={() => reset()}>Opnieuw proberen</Button>
+            <Button variant="outline" onClick={() => (window.location.href = "/dashboard")}>
+              Naar dashboard
+            </Button>
+          </div>
+        </div>
       </body>
     </html>
   );

@@ -28,6 +28,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useMyModules } from "@/components/layout/modules-provider";
+import { useSession } from "next-auth/react";
+import { canAccessNavItem, effectiveAppRole } from "@/lib/permissions";
 
 type SidebarNavEntry = {
   href: string;
@@ -296,6 +298,11 @@ export function Sidebar() {
   const setMobileSidebarOpen = useUIStore((state) => state.setMobileSidebarOpen);
   const { branding } = useBranding();
 
+  const { data: session } = useSession();
+  const appRole = effectiveAppRole(
+    session?.user as { role?: string; workspaceRole?: string } | undefined,
+  );
+
   const { data: moduleAccess } = useMyModules();
   const disabledModules = useMemo(
     () => new Set(moduleAccess?.disabled ?? []),
@@ -306,9 +313,13 @@ export function Sidebar() {
     () =>
       SIDEBAR_NAV_GROUPS.map((group) => ({
         ...group,
-        items: group.items.filter((item) => !item.moduleId || !disabledModules.has(item.moduleId)),
+        items: group.items.filter(
+          (item) =>
+            canAccessNavItem(appRole, item.href) &&
+            (!item.moduleId || !disabledModules.has(item.moduleId)),
+        ),
       })).filter((group) => group.items.length > 0),
-    [disabledModules],
+    [appRole, disabledModules],
   );
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {

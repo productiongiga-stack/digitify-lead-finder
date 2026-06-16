@@ -18,7 +18,7 @@ import { Moon, Sun, Bot, Menu, Bell, Plus, Building2, KeyRound, LogOut, Mail, Pa
 import { useUIStore } from "@/stores/ui-store";
 import { useBranding } from "@/lib/branding";
 import { resolvePageTitle } from "@/lib/navigation";
-import { canAccessSettingsPath } from "@/lib/permissions";
+import { canAccessSettingsPath, effectiveAppRole } from "@/lib/permissions";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import { useHasMounted } from "@/lib/use-has-mounted";
@@ -68,7 +68,9 @@ export function Topbar() {
       ? (dashboardOverview?.attentionCount ?? 0)
       : (attentionSummary?.totalCount ?? 0)
     : 0;
-  const role = (session?.user as { role?: string } | undefined)?.role;
+  const role = effectiveAppRole(
+    session?.user as { role?: string; workspaceRole?: string } | undefined,
+  );
   const canOpen = (href: string) => canAccessSettingsPath(role, href);
 
   return (

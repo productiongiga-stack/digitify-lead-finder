@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
+import { useEffectiveAppRole } from "@/lib/use-effective-app-role";
 import { trpc } from "@/lib/trpc/client";
 import {
   Button,
@@ -75,9 +75,8 @@ import {
 export default function DraftDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const { data: session } = useSession();
   const utils = trpc.useUtils();
-  const role = (session?.user as { role?: string } | undefined)?.role;
+  const role = useEffectiveAppRole();
   const isAdmin = role === "OWNER" || role === "ADMIN";
 
   const { data: draft, isLoading } = trpc.contact.getDraftById.useQuery({ id });

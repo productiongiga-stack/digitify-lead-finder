@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
+import { z } from "zod";
 import { OpenClawMessage, OpenClawContext, OpenClawConfig, EmailDraftSuggestion, LeadAnalysis } from "./types";
 import { buildSystemPrompt, EMAIL_DRAFT_PROMPT, LEAD_ANALYSIS_PROMPT, NICHE_SUGGESTION_PROMPT } from "./prompts";
 
@@ -97,6 +98,62 @@ export class OpenClawClient {
     return textBlock ? textBlock.text : "";
   }
 
+  private async chatForStructuredJson(messages: OpenClawMessage[], context: OpenClawContext): Promise<string> {
+    const systemPrompt = buildSystemPrompt(context);
+
+    if (this.provider === "openai" && this.openai) {
+      const response = await this.openai.chat.completions.create({
+        model: this.model,
+        max_tokens: this.maxTokens,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...messages.map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          })),
+        ],
+      });
+      return response.choices[0]?.message?.content || "";
+    }
+
+    const response = await this.anthropic!.messages.create({
+      model: this.model,
+      max_tokens: this.maxTokens,
+      system: systemPrompt,
+      messages: messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+      tools: [
+        {
+          name: "lead_analysis",
+          description: "Structured lead analysis output",
+          input_schema: {
+            type: "object",
+            properties: {
+              summary: { type: "string" },
+              opportunities: { type: "array", items: { type: "string" } },
+              risks: { type: "array", items: { type: "string" } },
+              suggestedApproach: { type: "string" },
+              confidence: { type: "number" },
+            },
+            required: ["summary", "opportunities", "risks", "suggestedApproach", "confidence"],
+          },
+        },
+      ],
+      tool_choice: { type: "tool", name: "lead_analysis" },
+    });
+
+    const toolBlock = response.content.find((b) => b.type === "tool_use");
+    if (toolBlock && toolBlock.type === "tool_use") {
+      return JSON.stringify(toolBlock.input);
+    }
+
+    const textBlock = response.content.find((b) => b.type === "text");
+    return textBlock && textBlock.type === "text" ? textBlock.text : "";
+  }
+
   async draftEmail(context: OpenClawContext): Promise<EmailDraftSuggestion> {
     const response = await this.chat(
       [{ role: "user", content: EMAIL_DRAFT_PROMPT }],
@@ -107,17 +164,20 @@ export class OpenClawClient {
   }
 
   async analyzeLead(context: OpenClawContext): Promise<LeadAnalysis> {
-    const response = await this.chat(
-      [{ role: "user", content: LEAD_ANALYSIS_PROMPT }],
-      context
+    const response = await this.chatForStructuredJson(
+      [{ role: "user", content: `${LEAD_ANALYSIS_PROMPT}\n\nAntwoord uitsluitend met geldig JSON.` }],
+      context,
     );
+
+    const structured = parseLeadAnalysisJson(response);
+    if (structured) return structured;
 
     return {
       summary: response.substring(0, 300),
       opportunities: extractListItems(response, "kansen"),
       risks: extractListItems(response, "risico"),
       suggestedApproach: extractSection(response, "aanpak") || "Gepersonaliseerde outreach",
-      confidence: 75,
+      confidence: parseConfidence(response),
     };
   }
 
@@ -172,10 +232,45 @@ function parseEmailDraftResponse(
 
   return {
     subject: subject && subject.length < 200 ? subject : defaultSubject,
-    body: safeBody ?? response.trim(),
-    reasoning: reasoning && reasoning.length < 1000 ? reasoning : defaultReasoning,
+    body: safeBody ?? "",
+    reasoning:
+      safeBody
+        ? reasoning && reasoning.length < 1000
+          ? reasoning
+          : defaultReasoning
+        : "Kon e-mailconcept niet parseren uit AI-response. Probeer opnieuw.",
   };
 }
+
+const leadAnalysisSchema = z.object({
+  summary: z.string().min(1).max(500),
+  opportunities: z.array(z.string().min(1).max(200)).max(8).default([]),
+  risks: z.array(z.string().min(1).max(200)).max(8).default([]),
+  suggestedApproach: z.string().min(1).max(500).default("Gepersonaliseerde outreach"),
+  confidence: z.number().min(0).max(100).default(50),
+});
+
+export function parseLeadAnalysisJson(response: string): LeadAnalysis | null {
+  const jsonMatch = response.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return null;
+  try {
+    return leadAnalysisSchema.parse(JSON.parse(jsonMatch[0]));
+  } catch {
+    return null;
+  }
+}
+
+export function parseConfidence(response: string): number {
+  const match =
+    response.match(/CONFIDENCE:\s*(\d{1,3})/i) ||
+    response.match(/vertrouwen[:\s]+(\d{1,3})/i);
+  if (!match) return 50;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return 50;
+  return Math.min(100, Math.max(0, value));
+}
+
+export { parseEmailDraftResponse };
 
 function extractListItems(text: string, keyword: string): string[] {
   const lines = text.split("\n");

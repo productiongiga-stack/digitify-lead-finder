@@ -2,6 +2,7 @@ import { z } from "zod";
 import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
+import { effectiveWorkspaceRole } from "../lib/effective-role";
 import { ensureUserWorkspace } from "../lib/user-workspace";
 import { sendTemplatedEmail } from "../lib/send-templated-email";
 import {
@@ -536,7 +537,7 @@ export const userRouter = router({
     const disabled = raw ? raw.split(",").map((s: string) => s.trim()).filter(Boolean) : [];
 
     const settingsMap = settingsRowsToMap(workspaceRows);
-    const readable = filterReadableSettingsForRole(ctx.user.role, settingsMap);
+    const readable = filterReadableSettingsForRole(effectiveWorkspaceRole(ctx), settingsMap);
     const settings = sanitizeShellSettings(readable);
 
     const densityRaw = getSettingString(settings, "ui.density", "comfortable");

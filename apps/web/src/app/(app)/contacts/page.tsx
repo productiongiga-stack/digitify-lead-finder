@@ -1,16 +1,16 @@
-"use client";
+import { HydrateClient, getServerHelpers } from "@/lib/trpc/server";
+import { ContactsPageInner } from "./contacts-page-inner";
 
-import dynamic from "next/dynamic";
-import { RouteLoading } from "@/components/layout/route-states";
+export default async function ContactsPage() {
+  const helpers = await getServerHelpers();
+  await helpers.contact.getOverview.prefetch({
+    page: 1,
+    pageSize: 50,
+  });
 
-const ContactsPageView = dynamic(
-  () => import("./contacts-page-inner").then((module) => module.ContactsPageInner),
-  {
-    ssr: false,
-    loading: () => <RouteLoading label="Contacten laden..." />,
-  },
-);
-
-export default function ContactsPage() {
-  return <ContactsPageView />;
+  return (
+    <HydrateClient>
+      <ContactsPageInner />
+    </HydrateClient>
+  );
 }

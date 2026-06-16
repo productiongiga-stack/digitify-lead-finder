@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@digitify/db";
 import { getCurrentUser } from "@/lib/auth/session";
+import { canManageIntegrations, integrationAccessDeniedUrl } from "@/lib/auth/integration-access";
 import { resolveOAuthAppUrl } from "@digitify/api/src/lib/oauth-app-url";
 import {
   exchangeMetaOAuthCode,
@@ -16,8 +17,8 @@ export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.redirect(new URL("/login", request.url));
 
-  if (!["OWNER", "ADMIN"].includes(String(user.role || ""))) {
-    return NextResponse.redirect(new URL("/settings/integrations?meta=forbidden", request.url));
+  if (!canManageIntegrations(user)) {
+    return NextResponse.redirect(integrationAccessDeniedUrl(request.url, "meta"));
   }
 
   const requestUrl = new URL(request.url);
@@ -38,7 +39,7 @@ export async function GET(request: Request) {
   const scope = workspaceScopeFromAuthenticatedUser({ id: user.id, workspaceId: user.workspaceId });
 
   try {
-    const metaConfig = await loadMetaWorkspaceConfig(prisma as any, scope);
+    const metaConfig = await loadMetaWorkspaceConfig(prisma, scope);
     const appId = metaConfig.appId;
     const appSecret = metaConfig.appSecret;
 
@@ -77,7 +78,7 @@ export async function GET(request: Request) {
     if (!metaConfig.autopostEnabled) {
       settingsToSave.push({ key: "social.autopost_enabled", value: "true" });
     }
-    await upsertMetaSettings(prisma as any, scope, settingsToSave);
+    await upsertMetaSettings(prisma, scope, settingsToSave);
 
     const response = NextResponse.redirect(new URL("/settings/integrations?meta=connected", request.url));
     response.cookies.set("digitify_meta_oauth_state", "", {

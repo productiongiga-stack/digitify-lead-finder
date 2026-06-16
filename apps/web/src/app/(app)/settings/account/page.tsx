@@ -192,7 +192,7 @@ export default function AccountSettingsPage() {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    accept="image/png,image/jpeg,image/webp"
                     className="hidden"
                     onChange={(event) => {
                       const file = event.target.files?.[0];

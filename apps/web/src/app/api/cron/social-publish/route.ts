@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { runDueSocialPostsWorker } from "@digitify/api/src/routers/social.router";
+import { runDueSocialPostsWorker } from "@digitify/api/src/workers/social-posts";
 import { log } from "@digitify/api/src/lib/logger";
 import { cronAuthFailureReason, isCronAuthorized } from "@digitify/api/src/lib/cron-auth";
 
@@ -11,6 +11,8 @@ async function runSocialPublishWorker(request: Request) {
   }
 
   try {
+    // Cross-tenant by design: cron processes due posts for all workspaces.
+    // Per-workspace publish is available via social.publishDuePosts (admin, scoped).
     log.job.info("Social publish cron started");
     const summary = await runDueSocialPostsWorker(prisma);
     log.job.info("Social publish cron completed", summary);

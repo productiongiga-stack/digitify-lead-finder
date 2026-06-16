@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { runAllDueDripsWorker } from "@digitify/api/src/routers/campaign.router";
+import { runAllDueDripsWorker } from "@digitify/api/src/workers/campaign-drips";
 import { log } from "@digitify/api/src/lib/logger";
 import { cronAuthFailureReason, isCronAuthorized } from "@digitify/api/src/lib/cron-auth";
 

@@ -18,7 +18,6 @@ export type {
   CtaButtonSize,
   CtaButtonAlign,
 } from "./master-shell";
-export { generateLayout } from "./layouts";
 export type { EmailLayout, LayoutOptions } from "./layouts";
 export type { EmailMessage, EmailAttachment, SendResult, EmailProvider, TemplateContext } from "./types";
 export { replacePlaceholders, buildLeadContext, hasUnresolvedPlaceholders, getPlaceholdersByCategory, PLACEHOLDER_REGISTRY } from "./placeholders";
@@ -38,7 +37,8 @@ export function createEmailProvider(config: {
       if (!config.smtp) throw new Error("SMTP config required");
       return new SmtpProvider(config.smtp);
     case "console":
-    default:
       return new ConsoleProvider();
+    default:
+      throw new Error(`Unknown email provider: ${config.provider}`);
   }
 }

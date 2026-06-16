@@ -9,6 +9,7 @@ import { GOOGLE_ADS_OAUTH_SCOPE } from "@digitify/api/src/lib/google-ads-oauth";
 import { loadGoogleOAuthClientConfig } from "@digitify/api/src/lib/google-calendar";
 import { resolveOAuthAppUrl } from "@digitify/api/src/lib/oauth-app-url";
 import { getCurrentUser } from "@/lib/auth/session";
+import { canManageIntegrations } from "@/lib/auth/integration-access";
 
 export async function GET(request: Request) {
   const user = await getCurrentUser();
@@ -17,15 +18,12 @@ export async function GET(request: Request) {
     loginUrl.searchParams.set("callbackUrl", "/settings/integrations");
     return NextResponse.redirect(loginUrl);
   }
-  if (!["OWNER", "ADMIN"].includes(String(user.role || ""))) {
+  if (!canManageIntegrations(user)) {
     return NextResponse.redirect(new URL("/settings/integrations?googleAds=forbidden", request.url));
   }
 
-  const userId = (user as { id?: string }).id;
-  const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(
-    prisma as any,
-    userId ? { userId } : undefined,
-  );
+  const userId = user.id;
+  const { clientId, clientSecret } = await loadGoogleOAuthClientConfig(prisma, { userId });
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(new URL("/settings/integrations?googleAds=missing-config", request.url));
   }

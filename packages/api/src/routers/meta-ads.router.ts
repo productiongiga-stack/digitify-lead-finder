@@ -1,8 +1,8 @@
 import { TRPCError } from "@trpc/server";
-import { type PrismaClient } from "@digitify/db";
+import { type PrismaClient, Prisma } from "@digitify/db";
 import { OpenClawClient } from "@digitify/openclaw";
 import { z } from "zod";
-import { adminProcedure, protectedProcedure, aiRateLimitedProcedure, router, mutationProcedure } from "../trpc";
+import { adminProcedure, protectedProcedure, aiRateLimitedProcedure, router, mutationProcedure, type Context } from "../trpc";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import {
   buildMetaCampaignSystemPrompt,
@@ -37,6 +37,7 @@ import {
   META_ADS_REQUIRED_SCOPES,
 } from "../lib/meta-ads";
 import { upsertMetaSettings, workspaceScopeFromAuthenticatedUser } from "../lib/social-meta";
+import { findWorkspaceRecord } from "../lib/workspace-record";
 
 const PLAN_STATUS = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "PUSHING", "PUSHED_PAUSED", "FAILED", "CANCELLED"] as const;
 const OBJECTIVES = [
@@ -75,12 +76,6 @@ function asRecord(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};
 }
 
-function ensureWorkspaceAccess(row: { createdById: string }, workspaceId: string) {
-  if (row.createdById !== workspaceId) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang tot dit Meta Ads plan." });
-  }
-}
-
 function normalizeMetaCampaignName(name: string) {
   return name.trim().toLowerCase();
 }
@@ -102,8 +97,7 @@ async function findMetaCampaignNameConflict(
   const normalized = normalizeMetaCampaignName(input.name);
   if (!normalized) return null;
 
-  const adsDb = ctx.db as any;
-  const plans = await adsDb.metaAdPlan
+  const plans = await ctx.db.metaAdPlan
     .findMany({
       where: { createdById: ctx.user.workspaceId!, status: { not: "CANCELLED" } },
       select: { id: true, name: true, status: true },
@@ -169,8 +163,7 @@ async function collectReservedMetaCampaignNames(
   input: { excludePlanId?: string; excludeLiveCampaignId?: string } = {},
 ) {
   const reserved = new Set<string>();
-  const adsDb = ctx.db as any;
-  const plans = await adsDb.metaAdPlan
+  const plans = await ctx.db.metaAdPlan
     .findMany({
       where: { createdById: ctx.user.workspaceId!, status: { not: "CANCELLED" } },
       select: { id: true, name: true },
@@ -220,15 +213,15 @@ function pickAvailableCopyName(baseName: string, reserved: Set<string>) {
 
 async function createMetaAdsActivity(
   db: PrismaClient,
-  input: { userId: string; type: string; title: string; metadata?: Record<string, unknown> },
+  input: { userId: string; type: Prisma.ActivityCreateInput["type"]; title: string; metadata?: Record<string, unknown> },
 ) {
-  await (db as any).activity
+  await db.activity
     .create({
       data: {
         userId: input.userId,
         type: input.type,
         title: input.title,
-        metadata: input.metadata || {},
+        metadata: (input.metadata || {}) as Prisma.InputJsonValue,
       },
     })
     .catch(() => null);
@@ -336,11 +329,8 @@ async function renderVariantSuggestion(
   }
 }
 
-async function pushPlanToMeta(ctx: { db: PrismaClient; user: NonNullable<Parameters<typeof workspaceScopeFromAuthenticatedUser>[0]> }, id: string) {
-  const adsDb = ctx.db as any;
-  const plan = await adsDb.metaAdPlan.findUnique({ where: { id } });
-  if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
-  ensureWorkspaceAccess(plan, ctx.user.workspaceId!);
+async function pushPlanToMeta(ctx: Pick<Context, "db" | "user"> & { user: NonNullable<Context["user"]> }, id: string) {
+  const plan = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, id, "Meta Ads draft");
   if (!["APPROVED", "FAILED"].includes(plan.status)) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen approved/failed drafts kunnen naar Meta gepusht worden." });
   }
@@ -357,15 +347,15 @@ async function pushPlanToMeta(ctx: { db: PrismaClient; user: NonNullable<Paramet
     excludeLiveCampaignId: String(asRecord(plan.externalIds).campaignId || ""),
   });
 
-  await adsDb.metaAdPlan.update({ where: { id }, data: { status: "PUSHING", lastError: null } });
+  await ctx.db.metaAdPlan.update({ where: { id }, data: { status: "PUSHING", lastError: null } });
 
   try {
     const externalIds = await pushPausedMetaAdPlan({ config, plan });
-    const updated = await adsDb.metaAdPlan.update({
+    const updated = await ctx.db.metaAdPlan.update({
       where: { id },
       data: {
         status: "PUSHED_PAUSED",
-        externalIds,
+        externalIds: externalIds as Prisma.InputJsonValue,
         pushedAt: new Date(),
         lastError: null,
       },
@@ -388,13 +378,13 @@ async function pushPlanToMeta(ctx: { db: PrismaClient; user: NonNullable<Paramet
       title: "Meta Ads push mislukt",
       metadata: { metaAdPlanId: id, error: message, partialExternalIds: partialExternalIds || null },
     });
-    const updated = await adsDb.metaAdPlan.update({
+    const updated = await ctx.db.metaAdPlan.update({
       where: { id },
       data: {
         status: "FAILED",
         retryCount: Number(plan.retryCount || 0) + 1,
         lastError: message,
-        externalIds: partialExternalIds ?? undefined,
+        externalIds: (partialExternalIds ?? undefined) as Prisma.InputJsonValue | undefined,
       },
     });
     return updated;
@@ -406,7 +396,7 @@ export const metaAdsRouter = router({
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
     const selected = config.adAccountId
-      ? await (ctx.db as any).metaAdAccount.findFirst({
+      ? await ctx.db.metaAdAccount.findFirst({
           where: { createdById: ctx.user.workspaceId!, externalAccountId: normalizeAdAccountId(config.adAccountId) },
         }).catch(() => null)
       : null;
@@ -475,8 +465,8 @@ export const metaAdsRouter = router({
         { key: "ads.meta_ad_account_id", value: accountId },
         { key: "ads.meta_business_id", value: input.businessId || "" },
       ]);
-      await (ctx.db as any).metaAdAccount.updateMany({ where: { createdById: ctx.user.workspaceId! }, data: { isSelected: false } });
-      const row = await (ctx.db as any).metaAdAccount.upsert({
+      await ctx.db.metaAdAccount.updateMany({ where: { createdById: ctx.user.workspaceId! }, data: { isSelected: false } });
+      const row = await ctx.db.metaAdAccount.upsert({
         where: { createdById_externalAccountId: { createdById: ctx.user.workspaceId!, externalAccountId: accountId } },
         update: {
           name: input.name || accountId,
@@ -522,12 +512,12 @@ export const metaAdsRouter = router({
       throw new TRPCError({ code: "BAD_REQUEST", message: "Meta Ad Account of access token ontbreekt." });
     }
     const result = await syncMetaCampaigns({ adAccountId: config.adAccountId, accessToken: config.accessToken });
-    await (ctx.db as any).metaAdAccount.updateMany({
+    await ctx.db.metaAdAccount.updateMany({
       where: { createdById: ctx.user.workspaceId!, externalAccountId: normalizeAdAccountId(config.adAccountId) },
       data: { lastSyncedAt: new Date(result.syncedAt) },
     }).catch(() => null);
 
-    const plans = await (ctx.db as any).metaAdPlan.findMany({
+    const plans = await ctx.db.metaAdPlan.findMany({
       where: { createdById: ctx.user.workspaceId!, status: { in: ["APPROVED", "PUSHED_PAUSED", "FAILED"] } },
       take: 100,
     }).catch(() => []);
@@ -536,9 +526,9 @@ export const metaAdsRouter = router({
       const externalIds = asRecord(row.externalIds);
       const campaignId = String(externalIds.campaignId || "");
       if (!campaignId) continue;
-      const remote = (result.campaigns as any[]).find((item) => String(item.id || "") === campaignId);
+      const remote = result.campaigns.find((item) => String(item.id || "") === campaignId);
       if (!remote) continue;
-      await (ctx.db as any).metaAdPlan.update({
+      await ctx.db.metaAdPlan.update({
         where: { id: row.id },
         data: {
           externalIds: {
@@ -598,19 +588,17 @@ export const metaAdsRouter = router({
     .query(async ({ ctx, input }) => {
       const where: Record<string, unknown> = { createdById: ctx.user.workspaceId! };
       if (input?.status) where.status = input.status;
-      return (ctx.db as any).metaAdPlan.findMany({ where, orderBy: { updatedAt: "desc" }, take: 100 });
+      return ctx.db.metaAdPlan.findMany({ where, orderBy: { updatedAt: "desc" }, take: 100 });
     }),
 
   getDraftById: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
-    const row = await (ctx.db as any).metaAdPlan.findUnique({ where: { id: input.id } });
-    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
-    ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
     return row;
   }),
 
   createDraft: mutationProcedure.input(draftInputSchema).mutation(async ({ ctx, input }) => {
     await assertUniqueMetaCampaignName(ctx, { name: input.name });
-    const row = await (ctx.db as any).metaAdPlan.create({
+    const row = await ctx.db.metaAdPlan.create({
       data: {
         createdById: ctx.user.workspaceId!,
         name: input.name.trim(),
@@ -635,10 +623,7 @@ export const metaAdsRouter = router({
   }),
 
   updateDraft: mutationProcedure.input(z.object({ id: z.string() }).merge(draftInputSchema.partial())).mutation(async ({ ctx, input }) => {
-    const adsDb = ctx.db as any;
-    const row = await adsDb.metaAdPlan.findUnique({ where: { id: input.id } });
-    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
-    ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
     if (!["DRAFT", "FAILED", "CANCELLED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen drafts, failed of cancelled plannen kunnen aangepast worden." });
     }
@@ -649,7 +634,7 @@ export const metaAdsRouter = router({
         excludeLiveCampaignId: String(asRecord(row.externalIds).campaignId || ""),
       });
     }
-    return adsDb.metaAdPlan.update({
+    return ctx.db.metaAdPlan.update({
       where: { id: input.id },
       data: {
         name: input.name?.trim(),
@@ -668,13 +653,10 @@ export const metaAdsRouter = router({
   }),
 
   duplicateDraft: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-    const adsDb = ctx.db as any;
-    const row = await adsDb.metaAdPlan.findUnique({ where: { id: input.id } });
-    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
-    ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
     const reserved = await collectReservedMetaCampaignNames(ctx);
     const copyName = pickAvailableCopyName(row.name, reserved);
-    return adsDb.metaAdPlan.create({
+    return ctx.db.metaAdPlan.create({
       data: {
         createdById: ctx.user.workspaceId!,
         name: copyName,
@@ -690,7 +672,7 @@ export const metaAdsRouter = router({
         approvedById: null,
         approvedAt: null,
         pushedAt: null,
-        externalIds: null,
+        externalIds: {},
         retryCount: 0,
         lastError: null,
       },
@@ -698,14 +680,11 @@ export const metaAdsRouter = router({
   }),
 
   archiveDraft: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-    const adsDb = ctx.db as any;
-    const row = await adsDb.metaAdPlan.findUnique({ where: { id: input.id } });
-    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
-    ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
     if (["PUSHING"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Een draft die nu naar Meta pusht kan niet gearchiveerd worden." });
     }
-    return adsDb.metaAdPlan.update({
+    return ctx.db.metaAdPlan.update({
       where: { id: input.id },
       data: { status: "CANCELLED", lastError: "Gearchiveerd" },
     });
@@ -764,14 +743,11 @@ export const metaAdsRouter = router({
     .mutation(async ({ input }) => scoreMetaAdDraft(input)),
 
   submitForApproval: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-    const adsDb = ctx.db as any;
-    const row = await adsDb.metaAdPlan.findUnique({ where: { id: input.id } });
-    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
-    ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
     if (!["DRAFT", "FAILED", "CANCELLED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Deze draft kan niet ter goedkeuring worden aangeboden." });
     }
-    const updated = await adsDb.metaAdPlan.update({ where: { id: input.id }, data: { status: "PENDING_APPROVAL", lastError: null } });
+    const updated = await ctx.db.metaAdPlan.update({ where: { id: input.id }, data: { status: "PENDING_APPROVAL", lastError: null } });
     await createMetaAdsActivity(ctx.db, {
       userId: ctx.user.id,
       type: "META_AD_SUBMITTED",
@@ -782,17 +758,14 @@ export const metaAdsRouter = router({
   }),
 
   approveDraft: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-    const adsDb = ctx.db as any;
-    const row = await adsDb.metaAdPlan.findUnique({ where: { id: input.id } });
-    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
-    ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
     if (!["PENDING_APPROVAL", "DRAFT", "FAILED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Deze draft kan niet goedgekeurd worden." });
     }
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
     validateBudgetGuard(row, config.maxDailyBudgetCents);
-    const updated = await adsDb.metaAdPlan.update({
+    const updated = await ctx.db.metaAdPlan.update({
       where: { id: input.id },
       data: { status: "APPROVED", approvedById: ctx.user.id, approvedAt: new Date(), lastError: null, retryCount: 0 },
     });
@@ -808,12 +781,9 @@ export const metaAdsRouter = router({
   rejectDraft: adminProcedure
     .input(z.object({ id: z.string(), reason: z.string().max(1000).optional() }))
     .mutation(async ({ ctx, input }) => {
-      const adsDb = ctx.db as any;
-      const row = await adsDb.metaAdPlan.findUnique({ where: { id: input.id } });
-      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
-      ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+      const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
       const reason = input.reason?.trim();
-      const updated = await adsDb.metaAdPlan.update({
+      const updated = await ctx.db.metaAdPlan.update({
         where: { id: input.id },
         data: { status: "DRAFT", approvedById: null, approvedAt: null, lastError: reason ? `Afgekeurd: ${reason}` : "Afgekeurd" },
       });
@@ -832,11 +802,12 @@ export const metaAdsRouter = router({
     if (!config.accessToken) throw new TRPCError({ code: "BAD_REQUEST", message: "Meta is niet gekoppeld." });
     await updateMetaCampaignStatus({ campaignId: input.campaignId, accessToken: config.accessToken, status: "PAUSED" });
     if (input.draftId) {
-      const row = await (ctx.db as any).metaAdPlan.findUnique({ where: { id: input.draftId } });
+      const row = await ctx.db.metaAdPlan.findFirst({
+        where: { id: input.draftId, createdById: ctx.user.workspaceId! },
+      });
       if (row) {
-        ensureWorkspaceAccess(row, ctx.user.workspaceId!);
         const externalIds = asRecord(row.externalIds);
-        await (ctx.db as any).metaAdPlan.update({
+        await ctx.db.metaAdPlan.update({
           where: { id: input.draftId },
           data: {
             externalIds: {
@@ -857,11 +828,12 @@ export const metaAdsRouter = router({
     if (!config.accessToken) throw new TRPCError({ code: "BAD_REQUEST", message: "Meta is niet gekoppeld." });
     await updateMetaCampaignStatus({ campaignId: input.campaignId, accessToken: config.accessToken, status: "ACTIVE" });
     if (input.draftId) {
-      const row = await (ctx.db as any).metaAdPlan.findUnique({ where: { id: input.draftId } });
+      const row = await ctx.db.metaAdPlan.findFirst({
+        where: { id: input.draftId, createdById: ctx.user.workspaceId! },
+      });
       if (row) {
-        ensureWorkspaceAccess(row, ctx.user.workspaceId!);
         const externalIds = asRecord(row.externalIds);
-        await (ctx.db as any).metaAdPlan.update({
+        await ctx.db.metaAdPlan.update({
           where: { id: input.draftId },
           data: {
             externalIds: {
@@ -876,18 +848,15 @@ export const metaAdsRouter = router({
     return { ok: true };
   }),
 
-  pushPausedToMeta: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToMeta(ctx as any, input.id)),
+  pushPausedToMeta: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToMeta(ctx, input.id)),
 
   cancelDraft: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-    const adsDb = ctx.db as any;
-    const row = await adsDb.metaAdPlan.findUnique({ where: { id: input.id } });
-    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Meta Ads draft niet gevonden." });
-    ensureWorkspaceAccess(row, ctx.user.workspaceId!);
+    const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
     if (["PUSHING", "PUSHED_PAUSED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Een gepushte Meta-campagne kan niet lokaal geannuleerd worden." });
     }
-    return adsDb.metaAdPlan.update({ where: { id: input.id }, data: { status: "CANCELLED" } });
+    return ctx.db.metaAdPlan.update({ where: { id: input.id }, data: { status: "CANCELLED" } });
   }),
 
-  retryFailed: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToMeta(ctx as any, input.id)),
+  retryFailed: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToMeta(ctx, input.id)),
 });

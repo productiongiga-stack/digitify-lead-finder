@@ -10,6 +10,7 @@ import {
 import { type PrismaClient } from "@digitify/db";
 import { formatSmtpErrorMessage, normalizeAiPlaceholderSyntax, normalizeLegacyPlaceholders, normalizeTlsOptions } from "./email-utils";
 import { log } from "./logger";
+import { createEmailTrackingToken } from "./email-tracking-token";
 import { getSettingBoolean, getSettingNumber, getSettingString, settingsRowsToMap } from "./settings";
 import { extractEmailTemplateMetadata } from "./email-content";
 import {
@@ -278,7 +279,7 @@ export async function sendBrandedEmail(
     },
   });
   const htmlWithTrackingPixel = params.trackingDraftId
-    ? `${html}<img src="${resolveAppUrl()}/api/public/email/open/${encodeURIComponent(params.trackingDraftId)}" alt="" width="1" height="1" style="display:none;border:0;outline:none;"/>`
+    ? `${html}<img src="${resolveAppUrl()}/api/public/email/open/${encodeURIComponent(params.trackingDraftId)}?t=${encodeURIComponent(createEmailTrackingToken(params.trackingDraftId))}" alt="" width="1" height="1" style="display:none;border:0;outline:none;"/>`
     : html;
 
   if (cfg.providerName === "smtp" && (!cfg.smtpHost || !cfg.smtpUser || !cfg.smtpPass)) {

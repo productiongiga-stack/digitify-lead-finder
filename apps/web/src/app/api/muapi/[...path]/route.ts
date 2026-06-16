@@ -6,16 +6,20 @@ import { enforceRateLimit } from "@/lib/http-security";
 
 const MUAPI_ORIGIN = "https://api.muapi.ai";
 
-const ALLOWED_PATH_PREFIXES = [
+const ALLOWED_MUAPI_PATHS = new Set([
   "api/v1/models",
   "api/v1/balance",
   "api/v1/upload_file",
-  "api/v1/",
+]);
+
+const ALLOWED_MUAPI_PREFIXES = [
+  "api/v1/predictions/",
 ] as const;
 
 function isAllowedMuapiPath(pathSegments: string[]): boolean {
   const normalized = pathSegments.join("/").replace(/^\/+/, "");
-  return ALLOWED_PATH_PREFIXES.some((prefix) => normalized === prefix || normalized.startsWith(prefix));
+  if (ALLOWED_MUAPI_PATHS.has(normalized)) return true;
+  return ALLOWED_MUAPI_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
 async function proxyMuapi(req: NextRequest, pathSegments: string[]) {

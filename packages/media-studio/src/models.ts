@@ -1,4 +1,5 @@
 import { MODEL_COST_USD } from "./model-costs";
+import { resolveMuapiEndpoint } from "./endpoint-aliases";
 
 export type MediaModelType =
   | "IMAGE"
@@ -26,7 +27,10 @@ export type MediaModelDefinition = {
 };
 
 function withModelCost(model: MediaModelDefinition): MediaModelDefinition {
-  const costUsd = MODEL_COST_USD[model.endpoint];
+  const costUsd =
+    MODEL_COST_USD[model.endpoint] ??
+    MODEL_COST_USD[model.id] ??
+    MODEL_COST_USD[resolveMuapiEndpoint(model.id)];
   return costUsd == null ? model : { ...model, costUsd };
 }
 

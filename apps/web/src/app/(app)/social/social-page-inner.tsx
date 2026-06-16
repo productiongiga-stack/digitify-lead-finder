@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { useEffectiveAppRole } from "@/lib/use-effective-app-role";
 import { trpc } from "@/lib/trpc/client";
 import { cn } from "@/lib/utils";
 import {
@@ -72,7 +72,10 @@ import {
 } from "@/components/social/social-carousel-editor";
 import { persistCarouselAssets, persistPlacementAssets } from "@/lib/persist-social-assets";
 import { FacebookPageAvatar, InstagramPageAvatar } from "@/components/social/social-platform-avatars";
-import { type SocialBrandKitApplyPayload } from "@/components/social/social-brand-kit-picker";
+import {
+  SocialBrandKitPickerProvider,
+  type SocialBrandKitApplyPayload,
+} from "@/components/social/social-brand-kit-picker";
 import { DEFAULT_SOCIAL_TONE, SOCIAL_TONE_OPTIONS, type SocialTone } from "@/lib/social-tone-options";
 import { SocialComposerSection } from "@/components/social/social-composer-section";
 import { SocialComposerWizard, SOCIAL_WIZARD_STEPS } from "@/components/social/social-composer-wizard";
@@ -669,8 +672,7 @@ export function SocialPageInner() {
   const utils = trpc.useUtils();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { data: session } = useSession();
-  const role = (session?.user as { role?: string } | undefined)?.role;
+  const role = useEffectiveAppRole();
   const canSchedule = role === "OWNER" || role === "ADMIN";
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1626,6 +1628,14 @@ export function SocialPageInner() {
         <div className="space-y-3">
           <Card className="border-border/70 shadow-sm">
             <CardContent className="space-y-3 pt-5">
+              <SocialBrandKitPickerProvider
+                selectedKitId={selectedBrandKitId}
+                onSelectedKitIdChange={setSelectedBrandKitId}
+                onApplyKit={applyBrandKitDefaults}
+                kits={(brandKitsQuery.data?.kits ?? []) as any}
+                kitsLoading={brandKitsQuery.isLoading}
+                autoApplyDefaults={!selectedId}
+              >
               <SocialComposerWizard
                 steps={SOCIAL_WIZARD_STEPS}
                 currentStep={wizardStep}
@@ -1668,15 +1678,7 @@ export function SocialPageInner() {
                 </div>
 
                 <div className={cn(wizardStep !== 1 && "hidden")}>
-                  <SocialBrandKitPicker
-                    selectedKitId={selectedBrandKitId}
-                    onSelectedKitIdChange={setSelectedBrandKitId}
-                    onApplyKit={applyBrandKitDefaults}
-                    kits={(brandKitsQuery.data?.kits ?? []) as any}
-                    kitsLoading={brandKitsQuery.isLoading}
-                    autoApplyDefaults={!selectedId}
-                    disabled={!canEditSelected}
-                  />
+                  <SocialBrandKitPicker disabled={!canEditSelected} />
                 </div>
 
                 <div className={cn(wizardStep !== 2 && "hidden")}>
@@ -1889,6 +1891,7 @@ export function SocialPageInner() {
                   </div>
                 </div>
               </SocialComposerWizard>
+              </SocialBrandKitPickerProvider>
             </CardContent>
           </Card>
         </div>
