@@ -24,6 +24,7 @@ Set these in **Vercel → Project → Settings → Environment Variables**:
 | `NEXT_PUBLIC_APP_URL` | Same as public app URL |
 | `SETTINGS_ENCRYPTION_KEY` | Min. 32 characters (production) |
 | `CRON_SECRET` | Min. 16 characters; Vercel Cron sends `Authorization: Bearer …` |
+| `ENABLE_WORKSPACE_RLS` | **`true`** — required on `project-ubm6y` / production; without it the app returns 500 on all `/dashboard`, `/social`, etc. |
 | `REDIS_URL` or Upstash | `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` for Edge rate limits |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob — logo/branding + **social video uploads** (required for videos >4MB on Vercel) |
 | `SENTRY_DSN` | Sentry project DSN (server errors + tRPC 500s) |

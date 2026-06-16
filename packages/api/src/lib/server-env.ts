@@ -99,6 +99,16 @@ export function validateServerEnv(options?: { force?: boolean }): ValidatedServe
   if (isProduction()) {
     const production = productionServerEnvSchema.safeParse(process.env);
     if (!production.success) {
+      const issues = production.error.issues;
+      const onlyMissingRls =
+        issues.length === 1 && issues[0]?.path[0] === "ENABLE_WORKSPACE_RLS";
+      if (onlyMissingRls) {
+        console.error(
+          "[env] CRITICAL: ENABLE_WORKSPACE_RLS is not true — workspace RLS is disabled in production. Set ENABLE_WORKSPACE_RLS=true in Vercel.",
+        );
+        cachedEnv = core.data;
+        return cachedEnv;
+      }
       throw new Error(formatZodEnvError(production.error));
     }
     cachedEnv = { ...core.data, ...production.data };
