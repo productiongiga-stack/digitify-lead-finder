@@ -38,8 +38,6 @@ const nextConfig = {
   outputFileTracingRoot: workspaceRoot,
   outputFileTracingIncludes: {
     "/api/internal/fix-production-db": ["./packages/db/prisma/manual/**/*.sql"],
-    "/api/trpc/[trpc]": ["./node_modules/sharp/**", "./node_modules/@img/**"],
-    "/api/cron/social-publish": ["./node_modules/sharp/**", "./node_modules/@img/**"],
   },
   turbopack: {
     root: workspaceRoot,
