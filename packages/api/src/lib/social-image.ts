@@ -14,6 +14,48 @@ const STORY_MIN_ASPECT_RATIO = 0.5; // 1:2, keeps a little tolerance around 9:16
 const STORY_MAX_ASPECT_RATIO = 0.75; // 3:4, avoids square/feed assets for stories
 const MAX_REMOTE_IMAGE_BYTES = 12 * 1024 * 1024;
 
+function contentTypeFromUploadPath(uploadPath: string) {
+  const ext = uploadPath.split(".").pop()?.toLowerCase();
+  if (ext === "png") return "image/png";
+  if (ext === "webp") return "image/webp";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  return "image/jpeg";
+}
+
+export function isWorkspaceUploadImagePath(imageUrl: string) {
+  const trimmed = imageUrl.trim();
+  return trimmed.startsWith("/uploads/") && !trimmed.includes("..");
+}
+
+async function readWorkspaceUploadImageBuffer(uploadPath: string) {
+  const path = await import("node:path");
+  const { readFile } = await import("node:fs/promises");
+  const normalized = uploadPath.trim().replace(/\\/g, "/");
+  if (!isWorkspaceUploadImagePath(normalized)) {
+    throw new Error("Ongeldig upload-pad.");
+  }
+
+  const relativePath = normalized.replace(/^\//, "");
+  const publicRoot = path.resolve(path.join(process.cwd(), "public"));
+  const absolutePath = path.resolve(publicRoot, relativePath);
+  if (!absolutePath.startsWith(`${publicRoot}${path.sep}`)) {
+    throw new Error("Ongeldig upload-pad.");
+  }
+
+  const buffer = await readFile(absolutePath);
+  if (!buffer.byteLength) {
+    throw new Error("Upload-afbeelding kon niet gelezen worden.");
+  }
+  if (buffer.byteLength > MAX_REMOTE_IMAGE_BYTES) {
+    throw new Error("Afbeelding is te groot. Gebruik maximaal 12 MB.");
+  }
+
+  return {
+    buffer,
+    contentType: contentTypeFromUploadPath(normalized),
+  };
+}
+
 function ratioLabel(value: number) {
   return `${value.toFixed(2)}:1`;
 }
@@ -249,6 +291,20 @@ export async function fetchSocialImageInfo(imageUrl: string): Promise<SocialImag
   const trimmed = imageUrl.trim();
   if (trimmed.startsWith("data:")) {
     return parseDataImageUrl(trimmed);
+  }
+
+  if (isWorkspaceUploadImagePath(trimmed)) {
+    const { buffer, contentType } = await readWorkspaceUploadImageBuffer(trimmed);
+    const dimensions = parseImageDimensions(buffer);
+    if (!dimensions?.width || !dimensions?.height) {
+      throw new Error("Upload-afbeelding kon niet gelezen worden. Gebruik JPG, PNG of WebP.");
+    }
+    return {
+      ...dimensions,
+      aspectRatio: dimensions.width / dimensions.height,
+      contentType,
+      byteLength: buffer.byteLength,
+    };
   }
 
   const safeUrl = await assertPublicHttpUrl(trimmed);

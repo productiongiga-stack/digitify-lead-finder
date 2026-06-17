@@ -320,6 +320,15 @@ export async function prepareAndValidatePostForPublish(
     prepared.metadata as z.infer<typeof socialPostMetadataSchema>,
   );
 
+  await ensurePostCanPublish(
+    {
+      imageUrl: prepared.imageUrl,
+      targetPlatforms: post.targetPlatforms,
+      metadata: normalizedMetadata,
+    },
+    publishTarget,
+  );
+
   if (prepared.changed) {
     await db.socialPost.update({
       where: { id: post.id },
@@ -329,15 +338,6 @@ export async function prepareAndValidatePostForPublish(
       },
     });
   }
-
-  await ensurePostCanPublish(
-    {
-      imageUrl: prepared.imageUrl,
-      targetPlatforms: post.targetPlatforms,
-      metadata: normalizedMetadata,
-    },
-    publishTarget,
-  );
 
   return {
     imageUrl: prepared.imageUrl,
@@ -375,6 +375,10 @@ type SocialPostRecord = {
   publishedAt?: Date | string | null;
   lastError?: string | null;
   scheduledFor?: Date | string | null;
+};
+
+export type SocialPublishOptions = {
+  failImmediately?: boolean;
 };
 
 export function parseStoredExternalIds(raw: unknown): Record<string, SocialPublishedRef> {
@@ -471,7 +475,16 @@ async function acquirePublishLock(db: PrismaClient, postId: string) {
   return result.count === 1;
 }
 
-export async function publishSocialPostRecord(db: PrismaClient, post: SocialPostRecord) {
+export function isSocialPublishInProgressError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /wordt al gepubliceerd|even geduld/i.test(message);
+}
+
+export async function publishSocialPostRecord(
+  db: PrismaClient,
+  post: SocialPostRecord,
+  options?: SocialPublishOptions,
+) {
   const existingExternalIds = parseStoredExternalIds(post.externalPostIds);
 
   if (post.status === "PUBLISHED" || hasPublishedExternally(existingExternalIds)) {
@@ -490,29 +503,30 @@ export async function publishSocialPostRecord(db: PrismaClient, post: SocialPost
     throw new Error("Post kan niet meer gepubliceerd worden.");
   }
 
-  const scope = { workspaceId: post.createdById, memberId: post.createdById };
-  const config = await loadMetaWorkspaceConfig(db, scope);
+  try {
+    const scope = { workspaceId: post.createdById, memberId: post.createdById };
+    const config = await loadMetaWorkspaceConfig(db, scope);
 
-  if (!config.pageId || !config.pageAccessToken) {
-    throw new Error("Meta is niet gekoppeld. Ga naar Instellingen → Integraties en koppel je Facebook-pagina.");
-  }
+    if (!config.pageId || !config.pageAccessToken) {
+      throw new Error("Meta is niet gekoppeld. Ga naar Instellingen → Integraties en koppel je Facebook-pagina.");
+    }
 
-  const publishTarget = await resolveSocialPublishTarget({
-    config,
-    publisherPageId: normalizeSocialMetadata(
-      (post.metadata || undefined) as z.infer<typeof socialPostMetadataSchema>,
-    ).publisherPageId,
-  });
+    const publishTarget = await resolveSocialPublishTarget({
+      config,
+      publisherPageId: normalizeSocialMetadata(
+        (post.metadata || undefined) as z.infer<typeof socialPostMetadataSchema>,
+      ).publisherPageId,
+    });
 
-  const prepared = await prepareAndValidatePostForPublish(db, post, scope, publishTarget);
-  const metadata = prepared.metadata;
-  const primaryImageUrl = prepared.imageUrl;
+    const prepared = await prepareAndValidatePostForPublish(db, post, scope, publishTarget);
+    const metadata = prepared.metadata;
+    const primaryImageUrl = prepared.imageUrl;
 
-  const externalIds: Record<string, SocialPublishedRef> = { ...existingExternalIds };
-  const placements = metadata.placements || ["FEED"];
-  const assets = metadata.assets || normalizePlacementAssets(metadata);
+    const externalIds: Record<string, SocialPublishedRef> = { ...existingExternalIds };
+    const placements = metadata.placements || ["FEED"];
+    const assets = metadata.assets || normalizePlacementAssets(metadata);
 
-  for (const placement of placements) {
+    for (const placement of placements) {
     if (placement === "FEED") {
       const publishCaption = buildPublishedCaption(post.caption, metadata, "FEED");
       const feedKind = resolveFeedPublishKind(metadata);
@@ -622,24 +636,41 @@ export async function publishSocialPostRecord(db: PrismaClient, post: SocialPost
     }
   }
 
-  if (!hasPublishedExternally(externalIds)) {
-    throw new Error("Geen Meta publicatie-ID ontvangen.");
-  }
+    if (!hasPublishedExternally(externalIds)) {
+      throw new Error("Geen Meta publicatie-ID ontvangen.");
+    }
 
-  return finalizePublishedPost(db, post, externalIds);
+    return finalizePublishedPost(db, post, externalIds);
+  } catch (error) {
+    if (!isSocialPublishInProgressError(error)) {
+      await markSocialPostPublishFailure(db, post, error, options);
+    }
+    throw error;
+  }
 }
 
-export async function markSocialPostPublishFailure(db: PrismaClient, post: SocialPostRecord, error: unknown) {
+export async function markSocialPostPublishFailure(
+  db: PrismaClient,
+  post: SocialPostRecord,
+  error: unknown,
+  options?: SocialPublishOptions,
+) {
+  if (isSocialPublishInProgressError(error)) return;
+
   const refreshed = await db.socialPost.findUnique({ where: { id: post.id } });
-  const partialIds = parseStoredExternalIds(refreshed?.externalPostIds);
+  if (!refreshed || refreshed.status === "PUBLISHED") return;
+
+  const partialIds = parseStoredExternalIds(refreshed.externalPostIds);
 
   if (hasPublishedExternally(partialIds)) {
-    await finalizePublishedPost(db, { ...post, publishedAt: refreshed?.publishedAt }, partialIds);
+    await finalizePublishedPost(db, { ...post, publishedAt: refreshed.publishedAt }, partialIds);
     return;
   }
 
-  const currentRetries = Number(post.retryCount || 0);
-  const canRetry = currentRetries < 3;
+  if (refreshed.status !== "PUBLISHING") return;
+
+  const currentRetries = Number(refreshed.retryCount ?? post.retryCount ?? 0);
+  const canRetry = !options?.failImmediately && currentRetries < 3;
   const nextRetryAt = canRetry ? new Date(Date.now() + computeRetryDelayMs(currentRetries)) : null;
   const message = error instanceof Error ? error.message : "Onbekende publicatiefout";
 
@@ -661,14 +692,21 @@ export async function markSocialPostPublishFailure(db: PrismaClient, post: Socia
   });
 }
 
-export async function recoverStuckPublishingPosts(db: PrismaClient) {
-  const stuckThreshold = new Date(Date.now() - 10 * 60 * 1000);
+export async function recoverStuckPublishingPosts(
+  db: PrismaClient,
+  options?: { postId?: string; maxAgeMs?: number },
+) {
+  const maxAgeMs = options?.maxAgeMs ?? 10 * 60 * 1000;
+  const stuckThreshold = new Date(Date.now() - maxAgeMs);
+  const where: Record<string, unknown> = {
+    status: "PUBLISHING",
+    updatedAt: { lt: stuckThreshold },
+  };
+  if (options?.postId) where.id = options.postId;
+
   const stuckPosts = await db.socialPost.findMany({
-    where: {
-      status: "PUBLISHING",
-      updatedAt: { lt: stuckThreshold },
-    },
-    take: 50,
+    where,
+    take: options?.postId ? 1 : 50,
   });
 
   for (const stuck of stuckPosts) {
@@ -690,14 +728,14 @@ export async function recoverStuckPublishingPosts(db: PrismaClient) {
 
 export async function runDueSocialPostsWorker(
   db: PrismaClient,
-  options?: { postId?: string; workspaceId?: string },
+  options?: { postId?: string; workspaceId?: string; failImmediately?: boolean },
 ) {
   const now = new Date();
 
   await recoverStuckPublishingPosts(db);
 
   const where: Record<string, unknown> = options?.postId
-    ? { id: options.postId, status: { in: ["SCHEDULED", "PUBLISHING"] } }
+    ? { id: options.postId, status: { in: ["SCHEDULED", "FAILED"] } }
     : {
         status: "SCHEDULED",
         scheduledFor: { lte: now },
@@ -723,10 +761,13 @@ export async function runDueSocialPostsWorker(
     }
 
     try {
-      await publishSocialPostRecord(db, post);
+      await publishSocialPostRecord(db, post, { failImmediately: options?.failImmediately });
       published += 1;
     } catch (error) {
-      await markSocialPostPublishFailure(db, post, error);
+      if (isSocialPublishInProgressError(error)) {
+        skipped += 1;
+        continue;
+      }
       failed += 1;
     }
   }

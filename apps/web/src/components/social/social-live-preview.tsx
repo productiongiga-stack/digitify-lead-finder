@@ -33,11 +33,13 @@ type PreviewSlide = {
   hasMedia: boolean;
 };
 
-const FEED_FORMAT_META: Record<FeedAspectFormat, { label: string; description: string; className: string }> = {
-  SQUARE: { label: "Square", description: "1:1 · FB + IG feed", className: "aspect-square" },
-  PORTRAIT: { label: "Portrait", description: "4:5 · IG feed", className: "aspect-[4/5]" },
-  LANDSCAPE: { label: "Landscape", description: "1.91:1 · breed", className: "aspect-[1.91/1]" },
+const FEED_FORMAT_META: Record<FeedAspectFormat, { label: string; description: string; className: string; ratio: number }> = {
+  SQUARE: { label: "Square", description: "1:1 · FB + IG feed", className: "aspect-square", ratio: 1 },
+  PORTRAIT: { label: "Portrait", description: "4:5 · IG feed", className: "aspect-[4/5]", ratio: 4 / 5 },
+  LANDSCAPE: { label: "Landscape", description: "1.91:1 · breed", className: "aspect-[1.91/1]", ratio: 1.91 },
 };
+
+import { useMediaAspectRatio, verticalPreviewFrameClassName } from "./use-media-aspect-ratio";
 
 export function buildPreviewSlides(input: {
   placements: SocialPlacement[];
@@ -125,10 +127,17 @@ function MediaFrame({
   storyLabel: string;
 }) {
   const formatClass = format === "STORY" ? "aspect-[9/16]" : FEED_FORMAT_META[format as FeedAspectFormat]?.className || "aspect-square";
+  const naturalAspectRatio = useMediaAspectRatio(imageUrl, videoUrl);
+  const feedAspectRatio =
+    format !== "STORY" && naturalAspectRatio
+      ? naturalAspectRatio
+      : format !== "STORY"
+        ? FEED_FORMAT_META[format as FeedAspectFormat]?.ratio ?? 1
+        : null;
 
   if (format === "STORY") {
     return (
-      <div className="relative mx-auto aspect-[9/16] max-h-[560px] bg-zinc-900">
+      <div className="relative h-full w-full bg-zinc-900">
         {videoUrl ? (
           <video src={videoUrl} className="h-full w-full object-cover" muted playsInline controls />
         ) : imageUrl ? (
@@ -149,10 +158,15 @@ function MediaFrame({
   }
 
   return (
-    <div className={cn("bg-zinc-100", formatClass)}>
-      {imageUrl ? (
+    <div
+      className={cn("w-full bg-zinc-100", feedAspectRatio ? "max-h-[560px]" : formatClass)}
+      style={feedAspectRatio ? { aspectRatio: feedAspectRatio } : undefined}
+    >
+      {videoUrl ? (
+        <video src={videoUrl} className="block h-full w-full object-contain" muted playsInline controls />
+      ) : imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={imageUrl} alt={alt} className="h-full w-full object-cover" />
+        <img src={imageUrl} alt={alt} className="block h-full w-full object-contain" />
       ) : (
         <div className="flex h-full min-h-[200px] items-center justify-center text-sm text-zinc-500">
           <ImageIcon className="mr-2 h-4 w-4" /> Feed-afbeelding
@@ -173,22 +187,25 @@ function FacebookPreview({
 
   if (isStory) {
     return (
-      <div className="overflow-hidden rounded-[1.6rem] border border-slate-200 bg-slate-950 text-white shadow-[0_22px_55px_rgba(15,23,42,0.18)]">
-        <div className="relative">
-          <MediaFrame
-            format="STORY"
-            imageUrl={slide.imageUrl}
-            videoUrl={slide.videoUrl}
-            alt="Facebook preview"
-            storyLabel={slide.placement === "REEL" ? "Facebook Reel preview" : "Facebook Story"}
-          />
-          <div className="pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-black/75 to-transparent p-4">
-            <div className="flex items-center gap-2">
-              <FacebookPageAvatar size="sm" />
-              <div>
-                <p className="text-sm font-semibold">Digitify</p>
-                <p className="text-xs text-white/70">{slide.placement === "REEL" ? "Reel preview" : "Story · 24 uur"}</p>
-              </div>
+      <div
+        className={cn(
+          "overflow-hidden rounded-[1.6rem] border border-slate-200 bg-slate-950 text-white shadow-[0_22px_55px_rgba(15,23,42,0.18)]",
+          verticalPreviewFrameClassName,
+        )}
+      >
+        <MediaFrame
+          format="STORY"
+          imageUrl={slide.imageUrl}
+          videoUrl={slide.videoUrl}
+          alt="Facebook preview"
+          storyLabel={slide.placement === "REEL" ? "Facebook Reel preview" : "Facebook Story"}
+        />
+        <div className="pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-black/75 to-transparent p-4">
+          <div className="flex items-center gap-2">
+            <FacebookPageAvatar size="sm" />
+            <div>
+              <p className="text-sm font-semibold">Digitify</p>
+              <p className="text-xs text-white/70">{slide.placement === "REEL" ? "Reel preview" : "Story · 24 uur"}</p>
             </div>
           </div>
         </div>
@@ -241,27 +258,30 @@ function InstagramPreview({
 
   if (isStory) {
     return (
-      <div className="overflow-hidden rounded-[1.6rem] border border-zinc-200 bg-zinc-950 text-white shadow-[0_22px_55px_rgba(24,24,27,0.18)]">
-        <div className="relative">
-          <MediaFrame
-            format="STORY"
-            imageUrl={slide.imageUrl}
-            videoUrl={slide.videoUrl}
-            alt="Instagram preview"
-            storyLabel={slide.placement === "REEL" ? "Instagram Reel" : "Instagram Story"}
-          />
-          <div className="absolute inset-x-0 top-0 space-y-3 bg-gradient-to-b from-black/75 to-transparent p-4">
-            <div className="grid grid-cols-5 gap-1">
-              {Array.from({ length: 5 }).map((_, index) => (
-                <span key={index} className="h-0.5 rounded-full bg-white/80" />
-              ))}
-            </div>
-            <div className="flex items-center gap-2">
-              <InstagramPageAvatar size="sm" />
-              <div>
-                <p className="text-sm font-semibold">digitify.be</p>
-                <p className="text-xs text-white/70">{slide.placement === "REEL" ? "Reel" : "Story"}</p>
-              </div>
+      <div
+        className={cn(
+          "overflow-hidden rounded-[1.6rem] border border-zinc-200 bg-zinc-950 text-white shadow-[0_22px_55px_rgba(24,24,27,0.18)]",
+          verticalPreviewFrameClassName,
+        )}
+      >
+        <MediaFrame
+          format="STORY"
+          imageUrl={slide.imageUrl}
+          videoUrl={slide.videoUrl}
+          alt="Instagram preview"
+          storyLabel={slide.placement === "REEL" ? "Instagram Reel" : "Instagram Story"}
+        />
+        <div className="absolute inset-x-0 top-0 space-y-3 bg-gradient-to-b from-black/75 to-transparent p-4">
+          <div className="grid grid-cols-5 gap-1">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <span key={index} className="h-0.5 rounded-full bg-white/80" />
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <InstagramPageAvatar size="sm" />
+            <div>
+              <p className="text-sm font-semibold">digitify.be</p>
+              <p className="text-xs text-white/70">{slide.placement === "REEL" ? "Reel" : "Story"}</p>
             </div>
           </div>
         </div>

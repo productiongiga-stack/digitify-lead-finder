@@ -72,6 +72,7 @@ import {
 } from "@/components/social/social-carousel-editor";
 import { persistCarouselAssets, persistPlacementAssets } from "@/lib/persist-social-assets";
 import { FacebookPageAvatar, InstagramPageAvatar } from "@/components/social/social-platform-avatars";
+import { useMediaAspectRatio, verticalPreviewFrameClassName } from "@/components/social/use-media-aspect-ratio";
 import {
   SocialBrandKitPickerProvider,
   type SocialBrandKitApplyPayload,
@@ -139,11 +140,11 @@ type ManagedMetaPage = {
   instagramUsername: string;
 };
 
-const FORMAT_OPTIONS: Array<{ value: PostFormat; label: string; description: string; className: string }> = [
-  { value: "SQUARE", label: "Square", description: "1:1 · veilig voor FB + IG", className: "aspect-square" },
-  { value: "PORTRAIT", label: "Portrait", description: "4:5 · sterk voor IG feed", className: "aspect-[4/5]" },
-  { value: "LANDSCAPE", label: "Landscape", description: "1.91:1 · breed beeld", className: "aspect-[1.91/1]" },
-  { value: "STORY", label: "Story", description: "9:16 · FB + IG Stories", className: "aspect-[9/16]" },
+const FORMAT_OPTIONS: Array<{ value: PostFormat; label: string; description: string; className: string; ratio: number }> = [
+  { value: "SQUARE", label: "Square", description: "1:1 · veilig voor FB + IG", className: "aspect-square", ratio: 1 },
+  { value: "PORTRAIT", label: "Portrait", description: "4:5 · sterk voor IG feed", className: "aspect-[4/5]", ratio: 4 / 5 },
+  { value: "LANDSCAPE", label: "Landscape", description: "1.91:1 · breed beeld", className: "aspect-[1.91/1]", ratio: 1.91 },
+  { value: "STORY", label: "Story", description: "9:16 · FB + IG Stories", className: "aspect-[9/16]", ratio: 9 / 16 },
 ];
 
 
@@ -464,19 +465,23 @@ function InstagramReelPreview({
 }) {
   const displayUsername = username.replace(/^@/, "");
   return (
-    <div className="overflow-hidden rounded-[1.6rem] border border-zinc-200 bg-zinc-950 text-white shadow-[0_22px_55px_rgba(24,24,27,0.18)]">
-      <div className="relative mx-auto aspect-[9/16] max-h-[560px] bg-zinc-900">
-        {videoUrl ? (
-          <video src={videoUrl} className="h-full w-full object-cover" controls playsInline muted />
-        ) : imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={imageUrl} alt="Instagram Reel cover" className="h-full w-full object-cover" />
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-white/70">
-            <Film className="mr-2 h-4 w-4" /> Instagram Reel
-          </div>
-        )}
-        <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-black/75 to-transparent p-4">
+    <div
+      className={cn(
+        "overflow-hidden rounded-[1.6rem] border border-zinc-200 bg-zinc-950 text-white shadow-[0_22px_55px_rgba(24,24,27,0.18)]",
+        verticalPreviewFrameClassName,
+      )}
+    >
+      {videoUrl ? (
+        <video src={videoUrl} className="h-full w-full object-cover" controls playsInline muted />
+      ) : imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={imageUrl} alt="Instagram Reel cover" className="h-full w-full object-cover" />
+      ) : (
+        <div className="flex h-full items-center justify-center text-sm text-white/70">
+          <Film className="mr-2 h-4 w-4" /> Instagram Reel
+        </div>
+      )}
+      <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-black/75 to-transparent p-4">
           <div className="flex items-center gap-2">
             <InstagramPageAvatar size="sm" label="D" />
             <div>
@@ -493,7 +498,6 @@ function InstagramReelPreview({
             {videoUrl ? "Video preview in browser. Publicatie gebruikt je MP4-URL." : "Upload een MP4 voor publicatie."}
           </p>
         </div>
-      </div>
     </div>
   );
 }
@@ -511,32 +515,39 @@ function FacebookPreview({
   format: PostFormat;
   pageName?: string;
 }) {
-  const formatClass = FORMAT_OPTIONS.find((item) => item.value === format)?.className || "aspect-square";
+  const formatMeta = FORMAT_OPTIONS.find((item) => item.value === format);
+  const formatClass = formatMeta?.className || "aspect-square";
+  const naturalAspectRatio = useMediaAspectRatio(imageUrl, videoUrl);
+  const feedAspectRatio =
+    format !== "STORY" ? naturalAspectRatio ?? formatMeta?.ratio ?? 1 : null;
 
   if (format === "STORY") {
     return (
-      <div className="overflow-hidden rounded-[1.6rem] border border-slate-200 bg-slate-950 text-white shadow-[0_22px_55px_rgba(15,23,42,0.18)]">
-        <div className="relative mx-auto aspect-[9/16] max-h-[560px] bg-slate-900">
-          {imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt="Facebook Story preview" className="h-full w-full object-cover" />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-white/70">
-              <ImageIcon className="mr-2 h-4 w-4" /> Facebook Story
-            </div>
-          )}
-          <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-black/75 to-transparent p-4">
-            <div className="flex items-center gap-2">
-              <FacebookPageAvatar size="sm" />
-              <div>
-                <p className="text-sm font-semibold">{pageName}</p>
-                <p className="text-xs text-white/70">Story · 24 uur zichtbaar</p>
-              </div>
+      <div
+        className={cn(
+          "overflow-hidden rounded-[1.6rem] border border-slate-200 bg-slate-950 text-white shadow-[0_22px_55px_rgba(15,23,42,0.18)]",
+          verticalPreviewFrameClassName,
+        )}
+      >
+        {imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={imageUrl} alt="Facebook Story preview" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-white/70">
+            <ImageIcon className="mr-2 h-4 w-4" /> Facebook Story
+          </div>
+        )}
+        <div className="absolute inset-x-0 top-0 bg-gradient-to-b from-black/75 to-transparent p-4">
+          <div className="flex items-center gap-2">
+            <FacebookPageAvatar size="sm" />
+            <div>
+              <p className="text-sm font-semibold">{pageName}</p>
+              <p className="text-xs text-white/70">Story · 24 uur zichtbaar</p>
             </div>
           </div>
-          <div className="absolute inset-x-4 bottom-4 rounded-2xl bg-black/45 p-3 text-xs text-white/85 backdrop-blur">
-            Tekst/CTA uit de composer blijft intern als reviewtekst. Meta Stories publiceren in v1 alleen de afbeelding.
-          </div>
+        </div>
+        <div className="absolute inset-x-4 bottom-4 rounded-2xl bg-black/45 p-3 text-xs text-white/85 backdrop-blur">
+          Tekst/CTA uit de composer blijft intern als reviewtekst. Meta Stories publiceren in v1 alleen de afbeelding.
         </div>
       </div>
     );
@@ -553,12 +564,15 @@ function FacebookPreview({
         <MoreHorizontal className="h-5 w-5 text-slate-500" />
       </div>
       <p className="whitespace-pre-line px-4 pb-3 text-sm leading-relaxed">{caption}</p>
-      <div className={cn("bg-slate-100", formatClass)}>
+      <div
+        className={cn("w-full bg-slate-100", feedAspectRatio ? "max-h-[560px]" : formatClass)}
+        style={feedAspectRatio ? { aspectRatio: feedAspectRatio } : undefined}
+      >
         {videoUrl ? (
-          <video src={videoUrl} className="h-full w-full object-cover" muted playsInline controls />
+          <video src={videoUrl} className="block h-full w-full object-contain" muted playsInline controls />
         ) : imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={imageUrl} alt="Facebook preview" className="block h-full w-full object-cover" />
+          <img src={imageUrl} alt="Facebook preview" className="block h-full w-full object-contain" />
         ) : (
           <div className="flex h-full min-h-[180px] items-center justify-center text-sm text-slate-500">
             <ImageIcon className="mr-2 h-4 w-4" /> Afbeelding preview
@@ -594,36 +608,43 @@ function InstagramPreview({
   username?: string;
 }) {
   const displayUsername = username.replace(/^@/, "");
-  const formatClass = FORMAT_OPTIONS.find((item) => item.value === format)?.className || "aspect-square";
+  const formatMeta = FORMAT_OPTIONS.find((item) => item.value === format);
+  const formatClass = formatMeta?.className || "aspect-square";
+  const naturalAspectRatio = useMediaAspectRatio(imageUrl, videoUrl);
+  const feedAspectRatio =
+    format !== "STORY" ? naturalAspectRatio ?? formatMeta?.ratio ?? 1 : null;
   if (format === "STORY") {
     return (
-      <div className="overflow-hidden rounded-[1.6rem] border border-zinc-200 bg-zinc-950 text-white shadow-[0_22px_55px_rgba(24,24,27,0.18)]">
-        <div className="relative mx-auto aspect-[9/16] max-h-[560px] bg-zinc-900">
-          {imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt="Instagram Story preview" className="h-full w-full object-cover" />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-white/70">
-              <ImageIcon className="mr-2 h-4 w-4" /> Instagram Story
-            </div>
-          )}
-          <div className="absolute inset-x-0 top-0 space-y-3 bg-gradient-to-b from-black/75 to-transparent p-4">
-            <div className="grid grid-cols-5 gap-1">
-              {Array.from({ length: 5 }).map((_, index) => (
-                <span key={index} className="h-0.5 rounded-full bg-white/80" />
-              ))}
-            </div>
-            <div className="flex items-center gap-2">
-              <InstagramPageAvatar size="sm" label="D" />
-              <div>
-                <p className="text-sm font-semibold">{displayUsername}</p>
-                <p className="text-xs text-white/70">Instagram Story</p>
-              </div>
+      <div
+        className={cn(
+          "overflow-hidden rounded-[1.6rem] border border-zinc-200 bg-zinc-950 text-white shadow-[0_22px_55px_rgba(24,24,27,0.18)]",
+          verticalPreviewFrameClassName,
+        )}
+      >
+        {imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={imageUrl} alt="Instagram Story preview" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-white/70">
+            <ImageIcon className="mr-2 h-4 w-4" /> Instagram Story
+          </div>
+        )}
+        <div className="absolute inset-x-0 top-0 space-y-3 bg-gradient-to-b from-black/75 to-transparent p-4">
+          <div className="grid grid-cols-5 gap-1">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <span key={index} className="h-0.5 rounded-full bg-white/80" />
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <InstagramPageAvatar size="sm" label="D" />
+            <div>
+              <p className="text-sm font-semibold">{displayUsername}</p>
+              <p className="text-xs text-white/70">Instagram Story</p>
             </div>
           </div>
-          <div className="absolute inset-x-4 bottom-4 rounded-2xl bg-black/45 p-3 text-xs text-white/85 backdrop-blur">
-            Stories ondersteunen geen gewone feed-caption. Voeg tekst visueel toe in de afbeelding zelf.
-          </div>
+        </div>
+        <div className="absolute inset-x-4 bottom-4 rounded-2xl bg-black/45 p-3 text-xs text-white/85 backdrop-blur">
+          Stories ondersteunen geen gewone feed-caption. Voeg tekst visueel toe in de afbeelding zelf.
         </div>
       </div>
     );
@@ -639,12 +660,15 @@ function InstagramPreview({
         </div>
         <MoreHorizontal className="h-5 w-5 text-zinc-500" />
       </div>
-      <div className={cn("bg-zinc-100", formatClass)}>
+      <div
+        className={cn("w-full bg-zinc-100", feedAspectRatio ? "max-h-[560px]" : formatClass)}
+        style={feedAspectRatio ? { aspectRatio: feedAspectRatio } : undefined}
+      >
         {videoUrl ? (
-          <video src={videoUrl} className="h-full w-full object-cover" muted playsInline controls />
+          <video src={videoUrl} className="block h-full w-full object-contain" muted playsInline controls />
         ) : imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={imageUrl} alt="Instagram preview" className="h-full w-full object-cover" />
+          <img src={imageUrl} alt="Instagram preview" className="block h-full w-full object-contain" />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-zinc-500">
             <ImageIcon className="mr-2 h-4 w-4" /> Feed afbeelding
@@ -948,6 +972,11 @@ export function SocialPageInner() {
     return match?.name || (selectedBrandKitId ? "Merkkit" : "Geen merkkit gekozen");
   }, [brandKitsQuery.data?.kits, selectedBrandKitId]);
 
+  const publishingPostsCount = useMemo(
+    () => rows.filter((row: { status: string }) => row.status === "PUBLISHING").length,
+    [rows],
+  );
+
   const dueSoonScheduledCount = useMemo(
     () =>
       rows.filter((row: { status: string; scheduledFor?: string | Date | null }) => {
@@ -986,6 +1015,12 @@ export function SocialPageInner() {
   const [publishingPostId, setPublishingPostId] = useState<string | null>(null);
 
   const publishPostNow = trpc.social.publishPostNow.useMutation({
+    onMutate: () => {
+      showToast({
+        title: "Publiceren gestart",
+        description: "Meta kan enkele minuten nodig hebben, vooral bij Instagram en video.",
+      });
+    },
     onSuccess: async () => {
       setPublishingPostId(null);
       await listQuery.refetch();
@@ -1002,21 +1037,24 @@ export function SocialPageInner() {
       });
       void listQuery.refetch();
     },
+    onSettled: () => {
+      setPublishingPostId(null);
+    },
   });
 
   useEffect(() => {
     if (!canSchedule || !connectionStatus.data?.connected || dueSoonScheduledCount === 0) return;
-    if (publishDuePosts.isPending) return;
+    if (publishDuePosts.isPending || publishingPostsCount > 0) return;
 
     const timer = window.setInterval(() => {
-      if (!publishDuePosts.isPending) publishDuePosts.mutate();
+      if (!publishDuePosts.isPending && publishingPostsCount === 0) publishDuePosts.mutate();
     }, 45_000);
 
     if (overdueScheduledCount > 0) publishDuePosts.mutate();
 
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- poll when due queue changes
-  }, [canSchedule, connectionStatus.data?.connected, dueSoonScheduledCount, overdueScheduledCount]);
+  }, [canSchedule, connectionStatus.data?.connected, dueSoonScheduledCount, overdueScheduledCount, publishingPostsCount]);
 
   function canProceedWizardStep(step: number) {
     if (step === 0) {

@@ -33,6 +33,7 @@ import {
   normalizeSocialMetadata,
   parseStoredExternalIds,
   prepareAndValidatePostForPublish,
+  recoverStuckPublishingPosts,
   runDueSocialPostsWorker,
   socialImageUrlSchema,
   socialPostFormatEnum,
@@ -494,7 +495,10 @@ export const socialRouter = router({
       });
 
       if (input.scheduledFor.getTime() <= Date.now() + 2 * 60 * 1000) {
-        void runDueSocialPostsWorker(ctx.db, { postId: input.id }).catch(() => null);
+        await runDueSocialPostsWorker(ctx.db, {
+          postId: input.id,
+          workspaceId: ctx.user.workspaceId!,
+        });
       }
 
       return updated;
@@ -719,6 +723,8 @@ export const socialRouter = router({
   publishPostNow: adminProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      await recoverStuckPublishingPosts(ctx.db, { postId: input.id, maxAgeMs: 3 * 60 * 1000 });
+
       const row = await requireSocialPost(ctx.db, ctx.user.workspaceId!, input.id);
 
       if (row.status === "PUBLISHED") {
@@ -731,7 +737,8 @@ export const socialRouter = router({
       if (row.status === "PUBLISHING") {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Deze post wordt al gepubliceerd. Even geduld.",
+          message:
+            "Deze post wordt al gepubliceerd. Wacht tot de huidige poging klaar is (max. enkele minuten) en vernieuw daarna de pagina.",
         });
       }
 
@@ -761,6 +768,7 @@ export const socialRouter = router({
       const summary = await runDueSocialPostsWorker(ctx.db, {
         postId: input.id,
         workspaceId: ctx.user.workspaceId!,
+        failImmediately: true,
       });
       const refreshed = await requireSocialPost(ctx.db, ctx.user.workspaceId!, input.id);
 
@@ -769,6 +777,13 @@ export const socialRouter = router({
       }
 
       if (summary.published === 0) {
+        if (refreshed?.status === "PUBLISHING") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "Publicatie naar Meta duurt langer dan verwacht. Vernieuw de pagina over een minuut; bij aanhoudende problemen controleer je Meta-koppeling.",
+          });
+        }
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: refreshed?.lastError || "Publicatie naar Meta is niet gelukt.",

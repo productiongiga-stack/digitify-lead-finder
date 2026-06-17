@@ -22,7 +22,7 @@ import {
   RefreshCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { FacebookPageAvatar } from "@/components/social/social-platform-avatars";
+import { FacebookPageAvatar, MetaAdsBrandMark } from "@/components/social/social-platform-avatars";
 
 export type SocialManagedPage = {
   id: string;
@@ -210,6 +210,66 @@ function MetaConnectionTroubleshoot({ pagesWithoutInstagram }: { pagesWithoutIns
   );
 }
 
+function AccountSelectorPreview({ page }: { page: SocialManagedPage }) {
+  const handle = instagramHandle(page.instagramUsername);
+  const linked = hasInstagram(page);
+
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-3.5 text-left">
+      {linked ? (
+        <MetaAdsBrandMark className="h-10 w-[2.85rem] shrink-0" />
+      ) : (
+        <FacebookPageAvatar size="sm" alt={page.name} className="h-10 w-10" />
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-semibold tracking-tight text-foreground">{page.name}</span>
+          <span className="hidden shrink-0 rounded-full border border-[#1877F2]/20 bg-[#1877F2]/8 px-2 py-0.5 text-[10px] font-medium text-[#1877F2] sm:inline">
+            Facebook Page
+          </span>
+        </span>
+        {handle ? (
+          <span className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+            <InstagramMark className="!h-4 !w-4 !shadow-none" />
+            <span className="truncate">{handle}</span>
+          </span>
+        ) : (
+          <span className="mt-0.5 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="h-3 w-3 shrink-0" />
+            Geen Instagram gekoppeld
+          </span>
+        )}
+      </span>
+    </span>
+  );
+}
+
+function AccountSelectorItem({ page }: { page: SocialManagedPage }) {
+  const handle = instagramHandle(page.instagramUsername);
+  const linked = hasInstagram(page);
+
+  return (
+    <span className="flex w-full items-center gap-3 py-0.5">
+      {linked ? (
+        <MetaAdsBrandMark className="h-9 w-[2.6rem] shrink-0" />
+      ) : (
+        <FacebookPageAvatar size="sm" alt={page.name} />
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium text-foreground">{page.name}</span>
+        <span
+          className={cn(
+            "block truncate text-[11px]",
+            linked ? "text-muted-foreground" : "text-amber-700 dark:text-amber-300",
+          )}
+        >
+          {handle || "Geen Instagram"}
+        </span>
+      </span>
+    </span>
+  );
+}
+
 export function SocialPublishAccountPicker({
   pages,
   selectedPageId,
@@ -223,7 +283,6 @@ export function SocialPublishAccountPicker({
   isLoading = false,
 }: Props) {
   const instagramLinked = hasInstagram(selectedPage);
-  const instagramUser = instagramHandle(selectedPage?.instagramUsername);
 
   const pagesWithoutInstagram = useMemo(
     () => pages.filter((page) => !hasInstagram(page)).length,
@@ -251,42 +310,27 @@ export function SocialPublishAccountPicker({
             <Select value={selectedPageId || undefined} onValueChange={onSelectedPageIdChange} disabled={disabled}>
               <SelectTrigger
                 id="social-publish-account"
-                className="h-auto min-h-12 rounded-xl border-border/60 bg-background/90 py-2.5 shadow-sm"
+                className={cn(
+                  "group h-auto min-h-[4.25rem] rounded-2xl border-border/50 bg-gradient-to-br from-background via-background to-muted/30 px-3.5 py-3 shadow-sm transition-all",
+                  "hover:border-[#1877F2]/30 hover:shadow-md hover:shadow-[#1877F2]/[0.06]",
+                  "focus:ring-2 focus:ring-[#1877F2]/15 focus:border-[#1877F2]/35",
+                  "data-[state=open]:border-[#1877F2]/35 data-[state=open]:ring-2 data-[state=open]:ring-[#1877F2]/10",
+                  "[&>span]:line-clamp-none [&>span]:min-w-0 [&>span]:flex-1",
+                  "[&>svg]:ml-2 [&>svg]:h-8 [&>svg]:w-8 [&>svg]:shrink-0 [&>svg]:rounded-full [&>svg]:border [&>svg]:border-border/50 [&>svg]:bg-muted/40 [&>svg]:p-1.5 [&>svg]:opacity-100",
+                  "group-hover:[&>svg]:border-[#1877F2]/25 group-hover:[&>svg]:bg-[#1877F2]/5",
+                  "data-[state=open]:[&>svg]:rotate-180 data-[state=open]:[&>svg]:border-[#1877F2]/30 data-[state=open]:[&>svg]:bg-[#1877F2]/8",
+                )}
               >
                 <SelectValue placeholder="Kies een pagina">
-                  {selectedPage ? (
-                    <span className="flex min-w-0 items-center gap-3 text-left">
-                      <FacebookPageAvatar size="sm" alt={selectedPage.name} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-semibold text-foreground">{selectedPage.name}</span>
-                        {instagramUser ? (
-                          <span className="block truncate text-xs text-muted-foreground">{instagramUser}</span>
-                        ) : (
-                          <span className="block text-xs text-amber-700 dark:text-amber-300">Geen Instagram gekoppeld</span>
-                        )}
-                      </span>
-                    </span>
-                  ) : null}
+                  {selectedPage ? <AccountSelectorPreview page={selectedPage} /> : null}
                 </SelectValue>
               </SelectTrigger>
-              <SelectContent>
-                {pages.map((page) => {
-                  const pageInstagram = hasInstagram(page);
-                  const handle = instagramHandle(page.instagramUsername);
-                  return (
-                    <SelectItem key={page.id} value={page.id}>
-                      <span className="flex w-full items-center gap-2.5 py-0.5">
-                        <FacebookPageAvatar size="sm" alt={page.name} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium">{page.name}</span>
-                          <span className={cn("block text-[11px]", pageInstagram ? "text-muted-foreground" : "text-amber-700 dark:text-amber-300")}>
-                            {handle || "Geen Instagram"}
-                          </span>
-                        </span>
-                      </span>
-                    </SelectItem>
-                  );
-                })}
+              <SelectContent className="rounded-xl border-border/60 p-1.5 shadow-lg">
+                {pages.map((page) => (
+                  <SelectItem key={page.id} value={page.id} className="rounded-lg py-2.5 pl-2.5 pr-9">
+                    <AccountSelectorItem page={page} />
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

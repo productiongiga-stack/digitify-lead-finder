@@ -6,7 +6,7 @@ import {
   type SocialImageTargetPlacement,
 } from "./social-image-targets";
 import type { FeedAspectFormat } from "./social-placements";
-import { fetchSocialImageInfo, parseImageDimensions, type SocialImageInfo } from "./social-image";
+import { fetchSocialImageInfo, isMetaPublishableImageUrl, parseImageDimensions, type SocialImageInfo } from "./social-image";
 
 function extensionForContentType(contentType: string) {
   if (contentType.includes("png")) return "png";
@@ -108,15 +108,29 @@ export async function cropImageBufferToPlacement(input: {
 }
 
 async function fetchImageBuffer(imageUrl: string) {
-  const info = await fetchSocialImageInfo(imageUrl);
-  if (imageUrl.startsWith("data:")) {
-    const match = /^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/i.exec(imageUrl.trim());
+  const trimmed = imageUrl.trim();
+  const info = await fetchSocialImageInfo(trimmed);
+
+  if (trimmed.startsWith("data:")) {
+    const match = /^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/i.exec(trimmed);
     if (!match) throw new Error("Ongeldige data-URL.");
     return { buffer: Buffer.from(match[2], "base64"), info };
   }
 
+  if (trimmed.startsWith("/uploads/")) {
+    const path = await import("node:path");
+    const { readFile } = await import("node:fs/promises");
+    const relativePath = trimmed.replace(/^\//, "");
+    const publicRoot = path.resolve(path.join(process.cwd(), "public"));
+    const absolutePath = path.resolve(publicRoot, relativePath);
+    if (!absolutePath.startsWith(`${publicRoot}${path.sep}`)) {
+      throw new Error("Ongeldig upload-pad.");
+    }
+    return { buffer: await readFile(absolutePath), info };
+  }
+
   const { assertPublicHttpUrl } = await import("@digitify/connectors");
-  const safeUrl = await assertPublicHttpUrl(imageUrl.trim());
+  const safeUrl = await assertPublicHttpUrl(trimmed);
   const response = await fetch(safeUrl, { signal: AbortSignal.timeout(15_000) });
   if (!response.ok) {
     throw new Error(`Afbeelding kon niet opgehaald worden (HTTP ${response.status}).`);
@@ -141,6 +155,7 @@ export async function prepareSocialImageUrlForPublish(input: {
   }
 
   const { buffer, info } = await fetchImageBuffer(trimmed);
+  const needsPublicUrl = !isMetaPublishableImageUrl(trimmed);
   const meetsTarget = imageMeetsPlacementTarget({
     width: info.width,
     height: info.height,
@@ -150,8 +165,19 @@ export async function prepareSocialImageUrlForPublish(input: {
     targetPlatforms: input.targetPlatforms,
   });
 
-  if (meetsTarget && !input.forceCrop) {
+  if (meetsTarget && !input.forceCrop && !needsPublicUrl) {
     return { imageUrl: trimmed, info, cropped: false };
+  }
+
+  if (meetsTarget && !input.forceCrop && needsPublicUrl) {
+    const uploadedUrl = await uploadCroppedImage({
+      buffer,
+      contentType: info.contentType,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      placement: input.placement,
+    });
+    return { imageUrl: uploadedUrl, info, cropped: false };
   }
 
   const { buffer: croppedBuffer, contentType } = await cropImageBufferToPlacement({

@@ -4,6 +4,7 @@ import {
   fetchSocialImageInfo,
   isMetaPublishableImageUrl,
   isMetaPublishableVideoUrl,
+  isWorkspaceUploadImagePath,
   parseImageDimensions,
   probeSocialImage,
 } from "../lib/social-image";
@@ -56,5 +57,11 @@ describe("social image parsing", () => {
     if (!result.ok) {
       expect(result.message).toMatch(/niet toegestaan/i);
     }
+  });
+
+  it("recognizes workspace upload paths and rejects traversal", () => {
+    expect(isWorkspaceUploadImagePath("/uploads/workspaces/w1/social/image.jpg")).toBe(true);
+    expect(isWorkspaceUploadImagePath("/uploads/../etc/passwd")).toBe(false);
+    expect(isMetaPublishableImageUrl("/uploads/workspaces/w1/social/image.jpg")).toBe(false);
   });
 });

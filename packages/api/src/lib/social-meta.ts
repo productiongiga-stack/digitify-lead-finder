@@ -269,14 +269,27 @@ async function parseMetaResponse(response: Response) {
   return data;
 }
 
+const META_API_TIMEOUT_MS = 45_000;
+
+async function metaFetch(url: URL, init: RequestInit) {
+  try {
+    const response = await fetch(url, init);
+    return parseMetaResponse(response);
+  } catch (error) {
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      throw new Error("Meta API reageerde niet op tijd. Probeer opnieuw over enkele minuten.");
+    }
+    throw error;
+  }
+}
+
 export async function metaGet(path: string, params: Record<string, string | undefined>) {
   const url = new URL(`https://graph.facebook.com/${resolveMetaGraphVersion()}/${path}`);
   for (const [key, value] of Object.entries(params)) {
     if (!value) continue;
     url.searchParams.set(key, value);
   }
-  const response = await fetch(url, { method: "GET" });
-  return parseMetaResponse(response);
+  return metaFetch(url, { method: "GET", signal: AbortSignal.timeout(META_API_TIMEOUT_MS) });
 }
 
 export async function metaPost(path: string, body: Record<string, string | undefined>) {
@@ -286,12 +299,12 @@ export async function metaPost(path: string, body: Record<string, string | undef
     if (value === undefined) continue;
     params.set(key, value);
   }
-  const response = await fetch(url, {
+  return metaFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params,
+    signal: AbortSignal.timeout(META_API_TIMEOUT_MS),
   });
-  return parseMetaResponse(response);
 }
 
 export async function exchangeMetaOAuthCode(params: {

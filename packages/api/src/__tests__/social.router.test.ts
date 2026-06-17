@@ -197,16 +197,21 @@ describe("social router flow", () => {
 
 function makePublishWorkerDb(post: Record<string, unknown>, options?: { lockFails?: boolean }) {
   const socialPostUpdate = vi.fn().mockResolvedValue({});
-  const socialPostFindUnique = vi.fn().mockResolvedValue(post);
-  const socialPostFindMany = vi.fn(async (args: { where?: { status?: string } }) => {
-    if (args?.where?.status === "PUBLISHING") return [];
-    return [post];
-  });
   const socialPostUpdateMany = vi.fn(async (args: { data?: { status?: string } }) => {
     if (args?.data?.status === "PUBLISHING") {
       return { count: options?.lockFails ? 0 : 1 };
     }
     return { count: 0 };
+  });
+  const socialPostFindUnique = vi.fn(async () => {
+    const publishing = socialPostUpdateMany.mock.calls.some(
+      (call) => call[0]?.data?.status === "PUBLISHING",
+    );
+    return publishing ? { ...post, status: "PUBLISHING" } : post;
+  });
+  const socialPostFindMany = vi.fn(async (args: { where?: { status?: string } }) => {
+    if (args?.where?.status === "PUBLISHING") return [];
+    return [post];
   });
 
   return {
@@ -282,6 +287,56 @@ describe("social publish worker", () => {
         data: expect.objectContaining({
           status: "SCHEDULED",
           retryCount: 2,
+          lastError: "Meta publish failed",
+        }),
+      }),
+    );
+  });
+
+  it("marks manual publish failures as FAILED instead of scheduling retry", async () => {
+    const post = {
+      id: "sp_manual_fail",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Caption",
+      imageUrl: "https://example.com/x.jpg",
+      targetPlatforms: ["FACEBOOK"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+    };
+
+    const { db, socialPostUpdate } = makePublishWorkerDb(post);
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "",
+      instagramUsername: "",
+    });
+    mockedMeta.publishFacebookImagePost.mockRejectedValue(new Error("Meta publish failed"));
+
+    const result = await runDueSocialPostsWorker(db as any, { postId: post.id, failImmediately: true });
+
+    expect(result.failed).toBe(1);
+    expect(socialPostUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          retryCount: 1,
+          lastError: "Meta publish failed",
         }),
       }),
     );
