@@ -624,8 +624,9 @@ export function IntegrationsSettingsInner() {
   }, [searchParams]);
 
   const pollProviderConnections = integrationsTab === "google-oauth" || integrationsTab === "meta";
+  const metaOAuthCallback = searchParams.get("meta");
   const metaConnection = trpc.social.connectionStatus.useQuery(undefined, {
-    enabled: pollProviderConnections,
+    enabled: pollProviderConnections || Boolean(metaOAuthCallback),
     refetchInterval: pollProviderConnections ? 30_000 : false,
     refetchOnWindowFocus: false,
   });
@@ -765,7 +766,82 @@ export function IntegrationsSettingsInner() {
   const muapiConfigured = Boolean(muapiKeyStatus.data?.hasKey);
   const googlePlacesConfiguredActive = googlePlacesConfigured || Boolean(googlePlacesKey.trim());
   const metaConfigured = Boolean(metaAppId.trim() && (metaAppSecret.trim() || metaAppSecretConfigured));
+  const metaSavedOnServer = Boolean(metaConnection.data?.hasAppCredentials);
   const metaRedirectUrl = "https://leads.digitify.be/api/integrations/meta/callback";
+
+  function startMetaOAuthConnect(reconnect = false) {
+    if (!canManageWorkspaceIntegrations) {
+      showToast({
+        title: "Geen rechten",
+        description: "Alleen de workspace-eigenaar kan Meta koppelen.",
+        variant: "error",
+      });
+      return;
+    }
+
+    if (metaDirty || (!metaSavedOnServer && metaConfigured)) {
+      showToast({
+        title: "Eerst opslaan",
+        description: "Klik op 'Meta instellingen opslaan' voordat je Meta koppelt.",
+        variant: "error",
+      });
+      return;
+    }
+
+    if (!metaSavedOnServer) {
+      showToast({
+        title: "Meta App credentials ontbreken",
+        description: "Vul Meta App ID en App Secret in, sla op, en klik daarna op Meta koppelen.",
+        variant: "error",
+      });
+      return;
+    }
+
+    window.location.assign(
+      reconnect ? "/api/integrations/meta/connect?reconnect=1" : "/api/integrations/meta/connect",
+    );
+  }
+
+  useEffect(() => {
+    const metaStatus = searchParams.get("meta");
+    if (!metaStatus) return;
+    const messages: Record<string, { title: string; description?: string; variant?: "error" | "success" }> = {
+      connected: { title: "Meta gekoppeld", description: "Facebook & Instagram zijn verbonden.", variant: "success" },
+      forbidden: {
+        title: "Geen rechten",
+        description: "Alleen de workspace-eigenaar kan Meta koppelen.",
+        variant: "error",
+      },
+      error: {
+        title: "Meta koppeling mislukt",
+        description: "Probeer opnieuw of controleer App ID, Secret en redirect URL in Meta.",
+        variant: "error",
+      },
+      "missing-config": {
+        title: "Meta App niet opgeslagen",
+        description: "Vul Meta App ID + Secret in en klik 'Meta instellingen opslaan' voordat je koppelt.",
+        variant: "error",
+      },
+      "invalid-app-id": {
+        title: "Ongeldig Meta App ID",
+        description: "Controleer het App ID in developers.facebook.com.",
+        variant: "error",
+      },
+    };
+    const message = messages[metaStatus] ?? {
+      title: "Meta koppeling",
+      description: metaStatus,
+      variant: "error" as const,
+    };
+    showToast(message);
+    void metaConnection.refetch();
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("meta");
+    const query = params.toString();
+    router.replace(query ? `/settings/integrations?${query}` : "/settings/integrations?tab=meta", {
+      scroll: false,
+    });
+  }, [searchParams, metaConnection, router, showToast]);
 
   const integrationNavItemsAll: IntegrationNavItem[] = [
     { id: "overview", label: "Overzicht", description: "Status van alle koppelingen", icon: Settings2, configured: true, group: "Start" },
@@ -900,7 +976,7 @@ export function IntegrationsSettingsInner() {
 
       setGooglePlacesConfigured(Boolean(googleKeyRaw));
       setGoogleOAuthSecretConfigured(Boolean(googleOAuthSecretRaw));
-      setMetaAppSecretConfigured(Boolean(metaAppSecretRaw));
+      setMetaAppSecretConfigured(metaAppSecretRaw === SECRET_MASK || Boolean(metaAppSecretRaw?.trim()));
       setAnthropicConfigured(Boolean(anthropicKeyRaw));
       setOpenaiConfigured(Boolean(openaiKeyRaw));
       setDeepseekConfigured(Boolean(deepseekKeyRaw));
@@ -1544,8 +1620,8 @@ export function IntegrationsSettingsInner() {
                     <strong>Facebook Login for Business</strong>, en klik hieronder op{" "}
                     <strong>Opnieuw koppelen (rechten)</strong>.
                   </p>
-                  <Button size="sm" className="mt-3" asChild>
-                    <a href="/api/integrations/meta/connect?reconnect=1">Opnieuw koppelen (rechten)</a>
+                  <Button size="sm" className="mt-3" onClick={() => startMetaOAuthConnect(true)}>
+                    Opnieuw koppelen (rechten)
                   </Button>
                 </div>
               ) : null}
@@ -1747,11 +1823,24 @@ export function IntegrationsSettingsInner() {
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <Button variant={metaConnection.data?.connected ? "outline" : "default"} size="sm" asChild disabled={!metaConfigured}>
-                  <a href={metaConnection.data?.connected ? "/api/integrations/meta/connect?reconnect=1" : "/api/integrations/meta/connect"}>
+                <div className="space-y-1">
+                  <Button
+                    variant={metaConnection.data?.connected ? "outline" : "default"}
+                    size="sm"
+                    onClick={() => startMetaOAuthConnect(Boolean(metaConnection.data?.connected))}
+                  >
                     {metaConnection.data?.connected ? "Opnieuw koppelen" : "Meta koppelen"}
-                  </a>
-                </Button>
+                  </Button>
+                  {!metaSavedOnServer ? (
+                    <p className="text-xs text-muted-foreground">
+                      Vul App ID + Secret in, sla op, en klik daarna Meta koppelen.
+                    </p>
+                  ) : metaDirty ? (
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      Je hebt niet-opgeslagen wijzigingen — sla eerst op.
+                    </p>
+                  ) : null}
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {metaAppSecretConfigured || metaConnection.data?.connected ? (
                     <Button
