@@ -357,7 +357,14 @@ function explainMetaError(message: string) {
         "Instagram feed accepteert geen extreem brede of hoge beelden. Gebruik bij voorkeur 1080x1080, 1080x1350 of een ratio tussen 4:5 en 1.91:1.",
     };
   }
-  if (/190|token|OAuth/i.test(message)) {
+  if (/code\s+10\b|does not have permission for this action/i.test(message)) {
+    return {
+      title: "Meta-app mist publishing-rechten",
+      description:
+        "Fout #10: je bent wel gekoppeld, maar de Meta-app heeft geen pages_manage_posts (Facebook) of instagram_content_publish (Instagram). Voeg die permissions toe in developers.facebook.com → Use cases, zet de app op Live, klik Opnieuw koppelen in Integraties.",
+    };
+  }
+  if (/190|token expired|verlopen/i.test(message)) {
     return {
       title: "Meta token of rechten verlopen",
       description: "Koppel Meta opnieuw via Integraties en controleer of de app de juiste Pages/Instagram publishing scopes heeft.",

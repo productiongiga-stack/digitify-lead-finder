@@ -15,6 +15,10 @@ import {
   publishInstagramReel,
   publishInstagramVideoPost,
   resolveSocialPublishTarget,
+  fetchMetaTokenDebugInfo,
+  resolveRequiredMetaPublishScopes,
+  missingMetaPublishScopes,
+  buildMetaPublishScopeError,
   type SocialPublishedRef,
 } from "./social-meta";
 import {
@@ -174,6 +178,7 @@ function placementLabel(placement: SocialPlacement) {
 async function ensurePostCanPublish(
   post: { imageUrl: string; targetPlatforms: string[]; metadata?: unknown },
   publishTarget?: { pageId: string; pageAccessToken: string; instagramBusinessId: string },
+  metaConfig?: { accessToken: string; appId: string; appSecret: string },
 ) {
   const metadata = normalizeSocialMetadata((post.metadata || undefined) as z.infer<typeof socialPostMetadataSchema>);
   const placements = metadata.placements || ["FEED"];
@@ -197,6 +202,30 @@ async function ensurePostCanPublish(
       code: "BAD_REQUEST",
       message: "Het geselecteerde account heeft geen gekoppeld Instagram Business-profiel.",
     });
+  }
+
+  if (metaConfig?.accessToken && metaConfig.appId && metaConfig.appSecret) {
+    const debug = await fetchMetaTokenDebugInfo({
+      inputToken: metaConfig.accessToken,
+      appId: metaConfig.appId,
+      appSecret: metaConfig.appSecret,
+    });
+    const missingScopes = missingMetaPublishScopes(
+      debug.scopes,
+      resolveRequiredMetaPublishScopes(post.targetPlatforms),
+    );
+    const scopeError = buildMetaPublishScopeError(missingScopes);
+    if (scopeError) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: scopeError });
+    }
+    if (!debug.isValid) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message:
+          debug.error ||
+          "Meta access token is ongeldig. Ga naar Instellingen → Integraties → Opnieuw koppelen.",
+      });
+    }
   }
 
   if (placements.includes("REEL") && !post.targetPlatforms.includes("INSTAGRAM")) {
@@ -307,6 +336,7 @@ export async function prepareAndValidatePostForPublish(
   post: { id: string; imageUrl: string; targetPlatforms: string[]; metadata?: unknown },
   scope: { workspaceId: string; memberId: string },
   publishTarget?: { pageId: string; pageAccessToken: string; instagramBusinessId: string },
+  metaConfig?: { accessToken: string; appId: string; appSecret: string },
 ) {
   const prepared = await prepareSocialPostAssetsForPublish({
     imageUrl: post.imageUrl,
@@ -327,6 +357,7 @@ export async function prepareAndValidatePostForPublish(
       metadata: normalizedMetadata,
     },
     publishTarget,
+    metaConfig,
   );
 
   if (prepared.changed) {
@@ -518,7 +549,11 @@ export async function publishSocialPostRecord(
       ).publisherPageId,
     });
 
-    const prepared = await prepareAndValidatePostForPublish(db, post, scope, publishTarget);
+    const prepared = await prepareAndValidatePostForPublish(db, post, scope, publishTarget, {
+      accessToken: config.accessToken,
+      appId: config.appId,
+      appSecret: config.appSecret,
+    });
     const metadata = prepared.metadata;
     const primaryImageUrl = prepared.imageUrl;
 

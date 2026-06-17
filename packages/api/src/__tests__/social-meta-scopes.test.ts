@@ -4,10 +4,12 @@ import {
   META_FACEBOOK_LOGIN_PUBLISHING_SCOPES,
   META_INSTAGRAM_LOGIN_PUBLISHING_SCOPES,
   formatMetaApiError,
+  missingMetaPublishScopes,
   normalizeMetaOAuthScopes,
   resolveMetaOAuthIncludeAds,
   resolveMetaOAuthLoginMode,
   resolveMetaOAuthScopes,
+  resolveRequiredMetaPublishScopes,
 } from "../lib/social-meta";
 
 const ENV_KEYS = [
@@ -80,6 +82,24 @@ describe("resolveMetaOAuthScopes", () => {
       "instagram_basic",
       "instagram_content_publish",
     ]);
+  });
+
+  it("detects missing publish scopes on debug token", () => {
+    expect(
+      missingMetaPublishScopes(
+        ["pages_show_list", "instagram_basic"],
+        resolveRequiredMetaPublishScopes(["FACEBOOK", "INSTAGRAM"]),
+      ),
+    ).toEqual(["pages_manage_posts", "instagram_content_publish"]);
+  });
+
+  it("adds a clear hint for OAuth permission errors", () => {
+    const message = formatMetaApiError({
+      message: "Application does not have permission for this action",
+      code: 10,
+      type: "OAuthException",
+    });
+    expect(message).toContain("pages_manage_posts");
   });
 
   it("adds a clear hint for Instagram aspect-ratio publish errors", () => {

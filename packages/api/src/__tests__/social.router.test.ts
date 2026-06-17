@@ -4,6 +4,15 @@ const mockedMeta = vi.hoisted(() => ({
   clearMetaSettings: vi.fn(),
   loadMetaManagedPages: vi.fn(),
   loadMetaWorkspaceConfig: vi.fn(),
+  fetchMetaTokenDebugInfo: vi.fn(),
+  resolveRequiredMetaPublishScopes: vi.fn((platforms: string[]) => {
+    const scopes = ["pages_show_list"];
+    if (platforms.includes("FACEBOOK")) scopes.push("pages_manage_posts");
+    if (platforms.includes("INSTAGRAM")) scopes.push("instagram_basic", "instagram_content_publish");
+    return scopes;
+  }),
+  missingMetaPublishScopes: vi.fn(() => []),
+  buildMetaPublishScopeError: vi.fn(() => null),
   publishFacebookCarouselPost: vi.fn(),
   publishFacebookImagePost: vi.fn(),
   publishFacebookImageStory: vi.fn(),
@@ -230,6 +239,20 @@ function makePublishWorkerDb(post: Record<string, unknown>, options?: { lockFail
 
 describe("social publish worker", () => {
   beforeEach(() => {
+    mockedMeta.fetchMetaTokenDebugInfo.mockResolvedValue({
+      isValid: true,
+      scopes: [
+        "pages_show_list",
+        "pages_read_engagement",
+        "pages_manage_posts",
+        "instagram_basic",
+        "instagram_content_publish",
+      ],
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      type: "USER",
+      userId: "meta-user",
+      error: null,
+    });
     mockedMeta.loadMetaWorkspaceConfig.mockReset();
     mockedMeta.resolveSocialPublishTarget.mockReset();
     mockedMeta.publishFacebookImagePost.mockReset();

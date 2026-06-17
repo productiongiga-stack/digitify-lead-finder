@@ -35,6 +35,7 @@ export async function GET(request: Request) {
   const appUrl = resolveOAuthAppUrl(request);
   const redirectUri = `${appUrl}/api/integrations/meta/callback`;
   const state = randomUUID();
+  const reconnect = new URL(request.url).searchParams.get("reconnect") === "1";
 
   const authUrl = new URL(`https://www.facebook.com/${resolveMetaGraphVersion()}/dialog/oauth`);
   authUrl.searchParams.set("client_id", config.appId);
@@ -42,6 +43,9 @@ export async function GET(request: Request) {
   authUrl.searchParams.set("state", state);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("scope", resolveMetaOAuthScopes().join(","));
+  if (reconnect) {
+    authUrl.searchParams.set("auth_type", "rerequest");
+  }
 
   const response = NextResponse.redirect(authUrl);
   response.cookies.set("digitify_meta_oauth_state", state, {

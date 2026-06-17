@@ -1512,7 +1512,11 @@ export function IntegrationsSettingsInner() {
                   </div>
                 </div>
                 {metaConnection.data?.connected ? (
-                  <Badge variant="success"><CheckCircle className="mr-1 h-3 w-3" /> Klaar om te posten</Badge>
+                  metaConnection.data.missingPublishScopes?.length ? (
+                    <Badge variant="warning"><AlertCircle className="mr-1 h-3 w-3" /> Rechten ontbreken</Badge>
+                  ) : (
+                    <Badge variant="success"><CheckCircle className="mr-1 h-3 w-3" /> Klaar om te posten</Badge>
+                  )
                 ) : metaConfigured ? (
                   <Badge variant="secondary"><AlertCircle className="mr-1 h-3 w-3" /> App klaar, nog koppelen</Badge>
                 ) : (
@@ -1521,6 +1525,30 @@ export function IntegrationsSettingsInner() {
               </div>
             </CardHeader>
             <CardContent className="space-y-5 pt-5">
+              {metaConnection.data?.connected && metaConnection.data.missingPublishScopes?.length ? (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-950 dark:text-amber-100">
+                  <p className="font-semibold">Meta publishing-rechten ontbreken op dit token</p>
+                  <p className="mt-2 text-xs leading-relaxed">
+                    Ontbrekend:{" "}
+                    <span className="font-mono">{metaConnection.data.missingPublishScopes.join(", ")}</span>.
+                    {metaConnection.data.grantedTokenScopes?.length ? (
+                      <>
+                        {" "}
+                        Huidig token heeft:{" "}
+                        <span className="font-mono">{metaConnection.data.grantedTokenScopes.join(", ")}</span>.
+                      </>
+                    ) : null}
+                  </p>
+                  <p className="mt-2 text-xs leading-relaxed">
+                    Zet je Meta-app op <strong>Live</strong>, voeg de permissions toe onder{" "}
+                    <strong>Facebook Login for Business</strong>, en klik hieronder op{" "}
+                    <strong>Opnieuw koppelen (rechten)</strong>.
+                  </p>
+                  <Button size="sm" className="mt-3" asChild>
+                    <a href="/api/integrations/meta/connect?reconnect=1">Opnieuw koppelen (rechten)</a>
+                  </Button>
+                </div>
+              ) : null}
               <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
                 <div className="space-y-4">
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -1720,7 +1748,7 @@ export function IntegrationsSettingsInner() {
 
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <Button variant={metaConnection.data?.connected ? "outline" : "default"} size="sm" asChild disabled={!metaConfigured}>
-                  <a href="/api/integrations/meta/connect">
+                  <a href={metaConnection.data?.connected ? "/api/integrations/meta/connect?reconnect=1" : "/api/integrations/meta/connect"}>
                     {metaConnection.data?.connected ? "Opnieuw koppelen" : "Meta koppelen"}
                   </a>
                 </Button>

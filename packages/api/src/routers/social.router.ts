@@ -7,9 +7,12 @@ import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import { probeSocialImage } from "../lib/social-image";
 import {
   clearMetaSettings,
+  fetchMetaTokenDebugInfo,
   loadMetaManagedPages,
   loadMetaWorkspaceConfig,
+  missingMetaPublishScopes,
   resolveMetaOAuthScopeSummary,
+  resolveRequiredMetaPublishScopes,
   resolveSocialPublishTarget,
   type SocialPublishedRef,
   upsertMetaSettings,
@@ -695,6 +698,26 @@ export const socialRouter = router({
       instagramUsername = selectedPage?.instagramUsername || null;
     }
 
+    let grantedTokenScopes: string[] = [];
+    let missingPublishScopes: string[] = [];
+    let tokenValid = false;
+    let tokenDebugError: string | null = null;
+
+    if (config.accessToken && config.appId && config.appSecret) {
+      const debug = await fetchMetaTokenDebugInfo({
+        inputToken: config.accessToken,
+        appId: config.appId,
+        appSecret: config.appSecret,
+      });
+      grantedTokenScopes = debug.scopes;
+      tokenValid = debug.isValid;
+      tokenDebugError = debug.error;
+      missingPublishScopes = missingMetaPublishScopes(
+        debug.scopes,
+        resolveRequiredMetaPublishScopes(["FACEBOOK", "INSTAGRAM"]),
+      );
+    }
+
     return {
       hasAppCredentials: Boolean(config.appId && config.appSecret),
       connected: Boolean(config.pageId && config.pageAccessToken),
@@ -706,6 +729,10 @@ export const socialRouter = router({
       instagramUsername,
       autopostEnabled: config.autopostEnabled,
       tokenExpiresAt: config.tokenExpiresAt || null,
+      grantedTokenScopes,
+      missingPublishScopes,
+      tokenValid,
+      tokenDebugError,
       oauthLoginMode: oauthScopes.loginMode,
       oauthScopeLevel: oauthScopes.scopeLevel,
       oauthScopes: oauthScopes.scopes,

@@ -165,6 +165,84 @@ export function resolveMetaOAuthScopeSummary() {
   };
 }
 
+export function resolveRequiredMetaPublishScopes(targetPlatforms: string[]) {
+  const scopes = new Set<string>(["pages_show_list"]);
+  if (targetPlatforms.includes("FACEBOOK")) {
+    scopes.add("pages_manage_posts");
+  }
+  if (targetPlatforms.includes("INSTAGRAM")) {
+    scopes.add("instagram_basic");
+    scopes.add("instagram_content_publish");
+  }
+  return [...scopes];
+}
+
+export function missingMetaPublishScopes(grantedScopes: string[], requiredScopes: string[]) {
+  const granted = new Set(grantedScopes.map((scope) => scope.trim().toLowerCase()).filter(Boolean));
+  return requiredScopes.filter((scope) => !granted.has(scope.toLowerCase()));
+}
+
+export type MetaTokenDebugInfo = {
+  isValid: boolean;
+  scopes: string[];
+  expiresAt: number | null;
+  type: string | null;
+  userId: string | null;
+  error: string | null;
+};
+
+export async function fetchMetaTokenDebugInfo(params: {
+  inputToken: string;
+  appId: string;
+  appSecret: string;
+}): Promise<MetaTokenDebugInfo> {
+  const inputToken = params.inputToken.trim();
+  if (!inputToken || !params.appId || !params.appSecret) {
+    return { isValid: false, scopes: [], expiresAt: null, type: null, userId: null, error: "Token of app-credentials ontbreken." };
+  }
+
+  try {
+    const response = (await metaGet("debug_token", {
+      input_token: inputToken,
+      access_token: `${params.appId}|${params.appSecret}`,
+    })) as {
+      data?: {
+        is_valid?: boolean;
+        scopes?: string[];
+        expires_at?: number;
+        type?: string;
+        user_id?: string;
+        error?: { message?: string };
+      };
+    };
+
+    const data = response.data;
+    return {
+      isValid: Boolean(data?.is_valid),
+      scopes: Array.isArray(data?.scopes) ? data.scopes.filter(Boolean) : [],
+      expiresAt: typeof data?.expires_at === "number" ? data.expires_at : null,
+      type: data?.type?.trim() || null,
+      userId: data?.user_id?.trim() || null,
+      error: data?.error?.message?.trim() || null,
+    };
+  } catch (error) {
+    return {
+      isValid: false,
+      scopes: [],
+      expiresAt: null,
+      type: null,
+      userId: null,
+      error: error instanceof Error ? error.message : "Meta token kon niet gevalideerd worden.",
+    };
+  }
+}
+
+export function buildMetaPublishScopeError(missingScopes: string[]) {
+  if (!missingScopes.length) return null;
+  const list = missingScopes.join(", ");
+  return `Meta mist publishing-rechten op dit token: ${list}. Ga naar Instellingen → Integraties → Opnieuw koppelen. Controleer in developers.facebook.com dat je app Live staat en ${list} heeft onder Facebook Login for Business.`;
+}
+
 export function resolveAppUrl(request?: Request) {
   return resolveOAuthAppUrl(request);
 }
@@ -234,6 +312,8 @@ type MetaErrorPayload = {
 };
 
 const META_API_ERROR_HINTS: Record<number, string> = {
+  10:
+    "De Meta-app mist publishing-rechten. Voeg pages_manage_posts en instagram_content_publish toe in Meta → Use cases → Facebook Login for Business, zet de app op Live, en koppel Meta opnieuw in Integraties.",
   1885183:
     "Zet je Meta-app op Live: developers.facebook.com → jouw app → App settings → Basic → schakel van Development naar Live.",
   2207009:
