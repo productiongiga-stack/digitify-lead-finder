@@ -14,19 +14,24 @@ describe("settings RBAC matrix", () => {
   });
 
   it("settings.update rejects VIEWER on owner integration keys", async () => {
+    const dbMock = {
+      setting: {
+        findUnique: async () => null,
+        upsert: async () => {
+          throw new Error("should not reach db");
+        },
+        create: async () => {
+          throw new Error("should not reach db");
+        },
+      },
+      activity: { create: async () => ({}) },
+      $transaction: async () => [],
+    };
+
     const caller = settingsRouter.createCaller({
       db: {
-        setting: {
-          findUnique: async () => null,
-          upsert: async () => {
-            throw new Error("should not reach db");
-          },
-          create: async () => {
-            throw new Error("should not reach db");
-          },
-        },
-        activity: { create: async () => ({}) },
-        $transaction: async () => [],
+        ...dbMock,
+        $extends: () => dbMock,
       } as never,
       user: {
         id: "viewer-1",
