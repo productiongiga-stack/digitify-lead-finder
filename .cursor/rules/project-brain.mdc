@@ -1,0 +1,73 @@
+---
+description: Digitify Lead Search project brain — lees AGENTS.md en docs/ voor context
+alwaysApply: true
+---
+
+# Project Brain — Digitify Lead Search
+
+Je werkt in **Digitify Lead Search** (`digitify-lead-search`), een pnpm monorepo voor lead generation, outbound e-mail, CRM, en marketing modules.
+
+## Eerste stap bij elke taak
+
+1. Lees [AGENTS.md](../../AGENTS.md) (repo root)
+2. Raadpleeg [docs/PROJECT_BRAIN.md](../../docs/PROJECT_BRAIN.md) voor architectuur
+3. Zoek feature in [docs/MODULE_MAP.md](../../docs/MODULE_MAP.md)
+4. Check [docs/TODO.md](../../docs/TODO.md) en [docs/DECISIONS.md](../../docs/DECISIONS.md)
+
+## Stack (kort)
+
+- **App:** `apps/web` — Next.js 15, React 19, tRPC client
+- **API:** `packages/api` — tRPC routers + `lib/` business logic
+- **DB:** `packages/db` — Prisma + PostgreSQL + optional RLS
+- **UI:** `@digitify/ui` — shared components
+
+## Kritieke regels
+
+### Tenant / workspace
+- `workspaceId` = **owner user id** (`users.id`), niet `workspaces.id`
+- Tenant-rijen: `createdById = workspaceId`
+- Productie: `ENABLE_WORKSPACE_RLS=true` verplicht
+- Zie `packages/api/src/lib/WORKSPACE.md`
+
+### Code conventies
+- Minimale diff; geen unrelated refactors
+- Business logic in `packages/api/src/lib/`, niet alleen in pages
+- UI copy in **Nederlands**
+- Match bestaande imports, naming, patterns in nabije code
+- **Commit niet** tenzij user expliciet vraagt
+
+### E-mail
+- Nooit auto-send: draft → approval → send
+
+### Waar code staat
+| Taak | Pad |
+|------|-----|
+| tRPC endpoint | `packages/api/src/routers/{feature}.router.ts` → `root.ts` |
+| UI page | `apps/web/src/app/(app)/{feature}/` |
+| Component | `apps/web/src/components/{feature}/` |
+| DB model | `packages/db/prisma/schema.prisma` |
+| Cron | `apps/web/src/app/api/cron/` |
+| Public API | `apps/web/src/app/api/public/` |
+| Nav/modules | `apps/web/src/lib/navigation.ts`, `module-access.ts` |
+
+## Tests vóór afronden
+
+```bash
+pnpm test
+pnpm typecheck
+# Bij DB/RLS: RUN_DB_INTEGRATION=1 ENABLE_WORKSPACE_RLS=true pnpm test:integration
+```
+
+## Documentatie bij significante wijzigingen
+
+Update [docs/AI_CHANGELOG.md](../../docs/AI_CHANGELOG.md).  
+Update [docs/MODULE_MAP.md](../../docs/MODULE_MAP.md) bij nieuwe modules/routers.
+
+## Geen fake info
+
+Documenteer alleen wat in de codebase staat. Bij onzekerheid: `TODO: bevestigen`.
+
+## Bestaande docs (niet dupliceren)
+
+- `README.md`, `DEPLOYMENT.md`, `docs/PHASES.md`, `docs/VERCEL.md`
+- `docs/CREATIVE-STUDIO.md`, `packages/api/src/lib/WORKSPACE.md`
