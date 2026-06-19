@@ -1,5 +1,8 @@
 export type SocialPlacement = "FEED" | "STORY" | "REEL";
+export type SocialPlatform = "FACEBOOK" | "INSTAGRAM";
 export type FeedAspectFormat = "SQUARE" | "PORTRAIT" | "LANDSCAPE";
+export type PlatformFeedFormats = Partial<Record<SocialPlatform, FeedAspectFormat>>;
+export type StoryPublishKind = "IMAGE" | "VIDEO";
 export type SocialCarouselSlideMediaType = "IMAGE" | "VIDEO";
 export type FeedPublishKind = "IMAGE" | "VIDEO" | "CAROUSEL";
 
@@ -32,7 +35,9 @@ export type SocialPlacementsMetadata = {
   postFormat?: string;
   placements?: SocialPlacement[];
   feedFormat?: FeedAspectFormat;
+  feedFormats?: PlatformFeedFormats;
   assets?: Partial<Record<SocialPlacement, SocialPlacementAsset>>;
+  platformAssets?: Partial<Record<SocialPlatform, Partial<Record<SocialPlacement, SocialPlacementAsset>>>>;
   carousel?: SocialCarouselSpec;
 };
 
@@ -58,6 +63,27 @@ export function normalizeFeedFormat(metadata?: SocialPlacementsMetadata | null):
   return "SQUARE";
 }
 
+export function normalizePlatformFeedFormats(
+  metadata?: SocialPlacementsMetadata | null,
+  targetPlatforms?: string[],
+): PlatformFeedFormats {
+  const fallback = normalizeFeedFormat(metadata);
+  const stored = metadata?.feedFormats || {};
+  const formats: PlatformFeedFormats = {
+    FACEBOOK: stored.FACEBOOK || fallback,
+    INSTAGRAM: stored.INSTAGRAM || fallback,
+  };
+  if (!targetPlatforms?.length) return formats;
+  const result: PlatformFeedFormats = {};
+  if (targetPlatforms.includes("FACEBOOK")) result.FACEBOOK = formats.FACEBOOK;
+  if (targetPlatforms.includes("INSTAGRAM")) result.INSTAGRAM = formats.INSTAGRAM;
+  return result;
+}
+
+export function normalizePlatformAssets(metadata?: SocialPlacementsMetadata | null) {
+  return metadata?.platformAssets || {};
+}
+
 export function normalizePlacementAssets(metadata?: SocialPlacementsMetadata | null) {
   const assets = metadata?.assets || {};
   return {
@@ -77,6 +103,30 @@ export function resolvePlacementImageUrl(
   if (fromAsset) return fromAsset;
   if (fallbackImageUrl?.trim()) return fallbackImageUrl.trim();
   return "";
+}
+
+export function resolvePlacementVideoUrl(
+  placement: SocialPlacement,
+  metadata?: SocialPlacementsMetadata | null,
+) {
+  const assets = normalizePlacementAssets(metadata);
+  return assets[placement]?.videoUrl?.trim() || "";
+}
+
+export function resolvePlatformFeedImageUrl(
+  platform: SocialPlatform,
+  metadata?: SocialPlacementsMetadata | null,
+  fallbackImageUrl?: string,
+) {
+  const fromPlatform = metadata?.platformAssets?.[platform]?.FEED?.imageUrl?.trim();
+  if (fromPlatform) return fromPlatform;
+  return resolvePlacementImageUrl("FEED", metadata, fallbackImageUrl);
+}
+
+export function resolveStoryPublishKind(metadata?: SocialPlacementsMetadata | null): StoryPublishKind {
+  const videoUrl = resolvePlacementVideoUrl("STORY", metadata);
+  if (videoUrl) return "VIDEO";
+  return "IMAGE";
 }
 
 export function normalizeCarouselMetadata(metadata?: SocialPlacementsMetadata | null): SocialCarouselSpec {

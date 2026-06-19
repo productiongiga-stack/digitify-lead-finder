@@ -10,6 +10,7 @@ import {
   fetchMetaTokenDebugInfo,
   loadMetaManagedPages,
   loadMetaWorkspaceConfig,
+  missingMetaGranularTargetScopes,
   missingMetaPublishScopes,
   resolveMetaOAuthScopeSummary,
   resolveRequiredMetaPublishScopes,
@@ -32,6 +33,7 @@ import { findWorkspaceRecord } from "../lib/workspace-record";
 import {
   createSocialActivity,
   finalizePublishedPost,
+  hasCompletedExternalPublish,
   hasPublishedExternally,
   normalizeSocialMetadata,
   parseStoredExternalIds,
@@ -74,15 +76,17 @@ function ensureSchedulableStatus(status: string) {
   }
 }
 
-async function resolvePostPublishTarget(
+async function preparePostForPublishValidation(
   db: PrismaClient,
   scope: { workspaceId: string; memberId: string },
-  metadata?: unknown,
+  row: SocialPostRecord,
 ) {
   const config = await loadMetaWorkspaceConfig(db, scope);
-  const normalized = normalizeSocialMetadata((metadata || undefined) as z.infer<typeof socialPostMetadataSchema>);
+  const normalized = normalizeSocialMetadata((row.metadata || undefined) as z.infer<typeof socialPostMetadataSchema>);
+  let publishTarget: Awaited<ReturnType<typeof resolveSocialPublishTarget>>;
+
   try {
-    return await resolveSocialPublishTarget({
+    publishTarget = await resolveSocialPublishTarget({
       config,
       publisherPageId: normalized.publisherPageId,
     });
@@ -92,6 +96,12 @@ async function resolvePostPublishTarget(
       message: error instanceof Error ? error.message : "Publicatie-account kon niet worden opgelost.",
     });
   }
+
+  await prepareAndValidatePostForPublish(db, row, scope, publishTarget, {
+    accessToken: config.accessToken,
+    appId: config.appId,
+    appSecret: config.appSecret,
+  });
 }
 
 async function renderCaptionSuggestion(
@@ -425,8 +435,7 @@ export const socialRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "Deze post kan niet ter goedkeuring worden aangeboden." });
       }
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
-      const publishTarget = await resolvePostPublishTarget(ctx.db, scope, row.metadata);
-      await prepareAndValidatePostForPublish(ctx.db, row, scope, publishTarget);
+      await preparePostForPublishValidation(ctx.db, scope, row);
 
       const updated = await ctx.db.socialPost.update({
         where: { id: input.id },
@@ -475,8 +484,7 @@ export const socialRouter = router({
 
       ensureSchedulableStatus(row.status);
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
-      const publishTarget = await resolvePostPublishTarget(ctx.db, scope, row.metadata);
-      await prepareAndValidatePostForPublish(ctx.db, row, scope, publishTarget);
+      await preparePostForPublishValidation(ctx.db, scope, row);
 
       const updated = await ctx.db.socialPost.update({
         where: { id: input.id },
@@ -547,8 +555,9 @@ export const socialRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen FAILED posts kunnen opnieuw ingepland worden." });
       }
 
-      if (hasPublishedExternally(parseStoredExternalIds(row.externalPostIds))) {
-        return finalizePublishedPost(ctx.db, row, parseStoredExternalIds(row.externalPostIds));
+      const externalIds = parseStoredExternalIds(row.externalPostIds);
+      if (hasCompletedExternalPublish(row, externalIds)) {
+        return finalizePublishedPost(ctx.db, row, externalIds);
       }
 
       return ctx.db.socialPost.update({
@@ -690,18 +699,23 @@ export const socialRouter = router({
     let pageName: string | null = null;
     let instagramUsername: string | null = null;
     let pages: Awaited<ReturnType<typeof loadMetaManagedPages>> = [];
+    let selectedPageTasks: string[] = [];
 
     if (config.accessToken) {
       pages = await loadMetaManagedPages(config.accessToken).catch(() => []);
       const selectedPage = config.pageId ? pages.find((page) => page.id === config.pageId) : null;
       pageName = selectedPage?.name || null;
       instagramUsername = selectedPage?.instagramUsername || null;
+      selectedPageTasks = selectedPage?.tasks || [];
     }
 
     let grantedTokenScopes: string[] = [];
     let missingPublishScopes: string[] = [];
+    let missingGranularPublishScopes: string[] = [];
     let tokenValid = false;
     let tokenDebugError: string | null = null;
+    let tokenAppId: string | null = null;
+    let tokenApplication: string | null = null;
 
     if (config.accessToken && config.appId && config.appSecret) {
       const debug = await fetchMetaTokenDebugInfo({
@@ -712,10 +726,24 @@ export const socialRouter = router({
       grantedTokenScopes = debug.scopes;
       tokenValid = debug.isValid;
       tokenDebugError = debug.error;
+      tokenAppId = debug.appId;
+      tokenApplication = debug.application;
       missingPublishScopes = missingMetaPublishScopes(
         debug.scopes,
         resolveRequiredMetaPublishScopes(["FACEBOOK", "INSTAGRAM"]),
       );
+      missingGranularPublishScopes = [
+        ...(config.pageId
+          ? missingMetaGranularTargetScopes(debug.granularScopes, ["pages_manage_posts"], config.pageId)
+          : []),
+        ...(config.instagramBusinessId
+          ? missingMetaGranularTargetScopes(
+              debug.granularScopes,
+              ["instagram_content_publish"],
+              config.instagramBusinessId,
+            )
+          : []),
+      ];
     }
 
     return {
@@ -725,14 +753,18 @@ export const socialRouter = router({
       pageName,
       pages,
       selectedPageId: config.pageId || null,
+      selectedPageTasks,
       instagramBusinessId: config.instagramBusinessId || null,
       instagramUsername,
       autopostEnabled: config.autopostEnabled,
       tokenExpiresAt: config.tokenExpiresAt || null,
       grantedTokenScopes,
       missingPublishScopes,
+      missingGranularPublishScopes,
       tokenValid,
       tokenDebugError,
+      tokenAppId,
+      tokenApplication,
       oauthLoginMode: oauthScopes.loginMode,
       oauthScopeLevel: oauthScopes.scopeLevel,
       oauthScopes: oauthScopes.scopes,
@@ -769,8 +801,9 @@ export const socialRouter = router({
         });
       }
 
-      if (hasPublishedExternally(parseStoredExternalIds(row.externalPostIds))) {
-        return finalizePublishedPost(ctx.db, row, parseStoredExternalIds(row.externalPostIds));
+      const externalIds = parseStoredExternalIds(row.externalPostIds);
+      if (hasCompletedExternalPublish(row, externalIds)) {
+        return finalizePublishedPost(ctx.db, row, externalIds);
       }
 
       if (!["SCHEDULED", "FAILED"].includes(row.status)) {
@@ -838,6 +871,7 @@ export const socialRouter = router({
         config,
         publisherPageId: metadata.publisherPageId,
       });
+      const instagramAccessToken = config.accessToken || publishTarget.pageAccessToken;
 
       const externalPostIds = (row.externalPostIds || {}) as Record<string, SocialPublishedRef | string>;
       const links: Array<{ key: string; url: string; verified: boolean }> = [];
@@ -864,7 +898,7 @@ export const socialRouter = router({
           } else if (key.startsWith("instagram")) {
             const verified = await verifyInstagramPublishedMedia({
               mediaId: ref.id,
-              pageAccessToken: publishTarget.pageAccessToken,
+              pageAccessToken: instagramAccessToken,
             });
             links.push({
               key,

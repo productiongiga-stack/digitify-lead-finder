@@ -2,10 +2,13 @@ import {
   normalizeCarousel,
   normalizeFeedFormat,
   normalizePlacementAssets,
+  normalizePlatformFeedFormats,
   normalizePlacements,
   resolveFeedPublishKind,
   resolvePrimaryImageUrl,
+  type FeedAspectFormat,
   type SocialPlacementsMetadata,
+  type SocialPlatform,
 } from "./social-placements";
 import { prepareSocialImageUrlForPublish } from "./social-image-crop";
 import type { SocialImageTargetPlacement } from "./social-image-targets";
@@ -20,23 +23,25 @@ export async function prepareSocialPostAssetsForPublish(input: {
   const metadata: SocialPlacementsMetadata = { ...(input.metadata || {}) };
   const placements = normalizePlacements(metadata);
   const feedFormat = normalizeFeedFormat(metadata);
+  const platformFeedFormats = normalizePlatformFeedFormats(metadata, input.targetPlatforms);
   const assets = normalizePlacementAssets(metadata);
+  const platformAssets = { ...(metadata.platformAssets || {}) };
   const feedImageUrl = assets.FEED?.imageUrl?.trim() || "";
   let changed = false;
 
   async function preparePlacementImage(
     placement: SocialImageTargetPlacement,
     imageUrl: string,
-    forceCrop = false,
+    options: { forceCrop?: boolean; feedFormat?: FeedAspectFormat } = {},
   ) {
     const prepared = await prepareSocialImageUrlForPublish({
       imageUrl,
       placement,
-      feedFormat,
+      feedFormat: options.feedFormat || feedFormat,
       targetPlatforms: input.targetPlatforms,
       workspaceId: input.workspaceId,
       userId: input.userId,
-      forceCrop,
+      forceCrop: options.forceCrop,
     });
     if (prepared.cropped || prepared.imageUrl !== imageUrl) changed = true;
     return prepared.imageUrl;
@@ -45,10 +50,40 @@ export async function prepareSocialPostAssetsForPublish(input: {
   if (placements.includes("FEED") && resolveFeedPublishKind(metadata) === "IMAGE") {
     const imageUrl = assets.FEED?.imageUrl?.trim();
     if (imageUrl) {
-      assets.FEED = {
-        ...assets.FEED,
-        imageUrl: await preparePlacementImage("FEED", imageUrl),
-      };
+      const facebookFormat = platformFeedFormats.FACEBOOK;
+      const instagramFormat = platformFeedFormats.INSTAGRAM;
+      const needsSplitCrop =
+        input.targetPlatforms.includes("FACEBOOK") &&
+        input.targetPlatforms.includes("INSTAGRAM") &&
+        facebookFormat &&
+        instagramFormat &&
+        facebookFormat !== instagramFormat;
+
+      if (needsSplitCrop) {
+        if (input.targetPlatforms.includes("FACEBOOK")) {
+          platformAssets.FACEBOOK = {
+            ...(platformAssets.FACEBOOK || {}),
+            FEED: {
+              ...(platformAssets.FACEBOOK?.FEED || {}),
+              imageUrl: await preparePlacementImage("FEED", imageUrl, { feedFormat: facebookFormat }),
+            },
+          };
+        }
+        if (input.targetPlatforms.includes("INSTAGRAM")) {
+          platformAssets.INSTAGRAM = {
+            ...(platformAssets.INSTAGRAM || {}),
+            FEED: {
+              ...(platformAssets.INSTAGRAM?.FEED || {}),
+              imageUrl: await preparePlacementImage("FEED", imageUrl, { feedFormat: instagramFormat }),
+            },
+          };
+        }
+      } else {
+        assets.FEED = {
+          ...assets.FEED,
+          imageUrl: await preparePlacementImage("FEED", imageUrl),
+        };
+      }
     }
   }
 
@@ -59,7 +94,7 @@ export async function prepareSocialPostAssetsForPublish(input: {
       const sameAsFeed = Boolean(feedImageUrl && sourceUrl === feedImageUrl);
       assets.STORY = {
         ...assets.STORY,
-        imageUrl: await preparePlacementImage("STORY", sourceUrl, sameAsFeed),
+        imageUrl: await preparePlacementImage("STORY", sourceUrl, { forceCrop: sameAsFeed }),
       };
     }
   }
@@ -89,6 +124,12 @@ export async function prepareSocialPostAssetsForPublish(input: {
   }
 
   metadata.assets = assets;
+  if (Object.keys(platformAssets).length) {
+    metadata.platformAssets = platformAssets as Partial<
+      Record<SocialPlatform, Partial<Record<"FEED" | "STORY" | "REEL", { imageUrl?: string; videoUrl?: string }>>>
+    >;
+    changed = true;
+  }
   const nextImageUrl = resolvePrimaryImageUrl(metadata, input.imageUrl.trim());
 
   return {

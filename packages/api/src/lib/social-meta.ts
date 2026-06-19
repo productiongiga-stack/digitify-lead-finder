@@ -185,9 +185,12 @@ export function missingMetaPublishScopes(grantedScopes: string[], requiredScopes
 export type MetaTokenDebugInfo = {
   isValid: boolean;
   scopes: string[];
+  granularScopes: Array<{ scope: string; targetIds: string[] }>;
   expiresAt: number | null;
   type: string | null;
   userId: string | null;
+  appId: string | null;
+  application: string | null;
   error: string | null;
 };
 
@@ -198,7 +201,17 @@ export async function fetchMetaTokenDebugInfo(params: {
 }): Promise<MetaTokenDebugInfo> {
   const inputToken = params.inputToken.trim();
   if (!inputToken || !params.appId || !params.appSecret) {
-    return { isValid: false, scopes: [], expiresAt: null, type: null, userId: null, error: "Token of app-credentials ontbreken." };
+    return {
+      isValid: false,
+      scopes: [],
+      granularScopes: [],
+      expiresAt: null,
+      type: null,
+      userId: null,
+      appId: null,
+      application: null,
+      error: "Token of app-credentials ontbreken.",
+    };
   }
 
   try {
@@ -209,9 +222,12 @@ export async function fetchMetaTokenDebugInfo(params: {
       data?: {
         is_valid?: boolean;
         scopes?: string[];
+        granular_scopes?: Array<{ scope?: string; target_ids?: string[] }>;
         expires_at?: number;
         type?: string;
         user_id?: string;
+        app_id?: string;
+        application?: string;
         error?: { message?: string };
       };
     };
@@ -220,27 +236,61 @@ export async function fetchMetaTokenDebugInfo(params: {
     return {
       isValid: Boolean(data?.is_valid),
       scopes: Array.isArray(data?.scopes) ? data.scopes.filter(Boolean) : [],
+      granularScopes: Array.isArray(data?.granular_scopes)
+        ? data.granular_scopes
+            .map((scope) => ({
+              scope: scope.scope?.trim() || "",
+              targetIds: Array.isArray(scope.target_ids) ? scope.target_ids.map((id) => id.trim()).filter(Boolean) : [],
+            }))
+            .filter((scope) => Boolean(scope.scope))
+        : [],
       expiresAt: typeof data?.expires_at === "number" ? data.expires_at : null,
       type: data?.type?.trim() || null,
       userId: data?.user_id?.trim() || null,
+      appId: data?.app_id?.trim() || null,
+      application: data?.application?.trim() || null,
       error: data?.error?.message?.trim() || null,
     };
   } catch (error) {
     return {
       isValid: false,
       scopes: [],
+      granularScopes: [],
       expiresAt: null,
       type: null,
       userId: null,
+      appId: null,
+      application: null,
       error: error instanceof Error ? error.message : "Meta token kon niet gevalideerd worden.",
     };
   }
+}
+
+export function missingMetaGranularTargetScopes(
+  granularScopes: MetaTokenDebugInfo["granularScopes"],
+  requiredScopes: string[],
+  targetId: string,
+) {
+  const normalizedTargetId = targetId.trim();
+  if (!normalizedTargetId || !granularScopes.length) return [];
+
+  return requiredScopes.filter((requiredScope) => {
+    const entry = granularScopes.find((scope) => scope.scope.toLowerCase() === requiredScope.toLowerCase());
+    if (!entry?.targetIds.length) return false;
+    return !entry.targetIds.includes(normalizedTargetId);
+  });
 }
 
 export function buildMetaPublishScopeError(missingScopes: string[]) {
   if (!missingScopes.length) return null;
   const list = missingScopes.join(", ");
   return `Meta mist publishing-rechten op dit token: ${list}. Ga naar Instellingen → Integraties → Opnieuw koppelen. Controleer in developers.facebook.com dat je app Live staat en ${list} heeft onder Facebook Login for Business.`;
+}
+
+export function buildMetaGranularScopeError(missingScopes: string[], targetLabel: string) {
+  if (!missingScopes.length) return null;
+  const list = missingScopes.join(", ");
+  return `Meta heeft ${list} wel op de tokenfamilie staan, maar niet voor ${targetLabel}. Koppel Meta opnieuw en vink de juiste Facebook-pagina/Instagram-account aan in het rechtenvenster.`;
 }
 
 export function resolveAppUrl(request?: Request) {
@@ -312,10 +362,20 @@ type MetaErrorPayload = {
 };
 
 const META_API_ERROR_HINTS: Record<number, string> = {
+  100:
+    "Meta accepteerde een parameter of object niet. Controleer vooral of de media-URL publiek bereikbaar is en bij de gekozen Page/Instagram Business-account hoort.",
   10:
     "De Meta-app mist publishing-rechten. Voeg pages_manage_posts en instagram_content_publish toe in Meta → Use cases → Facebook Login for Business, zet de app op Live, en koppel Meta opnieuw in Integraties.",
+  190:
+    "Meta access token is ongeldig of verlopen. Koppel Meta opnieuw via Integraties zodat user- en page-token vernieuwd worden.",
+  200:
+    "Meta weigert deze actie door ontbrekende rechten op de Page of Instagram Business-account. Controleer Page access, app mode en App Review-permissies.",
+  9004:
+    "Instagram kon de media niet ophalen of verwerken. Upload de media naar Vercel Blob of gebruik een direct publiek bereikbare HTTPS-URL.",
   1885183:
     "Zet je Meta-app op Live: developers.facebook.com → jouw app → App settings → Basic → schakel van Development naar Live.",
+  2207052:
+    "Instagram kon de media-URL niet downloaden. Gebruik een publieke HTTPS-URL zonder login, redirects of tijdelijke lokale link.",
   2207009:
     "Afbeeldingsverhouding ongeldig voor Instagram. Gebruik een publieke JPG/PNG/WebP tussen 4:5 en 1.91:1, bijvoorbeeld 1080x1080 of 1080x1350.",
   33:
@@ -428,6 +488,7 @@ export type MetaManagedPage = {
   accessToken: string;
   instagramBusinessId: string;
   instagramUsername: string;
+  tasks: string[];
 };
 
 type MetaAccountsListItem = {
@@ -435,6 +496,7 @@ type MetaAccountsListItem = {
   name?: string;
   access_token?: string;
   instagram_business_account?: { id?: string; username?: string };
+  tasks?: string[];
 };
 
 type MetaCollectionResponse<T> = {
@@ -453,6 +515,7 @@ function mapMetaAccountsListItem(item: MetaAccountsListItem): MetaManagedPage | 
     accessToken: item.access_token.trim(),
     instagramBusinessId: item.instagram_business_account?.id?.trim() || "",
     instagramUsername: item.instagram_business_account?.username?.trim() || "",
+    tasks: Array.isArray(item.tasks) ? item.tasks.map((task) => task.trim()).filter(Boolean) : [],
   };
 }
 
@@ -518,7 +581,7 @@ async function enrichManagedPagesInstagram(pages: MetaManagedPage[]) {
 
 export async function loadMetaManagedPages(userAccessToken: string): Promise<MetaManagedPage[]> {
   const rows = await metaGetCollection<MetaAccountsListItem>("me/accounts", {
-    fields: "id,name,access_token,instagram_business_account{id,username}",
+    fields: "id,name,access_token,tasks,instagram_business_account{id,username}",
     access_token: userAccessToken,
     limit: "100",
   });
@@ -541,6 +604,7 @@ export type SocialPublishTarget = {
   pageName: string;
   instagramBusinessId: string;
   instagramUsername: string;
+  pageTasks: string[];
 };
 
 export async function resolveSocialPublishTarget(params: {
@@ -552,6 +616,23 @@ export async function resolveSocialPublishTarget(params: {
     throw new Error("Geen Facebook-pagina geselecteerd. Kies een account in de Social Planner.");
   }
 
+  let page: MetaManagedPage | undefined;
+  if (params.config.accessToken) {
+    const pages = await loadMetaManagedPages(params.config.accessToken);
+    page = pages.find((item) => item.id === requestedPageId);
+  }
+
+  if (page) {
+    return {
+      pageId: page.id,
+      pageAccessToken: page.accessToken,
+      pageName: page.name,
+      instagramBusinessId: page.instagramBusinessId,
+      instagramUsername: page.instagramUsername,
+      pageTasks: page.tasks,
+    };
+  }
+
   if (requestedPageId === params.config.pageId?.trim() && params.config.pageAccessToken) {
     return {
       pageId: params.config.pageId,
@@ -559,6 +640,7 @@ export async function resolveSocialPublishTarget(params: {
       pageName: "",
       instagramBusinessId: params.config.instagramBusinessId,
       instagramUsername: "",
+      pageTasks: [],
     };
   }
 
@@ -566,19 +648,7 @@ export async function resolveSocialPublishTarget(params: {
     throw new Error("Meta access token ontbreekt. Koppel Meta opnieuw via Integraties.");
   }
 
-  const pages = await loadMetaManagedPages(params.config.accessToken);
-  const page = pages.find((item) => item.id === requestedPageId);
-  if (!page) {
-    throw new Error("Geselecteerde Facebook-pagina is niet meer beschikbaar. Kies een ander account.");
-  }
-
-  return {
-    pageId: page.id,
-    pageAccessToken: page.accessToken,
-    pageName: page.name,
-    instagramBusinessId: page.instagramBusinessId,
-    instagramUsername: page.instagramUsername,
-  };
+  throw new Error("Geselecteerde Facebook-pagina is niet meer beschikbaar. Kies een ander account.");
 }
 
 export type SocialPublishedRef = {
@@ -773,6 +843,68 @@ export async function publishInstagramImageStory(params: {
   if (!mediaId) throw new Error("Instagram Story gaf geen media-ID terug na publicatie.");
 
   return verifyInstagramPublishedMedia({ mediaId, pageAccessToken: params.pageAccessToken });
+}
+
+export async function publishInstagramVideoStory(params: {
+  instagramBusinessId: string;
+  pageAccessToken: string;
+  videoUrl: string;
+}): Promise<SocialPublishedRef> {
+  const created = (await metaPost(`${params.instagramBusinessId}/media`, {
+    access_token: params.pageAccessToken,
+    video_url: params.videoUrl,
+    media_type: "STORIES",
+  })) as { id?: string };
+
+  if (!created.id) throw new Error("Instagram Story video container kon niet worden aangemaakt.");
+
+  await waitForInstagramMediaContainer({
+    containerId: created.id,
+    pageAccessToken: params.pageAccessToken,
+  });
+
+  const published = (await metaPost(`${params.instagramBusinessId}/media_publish`, {
+    access_token: params.pageAccessToken,
+    creation_id: created.id,
+  })) as { id?: string };
+
+  const mediaId = published.id || "";
+  if (!mediaId) throw new Error("Instagram Story video gaf geen media-ID terug na publicatie.");
+
+  return verifyInstagramPublishedMedia({ mediaId, pageAccessToken: params.pageAccessToken });
+}
+
+export async function publishFacebookVideoStory(params: {
+  pageId: string;
+  pageAccessToken: string;
+  videoUrl: string;
+}): Promise<SocialPublishedRef> {
+  const uploaded = (await metaPost(`${params.pageId}/videos`, {
+    access_token: params.pageAccessToken,
+    file_url: params.videoUrl,
+    published: "false",
+  })) as { id?: string };
+
+  const videoId = uploaded.id?.trim() || "";
+  if (!videoId) {
+    throw new Error("Facebook Story video kon niet worden geüpload.");
+  }
+
+  const response = (await metaPost(`${params.pageId}/video_stories`, {
+    access_token: params.pageAccessToken,
+    video_id: videoId,
+  })) as { post_id?: string; id?: string; success?: boolean };
+
+  const postId = response.post_id || response.id || "";
+  if (!postId && !response.success) {
+    throw new Error("Facebook Story video publicatie mislukt (geen post-ID).");
+  }
+
+  if (postId) {
+    return verifyFacebookPublishedPost({ postId, pageAccessToken: params.pageAccessToken });
+  }
+
+  return { id: videoId, verified: Boolean(response.success) };
 }
 
 export type SocialCarouselPublishSlide = {

@@ -103,6 +103,7 @@ describe("resolvePageInstagramLink", () => {
       accessToken: "token_1",
       instagramBusinessId: "ig_1",
       instagramUsername: "digitify.be",
+      tasks: ["CREATE_CONTENT"],
     };
 
     await expect(resolvePageInstagramLink(page)).resolves.toEqual(page);

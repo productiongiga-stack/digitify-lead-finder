@@ -84,14 +84,16 @@ export function buildPreviewSlides(input: {
 
   if (input.placements.includes("STORY")) {
     const imageUrl = input.assets.STORY?.imageUrl?.trim() || "";
+    const videoUrl = input.assets.STORY?.videoUrl?.trim() || "";
     slides.push({
       id: "story",
       placement: "STORY",
       label: "Story",
-      description: "9:16 · FB + IG Stories",
+      description: videoUrl && !imageUrl ? "9:16 video · FB + IG Stories" : "9:16 · FB + IG Stories",
       format: "STORY",
       imageUrl,
-      hasMedia: Boolean(imageUrl),
+      videoUrl: videoUrl && !imageUrl ? videoUrl : undefined,
+      hasMedia: Boolean(imageUrl || videoUrl),
     });
   }
 

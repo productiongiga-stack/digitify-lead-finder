@@ -17,7 +17,9 @@ import {
 import { SocialComposerSection } from "./social-composer-section";
 
 export type SocialPlacement = "FEED" | "STORY" | "REEL";
+export type SocialPlatform = "FACEBOOK" | "INSTAGRAM";
 export type FeedAspectFormat = "SQUARE" | "PORTRAIT" | "LANDSCAPE";
+export type PlatformFeedFormats = Partial<Record<SocialPlatform, FeedAspectFormat>>;
 
 export type PlacementAssets = Partial<
   Record<SocialPlacement, { imageUrl?: string; videoUrl?: string }>
@@ -44,6 +46,78 @@ const FEED_FORMAT_OPTIONS: Array<{
   { value: "PORTRAIT", label: "Staand", ratio: "4:5", className: "aspect-[4/5]" },
   { value: "LANDSCAPE", label: "Liggend", ratio: "1.91:1", className: "aspect-[1.91/1]" },
 ];
+
+const FACEBOOK_FEED_FORMAT_OPTIONS = FEED_FORMAT_OPTIONS.filter((option) => option.value !== "PORTRAIT");
+const INSTAGRAM_FEED_FORMAT_OPTIONS = FEED_FORMAT_OPTIONS.filter((option) => option.value !== "LANDSCAPE");
+
+function PlatformFormatPanel({
+  platform,
+  placements,
+  feedFormat,
+  disabled,
+  onFeedFormatChange,
+}: {
+  platform: SocialPlatform;
+  placements: SocialPlacement[];
+  feedFormat: FeedAspectFormat;
+  disabled?: boolean;
+  onFeedFormatChange: (format: FeedAspectFormat) => void;
+}) {
+  const isFacebook = platform === "FACEBOOK";
+  const options = isFacebook ? FACEBOOK_FEED_FORMAT_OPTIONS : INSTAGRAM_FEED_FORMAT_OPTIONS;
+  const placementLabels = [
+    placements.includes("FEED") ? "Feed-post" : null,
+    placements.includes("STORY") ? "Story (9:16)" : null,
+    placements.includes("REEL") && !isFacebook ? "Reel (9:16)" : null,
+  ].filter(Boolean);
+
+  if (!placementLabels.length) return null;
+
+  return (
+    <div
+      className={cn(
+        "space-y-3 rounded-2xl border p-4",
+        isFacebook
+          ? "border-blue-200/70 bg-blue-50/40 dark:border-blue-900/50 dark:bg-blue-950/20"
+          : "border-fuchsia-200/70 bg-fuchsia-50/40 dark:border-fuchsia-900/50 dark:bg-fuchsia-950/20",
+      )}
+    >
+      <div className="space-y-1">
+        <p className="text-sm font-semibold">{isFacebook ? "Facebook" : "Instagram"}</p>
+        <p className="text-xs text-muted-foreground">
+          {placementLabels.join(" · ")}
+          {isFacebook ? " · feed werkt het best in 1:1 of liggend" : " · feed werkt het best in 4:5 of vierkant"}
+        </p>
+      </div>
+
+      {placements.includes("FEED") ? (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">Feed-formaat</p>
+          <div className="inline-flex flex-wrap gap-1.5 rounded-lg border bg-background/70 p-1">
+            {options.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                disabled={disabled}
+                onClick={() => onFeedFormatChange(option.value)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-xs font-medium transition",
+                  feedFormat === option.value
+                    ? isFacebook
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "bg-fuchsia-600 text-white shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {option.label} <span className="opacity-70">({option.ratio})</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function formatRatio(value: number) {
   return `${value.toFixed(2)}:1`;
@@ -331,12 +405,15 @@ function PlacementMediaEditor({
   const [debouncedImageUrl, setDebouncedImageUrl] = useState("");
   const imageUrl = asset?.imageUrl?.trim() || "";
   const videoUrl = asset?.videoUrl?.trim() || "";
-  const [feedMode, setFeedMode] = useState<FeedMediaMode>(() =>
-    placement === "FEED" && videoUrl && !imageUrl ? "video" : "photo",
-  );
+  const [feedMode, setFeedMode] = useState<FeedMediaMode>(() => {
+    if (placement === "REEL" || ((placement === "FEED" || placement === "STORY") && videoUrl && !imageUrl)) {
+      return "video";
+    }
+    return "photo";
+  });
 
   useEffect(() => {
-    if (placement !== "FEED") return;
+    if (placement !== "FEED" && placement !== "STORY") return;
     if (videoUrl && !imageUrl) setFeedMode("video");
     else if (imageUrl && !videoUrl) setFeedMode("photo");
   }, [imageUrl, placement, videoUrl]);
@@ -482,39 +559,53 @@ function PlacementMediaEditor({
       : "aspect-[9/16]";
 
   const cropLabel = describePlacementCrop(placement, feedFormat);
-  const showFeedModeToggle = placement === "FEED";
+  const showModeToggle = placement === "FEED" || placement === "STORY";
   const showReelVideo = placement === "REEL";
-  const showImageUpload = placement === "STORY" || placement === "REEL" || (placement === "FEED" && feedMode === "photo");
-  const showVideoUpload = showReelVideo || (placement === "FEED" && feedMode === "video");
+  const showImageUpload =
+    placement === "REEL" || ((placement === "FEED" || placement === "STORY") && feedMode === "photo");
+  const showVideoUpload =
+    showReelVideo || ((placement === "FEED" || placement === "STORY") && feedMode === "video");
 
   const imageEmptyTitle =
-    placement === "REEL" ? "Cover toevoegen" : placement === "STORY" ? "Story-foto toevoegen" : "Feed-foto toevoegen";
+    placement === "REEL"
+      ? "Cover toevoegen"
+      : placement === "STORY"
+        ? "Story-foto toevoegen"
+        : "Feed-foto toevoegen";
   const imageEmptyHint = `Sleep een bestand of klik · ${cropLabel} · JPG, PNG, WebP`;
-  const videoEmptyTitle = placement === "REEL" ? "Reel-video toevoegen" : "Feed-video toevoegen";
-  const videoEmptyHint = "Sleep een MP4/MOV of klik om te uploaden";
+  const videoEmptyTitle =
+    placement === "REEL" ? "Reel-video toevoegen" : placement === "STORY" ? "Story-video toevoegen" : "Feed-video toevoegen";
+  const videoEmptyHint =
+    placement === "STORY"
+      ? "Verticale 9:16 MP4/MOV · sleep of klik om te uploaden"
+      : "Sleep een MP4/MOV of klik om te uploaden";
 
   return (
     <div className="space-y-4 rounded-xl border bg-muted/10 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <p className="text-sm font-medium text-foreground">
-            {placement === "FEED" ? "Feed-media" : placement === "STORY" ? "Story-beeld" : "Reel-media"}
+            {placement === "FEED" ? "Feed-media" : placement === "STORY" ? "Story-media" : "Reel-media"}
           </p>
           {!compactHeader ? (
             <p className="text-xs text-muted-foreground">
               {placement === "FEED"
                 ? "Kies foto of video. Verkeerde verhouding? Wij knippen automatisch bij."
                 : placement === "STORY"
-                  ? "Verticaal 9:16 — ook vierkante uploads worden automatisch bijgeknipt."
+                  ? "Kies een verticale foto of video (9:16). Vierkante uploads worden automatisch bijgeknipt."
                   : "Upload je reel-video. Cover is optioneel."}
             </p>
           ) : null}
         </div>
-        {showFeedModeToggle ? (
+        {showModeToggle ? (
           <FeedMediaModeToggle
             mode={feedMode}
             disabled={disabled}
-            onChange={setFeedMode}
+            onChange={(mode) => {
+              setFeedMode(mode);
+              if (mode === "video") onImageChange("");
+              else onVideoChange?.("");
+            }}
           />
         ) : null}
         {placement === "STORY" || (placement === "FEED" && feedMode === "photo") ? (
@@ -547,7 +638,7 @@ function PlacementMediaEditor({
           <MediaDropZone
             mediaUrl={videoUrl}
             mediaKind="video"
-            aspectClass={placement === "REEL" ? "aspect-[9/16]" : "aspect-video"}
+            aspectClass={placement === "REEL" || placement === "STORY" ? "aspect-[9/16]" : "aspect-video"}
             disabled={disabled}
             uploading={uploading === "video"}
             emptyTitle={videoEmptyTitle}
@@ -664,23 +755,29 @@ function feedSectionDescription(carousel: SocialCarouselState, assets: Placement
 export function SocialPlacementEditor({
   placements,
   feedFormat,
+  feedFormats,
   assets,
   carousel,
   disabled,
+  targetFacebook,
   targetInstagram,
   onPlacementsChange,
   onFeedFormatChange,
+  onFeedFormatsChange,
   onAssetsChange,
   onCarouselChange,
 }: {
   placements: SocialPlacement[];
   feedFormat: FeedAspectFormat;
+  feedFormats?: PlatformFeedFormats;
   assets: PlacementAssets;
   carousel: SocialCarouselState;
   disabled?: boolean;
+  targetFacebook: boolean;
   targetInstagram: boolean;
   onPlacementsChange: (placements: SocialPlacement[]) => void;
   onFeedFormatChange: (format: FeedAspectFormat) => void;
+  onFeedFormatsChange?: (formats: PlatformFeedFormats) => void;
   onAssetsChange: (assets: PlacementAssets) => void;
   onCarouselChange: (carousel: SocialCarouselState) => void;
 }) {
@@ -740,7 +837,21 @@ export function SocialPlacementEditor({
   const openPlacement = primaryPlacementForOpen(placements);
   const feedBadge = carousel.enabled ? "Carousel" : FEED_FORMAT_OPTIONS.find((f) => f.value === feedFormat)?.ratio;
   const storyImage = assets.STORY?.imageUrl?.trim();
+  const storyVideo = assets.STORY?.videoUrl?.trim();
   const reelVideo = assets.REEL?.videoUrl?.trim();
+  const resolvedFeedFormats: PlatformFeedFormats = {
+    FACEBOOK: feedFormats?.FACEBOOK || feedFormat,
+    INSTAGRAM: feedFormats?.INSTAGRAM || feedFormat,
+  };
+  const showPlatformPanels = (targetFacebook || targetInstagram) && placements.includes("FEED");
+
+  function updatePlatformFeedFormat(platform: SocialPlatform, format: FeedAspectFormat) {
+    if (onFeedFormatsChange) {
+      onFeedFormatsChange({ ...resolvedFeedFormats, [platform]: format });
+      return;
+    }
+    onFeedFormatChange(format);
+  }
 
   return (
     <div className="space-y-4 md:col-span-2">
@@ -775,6 +886,29 @@ export function SocialPlacementEditor({
         ) : null}
       </div>
 
+      {showPlatformPanels ? (
+        <div className={cn("grid gap-4", targetFacebook && targetInstagram ? "lg:grid-cols-2" : "grid-cols-1")}>
+          {targetFacebook ? (
+            <PlatformFormatPanel
+              platform="FACEBOOK"
+              placements={placements}
+              feedFormat={resolvedFeedFormats.FACEBOOK || feedFormat}
+              disabled={disabled}
+              onFeedFormatChange={(format) => updatePlatformFeedFormat("FACEBOOK", format)}
+            />
+          ) : null}
+          {targetInstagram ? (
+            <PlatformFormatPanel
+              platform="INSTAGRAM"
+              placements={placements}
+              feedFormat={resolvedFeedFormats.INSTAGRAM || feedFormat}
+              disabled={disabled}
+              onFeedFormatChange={(format) => updatePlatformFeedFormat("INSTAGRAM", format)}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
       {placements.includes("FEED") ? (
         <SocialComposerSection
           title="Post"
@@ -793,30 +927,36 @@ export function SocialPlacementEditor({
 
             {!carousel.enabled ? (
               <>
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-xs font-medium text-muted-foreground">Beeldverhouding feed</p>
-                    <p className="text-[11px] text-muted-foreground">Verkeerde verhouding? Automatisch bijgeknipt.</p>
+                {!showPlatformPanels ? (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-muted-foreground">Beeldverhouding feed</p>
+                      <p className="text-[11px] text-muted-foreground">Verkeerde verhouding? Automatisch bijgeknipt.</p>
+                    </div>
+                    <div className="inline-flex flex-wrap gap-1.5 rounded-lg border bg-muted/20 p-1">
+                      {FEED_FORMAT_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => onFeedFormatChange(option.value)}
+                          className={cn(
+                            "rounded-md px-3 py-1.5 text-xs font-medium transition",
+                            feedFormat === option.value
+                              ? "bg-amber-500 text-white shadow-sm"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          {option.label} <span className="opacity-70">({option.ratio})</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="inline-flex flex-wrap gap-1.5 rounded-lg border bg-muted/20 p-1">
-                    {FEED_FORMAT_OPTIONS.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        disabled={disabled}
-                        onClick={() => onFeedFormatChange(option.value)}
-                        className={cn(
-                          "rounded-md px-3 py-1.5 text-xs font-medium transition",
-                          feedFormat === option.value
-                            ? "bg-amber-500 text-white shadow-sm"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {option.label} <span className="opacity-70">({option.ratio})</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Eén media-upload voor alle kanalen. Facebook en Instagram krijgen elk het juiste formaat bij publicatie.
+                  </p>
+                )}
 
                 <PlacementMediaEditor
                   placement="FEED"
@@ -838,17 +978,19 @@ export function SocialPlacementEditor({
         <SocialComposerSection
           title="Story"
           description={
-            storyUsesFeedImage && feedImage && !carousel.enabled
+            storyUsesFeedImage && feedImage && !carousel.enabled && !storyVideo
               ? "Gebruikt feed-foto · automatisch 9:16"
-              : storyImage
-                ? "Story-beeld toegevoegd"
-                : "Verticale 9:16 afbeelding"
+              : storyVideo
+                ? "Story-video toegevoegd"
+                : storyImage
+                  ? "Story-foto toegevoegd"
+                  : "Verticale 9:16 foto of video"
           }
           icon={Smartphone}
           badge="9:16"
           defaultOpen={openPlacement === "STORY"}
         >
-          {hasFeedAndStory && feedImage && !carousel.enabled ? (
+          {hasFeedAndStory && feedImage && !carousel.enabled && !storyVideo ? (
             <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border bg-muted/15 px-3 py-2.5">
               <div className="min-w-0">
                 <p className="text-xs font-medium">Zelfde afbeelding als feed</p>
@@ -867,7 +1009,7 @@ export function SocialPlacementEditor({
             </div>
           ) : null}
 
-          {storyUsesFeedImage && feedImage && !carousel.enabled ? (
+          {storyUsesFeedImage && feedImage && !carousel.enabled && !storyVideo ? (
             <div className="space-y-2 rounded-xl border bg-muted/10 p-4">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium">Voorbeeld vanuit feed</p>
@@ -895,7 +1037,8 @@ export function SocialPlacementEditor({
               disabled={disabled}
               targetPlatforms={targetPlatforms}
               compactHeader
-              onImageChange={(url) => updateAsset("STORY", { imageUrl: url })}
+              onImageChange={(url) => updateAsset("STORY", { imageUrl: url, videoUrl: "" })}
+              onVideoChange={(url) => updateAsset("STORY", { videoUrl: url, imageUrl: "" })}
             />
           )}
         </SocialComposerSection>
@@ -925,6 +1068,10 @@ export function SocialPlacementEditor({
   );
 }
 
+export function isStoryMediaReady(assets: PlacementAssets) {
+  return Boolean(assets.STORY?.imageUrl?.trim() || assets.STORY?.videoUrl?.trim());
+}
+
 export function resolvePrimaryImageFromAssets(
   assets: PlacementAssets,
   carousel?: SocialCarouselState,
@@ -939,6 +1086,7 @@ export function resolvePrimaryImageFromAssets(
     assets.FEED?.imageUrl?.trim() ||
     assets.FEED?.videoUrl?.trim() ||
     assets.STORY?.imageUrl?.trim() ||
+    assets.STORY?.videoUrl?.trim() ||
     assets.REEL?.imageUrl?.trim() ||
     assets.REEL?.videoUrl?.trim() ||
     ""

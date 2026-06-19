@@ -1588,7 +1588,10 @@ export function IntegrationsSettingsInner() {
                   </div>
                 </div>
                 {metaConnection.data?.connected ? (
-                  metaConnection.data.missingPublishScopes?.length ? (
+                  metaConnection.data.missingPublishScopes?.length ||
+                  metaConnection.data.missingGranularPublishScopes?.length ||
+                  ((metaConnection.data.selectedPageTasks?.length || 0) > 0 &&
+                    !metaConnection.data.selectedPageTasks?.some((task) => ["CREATE_CONTENT", "MANAGE"].includes(task.toUpperCase()))) ? (
                     <Badge variant="warning"><AlertCircle className="mr-1 h-3 w-3" /> Rechten ontbreken</Badge>
                   ) : (
                     <Badge variant="success"><CheckCircle className="mr-1 h-3 w-3" /> Klaar om te posten</Badge>
@@ -1601,24 +1604,45 @@ export function IntegrationsSettingsInner() {
               </div>
             </CardHeader>
             <CardContent className="space-y-5 pt-5">
-              {metaConnection.data?.connected && metaConnection.data.missingPublishScopes?.length ? (
+              {metaConnection.data?.connected &&
+              (metaConnection.data.missingPublishScopes?.length ||
+                metaConnection.data.missingGranularPublishScopes?.length ||
+                ((metaConnection.data.selectedPageTasks?.length || 0) > 0 &&
+                  !metaConnection.data.selectedPageTasks?.some((task) => ["CREATE_CONTENT", "MANAGE"].includes(task.toUpperCase())))) ? (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-950 dark:text-amber-100">
-                  <p className="font-semibold">Meta publishing-rechten ontbreken op dit token</p>
-                  <p className="mt-2 text-xs leading-relaxed">
-                    Ontbrekend:{" "}
-                    <span className="font-mono">{metaConnection.data.missingPublishScopes.join(", ")}</span>.
-                    {metaConnection.data.grantedTokenScopes?.length ? (
-                      <>
-                        {" "}
-                        Huidig token heeft:{" "}
-                        <span className="font-mono">{metaConnection.data.grantedTokenScopes.join(", ")}</span>.
-                      </>
-                    ) : null}
+                  <p className="font-semibold">
+                    {metaConnection.data.missingPublishScopes?.length
+                      ? "Meta publishing-rechten ontbreken op dit token"
+                      : "Meta publishing-rechten ontbreken op het gekozen account"}
                   </p>
+                  {metaConnection.data.missingPublishScopes?.length ? (
+                    <p className="mt-2 text-xs leading-relaxed">
+                      Token mist:{" "}
+                      <span className="font-mono">{metaConnection.data.missingPublishScopes.join(", ")}</span>.
+                    </p>
+                  ) : null}
+                  {metaConnection.data.missingGranularPublishScopes?.length ? (
+                    <p className="mt-2 text-xs leading-relaxed">
+                      Scope staat op het token, maar niet op de gekozen Facebook Page/Instagram-account:{" "}
+                      <span className="font-mono">{metaConnection.data.missingGranularPublishScopes.join(", ")}</span>.
+                    </p>
+                  ) : null}
+                  {(metaConnection.data.selectedPageTasks?.length || 0) > 0 &&
+                  !metaConnection.data.selectedPageTasks?.some((task) => ["CREATE_CONTENT", "MANAGE"].includes(task.toUpperCase())) ? (
+                    <p className="mt-2 text-xs leading-relaxed">
+                      Page-taak ontbreekt: <span className="font-mono">CREATE_CONTENT</span>.
+                    </p>
+                  ) : null}
+                  {metaConnection.data.grantedTokenScopes?.length ? (
+                    <p className="mt-2 text-xs leading-relaxed">
+                      Huidig token heeft globaal:{" "}
+                      <span className="font-mono">{metaConnection.data.grantedTokenScopes.join(", ")}</span>.
+                    </p>
+                  ) : null}
                   <p className="mt-2 text-xs leading-relaxed">
-                    Zet je Meta-app op <strong>Live</strong>, voeg de permissions toe onder{" "}
-                    <strong>Facebook Login for Business</strong>, en klik hieronder op{" "}
-                    <strong>Opnieuw koppelen (rechten)</strong>.
+                    Klik hieronder op <strong>Opnieuw koppelen (rechten)</strong> en kies in Meta expliciet de juiste
+                    Facebook Page en Instagram Business-account. Als Meta geen accountkeuze toont: verwijder Digitify
+                    eerst uit Meta Business Integrations en koppel daarna opnieuw.
                   </p>
                   <Button size="sm" className="mt-3" onClick={() => startMetaOAuthConnect(true)}>
                     Opnieuw koppelen (rechten)

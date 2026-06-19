@@ -60,9 +60,11 @@ import {
 import { useToast } from "@/components/feedback/toast-provider";
 import {
   isFeedMediaReady,
+  isStoryMediaReady,
   resolvePrimaryImageFromAssets,
   type FeedAspectFormat,
   type PlacementAssets,
+  type PlatformFeedFormats,
   type SocialPlacement,
 } from "@/components/social/social-placement-editor";
 import {
@@ -125,6 +127,7 @@ type SocialMetadata = {
   postFormat?: PostFormat;
   placements?: SocialPlacement[];
   feedFormat?: FeedAspectFormat;
+  feedFormats?: PlatformFeedFormats;
   publisherPageId?: string;
   publisherPageName?: string;
   publisherInstagramUsername?: string;
@@ -138,6 +141,7 @@ type ManagedMetaPage = {
   accessToken: string;
   instagramBusinessId: string;
   instagramUsername: string;
+  tasks?: string[];
 };
 
 const FORMAT_OPTIONS: Array<{ value: PostFormat; label: string; description: string; className: string; ratio: number }> = [
@@ -430,13 +434,15 @@ function buildPreviewSlides(
 
   if (placements.includes("STORY")) {
     const imageUrl = assets.STORY?.imageUrl?.trim() || "";
-    if (imageUrl) {
+    const videoUrl = assets.STORY?.videoUrl?.trim() || "";
+    if (imageUrl || videoUrl) {
       slides.push({
         id: "story",
         label: "Story",
-        subtitle: "9:16 · FB + IG Stories",
+        subtitle: videoUrl && !imageUrl ? "9:16 video · FB + IG Stories" : "9:16 · FB + IG Stories",
         format: "STORY",
         imageUrl,
+        videoUrl: videoUrl && !imageUrl ? videoUrl : undefined,
       });
     }
   }
@@ -539,6 +545,8 @@ function FacebookPreview({
         {imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={imageUrl} alt="Facebook Story preview" className="h-full w-full object-cover" />
+        ) : videoUrl ? (
+          <video src={videoUrl} className="h-full w-full object-cover" muted playsInline controls />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-white/70">
             <ImageIcon className="mr-2 h-4 w-4" /> Facebook Story
@@ -554,7 +562,9 @@ function FacebookPreview({
           </div>
         </div>
         <div className="absolute inset-x-4 bottom-4 rounded-2xl bg-black/45 p-3 text-xs text-white/85 backdrop-blur">
-          Tekst/CTA uit de composer blijft intern als reviewtekst. Meta Stories publiceren in v1 alleen de afbeelding.
+          {videoUrl
+            ? "Story-video preview. Caption wordt niet meegepubliceerd naar Stories."
+            : "Tekst/CTA uit de composer blijft intern als reviewtekst. Meta Stories publiceren zonder feed-caption."}
         </div>
       </div>
     );
@@ -631,6 +641,8 @@ function InstagramPreview({
         {imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={imageUrl} alt="Instagram Story preview" className="h-full w-full object-cover" />
+        ) : videoUrl ? (
+          <video src={videoUrl} className="h-full w-full object-cover" muted playsInline controls />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-white/70">
             <ImageIcon className="mr-2 h-4 w-4" /> Instagram Story
@@ -651,7 +663,9 @@ function InstagramPreview({
           </div>
         </div>
         <div className="absolute inset-x-4 bottom-4 rounded-2xl bg-black/45 p-3 text-xs text-white/85 backdrop-blur">
-          Stories ondersteunen geen gewone feed-caption. Voeg tekst visueel toe in de afbeelding zelf.
+          {videoUrl
+            ? "Story-video preview. Caption wordt niet meegepubliceerd naar Stories."
+            : "Stories ondersteunen geen gewone feed-caption. Voeg tekst visueel toe in de afbeelding zelf."}
         </div>
       </div>
     );
@@ -744,6 +758,10 @@ export function SocialPageInner() {
   const [wizardStep, setWizardStep] = useState(0);
   const [placements, setPlacements] = useState<SocialPlacement[]>(["FEED"]);
   const [feedFormat, setFeedFormat] = useState<FeedAspectFormat>("SQUARE");
+  const [feedFormats, setFeedFormats] = useState<PlatformFeedFormats>({
+    FACEBOOK: "LANDSCAPE",
+    INSTAGRAM: "PORTRAIT",
+  });
   const [placementAssets, setPlacementAssets] = useState<PlacementAssets>({});
   const [carousel, setCarousel] = useState<SocialCarouselState>({ enabled: false, slides: [] });
   const [previewSlideIndex, setPreviewSlideIndex] = useState(0);
@@ -757,6 +775,48 @@ export function SocialPageInner() {
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: true,
   });
+  const metaPublishIssue = useMemo(() => {
+    const status = connectionStatus.data;
+    if (!status?.connected) return null;
+    if (!status.hasAppCredentials) {
+      return {
+        title: "Meta app-gegevens ontbreken",
+        description: "Vul App ID + Secret in bij Integraties en koppel Meta opnieuw.",
+      };
+    }
+    if (status.tokenValid === false) {
+      return {
+        title: "Meta token ongeldig",
+        description: status.tokenDebugError || "Koppel Meta opnieuw via Integraties.",
+      };
+    }
+    if (status.missingPublishScopes?.length) {
+      return {
+        title: "Meta publishing-rechten ontbreken",
+        description: `Ontbrekend: ${status.missingPublishScopes.join(", ")}. Koppel Meta opnieuw nadat deze rechten op de Meta-app staan.`,
+      };
+    }
+    if (status.missingGranularPublishScopes?.length) {
+      return {
+        title: "Meta rechten niet actief op dit account",
+        description: `Ontbrekend voor de gekozen Page/Instagram: ${status.missingGranularPublishScopes.join(", ")}. Koppel Meta opnieuw en vink de juiste accounts aan.`,
+      };
+    }
+    const pageTasks = new Set((status.selectedPageTasks || []).map((task) => task.toUpperCase()));
+    if (pageTasks.size > 0 && !pageTasks.has("CREATE_CONTENT") && !pageTasks.has("MANAGE")) {
+      return {
+        title: "Facebook Page mist contentrechten",
+        description: "De gekoppelde Meta-gebruiker heeft geen CREATE_CONTENT taak op deze Page.",
+      };
+    }
+    if (status.oauthUsesLegacyEnvOverride || status.oauthHasDeprecatedScopes) {
+      return {
+        title: "Meta OAuth scopes verouderd",
+        description: "Gebruik Facebook Login scopes zoals pages_manage_posts, instagram_basic en instagram_content_publish.",
+      };
+    }
+    return null;
+  }, [connectionStatus.data]);
   const managedPages = useMemo(
     () => (connectionStatus.data?.pages ?? []) as ManagedMetaPage[],
     [connectionStatus.data?.pages],
@@ -784,6 +844,14 @@ export function SocialPageInner() {
     [carousel, placementAssets],
   );
 
+  const resolvedFeedFormats = useMemo(
+    () => ({
+      FACEBOOK: feedFormats.FACEBOOK || feedFormat,
+      INSTAGRAM: feedFormats.INSTAGRAM || feedFormat,
+    }),
+    [feedFormat, feedFormats.FACEBOOK, feedFormats.INSTAGRAM],
+  );
+
   const previewFormat: PostFormat = useMemo(() => {
     if (placements.includes("FEED")) return feedFormat;
     if (placements.includes("STORY") || placements.includes("REEL")) return "STORY";
@@ -803,6 +871,7 @@ export function SocialPageInner() {
       postFormat: previewFormat,
       placements,
       feedFormat,
+      feedFormats: resolvedFeedFormats,
       publisherPageId: selectedPageId || undefined,
       publisherPageName: selectedManagedPage?.name || undefined,
       publisherInstagramUsername: selectedManagedPage?.instagramUsername || undefined,
@@ -817,6 +886,7 @@ export function SocialPageInner() {
       cta,
       firstComment,
       feedFormat,
+      feedFormats,
       hashtags,
       headline,
       linkUrl,
@@ -1076,7 +1146,7 @@ export function SocialPageInner() {
     if (step === 3) {
       if (!placements.length) return false;
       if (placements.includes("FEED") && !isFeedMediaReady(placementAssets, carousel)) return false;
-      if (placements.includes("STORY") && !placementAssets.STORY?.imageUrl?.trim()) return false;
+      if (placements.includes("STORY") && !isStoryMediaReady(placementAssets)) return false;
       if (placements.includes("REEL") && !placementAssets.REEL?.videoUrl?.trim()) return false;
       return true;
     }
@@ -1296,8 +1366,12 @@ export function SocialPageInner() {
       });
       return false;
     }
-    if (placements.includes("STORY") && !placementAssets.STORY?.imageUrl?.trim()) {
-      showToast({ title: "Story-afbeelding ontbreekt", variant: "error" });
+    if (placements.includes("STORY") && !isStoryMediaReady(placementAssets)) {
+      showToast({
+        title: "Story-media ontbreekt",
+        description: "Voeg een verticale 9:16 foto of video toe.",
+        variant: "error",
+      });
       return false;
     }
     if (placements.includes("REEL") && !placementAssets.REEL?.videoUrl?.trim()) {
@@ -1501,6 +1575,10 @@ export function SocialPageInner() {
       metadata.feedFormat ||
         (legacyFormat === "PORTRAIT" || legacyFormat === "LANDSCAPE" || legacyFormat === "SQUARE" ? legacyFormat : "SQUARE"),
     );
+    setFeedFormats({
+      FACEBOOK: metadata.feedFormats?.FACEBOOK || metadata.feedFormat || "LANDSCAPE",
+      INSTAGRAM: metadata.feedFormats?.INSTAGRAM || metadata.feedFormat || "PORTRAIT",
+    });
     setPlacementAssets(metadata.assets || {});
     setCarousel(metadata.carousel || { enabled: false, slides: [] });
     setTargetFacebook((source.targetPlatforms || []).includes("FACEBOOK"));
@@ -1539,6 +1617,7 @@ export function SocialPageInner() {
     setWizardStep(0);
     setPlacements(["FEED"]);
     setFeedFormat("SQUARE");
+    setFeedFormats({ FACEBOOK: "LANDSCAPE", INSTAGRAM: "PORTRAIT" });
     setPlacementAssets({});
     setCarousel({ enabled: false, slides: [] });
   }
@@ -1602,8 +1681,8 @@ export function SocialPageInner() {
           <Button size="sm" variant="outline" className="h-8" onClick={resetEditor}>
             Nieuw
           </Button>
-          <Badge variant={connectionStatus.data?.connected ? "success" : "warning"}>
-            {connectionStatus.data?.connected ? "Meta OK" : "Meta uit"}
+          <Badge variant={connectionStatus.data?.connected && !metaPublishIssue ? "success" : "warning"}>
+            {!connectionStatus.data?.connected ? "Meta uit" : metaPublishIssue ? "Meta actie nodig" : "Meta OK"}
           </Badge>
         </div>
       </div>
@@ -1653,6 +1732,15 @@ export function SocialPageInner() {
           <span className="text-amber-950/90 dark:text-amber-100">Meta niet gekoppeld.</span>
           <Button size="sm" variant="outline" asChild>
             <Link href="/settings/integrations">Koppelen</Link>
+          </Button>
+        </div>
+      ) : metaPublishIssue ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-sm text-amber-950/90 dark:bg-amber-950/25 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            <strong>{metaPublishIssue.title}.</strong> {metaPublishIssue.description}
+          </span>
+          <Button size="sm" variant="outline" asChild>
+            <Link href="/settings/integrations?tab=meta">Integraties</Link>
           </Button>
         </div>
       ) : canSchedule && overdueScheduledCount > 0 ? (
@@ -1796,12 +1884,15 @@ export function SocialPageInner() {
                     <SocialPlacementEditor
                       placements={placements}
                       feedFormat={feedFormat}
+                      feedFormats={resolvedFeedFormats}
                       assets={placementAssets}
                       carousel={carousel}
                       disabled={!canEditSelected}
+                      targetFacebook={targetFacebook}
                       targetInstagram={targetInstagram}
                       onPlacementsChange={setPlacements}
                       onFeedFormatChange={setFeedFormat}
+                      onFeedFormatsChange={setFeedFormats}
                       onAssetsChange={setPlacementAssets}
                       onCarouselChange={setCarousel}
                     />
@@ -2014,7 +2105,11 @@ export function SocialPageInner() {
                               caption={activePreviewSlide.id === "story" ? "" : previewCaption}
                               imageUrl={activePreviewSlide.imageUrl}
                               videoUrl={activePreviewSlide.videoUrl}
-                              format={activePreviewSlide.format}
+                              format={
+                                activePreviewSlide.id === "FEED" || activePreviewSlide.id.startsWith("carousel_")
+                                  ? resolvedFeedFormats.FACEBOOK
+                                  : activePreviewSlide.format
+                              }
                               pageName={previewPageName}
                             />
                           ) : null}
@@ -2034,7 +2129,11 @@ export function SocialPageInner() {
                                 imageUrl={activePreviewSlide.imageUrl}
                                 videoUrl={activePreviewSlide.videoUrl}
                                 firstComment={firstComment}
-                                format={activePreviewSlide.format}
+                                format={
+                                  activePreviewSlide.id === "FEED" || activePreviewSlide.id.startsWith("carousel_")
+                                    ? resolvedFeedFormats.INSTAGRAM
+                                    : activePreviewSlide.format
+                                }
                                 username={previewInstagramUsername}
                               />
                             )

@@ -9,6 +9,18 @@ async function dataUrlToFile(dataUrl: string, filename: string) {
   return new File([blob], filename, { type: blob.type || "image/png" });
 }
 
+function isLocalBrowserAsset(url: string) {
+  return url.startsWith("data:") || url.startsWith("blob:");
+}
+
+function videoFilename(url: string, placement: SocialPlacement) {
+  const lower = url.toLowerCase();
+  const extension = lower.includes("quicktime") || lower.includes("video/quicktime") || lower.includes(".mov")
+    ? "mov"
+    : "mp4";
+  return `social-${placement.toLowerCase()}-video-${Date.now()}.${extension}`;
+}
+
 export async function uploadSocialAssetFile(file: File) {
   return uploadClientAsset(file);
 }
@@ -88,21 +100,30 @@ export async function persistPlacementAssets(
     if (!imageUrl && placement === "STORY" && options?.storyUsesFeedImage && feedImageUrl) {
       imageUrl = feedImageUrl;
     }
-    if (!imageUrl) continue;
+    if (imageUrl) {
+      const sameAsFeed = Boolean(placement === "STORY" && feedImageUrl && imageUrl === feedImageUrl);
+      const prepared = await preparePlacementImageUrl({
+        imageUrl,
+        placement,
+        feedFormat,
+        targetPlatforms,
+        forceCrop: sameAsFeed || Boolean(options?.storyUsesFeedImage && placement === "STORY"),
+      });
 
-    const sameAsFeed = Boolean(placement === "STORY" && feedImageUrl && imageUrl === feedImageUrl);
-    const prepared = await preparePlacementImageUrl({
-      imageUrl,
-      placement,
-      feedFormat,
-      targetPlatforms,
-      forceCrop: sameAsFeed || Boolean(options?.storyUsesFeedImage && placement === "STORY"),
-    });
+      next[placement] = {
+        ...asset,
+        imageUrl: prepared.url,
+      };
+    }
 
-    next[placement] = {
-      ...asset,
-      imageUrl: prepared.url,
-    };
+    const videoUrl = next[placement]?.videoUrl?.trim();
+    if (videoUrl && isLocalBrowserAsset(videoUrl)) {
+      const file = await dataUrlToFile(videoUrl, videoFilename(videoUrl, placement));
+      next[placement] = {
+        ...next[placement],
+        videoUrl: await uploadSocialAssetFile(file),
+      };
+    }
   }
 
   return next;
@@ -121,7 +142,7 @@ export async function persistCarouselAssets(carousel: SocialCarouselState): Prom
 
       const videoUrl = slide.videoUrl?.trim();
       if (!videoUrl) return slide;
-      if (!videoUrl.startsWith("data:") && !videoUrl.startsWith("blob:")) return slide;
+      if (!isLocalBrowserAsset(videoUrl)) return slide;
       const file = await dataUrlToFile(
         videoUrl,
         `social-carousel-video-${Date.now()}.${videoUrl.includes("quicktime") ? "mov" : "mp4"}`,
