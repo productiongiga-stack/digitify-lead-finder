@@ -13,6 +13,7 @@ import {
   Check,
   Film,
   ImageIcon,
+  Layers,
   LayoutGrid,
   Link2,
   Loader2,
@@ -24,8 +25,8 @@ import {
 import { useToast } from "@/components/feedback/toast-provider";
 import {
   isCarouselReady,
-  slideHasMedia,
   SocialCarouselEditor,
+  createDefaultCarouselState,
   type SocialCarouselState,
 } from "./social-carousel-editor";
 import { SocialComposerSection } from "./social-composer-section";
@@ -241,6 +242,49 @@ function AssetProbeStatus({
 }
 
 type FeedMediaMode = "photo" | "video";
+
+type FeedUploadMode = "single" | "multi";
+
+function FeedUploadModeToggle({
+  mode,
+  disabled,
+  onChange,
+}: {
+  mode: FeedUploadMode;
+  disabled?: boolean;
+  onChange: (mode: FeedUploadMode) => void;
+}) {
+  return (
+    <div className="inline-flex rounded-lg border bg-muted/20 p-1">
+      {(
+        [
+          { id: "single" as const, label: "1 bestand", icon: ImageIcon },
+          { id: "multi" as const, label: "Multi-upload", icon: Layers },
+        ] as const
+      ).map((option) => {
+        const Icon = option.icon;
+        const active = mode === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(option.id)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition",
+              active
+                ? "bg-amber-500 text-white shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function FeedMediaModeToggle({
   mode,
@@ -1134,7 +1178,20 @@ export function SocialPlacementEditor({
     FACEBOOK: feedFormats?.FACEBOOK || feedFormat,
     INSTAGRAM: feedFormats?.INSTAGRAM || feedFormat,
   };
-  const showPlatformPanels = (targetFacebook || targetInstagram) && placements.includes("FEED");
+  const showPlatformPanels =
+    !carousel.enabled && (targetFacebook || targetInstagram) && placements.includes("FEED");
+
+  function setFeedUploadMode(mode: FeedUploadMode) {
+    if (mode === "multi") {
+      if (!carousel.enabled) {
+        onCarouselChange(createDefaultCarouselState());
+      }
+      return;
+    }
+    if (carousel.enabled) {
+      onCarouselChange({ enabled: false, slides: [] });
+    }
+  }
 
   function updatePlatformFeedFormat(platform: SocialPlatform, format: FeedAspectFormat) {
     if (onFeedFormatsChange) {
@@ -1210,21 +1267,31 @@ export function SocialPlacementEditor({
         >
           <div className="space-y-4">
             {targetFacebook || targetInstagram ? (
-              <SocialCarouselEditor
-                carousel={carousel}
-                feedFormat={feedFormat}
-                disabled={disabled}
-                onChange={onCarouselChange}
-                title="Multi-upload"
-                description={
-                  targetFacebook && targetInstagram
-                    ? "Minstens 2 items, maximaal 10. Instagram wordt een carousel; Facebook een post met meerdere foto's of video's."
-                    : targetInstagram
-                      ? "Minstens 2 slides, maximaal 10. Eerste slide bepaalt de verhouding op Instagram."
-                      : "Minstens 2 items, maximaal 10. Facebook publiceert als post met meerdere foto's of video's."
-                }
-                actionLabel={carousel.enabled ? "Enkel bestand" : "Multi-upload aan"}
-              />
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Feed-media</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {carousel.enabled
+                        ? "Dezelfde items voor Facebook en Instagram · originele beeldverhoudingen blijven behouden"
+                        : "Eén foto of video voor je feed-post"}
+                    </p>
+                  </div>
+                  <FeedUploadModeToggle
+                    mode={carousel.enabled ? "multi" : "single"}
+                    disabled={disabled}
+                    onChange={setFeedUploadMode}
+                  />
+                </div>
+
+                <SocialCarouselEditor
+                  carousel={carousel}
+                  feedFormat={feedFormat}
+                  disabled={disabled}
+                  onChange={onCarouselChange}
+                  description="Minstens 2 items, maximaal 10. Instagram wordt een carousel; Facebook een post met meerdere foto's of video's."
+                />
+              </>
             ) : null}
 
             {!carousel.enabled ? (

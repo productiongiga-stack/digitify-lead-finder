@@ -126,7 +126,15 @@ type SlideProbeState =
   | { status: "ok"; publishableUrl: boolean; width: number; height: number }
   | { status: "error"; message: string };
 
-function CarouselSlideProbe({ imageUrl, feedFormat }: { imageUrl: string; feedFormat: FeedAspectFormat }) {
+function CarouselSlideProbe({
+  imageUrl,
+  feedFormat,
+  preserveOriginal,
+}: {
+  imageUrl: string;
+  feedFormat: FeedAspectFormat;
+  preserveOriginal?: boolean;
+}) {
   const [debouncedUrl, setDebouncedUrl] = useState("");
   const isDataUrl = debouncedUrl.startsWith("data:");
 
@@ -207,7 +215,11 @@ function CarouselSlideProbe({ imageUrl, feedFormat }: { imageUrl: string; feedFo
   return (
     <p className="text-xs text-muted-foreground">
       {probe.width}×{probe.height}
-      {!probe.publishableUrl ? " · upload of publieke URL nodig voor Meta" : ""}
+      {preserveOriginal
+        ? " · originele verhouding"
+        : !probe.publishableUrl
+          ? " · upload of publieke URL nodig voor Meta"
+          : ""}
     </p>
   );
 }
@@ -253,6 +265,7 @@ function CarouselSlideField({
   total,
   feedFormat,
   disabled,
+  preserveOriginal,
   onChange,
   onRemove,
   onMove,
@@ -262,6 +275,7 @@ function CarouselSlideField({
   total: number;
   feedFormat: FeedAspectFormat;
   disabled?: boolean;
+  preserveOriginal?: boolean;
   onChange: (slide: SocialCarouselSlide) => void;
   onRemove: () => void;
   onMove: (direction: -1 | 1) => void;
@@ -444,7 +458,9 @@ function CarouselSlideField({
         </button>
       )}
 
-      {isImage && mediaUrl ? <CarouselSlideProbe imageUrl={mediaUrl} feedFormat={feedFormat} /> : null}
+      {isImage && mediaUrl ? (
+        <CarouselSlideProbe imageUrl={mediaUrl} feedFormat={feedFormat} preserveOriginal={preserveOriginal} />
+      ) : null}
       {!isImage && mediaUrl && !/^https:\/\//i.test(mediaUrl) ? (
         <p className="text-xs text-destructive">Video-URL moet publiek bereikbaar zijn via https.</p>
       ) : null}
@@ -456,12 +472,16 @@ function CarouselFilmstrip({
   slides,
   activeIndex,
   disabled,
+  canAdd,
   onSelect,
+  onAdd,
 }: {
   slides: SocialCarouselSlide[];
   activeIndex: number;
   disabled?: boolean;
+  canAdd?: boolean;
   onSelect: (index: number) => void;
+  onAdd?: (mediaType: SocialCarouselSlide["mediaType"]) => void;
 }) {
   return (
     <div className="flex items-center gap-2 overflow-x-auto pb-1">
@@ -503,6 +523,18 @@ function CarouselFilmstrip({
           </button>
         );
       })}
+      {canAdd && onAdd ? (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onAdd("IMAGE")}
+          className="flex h-[4.5rem] w-12 shrink-0 flex-col items-center justify-center rounded-lg border-2 border-dashed border-border/80 text-muted-foreground transition hover:border-amber-400 hover:text-foreground"
+          aria-label="Item toevoegen"
+        >
+          <Plus className="h-4 w-4" />
+          <span className="mt-0.5 text-[9px] font-medium">Item</span>
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -530,14 +562,22 @@ function CarouselProgress({ readyCount, total }: { readyCount: number; total: nu
   );
 }
 
+export function createDefaultCarouselState(): SocialCarouselState {
+  return {
+    enabled: true,
+    slides: [createSlide("IMAGE"), createSlide("IMAGE")],
+  };
+}
+
 export function SocialCarouselEditor({
   carousel,
   feedFormat,
   disabled,
   onChange,
-  title = "Carousel",
-  description = "Minstens 2 items, maximaal 10. Het eerste item bepaalt de verhouding op Instagram.",
-  actionLabel,
+  title = "Multi-upload",
+  description = "Minstens 2 items, maximaal 10. Dezelfde items voor Facebook en Instagram; originele beeldverhoudingen blijven behouden.",
+  showHeaderToggle = false,
+  preserveOriginalFormats = true,
 }: {
   carousel: SocialCarouselState;
   feedFormat: FeedAspectFormat;
@@ -545,7 +585,8 @@ export function SocialCarouselEditor({
   onChange: (carousel: SocialCarouselState) => void;
   title?: string;
   description?: string;
-  actionLabel?: string;
+  showHeaderToggle?: boolean;
+  preserveOriginalFormats?: boolean;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -584,14 +625,6 @@ export function SocialCarouselEditor({
     setActiveIndex(slides.length - 1);
   }
 
-  function enableCarousel() {
-    onChange({
-      enabled: true,
-      slides: [createSlide("IMAGE"), createSlide("IMAGE")],
-    });
-    setActiveIndex(0);
-  }
-
   function disableCarousel() {
     onChange({ enabled: false, slides: [] });
     setActiveIndex(0);
@@ -601,6 +634,8 @@ export function SocialCarouselEditor({
   const activeSlide = carousel.slides[activeIndex];
   const canAddSlide = carousel.slides.length < CAROUSEL_MAX_SLIDES;
 
+  if (!carousel.enabled) return null;
+
   return (
     <div className="space-y-4 rounded-xl border border-amber-200/60 bg-amber-50/20 p-4 dark:border-amber-900/40 dark:bg-amber-950/10">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -609,54 +644,60 @@ export function SocialCarouselEditor({
             <Layers className="h-4 w-4 text-amber-600" />
             {title}
           </Label>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {description}
-          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
         </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="shrink-0 text-xs"
-          disabled={disabled}
-          onClick={() => (carousel.enabled ? disableCarousel() : enableCarousel())}
-        >
-          {actionLabel || (carousel.enabled ? "Enkel bestand" : "Multi-upload aan")}
-        </Button>
+        {showHeaderToggle ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="shrink-0 text-xs"
+            disabled={disabled}
+            onClick={disableCarousel}
+          >
+            Enkel bestand
+          </Button>
+        ) : null}
       </div>
 
-      {carousel.enabled ? (
-        <div className="space-y-4 rounded-lg border bg-background/80 p-3">
-          <CarouselProgress readyCount={readyCount} total={carousel.slides.length} />
+      <div className="space-y-4 rounded-lg border bg-background/80 p-3">
+        <CarouselProgress readyCount={readyCount} total={carousel.slides.length} />
 
-          <CarouselFilmstrip slides={carousel.slides} activeIndex={activeIndex} disabled={disabled} onSelect={setActiveIndex} />
+        <CarouselFilmstrip
+          slides={carousel.slides}
+          activeIndex={activeIndex}
+          disabled={disabled}
+          canAdd={canAddSlide}
+          onSelect={setActiveIndex}
+          onAdd={addSlide}
+        />
 
-          {canAddSlide ? (
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => addSlide("IMAGE")}>
-                <Plus className="mr-1.5 h-3.5 w-3.5" /> Foto
-              </Button>
-              <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => addSlide("VIDEO")}>
-                <Plus className="mr-1.5 h-3.5 w-3.5" /> Video
-              </Button>
-            </div>
-          ) : null}
+        {canAddSlide ? (
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => addSlide("IMAGE")}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" /> Foto
+            </Button>
+            <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => addSlide("VIDEO")}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" /> Video
+            </Button>
+          </div>
+        ) : null}
 
-          {activeSlide ? (
-            <CarouselSlideField
-              key={activeSlide.id}
-              slide={activeSlide}
-              index={activeIndex}
-              total={carousel.slides.length}
-              feedFormat={feedFormat}
-              disabled={disabled}
-              onChange={(next) => updateSlide(activeIndex, next)}
-              onRemove={() => removeSlide(activeIndex)}
-              onMove={(direction) => moveSlide(activeIndex, direction)}
-            />
-          ) : null}
-        </div>
-      ) : null}
+        {activeSlide ? (
+          <CarouselSlideField
+            key={activeSlide.id}
+            slide={activeSlide}
+            index={activeIndex}
+            total={carousel.slides.length}
+            feedFormat={feedFormat}
+            disabled={disabled}
+            preserveOriginal={preserveOriginalFormats}
+            onChange={(next) => updateSlide(activeIndex, next)}
+            onRemove={() => removeSlide(activeIndex)}
+            onMove={(direction) => moveSlide(activeIndex, direction)}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -148,6 +148,8 @@ export async function prepareSocialImageUrlForPublish(input: {
   workspaceId: string;
   userId: string;
   forceCrop?: boolean;
+  /** Multi-upload: upload blob/data URLs but never crop to feed aspect ratio. */
+  preserveOriginal?: boolean;
 }): Promise<{ imageUrl: string; info: SocialImageInfo; cropped: boolean }> {
   const trimmed = input.imageUrl.trim();
   if (!trimmed) {
@@ -156,6 +158,21 @@ export async function prepareSocialImageUrlForPublish(input: {
 
   const { buffer, info } = await fetchImageBuffer(trimmed);
   const needsPublicUrl = !isMetaPublishableImageUrl(trimmed);
+
+  if (input.preserveOriginal && !input.forceCrop) {
+    if (!needsPublicUrl) {
+      return { imageUrl: trimmed, info, cropped: false };
+    }
+    const uploadedUrl = await uploadCroppedImage({
+      buffer,
+      contentType: info.contentType,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      placement: input.placement,
+    });
+    return { imageUrl: uploadedUrl, info, cropped: false };
+  }
+
   const meetsTarget = imageMeetsPlacementTarget({
     width: info.width,
     height: info.height,

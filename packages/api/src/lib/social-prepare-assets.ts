@@ -34,7 +34,7 @@ export async function prepareSocialPostAssetsForPublish(input: {
   async function preparePlacementImage(
     placement: SocialImageTargetPlacement,
     imageUrl: string,
-    options: { forceCrop?: boolean; feedFormat?: FeedAspectFormat } = {},
+    options: { forceCrop?: boolean; feedFormat?: FeedAspectFormat; preserveOriginal?: boolean } = {},
   ) {
     const prepared = await prepareSocialImageUrlForPublish({
       imageUrl,
@@ -44,6 +44,7 @@ export async function prepareSocialPostAssetsForPublish(input: {
       workspaceId: input.workspaceId,
       userId: input.userId,
       forceCrop: options.forceCrop,
+      preserveOriginal: options.preserveOriginal,
     });
     if (prepared.cropped || prepared.imageUrl !== imageUrl) changed = true;
     return prepared.imageUrl;
@@ -165,7 +166,7 @@ export async function prepareSocialPostAssetsForPublish(input: {
       carousel.slides.map(async (slide) => {
         if (slide.mediaType !== "IMAGE" || !slide.imageUrl?.trim()) return slide;
         const originalUrl = slide.imageUrl.trim();
-        const nextUrl = await preparePlacementImage("FEED", originalUrl);
+        const nextUrl = await preparePlacementImage("FEED", originalUrl, { preserveOriginal: true });
         if (nextUrl !== originalUrl) changed = true;
         return { ...slide, imageUrl: nextUrl };
       }),
