@@ -2720,8 +2720,8 @@ export function GoogleAdsPageInner() {
     campaignType?: string;
     dailyBudgetCents?: number | null;
     currency?: string;
-    targeting?: Record<string, unknown>;
-    creatives?: Record<string, unknown>;
+    targeting?: unknown;
+    creatives?: unknown;
   }) {
     const creative = asRecord(payload.creatives);
     const targeting = asRecord(payload.targeting);
