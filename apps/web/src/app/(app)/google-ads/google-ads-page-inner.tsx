@@ -77,6 +77,7 @@ import {
   XCircle,
   Monitor,
   Play,
+  Trash2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AdsStudioStatsStrip, adsStudioStatIcons } from "@/components/ads/ads-studio-stats-strip";
@@ -553,6 +554,24 @@ function evaluatePmaxImage(probe: ImageProbeState, spec: GooglePmaxImageSpec) {
     message = `Voldoet aan minimum; aanbevolen is ${formatPx(spec.recommended)} voor scherpe weergave.`;
   }
   return { ratioOk, meetsMinimum, meetsRecommended, message };
+}
+
+function googleCampaignStatusLabel(status: unknown) {
+  const normalized = String(status || "").toUpperCase();
+  if (normalized === "ENABLED" || normalized === "2") return "Actief";
+  if (normalized === "PAUSED" || normalized === "3") return "Gepauzeerd";
+  if (normalized === "REMOVED" || normalized === "4") return "Verwijderd";
+  return String(status || "Onbekend");
+}
+
+function googleCampaignIsEnabled(status: unknown) {
+  const normalized = String(status || "").toUpperCase();
+  return normalized === "ENABLED" || normalized === "2";
+}
+
+function googleCampaignIsPaused(status: unknown) {
+  const normalized = String(status || "").toUpperCase();
+  return normalized === "PAUSED" || normalized === "3";
 }
 
 function describeOperationalRequirement(code: string): OperationalRequirement {
@@ -2486,6 +2505,8 @@ export function GoogleAdsPageInner() {
   const { beginGeneration, isCurrentGeneration } = useMutationGeneration();
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [loadedPlanId, setLoadedPlanId] = useState<string | null>(null);
+  const [editingLiveCampaignId, setEditingLiveCampaignId] = useState<string | null>(null);
+  const [editingLiveCampaignStatus, setEditingLiveCampaignStatus] = useState<string | null>(null);
   const [activeStep, setActiveStep] = useState<BuilderStep>("setup");
   const [adsTab, setAdsTab] = useState("campaigns");
   const [approvalFilter, setApprovalFilter] = useState<"ALL" | PlanStatus>("ALL");
@@ -2537,12 +2558,23 @@ export function GoogleAdsPageInner() {
   const [advancedCreativeJson, setAdvancedCreativeJson] = useState("{}");
   const [advancedTargetingJson, setAdvancedTargetingJson] = useState("{}");
   const [uploadingAsset, setUploadingAsset] = useState<PmaxImageKind | null>(null);
+  const [loginCustomerIdInput, setLoginCustomerIdInput] = useState("");
 
   const connection = trpc.googleAds.connectionStatus.useQuery(undefined, { refetchInterval: 30_000 });
   const customers = trpc.googleAds.listCustomers.useQuery(undefined, { enabled: Boolean(connection.data?.connected) });
-  const campaigns = trpc.googleAds.listCampaigns.useQuery(undefined, { enabled: Boolean(connection.data?.selectedCustomerId), refetchInterval: 60_000 });
-  const insights = trpc.googleAds.getInsights.useQuery(undefined, { enabled: Boolean(connection.data?.selectedCustomerId), refetchInterval: 60_000 });
+  const campaigns = trpc.googleAds.listCampaigns.useQuery(undefined, {
+    enabled: Boolean(connection.data?.selectedCustomerId && connection.data?.connected),
+    refetchInterval: 60_000,
+  });
+  const insights = trpc.googleAds.getInsights.useQuery(undefined, {
+    enabled: Boolean(connection.data?.selectedCustomerId && connection.data?.connected),
+    refetchInterval: 60_000,
+  });
   const drafts = trpc.googleAds.listDrafts.useQuery(undefined, { refetchInterval: 20_000 });
+  const liveCampaignDetails = trpc.googleAds.getCampaignDetails.useQuery(
+    { campaignId: editingLiveCampaignId || "" },
+    { enabled: Boolean(editingLiveCampaignId) },
+  );
 
   const rows = drafts.data ?? [];
   const heroStats = useMemo(
@@ -2627,6 +2659,8 @@ export function GoogleAdsPageInner() {
   function resetBuilderForNewCampaign() {
     setSelectedPlanId(null);
     setLoadedPlanId(null);
+    setEditingLiveCampaignId(null);
+    setEditingLiveCampaignStatus(null);
     setActiveStep("setup");
     setAdsTab("dashboard");
     setName("");
@@ -2681,37 +2715,21 @@ export function GoogleAdsPageInner() {
     showToast({ title: "Nieuwe campagne", description: "Vul een nieuwe campagnenaam en instellingen in." });
   }
 
-  function openGoogleCampaignAsDraft(campaign: Record<string, any>) {
-    const campaignName = String(campaign.name || "Google campagne");
-    setSelectedPlanId(`__google_live_import_${String(campaign.id || Date.now())}`);
-    setLoadedPlanId(null);
-    setName(`${campaignName} (bewerking)`);
-    setCampaignType(googleCampaignTypeFromChannel(campaign.channelType));
-    setCurrency(connection.data?.defaultCurrency || currency || "EUR");
-    setDailyBudget(String(numberValue(dailyBudget) || 2500));
-    setStartTime("");
-    setEndTime("");
-    setAdvancedCreativeJson("{}");
-    setAdvancedTargetingJson("{}");
-    setAdsTab("dashboard");
-    setActiveStep("setup");
-    showToast({
-      title: "Live Google campagne als draft geopend",
-      description: "Google geeft hier basisgegevens terug; vul creative en targeting verder aan in de Studio.",
-    });
-  }
-
-  useEffect(() => {
-    if (!selectedPlan || selectedPlan.id === loadedPlanId) return;
-    const creative = asRecord(selectedPlan.creatives);
-    const targeting = asRecord(selectedPlan.targeting);
+  function applyPlanPayloadToForm(payload: {
+    name?: string;
+    campaignType?: string;
+    dailyBudgetCents?: number | null;
+    currency?: string;
+    targeting?: Record<string, unknown>;
+    creatives?: Record<string, unknown>;
+  }) {
+    const creative = asRecord(payload.creatives);
+    const targeting = asRecord(payload.targeting);
     const campaignSettings = asRecord(targeting.campaignSettings);
-    setName(selectedPlan.name || name);
-    setCampaignType((selectedPlan.campaignType || "SEARCH") as CampaignType);
-    setCurrency(selectedPlan.currency || "EUR");
-    setDailyBudget(selectedPlan.dailyBudgetCents ? String(selectedPlan.dailyBudgetCents) : "");
-    setStartTime(selectedPlan.startTime ? new Date(selectedPlan.startTime).toISOString().slice(0, 16) : "");
-    setEndTime(selectedPlan.endTime ? new Date(selectedPlan.endTime).toISOString().slice(0, 16) : "");
+    setName(payload.name || name);
+    setCampaignType((payload.campaignType || "SEARCH") as CampaignType);
+    setCurrency(payload.currency || "EUR");
+    setDailyBudget(payload.dailyBudgetCents ? String(payload.dailyBudgetCents) : "");
     setBiddingStrategy((campaignSettings.biddingStrategy || creative.biddingStrategy || "MAXIMIZE_CONVERSIONS") as BiddingStrategy);
     setTargetCpaCents(String(campaignSettings.targetCpaCents || ""));
     setTargetRoas(String(campaignSettings.targetRoas || ""));
@@ -2750,8 +2768,42 @@ export function GoogleAdsPageInner() {
     setDisplayExpansion(Boolean(targeting.displayExpansion));
     setAdvancedCreativeJson("{}");
     setAdvancedTargetingJson("{}");
+  }
+
+  function openLiveCampaignEditor(campaign: Record<string, any>) {
+    setSelectedPlanId(null);
+    setLoadedPlanId(null);
+    setEditingLiveCampaignId(String(campaign.id || ""));
+    setEditingLiveCampaignStatus(String(campaign.status || ""));
+    setAdsTab("dashboard");
+    setActiveStep("setup");
+    showToast({
+      title: "Live campagne geladen",
+      description: "Gegevens worden opgehaald uit Google Ads…",
+    });
+  }
+
+  useEffect(() => {
+    if (!liveCampaignDetails.data || !editingLiveCampaignId) return;
+    const liveKey = `live_${editingLiveCampaignId}`;
+    if (loadedPlanId === liveKey) return;
+    const details = liveCampaignDetails.data;
+    applyPlanPayloadToForm(details);
+    setEditingLiveCampaignStatus(details.status || null);
+    setLoadedPlanId(liveKey);
+    showToast({
+      title: "Campagne geladen uit Google Ads",
+      description: `${details.name} · wijzigingen opslaan stuurt direct naar Google.`,
+    });
+  }, [liveCampaignDetails.data, editingLiveCampaignId, loadedPlanId, showToast]);
+
+  useEffect(() => {
+    if (!selectedPlan || selectedPlan.id === loadedPlanId || editingLiveCampaignId) return;
+    applyPlanPayloadToForm(selectedPlan);
+    setStartTime(selectedPlan.startTime ? new Date(selectedPlan.startTime).toISOString().slice(0, 16) : "");
+    setEndTime(selectedPlan.endTime ? new Date(selectedPlan.endTime).toISOString().slice(0, 16) : "");
     setLoadedPlanId(selectedPlan.id);
-  }, [selectedPlan, loadedPlanId]);
+  }, [selectedPlan, loadedPlanId, editingLiveCampaignId]);
 
   const invalidate = async () => {
     await Promise.all([
@@ -2812,6 +2864,57 @@ export function GoogleAdsPageInner() {
     },
     onError: (error) => showToast({ title: "Selecteren mislukt", description: error.message, variant: "error" }),
   });
+  const setLoginCustomerId = trpc.googleAds.setLoginCustomerId.useMutation({
+    onSuccess: async () => {
+      await invalidate();
+      showToast({ title: "Manager customer ID opgeslagen" });
+    },
+    onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
+  });
+  const pauseCampaign = trpc.googleAds.pauseInGoogle.useMutation({
+    onSuccess: async () => {
+      await invalidate();
+      showToast({ title: "Campagne gepauzeerd in Google Ads" });
+    },
+    onError: (error) => showToast({ title: "Pauzeren mislukt", description: explainGoogleError(error.message)?.message || error.message, variant: "error" }),
+  });
+  const resumeCampaign = trpc.googleAds.resumeInGoogle.useMutation({
+    onSuccess: async () => {
+      await invalidate();
+      showToast({ title: "Campagne geactiveerd in Google Ads" });
+    },
+    onError: (error) => showToast({ title: "Activeren mislukt", description: explainGoogleError(error.message)?.message || error.message, variant: "error" }),
+  });
+  const removeCampaign = trpc.googleAds.removeCampaign.useMutation({
+    onSuccess: async () => {
+      await invalidate();
+      showToast({ title: "Campagne verwijderd in Google Ads" });
+    },
+    onError: (error) => showToast({ title: "Verwijderen mislukt", description: explainGoogleError(error.message)?.message || error.message, variant: "error" }),
+  });
+  const updateCampaignName = trpc.googleAds.updateCampaignName.useMutation({
+    onSuccess: async () => {
+      await invalidate();
+      showToast({ title: "Campagnenaam bijgewerkt" });
+    },
+    onError: (error) => showToast({ title: "Naam wijzigen mislukt", description: explainGoogleError(error.message)?.message || error.message, variant: "error" }),
+  });
+  const saveCampaignToGoogle = trpc.googleAds.saveCampaignToGoogle.useMutation({
+    onSuccess: async (result) => {
+      await invalidate();
+      if (result.status) setEditingLiveCampaignStatus(String(result.status));
+      showToast({
+        title: "Campagne opgeslagen in Google Ads",
+        description: result.status === "ENABLED" ? "De campagne staat live." : "Wijzigingen zijn doorgestuurd naar Google.",
+      });
+    },
+    onError: (error) =>
+      showToast({
+        title: "Opslaan naar Google mislukt",
+        description: explainGoogleError(error.message)?.message || error.message,
+        variant: "error",
+      }),
+  });
   const setAutoadsEnabled = trpc.googleAds.setAutoadsEnabled.useMutation({
     onSuccess: async () => {
       await invalidate();
@@ -2819,6 +2922,28 @@ export function GoogleAdsPageInner() {
     },
     onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
   });
+
+  useEffect(() => {
+    setLoginCustomerIdInput(connection.data?.loginCustomerId || "");
+  }, [connection.data?.loginCustomerId]);
+
+  const campaignActionPending =
+    pauseCampaign.isPending ||
+    resumeCampaign.isPending ||
+    removeCampaign.isPending ||
+    updateCampaignName.isPending ||
+    saveCampaignToGoogle.isPending;
+
+  function handleRenameCampaign(campaign: { id: string; name: string }) {
+    const nextName = window.prompt("Nieuwe campagnenaam", campaign.name)?.trim();
+    if (!nextName || nextName === campaign.name) return;
+    updateCampaignName.mutate({ campaignId: campaign.id, name: nextName });
+  }
+
+  function handleRemoveCampaign(campaign: { id: string; name: string }) {
+    if (!window.confirm(`Campagne "${campaign.name}" verwijderen in Google Ads? Dit kan niet ongedaan worden gemaakt.`)) return;
+    removeCampaign.mutate({ campaignId: campaign.id });
+  }
 
   const aiBriefingPending =
     generateSuggestion.isPending || generateSearchKeywords.isPending || generateAudienceSignals.isPending;
@@ -2995,8 +3120,12 @@ export function GoogleAdsPageInner() {
     if (strict && campaignType === "SEARCH" && !keywords.length) throw new Error("Search vereist minstens 1 keyword.");
     if (strict && campaignType === "PERFORMANCE_MAX") {
       if (!longHeadlines.length) throw new Error("Performance Max vereist minstens 1 long headline.");
-      if (!imageUrl.trim() || !squareImageUrl.trim()) throw new Error("Performance Max vereist minstens een landscape en square image URL.");
-      if (!businessName.trim() || businessName.trim().length > 25) throw new Error("Performance Max business name is verplicht en maximaal 25 tekens.");
+      if (!editingLiveCampaignId && (!imageUrl.trim() || !squareImageUrl.trim())) {
+        throw new Error("Performance Max vereist minstens een landscape en square image URL.");
+      }
+      if (!editingLiveCampaignId && (!businessName.trim() || businessName.trim().length > 25)) {
+        throw new Error("Performance Max business name is verplicht en maximaal 25 tekens.");
+      }
     }
     const advancedCreative = parseJson(advancedCreativeJson, "Advanced creative");
     const advancedTargeting = parseJson(advancedTargetingJson, "Advanced targeting");
@@ -3051,6 +3180,20 @@ export function GoogleAdsPageInner() {
         ...advancedCreative,
       },
     };
+  }
+
+  function saveToGoogle(publishStatus?: "ENABLED" | "PAUSED") {
+    if (!editingLiveCampaignId) return;
+    try {
+      const payload = buildPayload(true);
+      saveCampaignToGoogle.mutate({
+        campaignId: editingLiveCampaignId,
+        ...payload,
+        publishStatus,
+      });
+    } catch (error) {
+      showToast({ title: "Controleer je velden", description: error instanceof Error ? error.message : "Ongeldige input", variant: "error" });
+    }
   }
 
   function saveDraft() {
@@ -3342,9 +3485,26 @@ export function GoogleAdsPageInner() {
                   <Badge variant="outline" className="shrink-0">
                     {campaignType === "SEARCH" ? "Zoekcampagne" : "Performance Max"}
                   </Badge>
+                  {editingLiveCampaignId ? (
+                    <Badge variant="secondary" className="shrink-0">
+                      Live bewerken · {googleCampaignStatusLabel(editingLiveCampaignStatus)}
+                    </Badge>
+                  ) : null}
                 </div>
               </CardHeader>
               <CardContent className="space-y-4 pt-5 sm:pt-5">
+                {editingLiveCampaignId && liveCampaignDetails.isLoading ? (
+                  <div className="rounded-xl border bg-muted/20 p-4 text-sm text-muted-foreground">
+                    <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+                    Campagnegegevens ophalen uit Google Ads…
+                  </div>
+                ) : null}
+                {editingLiveCampaignId && liveCampaignDetails.error ? (
+                  <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+                    <p className="font-medium text-destructive">Live campagne laden mislukt</p>
+                    <p className="mt-1 text-muted-foreground">{liveCampaignDetails.error.message}</p>
+                  </div>
+                ) : null}
                 {activeStep === "setup" ? (
                   <div className="space-y-4">
                     <WizardSection
@@ -3833,15 +3993,51 @@ Waar vind je het ID? In Google Ads: Doelen → Conversies → klik op de actie �
                       <Plus className="mr-2 h-4 w-4" />
                       Nieuwe campagne
                     </Button>
-                    <Button onClick={saveDraft} size="sm" disabled={createDraft.isPending || updateDraft.isPending || !canSaveDraft}>
-                      {createDraft.isPending || updateDraft.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                      Draft opslaan
-                    </Button>
-                    {readyToSave ? <Badge variant="success">Klaar voor approval</Badge> : null}
+                    {editingLiveCampaignId ? (
+                      <>
+                        <Button
+                          onClick={() => saveToGoogle()}
+                          size="sm"
+                          disabled={saveCampaignToGoogle.isPending || !readyToSave}
+                        >
+                          {saveCampaignToGoogle.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                          Opslaan in Google
+                        </Button>
+                        <Button
+                          onClick={() => saveToGoogle("ENABLED")}
+                          size="sm"
+                          variant="default"
+                          className="bg-emerald-700 hover:bg-emerald-800"
+                          disabled={saveCampaignToGoogle.isPending || !readyToSave}
+                        >
+                          {saveCampaignToGoogle.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                          Publiceren
+                        </Button>
+                        <Button
+                          onClick={() => saveToGoogle("PAUSED")}
+                          size="sm"
+                          variant="outline"
+                          disabled={saveCampaignToGoogle.isPending || !readyToSave}
+                        >
+                          <PauseCircle className="mr-2 h-4 w-4" />
+                          Pauzeren
+                        </Button>
+                      </>
+                    ) : (
+                      <Button onClick={saveDraft} size="sm" disabled={createDraft.isPending || updateDraft.isPending || !canSaveDraft}>
+                        {createDraft.isPending || updateDraft.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                        Draft opslaan
+                      </Button>
+                    )}
+                    {readyToSave ? <Badge variant="success">{editingLiveCampaignId ? "Klaar om op te slaan" : "Klaar voor approval"}</Badge> : null}
                   </div>
                 </div>
                 {!readyToSave ? (
-                  <p className="text-xs text-muted-foreground">Je kunt tussentijds opslaan. Voor de goedkeuringswachtrij moeten alle stappen groen zijn.</p>
+                  <p className="text-xs text-muted-foreground">
+                    {editingLiveCampaignId
+                      ? "Vul alle stappen in om live op te slaan naar Google Ads."
+                      : "Je kunt tussentijds opslaan. Voor de goedkeuringswachtrij moeten alle stappen groen zijn."}
+                  </p>
                 ) : null}
               </CardContent>
             </Card>
@@ -3908,20 +4104,64 @@ Waar vind je het ID? In Google Ads: Doelen → Conversies → klik op de actie �
               <CardDescription>Campagnes uit het geselecteerde Google Ads customer account.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {campaigns.isLoading ? (
+              {campaigns.error ? (
+                <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+                  <p className="font-medium text-destructive">Campagnes laden mislukt</p>
+                  <p className="mt-1 text-muted-foreground">{campaigns.error.message}</p>
+                </div>
+              ) : campaigns.isLoading ? (
                 <Skeleton className="h-32 w-full" />
               ) : (campaigns.data || []).length ? (
                 (campaigns.data || []).map((campaign: any) => (
                   <div key={campaign.id} className="flex flex-col gap-3 rounded-xl border p-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="font-medium">{campaign.name}</p>
-                      <p className="text-xs text-muted-foreground">{campaign.channelType} · {campaign.status}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {campaign.channelType} · {googleCampaignStatusLabel(campaign.status)}
+                      </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={campaign.status === "ENABLED" || campaign.status === 2 ? "success" : "secondary"}>{String(campaign.status)}</Badge>
-                      <Button size="sm" variant="outline" onClick={() => openGoogleCampaignAsDraft(asRecord(campaign))}>
+                      <Badge variant={googleCampaignIsEnabled(campaign.status) ? "success" : "secondary"}>
+                        {googleCampaignStatusLabel(campaign.status)}
+                      </Badge>
+                      {googleCampaignIsEnabled(campaign.status) ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={campaignActionPending}
+                          onClick={() => pauseCampaign.mutate({ campaignId: campaign.id })}
+                        >
+                          <PauseCircle className="mr-2 h-3.5 w-3.5" />
+                          Pauzeren
+                        </Button>
+                      ) : googleCampaignIsPaused(campaign.status) ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={campaignActionPending}
+                          onClick={() => resumeCampaign.mutate({ campaignId: campaign.id })}
+                        >
+                          <Play className="mr-2 h-3.5 w-3.5" />
+                          Activeren
+                        </Button>
+                      ) : null}
+                      <Button size="sm" variant="outline" disabled={campaignActionPending} onClick={() => handleRenameCampaign(campaign)}>
                         <PencilLine className="mr-2 h-3.5 w-3.5" />
-                        Bewerk als draft
+                        Naam
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => openLiveCampaignEditor(asRecord(campaign))}>
+                        <PencilLine className="mr-2 h-3.5 w-3.5" />
+                        Live bewerken
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-destructive hover:text-destructive"
+                        disabled={campaignActionPending}
+                        onClick={() => handleRemoveCampaign(campaign)}
+                      >
+                        <Trash2 className="mr-2 h-3.5 w-3.5" />
+                        Verwijderen
                       </Button>
                     </div>
                   </div>
@@ -3932,7 +4172,7 @@ Waar vind je het ID? In Google Ads: Doelen → Conversies → klik op de actie �
                   description={
                     connection.data?.selectedCustomerId
                       ? "Er staan nog geen campagnes in dit Google Ads-account."
-                      : "Kies eerst een customer of koppel Google Ads opnieuw."
+                      : "Kies eerst een customer in Instellingen of koppel Google Ads opnieuw."
                   }
                   icon={<Search className="h-8 w-8" />}
                   action={
@@ -3974,7 +4214,109 @@ Waar vind je het ID? In Google Ads: Doelen → Conversies → klik op de actie �
           </Card>
         </TabsContent>
         <TabsContent value="insights"><Card><CardHeader><CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5" /> Insights</CardTitle><CardDescription>Campaign-level performance van de laatste 30 dagen.</CardDescription></CardHeader><CardContent className="space-y-4"><div className="grid gap-3 md:grid-cols-4"><div className="rounded-xl border bg-muted/30 p-3 text-sm"><p className="text-xs uppercase text-muted-foreground">Campaigns</p><p className="text-2xl font-semibold">{(insights.data || []).length}</p></div><div className="rounded-xl border bg-muted/30 p-3 text-sm"><p className="text-xs uppercase text-muted-foreground">CTR</p><p className="text-2xl font-semibold">{insightCoach.ctr.toFixed(2)}%</p></div><div className="rounded-xl border bg-muted/30 p-3 text-sm"><p className="text-xs uppercase text-muted-foreground">Gem. CPC</p><p className="text-2xl font-semibold">€{insightCoach.cpc.toFixed(2)}</p></div><div className="rounded-xl border bg-muted/30 p-3 text-sm"><p className="text-xs uppercase text-muted-foreground">Conversies</p><p className="text-2xl font-semibold">{totalConversions}</p></div></div><Card className="border-primary/20 bg-primary/5"><CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Sparkles className="h-4 w-4" /> AI coach</CardTitle><CardDescription>Praktische interpretatie van de huidige Google Ads resultaten.</CardDescription></CardHeader><CardContent className="space-y-2 text-sm">{insightCoach.tips.map((tip) => <p key={tip} className="rounded-xl border bg-card px-3 py-2">{tip}</p>)}</CardContent></Card>{(insights.data || []).map((row: any) => <div key={row.campaign_id || row.campaign_name} className="grid gap-2 rounded-xl border p-3 text-sm md:grid-cols-6"><div className="font-medium">{row.campaign_name || row.campaign_id}</div><div>Impressies: {row.impressions || 0}</div><div>Clicks: {row.clicks || 0}</div><div>CTR: {Number(row.ctr || 0).toFixed(2)}%</div><div>CPC: €{Number(row.cpc || 0).toFixed(2)}</div><div>Conv: {row.conversions || 0} · Spend: €{row.spend || 0}</div></div>)}{!(insights.data || []).length ? <EmptyState title="Geen inzichten" description="Google geeft nog geen data terug voor dit account of deze periode." icon={<BarChart3 className="h-8 w-8" />} /> : null}</CardContent></Card></TabsContent>
-        <TabsContent value="settings"><Card><CardHeader><CardTitle>Google Ads instellingen</CardTitle><CardDescription>Selecteer exact één customer ID per workspace.</CardDescription></CardHeader><CardContent className="space-y-4"><Card className="border-amber-500/30 bg-amber-500/10"><CardContent className="flex gap-3 p-4 text-sm"><ShieldCheck className="mt-0.5 h-5 w-5 text-amber-700" /><div><p className="font-medium text-amber-950 dark:text-amber-100">Nieuwe campagnes worden gepauzeerd aangemaakt in Google Ads.</p><p className="text-amber-900/80 dark:text-amber-100/80">Live zetten doe je bewust in Google Ads.</p></div></CardContent></Card><div className="rounded-xl border p-3 text-sm"><div className="flex items-center justify-between gap-3"><div><p className="font-medium">Google Ads module</p><p className="text-xs text-muted-foreground">Vereist om Push paused naar Google te gebruiken.</p></div><Switch checked={Boolean(connection.data?.autoadsEnabled)} disabled={setAutoadsEnabled.isPending} onCheckedChange={(enabled) => setAutoadsEnabled.mutate({ enabled })} /></div></div><div className="space-y-2"><Label>Beschikbare Google Ads customers</Label>{customers.isLoading ? <Skeleton className="h-20 w-full" /> : (customers.data || []).map((account: any) => (<div key={account.customerId} className="flex flex-col gap-2 rounded-xl border p-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-medium">{account.name}</p><p className="font-mono text-xs text-muted-foreground">{account.customerId} · {account.currency}</p></div><Button size="sm" variant={connection.data?.selectedCustomerId === account.customerId ? "secondary" : "default"} onClick={() => selectCustomer.mutate({ customerId: account.customerId, name: account.name, currency: account.currency, timezoneName: account.timezone })}>{connection.data?.selectedCustomerId === account.customerId ? "Geselecteerd" : "Selecteren"}</Button></div>))}{!(customers.data || []).length ? <EmptyState title="Geen customers gevonden" description="Koppel Google Ads met adwords-scope en controleer API-toegang." icon={<Search className="h-8 w-8" />} /> : null}</div></CardContent></Card></TabsContent>
+        <TabsContent value="settings">
+          <Card>
+            <CardHeader>
+              <CardTitle>Google Ads instellingen</CardTitle>
+              <CardDescription>Selecteer exact één customer ID per workspace.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Card className="border-amber-500/30 bg-amber-500/10">
+                <CardContent className="flex gap-3 p-4 text-sm">
+                  <ShieldCheck className="mt-0.5 h-5 w-5 text-amber-700" />
+                  <div>
+                    <p className="font-medium text-amber-950 dark:text-amber-100">Nieuwe campagnes worden gepauzeerd aangemaakt in Google Ads.</p>
+                    <p className="text-amber-900/80 dark:text-amber-100/80">Activeren, pauzeren en verwijderen kan rechtstreeks vanuit het tabblad Campagnes.</p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="rounded-xl border p-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium">Google Ads module</p>
+                    <p className="text-xs text-muted-foreground">Vereist om drafts naar Google te pushen.</p>
+                  </div>
+                  <Switch
+                    checked={Boolean(connection.data?.autoadsEnabled)}
+                    disabled={setAutoadsEnabled.isPending}
+                    onCheckedChange={(enabled) => setAutoadsEnabled.mutate({ enabled })}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2 rounded-xl border p-3">
+                <Label>Manager customer ID (MCC)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Alleen nodig als je via een manager-account werkt. Wordt automatisch ingevuld bij selectie waar mogelijk.
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    value={loginCustomerIdInput}
+                    onChange={(event) => setLoginCustomerIdInput(event.target.value.replace(/\D/g, ""))}
+                    placeholder="Bijv. 1234567890"
+                  />
+                  <Button
+                    variant="outline"
+                    disabled={setLoginCustomerId.isPending}
+                    onClick={() => setLoginCustomerId.mutate({ loginCustomerId: loginCustomerIdInput })}
+                  >
+                    Opslaan
+                  </Button>
+                </div>
+                {connection.data?.loginCustomerId ? (
+                  <p className="text-xs text-muted-foreground">Actief: {connection.data.loginCustomerId}</p>
+                ) : null}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Beschikbare Google Ads customers</Label>
+                {customers.error ? (
+                  <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+                    <p className="font-medium text-destructive">Customers laden mislukt</p>
+                    <p className="mt-1 text-muted-foreground">{customers.error.message}</p>
+                  </div>
+                ) : customers.isLoading ? (
+                  <Skeleton className="h-20 w-full" />
+                ) : (customers.data || []).map((account: any) => (
+                  <div key={account.customerId} className="flex flex-col gap-2 rounded-xl border p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="font-medium">{account.name}</p>
+                      <p className="font-mono text-xs text-muted-foreground">
+                        {account.customerId} · {account.currency}
+                        {account.isManager ? " · Manager" : ""}
+                        {account.loginCustomerId ? ` · login ${account.loginCustomerId}` : ""}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant={connection.data?.selectedCustomerId === account.customerId ? "secondary" : "default"}
+                      disabled={selectCustomer.isPending}
+                      onClick={() =>
+                        selectCustomer.mutate({
+                          customerId: account.customerId,
+                          name: account.name,
+                          currency: account.currency,
+                          timezoneName: account.timezone,
+                          loginCustomerId: account.loginCustomerId,
+                        })
+                      }
+                    >
+                      {connection.data?.selectedCustomerId === account.customerId ? "Geselecteerd" : "Selecteren"}
+                    </Button>
+                  </div>
+                ))}
+                {!customers.isLoading && !customers.error && !(customers.data || []).length ? (
+                  <EmptyState
+                    title="Geen customers gevonden"
+                    description="Koppel Google Ads met adwords-scope, zet GOOGLE_ADS_DEVELOPER_TOKEN en controleer API-toegang."
+                    icon={<Search className="h-8 w-8" />}
+                  />
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
       </div>
 

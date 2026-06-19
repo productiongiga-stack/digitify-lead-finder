@@ -272,16 +272,16 @@ function CarouselSlideField({
   const [dragOver, setDragOver] = useState(false);
   const [showUrlInput, setShowUrlInput] = useState(false);
 
-  async function uploadFile(file: File) {
+  async function uploadFile(file: File, targetSlide: SocialCarouselSlide = slide) {
     setUploading(true);
     try {
       const url = await uploadSocialAssetFile(file);
-      if (slide.mediaType === "IMAGE") {
-        onChange({ ...slide, imageUrl: url, videoUrl: undefined });
+      if (targetSlide.mediaType === "IMAGE") {
+        onChange({ ...targetSlide, imageUrl: url, videoUrl: undefined });
       } else {
-        onChange({ ...slide, videoUrl: url, imageUrl: undefined });
+        onChange({ ...targetSlide, videoUrl: url, imageUrl: undefined });
       }
-      showToast({ title: slide.mediaType === "IMAGE" ? "Foto toegevoegd" : "Video toegevoegd" });
+      showToast({ title: targetSlide.mediaType === "IMAGE" ? "Foto toegevoegd" : "Video toegevoegd" });
     } catch (error) {
       showToast({
         title: "Upload mislukt",
@@ -301,10 +301,14 @@ function CarouselSlideField({
       return;
     }
     const nextType: SocialCarouselSlide["mediaType"] = isVideo ? "VIDEO" : "IMAGE";
+    const targetSlide =
+      nextType !== slide.mediaType
+        ? { ...slide, mediaType: nextType, imageUrl: undefined, videoUrl: undefined }
+        : slide;
     if (nextType !== slide.mediaType) {
-      onChange({ ...slide, mediaType: nextType, imageUrl: undefined, videoUrl: undefined });
+      onChange(targetSlide);
     }
-    await uploadFile(file);
+    await uploadFile(file, targetSlide);
   }
 
   function setMediaType(mediaType: SocialCarouselSlide["mediaType"]) {
@@ -321,7 +325,7 @@ function CarouselSlideField({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-semibold">Slide {index + 1}</p>
+          <p className="text-sm font-semibold">Item {index + 1}</p>
           <MediaTypeToggle value={slide.mediaType} disabled={disabled} onChange={setMediaType} />
           {ready ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
@@ -452,19 +456,13 @@ function CarouselFilmstrip({
   slides,
   activeIndex,
   disabled,
-  canAdd,
   onSelect,
-  onAdd,
 }: {
   slides: SocialCarouselSlide[];
   activeIndex: number;
   disabled?: boolean;
-  canAdd: boolean;
   onSelect: (index: number) => void;
-  onAdd: (mediaType: SocialCarouselSlide["mediaType"]) => void;
 }) {
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
-
   return (
     <div className="flex items-center gap-2 overflow-x-auto pb-1">
       {slides.map((slide, index) => {
@@ -505,47 +503,6 @@ function CarouselFilmstrip({
           </button>
         );
       })}
-
-      {canAdd ? (
-        <div className="relative shrink-0">
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => setAddMenuOpen((open) => !open)}
-            className="flex h-[4.5rem] w-12 flex-col items-center justify-center rounded-lg border-2 border-dashed border-border/80 text-muted-foreground transition hover:border-amber-400 hover:text-foreground"
-          >
-            <Plus className="h-4 w-4" />
-            <span className="mt-0.5 text-[9px] font-medium">Slide</span>
-          </button>
-          {addMenuOpen ? (
-            <>
-              <button type="button" className="fixed inset-0 z-10" aria-label="Menu sluiten" onClick={() => setAddMenuOpen(false)} />
-              <div className="absolute bottom-full left-0 z-20 mb-1 flex min-w-[7rem] flex-col overflow-hidden rounded-lg border bg-popover shadow-md">
-                <button
-                  type="button"
-                  className="flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted"
-                  onClick={() => {
-                    onAdd("IMAGE");
-                    setAddMenuOpen(false);
-                  }}
-                >
-                  <ImageIcon className="h-3.5 w-3.5" /> Foto-slide
-                </button>
-                <button
-                  type="button"
-                  className="flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted"
-                  onClick={() => {
-                    onAdd("VIDEO");
-                    setAddMenuOpen(false);
-                  }}
-                >
-                  <Film className="h-3.5 w-3.5" /> Video-slide
-                </button>
-              </div>
-            </>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -558,7 +515,7 @@ function CarouselProgress({ readyCount, total }: { readyCount: number; total: nu
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2 text-xs">
         <span className={cn("font-medium", minMet ? "text-emerald-700 dark:text-emerald-300" : "text-foreground")}>
-          {readyCount} van {total} slides klaar
+          {readyCount} van {total} items klaar
           {!minMet ? ` · nog ${CAROUSEL_MIN_SLIDES - readyCount} nodig` : ""}
         </span>
         <span className="text-muted-foreground">{total}/{CAROUSEL_MAX_SLIDES}</span>
@@ -578,11 +535,17 @@ export function SocialCarouselEditor({
   feedFormat,
   disabled,
   onChange,
+  title = "Carousel",
+  description = "Minstens 2 items, maximaal 10. Het eerste item bepaalt de verhouding op Instagram.",
+  actionLabel,
 }: {
   carousel: SocialCarouselState;
   feedFormat: FeedAspectFormat;
   disabled?: boolean;
   onChange: (carousel: SocialCarouselState) => void;
+  title?: string;
+  description?: string;
+  actionLabel?: string;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -615,9 +578,10 @@ export function SocialCarouselEditor({
   }
 
   function addSlide(mediaType: SocialCarouselSlide["mediaType"]) {
-    const next = appendCarouselSlide(carousel, mediaType);
-    onChange(next);
-    setActiveIndex(next.slides.length - 1);
+    if (carousel.slides.length >= CAROUSEL_MAX_SLIDES) return;
+    const slides = [...carousel.slides, createSlide(mediaType)];
+    onChange({ ...carousel, enabled: true, slides });
+    setActiveIndex(slides.length - 1);
   }
 
   function enableCarousel() {
@@ -643,10 +607,10 @@ export function SocialCarouselEditor({
         <div className="min-w-0">
           <Label className="flex items-center gap-1.5 text-sm font-semibold">
             <Layers className="h-4 w-4 text-amber-600" />
-            Carousel
+            {title}
           </Label>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Minstens 2 slides, maximaal 10. Eerste slide bepaalt de verhouding op Instagram.
+            {description}
           </p>
         </div>
         <Button
@@ -657,7 +621,7 @@ export function SocialCarouselEditor({
           disabled={disabled}
           onClick={() => (carousel.enabled ? disableCarousel() : enableCarousel())}
         >
-          {carousel.enabled ? "Enkel bestand" : "Carousel aan"}
+          {actionLabel || (carousel.enabled ? "Enkel bestand" : "Multi-upload aan")}
         </Button>
       </div>
 
@@ -665,14 +629,18 @@ export function SocialCarouselEditor({
         <div className="space-y-4 rounded-lg border bg-background/80 p-3">
           <CarouselProgress readyCount={readyCount} total={carousel.slides.length} />
 
-          <CarouselFilmstrip
-            slides={carousel.slides}
-            activeIndex={activeIndex}
-            disabled={disabled}
-            canAdd={canAddSlide}
-            onSelect={setActiveIndex}
-            onAdd={addSlide}
-          />
+          <CarouselFilmstrip slides={carousel.slides} activeIndex={activeIndex} disabled={disabled} onSelect={setActiveIndex} />
+
+          {canAddSlide ? (
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => addSlide("IMAGE")}>
+                <Plus className="mr-1.5 h-3.5 w-3.5" /> Foto
+              </Button>
+              <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => addSlide("VIDEO")}>
+                <Plus className="mr-1.5 h-3.5 w-3.5" /> Video
+              </Button>
+            </div>
+          ) : null}
 
           {activeSlide ? (
             <CarouselSlideField

@@ -6,11 +6,25 @@ import { cropImageSourceToPlacement, describePlacementCrop } from "@/lib/social-
 import { uploadSocialAssetFile } from "@/lib/persist-social-assets";
 import { trpc } from "@/lib/trpc/client";
 import { cn } from "@/lib/utils";
-import { Badge, Button, Input, Switch } from "@digitify/ui";
-import { Check, Film, ImageIcon, LayoutGrid, Link2, Loader2, Smartphone, Upload } from "lucide-react";
+import { Badge, Button, Input } from "@digitify/ui";
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  Film,
+  ImageIcon,
+  LayoutGrid,
+  Link2,
+  Loader2,
+  Plus,
+  Smartphone,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
 import {
   isCarouselReady,
+  slideHasMedia,
   SocialCarouselEditor,
   type SocialCarouselState,
 } from "./social-carousel-editor";
@@ -24,6 +38,14 @@ export type PlatformFeedFormats = Partial<Record<SocialPlatform, FeedAspectForma
 export type PlacementAssets = Partial<
   Record<SocialPlacement, { imageUrl?: string; videoUrl?: string }>
 >;
+export type PlatformAssets = Partial<Record<SocialPlatform, PlacementAssets>>;
+
+export type SocialStoryItem = {
+  id: string;
+  mediaType: "IMAGE" | "VIDEO";
+  imageUrl?: string;
+  videoUrl?: string;
+};
 
 const PLACEMENT_OPTIONS: Array<{
   id: SocialPlacement;
@@ -49,6 +71,19 @@ const FEED_FORMAT_OPTIONS: Array<{
 
 const FACEBOOK_FEED_FORMAT_OPTIONS = FEED_FORMAT_OPTIONS.filter((option) => option.value !== "PORTRAIT");
 const INSTAGRAM_FEED_FORMAT_OPTIONS = FEED_FORMAT_OPTIONS.filter((option) => option.value !== "LANDSCAPE");
+
+function createStoryItem(mediaType: SocialStoryItem["mediaType"] = "IMAGE"): SocialStoryItem {
+  return {
+    id: `story_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    mediaType,
+    imageUrl: undefined,
+    videoUrl: undefined,
+  };
+}
+
+export function storyItemHasMedia(item: SocialStoryItem) {
+  return item.mediaType === "VIDEO" ? Boolean(item.videoUrl?.trim()) : Boolean(item.imageUrl?.trim());
+}
 
 function PlatformFormatPanel({
   platform,
@@ -731,6 +766,279 @@ function PlacementMediaEditor({
   );
 }
 
+function StoryItemsEditor({
+  items,
+  feedFormat,
+  disabled,
+  targetPlatforms,
+  onChange,
+}: {
+  items: SocialStoryItem[];
+  feedFormat: FeedAspectFormat;
+  disabled?: boolean;
+  targetPlatforms: string[];
+  onChange: (items: SocialStoryItem[]) => void;
+}) {
+  const { showToast } = useToast();
+  const imageRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLInputElement>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [uploading, setUploading] = useState<"image" | "video" | null>(null);
+  const activeItem = items[activeIndex] || items[0] || null;
+
+  useEffect(() => {
+    if (activeIndex >= items.length) {
+      setActiveIndex(Math.max(0, items.length - 1));
+    }
+  }, [activeIndex, items.length]);
+
+  function addItem(mediaType: SocialStoryItem["mediaType"]) {
+    const next = [...items, createStoryItem(mediaType)];
+    onChange(next);
+    setActiveIndex(next.length - 1);
+  }
+
+  function updateActive(patch: Partial<SocialStoryItem>) {
+    if (!activeItem) return;
+    const next = [...items];
+    next[activeIndex] = { ...activeItem, ...patch };
+    onChange(next);
+  }
+
+  function removeActive() {
+    if (!activeItem) return;
+    const next = items.filter((_, index) => index !== activeIndex);
+    onChange(next);
+    setActiveIndex((current) => Math.max(0, Math.min(current, next.length - 1)));
+  }
+
+  function moveActive(direction: -1 | 1) {
+    if (!activeItem) return;
+    const target = activeIndex + direction;
+    if (target < 0 || target >= items.length) return;
+    const next = [...items];
+    const [item] = next.splice(activeIndex, 1);
+    next.splice(target, 0, item);
+    onChange(next);
+    setActiveIndex(target);
+  }
+
+  async function uploadFile(file: File, kind: "image" | "video") {
+    setUploading(kind);
+    try {
+      let uploadFile = file;
+      let cropped = false;
+      if (kind === "image") {
+        const prepared = await cropImageSourceToPlacement({
+          source: file,
+          placement: "STORY",
+          feedFormat,
+          targetPlatforms,
+          forceCrop: true,
+        });
+        if (prepared.file) {
+          uploadFile = prepared.file;
+          cropped = prepared.cropped;
+        }
+      }
+
+      const url = await uploadSocialAssetFile(uploadFile);
+      updateActive(
+        kind === "image"
+          ? { mediaType: "IMAGE", imageUrl: url, videoUrl: undefined }
+          : { mediaType: "VIDEO", videoUrl: url, imageUrl: undefined },
+      );
+      showToast({
+        title: kind === "image" ? "Story-foto toegevoegd" : "Story-video toegevoegd",
+        description: kind === "image" && cropped ? "Automatisch bijgeknipt naar 9:16." : undefined,
+      });
+    } catch (error) {
+      showToast({
+        title: "Upload mislukt",
+        description: error instanceof Error ? error.message : "Onbekende fout",
+        variant: "error",
+      });
+    } finally {
+      setUploading(null);
+    }
+  }
+
+  function handleDroppedFile(file: File) {
+    if (file.type.startsWith("image/")) {
+      void uploadFile(file, "image");
+      return;
+    }
+    if (file.type.startsWith("video/")) {
+      void uploadFile(file, "video");
+      return;
+    }
+    showToast({ title: "Ongeldig bestand", description: "Gebruik JPG, PNG, WebP, MP4 of MOV.", variant: "error" });
+  }
+
+  const mediaUrl =
+    activeItem?.mediaType === "VIDEO"
+      ? activeItem.videoUrl?.trim() || ""
+      : activeItem?.imageUrl?.trim() || "";
+  const mediaKind = activeItem?.mediaType === "VIDEO" ? "video" : "image";
+
+  return (
+    <div className="space-y-4 rounded-xl border bg-muted/10 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-foreground">Story-reeks</p>
+          <p className="text-xs text-muted-foreground">
+            Sleep de volgorde goed: 1 wordt als eerste gezien. Bij publicatie plaatsen we de reeks veilig omgekeerd.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="outline" disabled={disabled || items.length >= 10} onClick={() => addItem("IMAGE")}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" /> Foto
+          </Button>
+          <Button type="button" size="sm" variant="outline" disabled={disabled || items.length >= 10} onClick={() => addItem("VIDEO")}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" /> Video
+          </Button>
+        </div>
+      </div>
+
+      {items.length ? (
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {items.map((item, index) => {
+            const itemUrl = item.mediaType === "VIDEO" ? item.videoUrl?.trim() : item.imageUrl?.trim();
+            const active = index === activeIndex;
+            const ready = storyItemHasMedia(item);
+            return (
+              <button
+                key={item.id}
+                type="button"
+                disabled={disabled}
+                onClick={() => setActiveIndex(index)}
+                className={cn(
+                  "relative h-[4.5rem] w-12 shrink-0 overflow-hidden rounded-lg border-2 transition",
+                  active ? "border-amber-500 ring-2 ring-amber-500/20" : "border-border/80 hover:border-amber-300",
+                )}
+              >
+                {itemUrl ? (
+                  item.mediaType === "VIDEO" ? (
+                    <video src={itemUrl} className="h-full w-full object-cover" muted playsInline />
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={itemUrl} alt="" className="h-full w-full object-cover" />
+                  )
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-muted/30 text-muted-foreground">
+                    {item.mediaType === "VIDEO" ? <Film className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}
+                  </div>
+                )}
+                <span
+                  className={cn(
+                    "absolute left-1 top-1 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold",
+                    ready ? "bg-emerald-500 text-white" : "bg-background/90 text-muted-foreground ring-1 ring-border",
+                  )}
+                >
+                  {index + 1}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed bg-background/70 px-4 py-6 text-center">
+          <p className="text-sm font-medium">Nog geen story-items</p>
+          <p className="mt-1 text-xs text-muted-foreground">Voeg minstens één foto of video toe.</p>
+        </div>
+      )}
+
+      {activeItem ? (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-semibold">Story {activeIndex + 1}</p>
+              <FeedMediaModeToggle
+                mode={activeItem.mediaType === "VIDEO" ? "video" : "photo"}
+                disabled={disabled}
+                onChange={(mode) =>
+                  updateActive(
+                    mode === "video"
+                      ? { mediaType: "VIDEO", imageUrl: undefined, videoUrl: "" }
+                      : { mediaType: "IMAGE", imageUrl: "", videoUrl: undefined },
+                  )
+                }
+              />
+            </div>
+            <div className="flex items-center gap-0.5">
+              <Button type="button" size="icon" variant="ghost" className="h-8 w-8" disabled={disabled || activeIndex === 0} onClick={() => moveActive(-1)}>
+                <ArrowUp className="h-3.5 w-3.5" />
+              </Button>
+              <Button type="button" size="icon" variant="ghost" className="h-8 w-8" disabled={disabled || activeIndex >= items.length - 1} onClick={() => moveActive(1)}>
+                <ArrowDown className="h-3.5 w-3.5" />
+              </Button>
+              <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" disabled={disabled} onClick={removeActive}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+
+          <input
+            ref={imageRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadFile(file, "image");
+              event.currentTarget.value = "";
+            }}
+          />
+          <input
+            ref={videoRef}
+            type="file"
+            accept="video/mp4,video/quicktime"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadFile(file, "video");
+              event.currentTarget.value = "";
+            }}
+          />
+
+          <MediaDropZone
+            mediaUrl={mediaUrl}
+            mediaKind={mediaKind}
+            aspectClass="aspect-[9/16]"
+            disabled={disabled}
+            uploading={uploading !== null}
+            emptyTitle={activeItem.mediaType === "VIDEO" ? "Story-video toevoegen" : "Story-foto toevoegen"}
+            emptyHint="Verticale 9:16 media · sleep of klik om te uploaden"
+            onPickFile={() => (activeItem.mediaType === "VIDEO" ? videoRef.current?.click() : imageRef.current?.click())}
+            onClear={mediaUrl ? () => updateActive(activeItem.mediaType === "VIDEO" ? { videoUrl: "" } : { imageUrl: "" }) : undefined}
+            onDropFile={handleDroppedFile}
+          />
+
+          <div className="relative">
+            <Link2 className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              disabled={disabled}
+              value={mediaUrl}
+              onChange={(event) =>
+                updateActive(
+                  activeItem.mediaType === "VIDEO"
+                    ? { videoUrl: event.target.value, imageUrl: undefined }
+                    : { imageUrl: event.target.value, videoUrl: undefined },
+                )
+              }
+              placeholder={activeItem.mediaType === "VIDEO" ? "Of plak een publieke video-URL" : "Of plak een publieke afbeeldings-URL"}
+              className="h-9 pl-9"
+            />
+          </div>
+          {activeItem.mediaType === "VIDEO" && mediaUrl && !/^https:\/\//i.test(mediaUrl) ? (
+            <p className="text-xs text-destructive">Video-URL moet publiek bereikbaar zijn via https.</p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function primaryPlacementForOpen(placements: SocialPlacement[]) {
   const order: SocialPlacement[] = ["FEED", "STORY", "REEL"];
   return order.find((placement) => placements.includes(placement));
@@ -741,7 +1049,7 @@ function feedSectionDescription(carousel: SocialCarouselState, assets: Placement
     const count = carousel.slides.filter((slide) =>
       slide.mediaType === "IMAGE" ? Boolean(slide.imageUrl?.trim()) : Boolean(slide.videoUrl?.trim()),
     ).length;
-    return `Carousel · ${count} slide${count === 1 ? "" : "s"}`;
+    return `Multi-upload · ${count} item${count === 1 ? "" : "s"}`;
   }
   const hasImage = Boolean(assets.FEED?.imageUrl?.trim());
   const hasVideo = Boolean(assets.FEED?.videoUrl?.trim());
@@ -749,7 +1057,7 @@ function feedSectionDescription(carousel: SocialCarouselState, assets: Placement
   if (hasImage && hasVideo) return "Foto en video";
   if (hasImage) return "Feed-foto toegevoegd";
   if (hasVideo) return "Feed-video toegevoegd";
-  return "Foto, video of carousel instellen";
+  return "Foto, video of multi-upload instellen";
 }
 
 export function SocialPlacementEditor({
@@ -757,7 +1065,9 @@ export function SocialPlacementEditor({
   feedFormat,
   feedFormats,
   assets,
+  platformAssets,
   carousel,
+  storyItems,
   disabled,
   targetFacebook,
   targetInstagram,
@@ -765,13 +1075,17 @@ export function SocialPlacementEditor({
   onFeedFormatChange,
   onFeedFormatsChange,
   onAssetsChange,
+  onPlatformAssetsChange,
   onCarouselChange,
+  onStoryItemsChange,
 }: {
   placements: SocialPlacement[];
   feedFormat: FeedAspectFormat;
   feedFormats?: PlatformFeedFormats;
   assets: PlacementAssets;
+  platformAssets: PlatformAssets;
   carousel: SocialCarouselState;
+  storyItems: SocialStoryItem[];
   disabled?: boolean;
   targetFacebook: boolean;
   targetInstagram: boolean;
@@ -779,28 +1093,10 @@ export function SocialPlacementEditor({
   onFeedFormatChange: (format: FeedAspectFormat) => void;
   onFeedFormatsChange?: (formats: PlatformFeedFormats) => void;
   onAssetsChange: (assets: PlacementAssets) => void;
+  onPlatformAssetsChange: (assets: PlatformAssets) => void;
   onCarouselChange: (carousel: SocialCarouselState) => void;
+  onStoryItemsChange: (items: SocialStoryItem[]) => void;
 }) {
-  const feedImage = assets.FEED?.imageUrl?.trim() || "";
-  const hasFeedAndStory = placements.includes("FEED") && placements.includes("STORY");
-  const storyMatchesFeed = Boolean(
-    hasFeedAndStory && feedImage && assets.STORY?.imageUrl?.trim() === feedImage,
-  );
-
-  const [storyUsesFeedImage, setStoryUsesFeedImage] = useState(
-    () => !assets.STORY?.imageUrl?.trim() || storyMatchesFeed,
-  );
-
-  useEffect(() => {
-    if (!hasFeedAndStory || !feedImage) return;
-    if (storyUsesFeedImage && assets.STORY?.imageUrl?.trim() !== feedImage) {
-      onAssetsChange({
-        ...assets,
-        STORY: { ...(assets.STORY || {}), imageUrl: feedImage },
-      });
-    }
-  }, [assets, feedImage, hasFeedAndStory, onAssetsChange, storyUsesFeedImage]);
-
   function togglePlacement(placement: SocialPlacement) {
     if (placements.includes(placement)) {
       if (placements.length === 1) return;
@@ -815,13 +1111,10 @@ export function SocialPlacementEditor({
       ...assets,
       [placement]: { ...(assets[placement] || {}), ...patch },
     });
-    if (placement === "STORY" && patch.imageUrl && patch.imageUrl !== feedImage) {
-      setStoryUsesFeedImage(false);
-    }
   }
 
   const targetPlatforms = [
-    placements.includes("FEED") || placements.includes("STORY") ? "FACEBOOK" : null,
+    targetFacebook && (placements.includes("FEED") || placements.includes("STORY")) ? "FACEBOOK" : null,
     targetInstagram && (placements.includes("FEED") || placements.includes("STORY") || placements.includes("REEL"))
       ? "INSTAGRAM"
       : null,
@@ -835,9 +1128,7 @@ export function SocialPlacementEditor({
     .join(" + ");
 
   const openPlacement = primaryPlacementForOpen(placements);
-  const feedBadge = carousel.enabled ? "Carousel" : FEED_FORMAT_OPTIONS.find((f) => f.value === feedFormat)?.ratio;
-  const storyImage = assets.STORY?.imageUrl?.trim();
-  const storyVideo = assets.STORY?.videoUrl?.trim();
+  const feedBadge = carousel.enabled ? "Multi" : FEED_FORMAT_OPTIONS.find((f) => f.value === feedFormat)?.ratio;
   const reelVideo = assets.REEL?.videoUrl?.trim();
   const resolvedFeedFormats: PlatformFeedFormats = {
     FACEBOOK: feedFormats?.FACEBOOK || feedFormat,
@@ -918,12 +1209,23 @@ export function SocialPlacementEditor({
           defaultOpen={openPlacement === "FEED"}
         >
           <div className="space-y-4">
-            <SocialCarouselEditor
-              carousel={carousel}
-              feedFormat={feedFormat}
-              disabled={disabled}
-              onChange={onCarouselChange}
-            />
+            {targetFacebook || targetInstagram ? (
+              <SocialCarouselEditor
+                carousel={carousel}
+                feedFormat={feedFormat}
+                disabled={disabled}
+                onChange={onCarouselChange}
+                title="Multi-upload"
+                description={
+                  targetFacebook && targetInstagram
+                    ? "Minstens 2 items, maximaal 10. Instagram wordt een carousel; Facebook een post met meerdere foto's of video's."
+                    : targetInstagram
+                      ? "Minstens 2 slides, maximaal 10. Eerste slide bepaalt de verhouding op Instagram."
+                      : "Minstens 2 items, maximaal 10. Facebook publiceert als post met meerdere foto's of video's."
+                }
+                actionLabel={carousel.enabled ? "Enkel bestand" : "Multi-upload aan"}
+              />
+            ) : null}
 
             {!carousel.enabled ? (
               <>
@@ -978,69 +1280,21 @@ export function SocialPlacementEditor({
         <SocialComposerSection
           title="Story"
           description={
-            storyUsesFeedImage && feedImage && !carousel.enabled && !storyVideo
-              ? "Gebruikt feed-foto · automatisch 9:16"
-              : storyVideo
-                ? "Story-video toegevoegd"
-                : storyImage
-                  ? "Story-foto toegevoegd"
-                  : "Verticale 9:16 foto of video"
+            storyItems.length
+              ? `${storyItems.filter(storyItemHasMedia).length} van ${storyItems.length} story-items klaar`
+              : "Meerdere 9:16 foto's of video's"
           }
           icon={Smartphone}
           badge="9:16"
           defaultOpen={openPlacement === "STORY"}
         >
-          {hasFeedAndStory && feedImage && !carousel.enabled && !storyVideo ? (
-            <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border bg-muted/15 px-3 py-2.5">
-              <div className="min-w-0">
-                <p className="text-xs font-medium">Zelfde afbeelding als feed</p>
-                <p className="text-[11px] text-muted-foreground">Geen aparte upload nodig</p>
-              </div>
-              <Switch
-                checked={storyUsesFeedImage}
-                disabled={disabled}
-                onCheckedChange={(checked) => {
-                  setStoryUsesFeedImage(checked);
-                  if (checked && feedImage) {
-                    updateAsset("STORY", { imageUrl: feedImage });
-                  }
-                }}
-              />
-            </div>
-          ) : null}
-
-          {storyUsesFeedImage && feedImage && !carousel.enabled && !storyVideo ? (
-            <div className="space-y-2 rounded-xl border bg-muted/10 p-4">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium">Voorbeeld vanuit feed</p>
-                <Badge variant="outline" className="text-[10px]">9:16 bij publicatie</Badge>
-              </div>
-              <MediaDropZone
-                mediaUrl={feedImage}
-                mediaKind="image"
-                aspectClass="aspect-[9/16] max-h-52"
-                disabled
-                uploading={false}
-                emptyTitle=""
-                emptyHint=""
-                onPickFile={() => undefined}
-              />
-              <p className="text-xs text-muted-foreground">
-                Story gebruikt je feed-foto. Bij opslaan maken we automatisch een verticale 9:16-versie.
-              </p>
-            </div>
-          ) : (
-            <PlacementMediaEditor
-              placement="STORY"
-              feedFormat={feedFormat}
-              asset={assets.STORY}
-              disabled={disabled}
-              targetPlatforms={targetPlatforms}
-              compactHeader
-              onImageChange={(url) => updateAsset("STORY", { imageUrl: url, videoUrl: "" })}
-              onVideoChange={(url) => updateAsset("STORY", { videoUrl: url, imageUrl: "" })}
-            />
-          )}
+          <StoryItemsEditor
+            items={storyItems}
+            feedFormat={feedFormat}
+            disabled={disabled}
+            targetPlatforms={targetPlatforms}
+            onChange={onStoryItemsChange}
+          />
         </SocialComposerSection>
       ) : null}
 
@@ -1068,7 +1322,8 @@ export function SocialPlacementEditor({
   );
 }
 
-export function isStoryMediaReady(assets: PlacementAssets) {
+export function isStoryMediaReady(assets: PlacementAssets, storyItems: SocialStoryItem[] = []) {
+  if (storyItems.length > 0) return storyItems.every(storyItemHasMedia);
   return Boolean(assets.STORY?.imageUrl?.trim() || assets.STORY?.videoUrl?.trim());
 }
 

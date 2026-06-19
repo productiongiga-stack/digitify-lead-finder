@@ -19,13 +19,17 @@ const mockedMeta = vi.hoisted(() => ({
   publishFacebookImagePost: vi.fn(),
   publishFacebookImageStory: vi.fn(),
   publishFacebookVideoPost: vi.fn(),
+  publishFacebookVideoStory: vi.fn(),
   publishInstagramCarouselPost: vi.fn(),
   publishInstagramImagePost: vi.fn(),
   publishInstagramImageStory: vi.fn(),
   publishInstagramReel: vi.fn(),
   publishInstagramVideoPost: vi.fn(),
+  publishInstagramVideoStory: vi.fn(),
   resolveSocialPublishTarget: vi.fn(),
   upsertMetaSettings: vi.fn(),
+  verifyFacebookPublishedPost: vi.fn(),
+  verifyInstagramPublishedMedia: vi.fn(),
   workspaceScopeFromAuthenticatedUser: vi.fn((user: { id: string; workspaceId?: string }) => ({
     workspaceId: user.workspaceId || user.id,
     memberId: user.id,
@@ -117,6 +121,8 @@ describe("social router flow", () => {
       tokenExpiresAt: "",
       autopostEnabled: true,
     });
+    mockedMeta.verifyFacebookPublishedPost.mockReset();
+    mockedMeta.verifyInstagramPublishedMedia.mockReset();
     mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
       pageId: "123",
       pageAccessToken: "page-token",
@@ -222,6 +228,80 @@ describe("social router flow", () => {
     );
     expect(socialPostUpdate.mock.calls[0]?.[0]?.data).not.toHaveProperty("status");
   });
+
+  it("deletes a published queue post locally without touching Meta", async () => {
+    const socialPostFindMany = vi.fn().mockResolvedValue([
+      {
+        id: "sp_live",
+        status: "PUBLISHED",
+        externalPostIds: {
+          facebook: { id: "fb_1", permalink: "https://facebook.com/post/1" },
+        },
+      },
+    ]);
+    const socialPostDeleteMany = vi.fn().mockResolvedValue({ count: 1 });
+
+    const caller = socialRouter.createCaller(
+      makeCtx({
+        socialPost: socialPostDb({
+          findMany: socialPostFindMany,
+          deleteMany: socialPostDeleteMany,
+        }),
+      }),
+    );
+
+    const result = await caller.deletePosts({ ids: ["sp_live"] });
+
+    expect(result).toEqual({
+      deleted: 1,
+      skippedPublishing: 0,
+      missing: 0,
+      publishedLocalOnly: 1,
+    });
+    expect(socialPostDeleteMany).toHaveBeenCalledWith({
+      where: {
+        createdById: TEST_USER_ID,
+        id: { in: ["sp_live"] },
+        status: { not: "PUBLISHING" },
+      },
+    });
+    expect(mockedMeta.verifyFacebookPublishedPost).not.toHaveBeenCalled();
+    expect(mockedMeta.verifyInstagramPublishedMedia).not.toHaveBeenCalled();
+  });
+
+  it("bulk deletes queue posts and skips in-progress publishing rows", async () => {
+    const socialPostFindMany = vi.fn().mockResolvedValue([
+      { id: "sp_draft", status: "DRAFT", externalPostIds: null },
+      { id: "sp_publishing", status: "PUBLISHING", externalPostIds: null },
+      { id: "sp_failed", status: "FAILED", externalPostIds: null },
+    ]);
+    const socialPostDeleteMany = vi.fn().mockResolvedValue({ count: 2 });
+
+    const caller = socialRouter.createCaller(
+      makeCtx({
+        socialPost: socialPostDb({
+          findMany: socialPostFindMany,
+          deleteMany: socialPostDeleteMany,
+        }),
+      }),
+    );
+
+    const result = await caller.deletePosts({ all: true });
+
+    expect(result).toEqual({
+      deleted: 2,
+      skippedPublishing: 1,
+      missing: 0,
+      publishedLocalOnly: 0,
+    });
+    expect(socialPostDeleteMany).toHaveBeenCalledWith({
+      where: {
+        createdById: TEST_USER_ID,
+        id: { in: ["sp_draft", "sp_failed"] },
+        status: { not: "PUBLISHING" },
+      },
+    });
+  });
 });
 
 function makePublishWorkerDb(post: Record<string, unknown>, options?: { lockFails?: boolean }) {
@@ -280,13 +360,17 @@ describe("social publish worker", () => {
     mockedMeta.resolveSocialPublishTarget.mockReset();
     mockedMeta.publishFacebookImagePost.mockReset();
     mockedMeta.publishFacebookImageStory.mockReset();
+    mockedMeta.publishFacebookVideoStory.mockReset();
     mockedMeta.publishInstagramImagePost.mockReset();
     mockedMeta.publishInstagramImageStory.mockReset();
+    mockedMeta.publishInstagramVideoStory.mockReset();
     mockedMeta.publishInstagramReel.mockReset();
     mockedMeta.publishFacebookCarouselPost.mockReset();
     mockedMeta.publishInstagramCarouselPost.mockReset();
     mockedMeta.publishFacebookVideoPost.mockReset();
     mockedMeta.publishInstagramVideoPost.mockReset();
+    mockedMeta.verifyFacebookPublishedPost.mockReset();
+    mockedMeta.verifyInstagramPublishedMedia.mockReset();
   });
 
   it("retries failed post with exponential backoff", async () => {
@@ -506,7 +590,7 @@ describe("social publish worker", () => {
     expect(mockedMeta.publishInstagramImagePost).not.toHaveBeenCalled();
   });
 
-  it("publishes image-only carousel feed posts through carousel endpoints", async () => {
+  it("publishes multi-upload to Instagram carousel and Facebook multi-photo post", async () => {
     const post = {
       id: "sp_carousel_images",
       createdById: TEST_USER_ID,
@@ -567,20 +651,21 @@ describe("social publish worker", () => {
     expect(mockedMeta.publishFacebookCarouselPost).toHaveBeenCalledWith(
       expect.objectContaining({
         pageId: "123",
+        caption: "Carousel caption",
         slides: expect.arrayContaining([
-          expect.objectContaining({ mediaType: "IMAGE", imageUrl: "https://example.com/slide1.jpg" }),
-          expect.objectContaining({ mediaType: "IMAGE", imageUrl: "https://example.com/slide2.jpg" }),
+          expect.objectContaining({ imageUrl: "https://example.com/slide1.jpg" }),
+          expect.objectContaining({ imageUrl: "https://example.com/slide2.jpg" }),
         ]),
       }),
     );
+    expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
     expect(mockedMeta.publishFacebookVideoPost).not.toHaveBeenCalled();
     expect(mockedMeta.publishInstagramCarouselPost).toHaveBeenCalledWith(
       expect.objectContaining({ pageAccessToken: "user-token" }),
     );
-    expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
   });
 
-  it("publishes mixed carousel feed posts as Facebook video and Instagram carousel", async () => {
+  it("publishes multi-upload with mixed photo and video slides", async () => {
     const post = {
       id: "sp_carousel",
       createdById: TEST_USER_ID,
@@ -624,9 +709,9 @@ describe("social publish worker", () => {
       instagramBusinessId: "ig_123",
       instagramUsername: "digitify.be",
     });
-    mockedMeta.publishFacebookVideoPost.mockResolvedValue({
-      id: "fb_video_1",
-      permalink: "https://facebook.com/post/video",
+    mockedMeta.publishFacebookCarouselPost.mockResolvedValue({
+      id: "fb_carousel_1",
+      permalink: "https://facebook.com/post/carousel",
       verified: true,
     });
     mockedMeta.publishInstagramCarouselPost.mockResolvedValue({
@@ -638,19 +723,74 @@ describe("social publish worker", () => {
     const result = await runDueSocialPostsWorker(db as any);
 
     expect(result.published).toBe(1);
-    expect(mockedMeta.publishFacebookVideoPost).toHaveBeenCalledWith(
+    expect(mockedMeta.publishFacebookCarouselPost).toHaveBeenCalledWith(
       expect.objectContaining({
         pageId: "123",
         pageAccessToken: "page-token",
         caption: "Carousel caption",
-        videoUrl: "https://example.com/slide2.mp4",
       }),
     );
-    expect(mockedMeta.publishFacebookCarouselPost).not.toHaveBeenCalled();
     expect(mockedMeta.publishInstagramCarouselPost).toHaveBeenCalledWith(
       expect.objectContaining({ pageAccessToken: "user-token" }),
     );
     expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
+    expect(mockedMeta.publishFacebookVideoPost).not.toHaveBeenCalled();
+  });
+
+  it("fails clearly when multi-upload has fewer than 2 items", async () => {
+    const post = {
+      id: "sp_carousel_missing_fb",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Carousel caption",
+      imageUrl: "https://example.com/slide1.jpg",
+      targetPlatforms: ["FACEBOOK", "INSTAGRAM"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+      metadata: {
+        placements: ["FEED"],
+        carousel: {
+          enabled: true,
+          slides: [{ id: "s1", mediaType: "IMAGE", imageUrl: "https://example.com/slide1.jpg" }],
+        },
+      },
+    };
+
+    const { db, socialPostUpdate } = makePublishWorkerDb(post);
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "ig_123",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "ig_123",
+      instagramUsername: "digitify.be",
+    });
+
+    const result = await runDueSocialPostsWorker(db as any, { postId: post.id, failImmediately: true });
+
+    expect(result.failed).toBe(1);
+    expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
+    expect(mockedMeta.publishInstagramCarouselPost).not.toHaveBeenCalled();
+    expect(socialPostUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          lastError: expect.stringContaining("Multi-upload vereist minstens 2"),
+        }),
+      }),
+    );
   });
 
   it("publishes feed video posts through video endpoints", async () => {
@@ -774,6 +914,156 @@ describe("social publish worker", () => {
             facebookStory: { id: "fb_story_1", permalink: "https://facebook.com/story/1", verified: true },
             instagramStory: { id: "ig_story_1", permalink: "https://instagram.com/p/1", verified: true },
           },
+        }),
+      }),
+    );
+  });
+
+  it("publishes multiple story items in reverse order with indexed external ids", async () => {
+    const post = {
+      id: "sp_multi_story",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Story sequence",
+      imageUrl: "https://example.com/story-1.jpg",
+      targetPlatforms: ["FACEBOOK", "INSTAGRAM"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+      metadata: {
+        placements: ["STORY"],
+        storyItems: [
+          { id: "s1", mediaType: "IMAGE", imageUrl: "https://example.com/story-1.jpg" },
+          { id: "s2", mediaType: "VIDEO", videoUrl: "https://example.com/story-2.mp4" },
+          { id: "s3", mediaType: "IMAGE", imageUrl: "https://example.com/story-3.jpg" },
+        ],
+      },
+    };
+
+    const { db, socialPostUpdate } = makePublishWorkerDb(post);
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "ig_123",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "ig_123",
+      instagramUsername: "digitify.be",
+    });
+    mockedMeta.publishFacebookImageStory
+      .mockResolvedValueOnce({ id: "fb_story_3", verified: true })
+      .mockResolvedValueOnce({ id: "fb_story_1", verified: true });
+    mockedMeta.publishInstagramImageStory
+      .mockResolvedValueOnce({ id: "ig_story_3", verified: true })
+      .mockResolvedValueOnce({ id: "ig_story_1", verified: true });
+    mockedMeta.publishFacebookVideoStory.mockResolvedValue({ id: "fb_story_2", verified: true });
+    mockedMeta.publishInstagramVideoStory.mockResolvedValue({ id: "ig_story_2", verified: true });
+
+    const result = await runDueSocialPostsWorker(db as any);
+
+    expect(result.published).toBe(1);
+    expect(mockedMeta.publishFacebookImageStory).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ imageUrl: "https://example.com/story-3.jpg" }),
+    );
+    expect(mockedMeta.publishFacebookVideoStory).toHaveBeenCalledWith(
+      expect.objectContaining({ videoUrl: "https://example.com/story-2.mp4" }),
+    );
+    expect(mockedMeta.publishFacebookImageStory).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ imageUrl: "https://example.com/story-1.jpg" }),
+    );
+    expect(socialPostUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "PUBLISHED",
+          externalPostIds: expect.objectContaining({
+            facebookStory_1: { id: "fb_story_1", verified: true },
+            facebookStory_2: { id: "fb_story_2", verified: true },
+            facebookStory_3: { id: "fb_story_3", verified: true },
+            instagramStory_1: { id: "ig_story_1", verified: true },
+            instagramStory_2: { id: "ig_story_2", verified: true },
+            instagramStory_3: { id: "ig_story_3", verified: true },
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("does not republish already stored story items on retry", async () => {
+    const post = {
+      id: "sp_multi_story_retry",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Story retry",
+      imageUrl: "https://example.com/story-1.jpg",
+      targetPlatforms: ["FACEBOOK", "INSTAGRAM"],
+      status: "FAILED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 1,
+      metadata: {
+        placements: ["STORY"],
+        storyItems: [
+          { id: "s1", mediaType: "IMAGE", imageUrl: "https://example.com/story-1.jpg" },
+          { id: "s2", mediaType: "IMAGE", imageUrl: "https://example.com/story-2.jpg" },
+        ],
+      },
+      externalPostIds: {
+        facebookStory_2: { id: "fb_story_2", verified: true },
+        instagramStory_2: { id: "ig_story_2", verified: true },
+      },
+    };
+
+    const { db, socialPostUpdate } = makePublishWorkerDb(post);
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "ig_123",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "ig_123",
+      instagramUsername: "digitify.be",
+    });
+    mockedMeta.publishFacebookImageStory.mockResolvedValue({ id: "fb_story_1", verified: true });
+    mockedMeta.publishInstagramImageStory.mockResolvedValue({ id: "ig_story_1", verified: true });
+
+    const result = await runDueSocialPostsWorker(db as any, { postId: post.id, failImmediately: true });
+
+    expect(result.published).toBe(1);
+    expect(mockedMeta.publishFacebookImageStory).toHaveBeenCalledTimes(1);
+    expect(mockedMeta.publishFacebookImageStory).toHaveBeenCalledWith(
+      expect.objectContaining({ imageUrl: "https://example.com/story-1.jpg" }),
+    );
+    expect(socialPostUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "PUBLISHED",
+          externalPostIds: expect.objectContaining({
+            facebookStory_1: { id: "fb_story_1", verified: true },
+            facebookStory_2: { id: "fb_story_2", verified: true },
+            instagramStory_1: { id: "ig_story_1", verified: true },
+            instagramStory_2: { id: "ig_story_2", verified: true },
+          }),
         }),
       }),
     );

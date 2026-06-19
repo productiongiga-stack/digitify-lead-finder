@@ -11,6 +11,13 @@ export type SocialPlacementAsset = {
   videoUrl?: string;
 };
 
+export type SocialStoryItem = {
+  id?: string;
+  mediaType: "IMAGE" | "VIDEO";
+  imageUrl?: string;
+  videoUrl?: string;
+};
+
 export type SocialCarouselSlide = {
   id?: string;
   mediaType: SocialCarouselSlideMediaType;
@@ -38,11 +45,13 @@ export type SocialPlacementsMetadata = {
   feedFormats?: PlatformFeedFormats;
   assets?: Partial<Record<SocialPlacement, SocialPlacementAsset>>;
   platformAssets?: Partial<Record<SocialPlatform, Partial<Record<SocialPlacement, SocialPlacementAsset>>>>;
+  storyItems?: SocialStoryItem[];
   carousel?: SocialCarouselSpec;
 };
 
 export const CAROUSEL_MIN_SLIDES = 2;
 export const CAROUSEL_MAX_SLIDES = 10;
+export const STORY_MAX_ITEMS = 10;
 
 const PLACEMENT_ORDER: SocialPlacement[] = ["FEED", "STORY", "REEL"];
 
@@ -81,7 +90,28 @@ export function normalizePlatformFeedFormats(
 }
 
 export function normalizePlatformAssets(metadata?: SocialPlacementsMetadata | null) {
-  return metadata?.platformAssets || {};
+  const platformAssets = metadata?.platformAssets || {};
+  const normalizeAsset = (asset?: SocialPlacementAsset) => ({
+    imageUrl: asset?.imageUrl?.trim() || undefined,
+    videoUrl: asset?.videoUrl?.trim() || undefined,
+  });
+
+  return {
+    FACEBOOK: platformAssets.FACEBOOK
+      ? {
+          FEED: normalizeAsset(platformAssets.FACEBOOK.FEED),
+          STORY: normalizeAsset(platformAssets.FACEBOOK.STORY),
+          REEL: normalizeAsset(platformAssets.FACEBOOK.REEL),
+        }
+      : undefined,
+    INSTAGRAM: platformAssets.INSTAGRAM
+      ? {
+          FEED: normalizeAsset(platformAssets.INSTAGRAM.FEED),
+          STORY: normalizeAsset(platformAssets.INSTAGRAM.STORY),
+          REEL: normalizeAsset(platformAssets.INSTAGRAM.REEL),
+        }
+      : undefined,
+  };
 }
 
 export function normalizePlacementAssets(metadata?: SocialPlacementsMetadata | null) {
@@ -123,10 +153,68 @@ export function resolvePlatformFeedImageUrl(
   return resolvePlacementImageUrl("FEED", metadata, fallbackImageUrl);
 }
 
+export function resolvePlatformFeedAsset(
+  platform: SocialPlatform,
+  metadata?: SocialPlacementsMetadata | null,
+  fallbackImageUrl?: string,
+): SocialPlacementAsset {
+  const platformAsset = metadata?.platformAssets?.[platform]?.FEED;
+  const imageUrl = platformAsset?.imageUrl?.trim() || "";
+  const videoUrl = platformAsset?.videoUrl?.trim() || "";
+  if (imageUrl || videoUrl) {
+    return {
+      imageUrl: imageUrl || undefined,
+      videoUrl: videoUrl || undefined,
+    };
+  }
+
+  const sharedAssets = normalizePlacementAssets(metadata);
+  const sharedImageUrl = sharedAssets.FEED?.imageUrl?.trim() || "";
+  const sharedVideoUrl = sharedAssets.FEED?.videoUrl?.trim() || "";
+  return {
+    imageUrl: sharedImageUrl || fallbackImageUrl?.trim() || undefined,
+    videoUrl: sharedVideoUrl || undefined,
+  };
+}
+
 export function resolveStoryPublishKind(metadata?: SocialPlacementsMetadata | null): StoryPublishKind {
   const videoUrl = resolvePlacementVideoUrl("STORY", metadata);
   if (videoUrl) return "VIDEO";
   return "IMAGE";
+}
+
+export function normalizeStoryItemsMetadata(metadata?: SocialPlacementsMetadata | null): SocialStoryItem[] {
+  const items = metadata?.storyItems;
+  if (!Array.isArray(items) || items.length === 0) return [];
+
+  return items.slice(0, STORY_MAX_ITEMS).map((item, index) => ({
+    id: item.id?.trim() || `story_${index + 1}`,
+    mediaType: item.mediaType === "VIDEO" ? "VIDEO" : "IMAGE",
+    imageUrl: item.imageUrl?.trim() || undefined,
+    videoUrl: item.videoUrl?.trim() || undefined,
+  }));
+}
+
+export function normalizeStoryItems(
+  metadata?: SocialPlacementsMetadata | null,
+  fallbackImageUrl?: string,
+): SocialStoryItem[] {
+  const items = normalizeStoryItemsMetadata(metadata).filter((item) =>
+    item.mediaType === "VIDEO" ? Boolean(item.videoUrl) : Boolean(item.imageUrl),
+  );
+  if (items.length) return items;
+
+  const videoUrl = resolvePlacementVideoUrl("STORY", metadata);
+  if (videoUrl) {
+    return [{ id: "story_1", mediaType: "VIDEO", videoUrl }];
+  }
+
+  const imageUrl = resolvePlacementImageUrl("STORY", metadata, fallbackImageUrl);
+  if (imageUrl) {
+    return [{ id: "story_1", mediaType: "IMAGE", imageUrl }];
+  }
+
+  return [];
 }
 
 export function normalizeCarouselMetadata(metadata?: SocialPlacementsMetadata | null): SocialCarouselSpec {

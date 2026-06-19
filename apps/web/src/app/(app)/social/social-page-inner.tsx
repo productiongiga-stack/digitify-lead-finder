@@ -12,10 +12,8 @@ import {
   Button,
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
-  EmptyState,
   Input,
   Label,
   Select,
@@ -33,7 +31,6 @@ import {
 import {
   AlertTriangle,
   CalendarDays,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -62,17 +59,26 @@ import {
   isFeedMediaReady,
   isStoryMediaReady,
   resolvePrimaryImageFromAssets,
+  storyItemHasMedia,
   type FeedAspectFormat,
   type PlacementAssets,
+  type PlatformAssets,
   type PlatformFeedFormats,
   type SocialPlacement,
+  type SocialStoryItem,
 } from "@/components/social/social-placement-editor";
 import {
   applyCarouselImage,
   applyCarouselVideo,
+  isCarouselReady,
   type SocialCarouselState,
 } from "@/components/social/social-carousel-editor";
-import { persistCarouselAssets, persistPlacementAssets } from "@/lib/persist-social-assets";
+import {
+  persistCarouselAssets,
+  persistPlacementAssets,
+  persistPlatformAssets,
+  persistStoryItems,
+} from "@/lib/persist-social-assets";
 import { FacebookPageAvatar, InstagramPageAvatar } from "@/components/social/social-platform-avatars";
 import { useMediaAspectRatio, verticalPreviewFrameClassName } from "@/components/social/use-media-aspect-ratio";
 import {
@@ -112,7 +118,6 @@ const SocialBrandKitPicker = dynamic(
 );
 
 type Platform = "FACEBOOK" | "INSTAGRAM";
-type RowStatus = "DRAFT" | "PENDING_APPROVAL" | "SCHEDULED" | "PUBLISHING" | "PUBLISHED" | "FAILED" | "CANCELLED";
 type PostFormat = "SQUARE" | "PORTRAIT" | "LANDSCAPE" | "STORY";
 
 type SocialMetadata = {
@@ -132,6 +137,8 @@ type SocialMetadata = {
   publisherPageName?: string;
   publisherInstagramUsername?: string;
   assets?: PlacementAssets;
+  platformAssets?: PlatformAssets;
+  storyItems?: SocialStoryItem[];
   carousel?: SocialCarouselState;
 };
 
@@ -151,17 +158,6 @@ const FORMAT_OPTIONS: Array<{ value: PostFormat; label: string; description: str
   { value: "STORY", label: "Story", description: "9:16 · FB + IG Stories", className: "aspect-[9/16]", ratio: 9 / 16 },
 ];
 
-
-function statusBadge(status: RowStatus) {
-  if (status === "PUBLISHED") return <Badge variant="success">Gepubliceerd</Badge>;
-  if (status === "FAILED") return <Badge variant="warning">Mislukt</Badge>;
-  if (status === "SCHEDULED") return <Badge variant="info">Ingepland</Badge>;
-  if (status === "PENDING_APPROVAL") return <Badge variant="warning">Wacht op goedkeuring</Badge>;
-  if (status === "PUBLISHING") return <Badge variant="secondary">Publiceren...</Badge>;
-  if (status === "CANCELLED") return <Badge variant="outline">Geannuleerd</Badge>;
-  return <Badge variant="secondary">Draft</Badge>;
-}
-
 function toDateTimeLocal(value?: string | Date | null) {
   if (!value) return "";
   const d = value instanceof Date ? value : new Date(value);
@@ -171,18 +167,6 @@ function toDateTimeLocal(value?: string | Date | null) {
   const hh = String(d.getHours()).padStart(2, "0");
   const min = String(d.getMinutes()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
-}
-
-function prettyDate(value?: string | Date | null) {
-  if (!value) return "-";
-  const date = new Date(value);
-  return date.toLocaleString("nl-BE", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 const HASHTAG_MAX_TAGS = 30;
@@ -346,43 +330,6 @@ function buildPreviewCaption(input: {
     .join("\n\n");
 }
 
-function explainMetaError(message: string) {
-  if (/story|stories|9:16/i.test(message)) {
-    return {
-      title: "Story-afbeelding ongeldig",
-      description:
-        "Stories werken het veiligst met een verticale 9:16-afbeelding. Gebruik bij voorkeur 1080x1920 en een publieke JPG/PNG/WebP URL.",
-    };
-  }
-  if (/2207009|36003|aspect ratio|afbeeldingsverhouding/i.test(message)) {
-    return {
-      title: "Afbeeldingsratio ongeldig",
-      description:
-        "Instagram feed accepteert geen extreem brede of hoge beelden. Gebruik bij voorkeur 1080x1080, 1080x1350 of een ratio tussen 4:5 en 1.91:1.",
-    };
-  }
-  if (/code\s+10\b|does not have permission for this action/i.test(message)) {
-    return {
-      title: "Meta-app mist publishing-rechten",
-      description:
-        "Fout #10: je bent wel gekoppeld, maar de Meta-app heeft geen pages_manage_posts (Facebook) of instagram_content_publish (Instagram). Voeg die permissions toe in developers.facebook.com → Use cases, zet de app op Live, klik Opnieuw koppelen in Integraties.",
-    };
-  }
-  if (/190|token expired|verlopen/i.test(message)) {
-    return {
-      title: "Meta token of rechten verlopen",
-      description: "Koppel Meta opnieuw via Integraties en controleer of de app de juiste Pages/Instagram publishing scopes heeft.",
-    };
-  }
-  if (/permission|pages_manage_posts|instagram_content_publish|scope/i.test(message)) {
-    return {
-      title: "Ontbrekende Meta-permissie",
-      description: "Controleer in Meta App Review of publishing rechten zijn toegekend en zet de app live wanneer externe users publiceren.",
-    };
-  }
-  return { title: "Publicatiefout", description: "Bekijk de technische details hieronder en probeer daarna opnieuw." };
-}
-
 type PreviewSlide = {
   id: string;
   label: string;
@@ -390,13 +337,43 @@ type PreviewSlide = {
   format: PostFormat;
   imageUrl: string;
   videoUrl?: string;
+  platform?: Platform;
 };
+
+function isPublicOrLocalVideoUrl(url?: string) {
+  const trimmed = url?.trim();
+  return Boolean(trimmed && (/^https:\/\//i.test(trimmed) || /^(data:|blob:)/i.test(trimmed)));
+}
+
+function normalizeStoryItemsForEditor(metadata: SocialMetadata): SocialStoryItem[] {
+  if (metadata.storyItems?.length) {
+    return metadata.storyItems.map((item, index) => ({
+      id: item.id || `story_${index + 1}`,
+      mediaType: item.mediaType === "VIDEO" ? "VIDEO" : "IMAGE",
+      imageUrl: item.imageUrl?.trim() || undefined,
+      videoUrl: item.videoUrl?.trim() || undefined,
+    }));
+  }
+
+  const storyAsset = metadata.assets?.STORY;
+  const videoUrl = storyAsset?.videoUrl?.trim();
+  if (videoUrl) {
+    return [{ id: "story_1", mediaType: "VIDEO", videoUrl }];
+  }
+  const imageUrl = storyAsset?.imageUrl?.trim();
+  if (imageUrl) {
+    return [{ id: "story_1", mediaType: "IMAGE", imageUrl }];
+  }
+  return [];
+}
 
 function buildPreviewSlides(
   placements: SocialPlacement[],
   feedFormat: FeedAspectFormat,
   assets: PlacementAssets,
+  platformAssets: PlatformAssets,
   carousel: SocialCarouselState,
+  storyItems: SocialStoryItem[],
 ): PreviewSlide[] {
   const slides: PreviewSlide[] = [];
 
@@ -405,11 +382,10 @@ function buildPreviewSlides(
       carousel.slides.forEach((slide, index) => {
         const imageUrl = slide.mediaType === "IMAGE" ? slide.imageUrl?.trim() || "" : "";
         const videoUrl = slide.mediaType === "VIDEO" ? slide.videoUrl?.trim() || "" : "";
-        if (!imageUrl && !videoUrl) return;
         slides.push({
           id: `carousel_${slide.id}`,
-          label: `Carousel ${index + 1}`,
-          subtitle: slide.mediaType === "VIDEO" ? "Video-slide" : "Foto-slide",
+          label: `Item ${index + 1}`,
+          subtitle: slide.mediaType === "VIDEO" ? "Video" : "Foto",
           format: feedFormat,
           imageUrl,
           videoUrl: videoUrl || undefined,
@@ -433,18 +409,31 @@ function buildPreviewSlides(
   }
 
   if (placements.includes("STORY")) {
-    const imageUrl = assets.STORY?.imageUrl?.trim() || "";
-    const videoUrl = assets.STORY?.videoUrl?.trim() || "";
-    if (imageUrl || videoUrl) {
+    const activeStoryItems = storyItems.length
+      ? storyItems
+      : assets.STORY?.videoUrl?.trim() || assets.STORY?.imageUrl?.trim()
+        ? [
+            {
+              id: "story_1",
+              mediaType: assets.STORY?.videoUrl?.trim() ? "VIDEO" : "IMAGE",
+              imageUrl: assets.STORY?.imageUrl,
+              videoUrl: assets.STORY?.videoUrl,
+            } satisfies SocialStoryItem,
+          ]
+        : [];
+    activeStoryItems.forEach((item, index) => {
+      const imageUrl = item.mediaType === "IMAGE" ? item.imageUrl?.trim() || "" : "";
+      const videoUrl = item.mediaType === "VIDEO" ? item.videoUrl?.trim() || "" : "";
+      if (!imageUrl && !videoUrl) return;
       slides.push({
-        id: "story",
-        label: "Story",
-        subtitle: videoUrl && !imageUrl ? "9:16 video · FB + IG Stories" : "9:16 · FB + IG Stories",
+        id: `story_${item.id}`,
+        label: `Story ${index + 1}`,
+        subtitle: videoUrl ? "9:16 video · FB + IG Stories" : "9:16 · FB + IG Stories",
         format: "STORY",
         imageUrl,
-        videoUrl: videoUrl && !imageUrl ? videoUrl : undefined,
+        videoUrl: videoUrl || undefined,
       });
-    }
+    });
   }
 
   if (placements.includes("REEL")) {
@@ -487,7 +476,6 @@ function InstagramReelPreview({
       {videoUrl ? (
         <video src={videoUrl} className="h-full w-full object-cover" controls playsInline muted />
       ) : imageUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
         <img src={imageUrl} alt="Instagram Reel cover" className="h-full w-full object-cover" />
       ) : (
         <div className="flex h-full items-center justify-center text-sm text-white/70">
@@ -543,7 +531,6 @@ function FacebookPreview({
         )}
       >
         {imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={imageUrl} alt="Facebook Story preview" className="h-full w-full object-cover" />
         ) : videoUrl ? (
           <video src={videoUrl} className="h-full w-full object-cover" muted playsInline controls />
@@ -588,7 +575,6 @@ function FacebookPreview({
         {videoUrl ? (
           <video src={videoUrl} className="block h-full w-full object-contain" muted playsInline controls />
         ) : imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={imageUrl} alt="Facebook preview" className="block h-full w-full object-contain" />
         ) : (
           <div className="flex h-full min-h-[180px] items-center justify-center text-sm text-slate-500">
@@ -639,7 +625,6 @@ function InstagramPreview({
         )}
       >
         {imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={imageUrl} alt="Instagram Story preview" className="h-full w-full object-cover" />
         ) : videoUrl ? (
           <video src={videoUrl} className="h-full w-full object-cover" muted playsInline controls />
@@ -688,7 +673,6 @@ function InstagramPreview({
         {videoUrl ? (
           <video src={videoUrl} className="block h-full w-full object-contain" muted playsInline controls />
         ) : imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={imageUrl} alt="Instagram preview" className="block h-full w-full object-contain" />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-zinc-500">
@@ -763,6 +747,8 @@ export function SocialPageInner() {
     INSTAGRAM: "PORTRAIT",
   });
   const [placementAssets, setPlacementAssets] = useState<PlacementAssets>({});
+  const [platformAssets, setPlatformAssets] = useState<PlatformAssets>({});
+  const [storyItems, setStoryItems] = useState<SocialStoryItem[]>([]);
   const [carousel, setCarousel] = useState<SocialCarouselState>({ enabled: false, slides: [] });
   const [previewSlideIndex, setPreviewSlideIndex] = useState(0);
   const [selectedPageId, setSelectedPageId] = useState("");
@@ -839,11 +825,6 @@ export function SocialPageInner() {
     return { pending, scheduled, failed };
   }, [rows]);
 
-  const imageUrl = useMemo(
-    () => resolvePrimaryImageFromAssets(placementAssets, carousel),
-    [carousel, placementAssets],
-  );
-
   const resolvedFeedFormats = useMemo(
     () => ({
       FACEBOOK: feedFormats.FACEBOOK || feedFormat,
@@ -876,6 +857,8 @@ export function SocialPageInner() {
       publisherPageName: selectedManagedPage?.name || undefined,
       publisherInstagramUsername: selectedManagedPage?.instagramUsername || undefined,
       assets: placementAssets,
+      platformAssets,
+      storyItems,
       carousel: carousel.enabled ? carousel : undefined,
     }),
     [
@@ -886,16 +869,18 @@ export function SocialPageInner() {
       cta,
       firstComment,
       feedFormat,
-      feedFormats,
       hashtags,
       headline,
       linkUrl,
       placementAssets,
+      platformAssets,
       placements,
       previewFormat,
+      resolvedFeedFormats,
       selectedManagedPage?.instagramUsername,
       selectedManagedPage?.name,
       selectedPageId,
+      storyItems,
     ],
   );
 
@@ -930,8 +915,8 @@ export function SocialPageInner() {
   );
 
   const previewSlides = useMemo(
-    () => buildPreviewSlides(placements, feedFormat, placementAssets, carousel),
-    [carousel, feedFormat, placementAssets, placements],
+    () => buildPreviewSlides(placements, feedFormat, placementAssets, platformAssets, carousel, storyItems),
+    [carousel, feedFormat, placementAssets, platformAssets, placements, storyItems],
   );
 
   const activePreviewSlide = previewSlides[previewSlideIndex] ?? previewSlides[0] ?? null;
@@ -1020,6 +1005,37 @@ export function SocialPageInner() {
       showToast({ title: "Planning geannuleerd" });
     },
     onError: (error) => showToast({ title: "Annuleren mislukt", description: error.message, variant: "error" }),
+  });
+
+  const deletePosts = trpc.social.deletePosts.useMutation({
+    onSuccess: async (result, variables) => {
+      await listQuery.refetch();
+      if (
+        selectedId &&
+        (variables.all || variables.ids?.includes(selectedId) || (variables.status && selected?.status === variables.status))
+      ) {
+        setSelectedId(null);
+      }
+
+      const details = [
+        result.publishedLocalOnly
+          ? `${result.publishedLocalOnly} live post${result.publishedLocalOnly === 1 ? "" : "s"} enkel uit Planner verwijderd`
+          : null,
+        result.skippedPublishing
+          ? `${result.skippedPublishing} lopende publicatie${result.skippedPublishing === 1 ? "" : "s"} overgeslagen`
+          : null,
+        result.missing ? `${result.missing} niet gevonden` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
+      showToast({
+        title: result.deleted ? `${result.deleted} post${result.deleted === 1 ? "" : "s"} verwijderd` : "Geen posts verwijderd",
+        description: details || undefined,
+        variant: result.deleted ? "success" : "info",
+      });
+    },
+    onError: (error) => showToast({ title: "Verwijderen mislukt", description: error.message, variant: "error" }),
   });
 
   const generateSuggestion = trpc.social.generateSuggestion.useMutation({
@@ -1145,8 +1161,14 @@ export function SocialPageInner() {
     }
     if (step === 3) {
       if (!placements.length) return false;
-      if (placements.includes("FEED") && !isFeedMediaReady(placementAssets, carousel)) return false;
-      if (placements.includes("STORY") && !isStoryMediaReady(placementAssets)) return false;
+      if (placements.includes("FEED")) {
+        if (carousel.enabled) {
+          if ((targetFacebook || targetInstagram) && !isCarouselReady(carousel)) return false;
+        } else if (!isFeedMediaReady(placementAssets, carousel)) {
+          return false;
+        }
+      }
+      if (placements.includes("STORY") && !isStoryMediaReady(placementAssets, storyItems)) return false;
       if (placements.includes("REEL") && !placementAssets.REEL?.videoUrl?.trim()) return false;
       return true;
     }
@@ -1213,6 +1235,12 @@ export function SocialPageInner() {
             if (placements.includes("REEL") && !next.REEL?.videoUrl) next.REEL = { imageUrl };
             return next;
           });
+          if (placements.includes("STORY")) {
+            setStoryItems((current) => [
+              ...current,
+              { id: `story_${Date.now()}`, mediaType: "IMAGE", imageUrl },
+            ]);
+          }
         }
         setAppliedImageJobId(pendingImageJobId);
         setActiveTab("composer");
@@ -1274,6 +1302,12 @@ export function SocialPageInner() {
             }
             return next;
           });
+          if (placements.includes("STORY")) {
+            setStoryItems((current) => [
+              ...current,
+              { id: `story_${Date.now()}`, mediaType: "VIDEO", videoUrl },
+            ]);
+          }
           if (!placements.includes("REEL") && !carousel.enabled) {
             setPlacements((current) => (current.includes("REEL") ? current : [...current, "REEL"]));
           }
@@ -1356,20 +1390,29 @@ export function SocialPageInner() {
       return false;
     }
 
-    if (placements.includes("FEED") && !isFeedMediaReady(placementAssets, carousel)) {
-      showToast({
-        title: carousel.enabled ? "Carousel onvolledig" : "Feed-media ontbreekt",
-        description: carousel.enabled
-          ? "Voeg minstens 2 slides toe met foto of video."
-          : "Voeg een feed-foto of -video toe, of schakel carousel in.",
-        variant: "error",
-      });
-      return false;
+    if (placements.includes("FEED")) {
+      if (carousel.enabled) {
+        if ((targetFacebook || targetInstagram) && !isCarouselReady(carousel)) {
+          showToast({
+            title: "Multi-upload onvolledig",
+            description: "Voeg minstens 2 items toe met foto of video.",
+            variant: "error",
+          });
+          return false;
+        }
+      } else if (!isFeedMediaReady(placementAssets, carousel)) {
+        showToast({
+          title: "Feed-media ontbreekt",
+          description: "Voeg een feed-foto of -video toe, of schakel multi-upload in.",
+          variant: "error",
+        });
+        return false;
+      }
     }
-    if (placements.includes("STORY") && !isStoryMediaReady(placementAssets)) {
+    if (placements.includes("STORY") && !isStoryMediaReady(placementAssets, storyItems)) {
       showToast({
         title: "Story-media ontbreekt",
-        description: "Voeg een verticale 9:16 foto of video toe.",
+        description: "Voeg minstens één verticale 9:16 foto of video toe.",
         variant: "error",
       });
       return false;
@@ -1386,10 +1429,10 @@ export function SocialPageInner() {
     if (
       requireInstagramSafe &&
       carousel.enabled &&
-      carousel.slides.some((slide) => slide.mediaType === "VIDEO" && slide.videoUrl && !/^https:\/\//i.test(slide.videoUrl))
+      carousel.slides.some((slide) => slide.mediaType === "VIDEO" && slide.videoUrl && !isPublicOrLocalVideoUrl(slide.videoUrl))
     ) {
       showToast({
-        title: "Carousel-video moet publiek zijn",
+        title: "Multi-upload video moet publiek zijn",
         description: "Gebruik publieke https-URL's of upload via Vercel Blob.",
         variant: "error",
       });
@@ -1402,7 +1445,7 @@ export function SocialPageInner() {
       !carousel.enabled &&
       placementAssets.FEED?.videoUrl?.trim() &&
       !placementAssets.FEED?.imageUrl?.trim() &&
-      !/^https:\/\//i.test(placementAssets.FEED.videoUrl)
+      !isPublicOrLocalVideoUrl(placementAssets.FEED.videoUrl)
     ) {
       showToast({
         title: "Feed-video moet publiek zijn",
@@ -1412,7 +1455,20 @@ export function SocialPageInner() {
       return false;
     }
 
-    if (requireInstagramSafe && placements.includes("REEL") && !/^https:\/\//i.test(placementAssets.REEL?.videoUrl || "")) {
+    if (
+      requireInstagramSafe &&
+      placements.includes("STORY") &&
+      storyItems.some((item) => item.mediaType === "VIDEO" && item.videoUrl && !isPublicOrLocalVideoUrl(item.videoUrl))
+    ) {
+      showToast({
+        title: "Story-video moet publiek zijn",
+        description: "Gebruik publieke https-MP4-URL's of upload via Vercel Blob.",
+        variant: "error",
+      });
+      return false;
+    }
+
+    if (requireInstagramSafe && placements.includes("REEL") && !isPublicOrLocalVideoUrl(placementAssets.REEL?.videoUrl)) {
       showToast({
         title: "Reel-video moet publiek zijn",
         description: "Gebruik een publieke https-MP4-URL of upload via Vercel Blob.",
@@ -1433,26 +1489,42 @@ export function SocialPageInner() {
         placements,
         feedFormat,
         targetPlatforms: targets,
-        storyUsesFeedImage:
-          placements.includes("STORY") &&
-          placements.includes("FEED") &&
-          !carousel.enabled &&
-          Boolean(placementAssets.FEED?.imageUrl?.trim()) &&
-          (placementAssets.STORY?.imageUrl?.trim() === placementAssets.FEED?.imageUrl?.trim() ||
-            !placementAssets.STORY?.imageUrl?.trim()),
+      });
+      const persistedPlatformAssets = await persistPlatformAssets(platformAssets, {
+        feedFormats: resolvedFeedFormats,
       });
       const persistedCarousel = await persistCarouselAssets(carousel);
-      if (JSON.stringify(persistedAssets) !== JSON.stringify(placementAssets)) {
-        setPlacementAssets(persistedAssets);
+      const persistedStoryItems = await persistStoryItems(storyItems, {
+        feedFormat,
+        targetPlatforms: targets,
+      });
+      const assetsWithStoryMirror = { ...persistedAssets };
+      const firstStoryItem = persistedStoryItems.find(storyItemHasMedia);
+      if (firstStoryItem) {
+        assetsWithStoryMirror.STORY =
+          firstStoryItem.mediaType === "VIDEO"
+            ? { videoUrl: firstStoryItem.videoUrl, imageUrl: undefined }
+            : { imageUrl: firstStoryItem.imageUrl, videoUrl: undefined };
+      }
+      if (JSON.stringify(assetsWithStoryMirror) !== JSON.stringify(placementAssets)) {
+        setPlacementAssets(assetsWithStoryMirror);
+      }
+      if (JSON.stringify(persistedPlatformAssets) !== JSON.stringify(platformAssets)) {
+        setPlatformAssets(persistedPlatformAssets);
+      }
+      if (JSON.stringify(persistedStoryItems) !== JSON.stringify(storyItems)) {
+        setStoryItems(persistedStoryItems);
       }
       if (JSON.stringify(persistedCarousel) !== JSON.stringify(carousel)) {
         setCarousel(persistedCarousel);
       }
 
-      const persistedImageUrl = resolvePrimaryImageFromAssets(persistedAssets, persistedCarousel);
+      const persistedImageUrl = resolvePrimaryImageFromAssets(assetsWithStoryMirror, persistedCarousel);
       const persistedMetadata: SocialMetadata = {
         ...metadataPayload,
-        assets: persistedAssets,
+        assets: assetsWithStoryMirror,
+        platformAssets: persistedPlatformAssets,
+        storyItems: persistedStoryItems,
         carousel: persistedCarousel.enabled ? persistedCarousel : undefined,
       };
 
@@ -1516,16 +1588,15 @@ export function SocialPageInner() {
 
   async function handleSubmitForApproval() {
     if (!selected) return;
-    if (!ensureEditorReady({ requireInstagramSafe: true })) return;
-    if (canEditSelected) {
-      await saveDraft();
-    }
-    await submitApproval.mutateAsync({ id: selected.id });
+    const saved = canEditSelected ? await saveDraft() : selected;
+    if (canEditSelected && !saved) return;
+    const postId = saved && typeof saved === "object" && "id" in saved ? String((saved as { id: string }).id) : selected.id;
+    await submitApproval.mutateAsync({ id: postId });
   }
 
   async function handleCreateAndSubmit() {
-    if (!ensureEditorReady({ requireInstagramSafe: true })) return;
     const saved = await saveDraft();
+    if (!saved) return;
     const postId = saved && typeof saved === "object" && "id" in saved ? String((saved as { id: string }).id) : selected?.id;
     if (!postId) return;
     await submitApproval.mutateAsync({ id: postId });
@@ -1533,11 +1604,10 @@ export function SocialPageInner() {
 
   async function handleApproveAndSchedule() {
     if (!selected || !scheduledFor) return;
-    if (!ensureEditorReady({ requireInstagramSafe: true })) return;
-    if (canEditSelected) {
-      await saveDraft();
-    }
-    await approveAndSchedule.mutateAsync({ id: selected.id, scheduledFor: new Date(scheduledFor) });
+    const saved = canEditSelected ? await saveDraft() : selected;
+    if (canEditSelected && !saved) return;
+    const postId = saved && typeof saved === "object" && "id" in saved ? String((saved as { id: string }).id) : selected.id;
+    await approveAndSchedule.mutateAsync({ id: postId, scheduledFor: new Date(scheduledFor) });
   }
 
   function planPostForDate(date: Date) {
@@ -1580,6 +1650,8 @@ export function SocialPageInner() {
       INSTAGRAM: metadata.feedFormats?.INSTAGRAM || metadata.feedFormat || "PORTRAIT",
     });
     setPlacementAssets(metadata.assets || {});
+    setPlatformAssets(metadata.platformAssets || {});
+    setStoryItems(normalizeStoryItemsForEditor(metadata));
     setCarousel(metadata.carousel || { enabled: false, slides: [] });
     setTargetFacebook((source.targetPlatforms || []).includes("FACEBOOK"));
     setTargetInstagram((source.targetPlatforms || []).includes("INSTAGRAM"));
@@ -1619,6 +1691,8 @@ export function SocialPageInner() {
     setFeedFormat("SQUARE");
     setFeedFormats({ FACEBOOK: "LANDSCAPE", INSTAGRAM: "PORTRAIT" });
     setPlacementAssets({});
+    setPlatformAssets({});
+    setStoryItems([]);
     setCarousel({ enabled: false, slides: [] });
   }
 
@@ -1631,6 +1705,7 @@ export function SocialPageInner() {
     rejectPost.isPending ||
     retryFailed.isPending ||
     cancelScheduled.isPending ||
+    deletePosts.isPending ||
     publishDuePosts.isPending ||
     publishPostNow.isPending;
 
@@ -1886,7 +1961,9 @@ export function SocialPageInner() {
                       feedFormat={feedFormat}
                       feedFormats={resolvedFeedFormats}
                       assets={placementAssets}
+                      platformAssets={platformAssets}
                       carousel={carousel}
+                      storyItems={storyItems}
                       disabled={!canEditSelected}
                       targetFacebook={targetFacebook}
                       targetInstagram={targetInstagram}
@@ -1894,7 +1971,9 @@ export function SocialPageInner() {
                       onFeedFormatChange={setFeedFormat}
                       onFeedFormatsChange={setFeedFormats}
                       onAssetsChange={setPlacementAssets}
+                      onPlatformAssetsChange={setPlatformAssets}
                       onCarouselChange={setCarousel}
+                      onStoryItemsChange={setStoryItems}
                     />
                     <SocialImageGenerator
                       disabled={!canEditSelected}
@@ -1927,7 +2006,7 @@ export function SocialPageInner() {
                         {selectedBrandKitName}
                         {" · "}
                         {carousel.enabled
-                          ? `Carousel (${carousel.slides.length} slides)`
+                          ? `Multi-upload (${carousel.slides.length} items)`
                           : placements.join(", ") || "geen formaat"}
                       </p>
                       <p className="mt-2 line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">{caption || "Geen caption"}</p>
@@ -2092,17 +2171,22 @@ export function SocialPageInner() {
                           videoUrl={activePreviewSlide.videoUrl}
                           username={previewInstagramUsername}
                         />
-                      ) : (
-                        <div
-                          className={cn(
-                            "grid gap-4 grid-cols-1",
-                            targetFacebook && targetInstagram && activePreviewSlide.format === "STORY" && "xl:grid-cols-2",
-                            targetFacebook && targetInstagram && activePreviewSlide.format !== "STORY" && "2xl:grid-cols-2",
-                          )}
-                        >
-                          {targetFacebook ? (
+                      ) : (() => {
+                        const showFacebookPreview = targetFacebook && activePreviewSlide.platform !== "INSTAGRAM";
+                        const showInstagramPreview = targetInstagram && activePreviewSlide.platform !== "FACEBOOK";
+                        const showBoth = showFacebookPreview && showInstagramPreview;
+                        const isStorySlide = activePreviewSlide.format === "STORY";
+                        return (
+                          <div
+                            className={cn(
+                              "grid gap-4 grid-cols-1",
+                              showBoth && isStorySlide && "xl:grid-cols-2",
+                              showBoth && !isStorySlide && "2xl:grid-cols-2",
+                            )}
+                          >
+                          {showFacebookPreview ? (
                             <FacebookPreview
-                              caption={activePreviewSlide.id === "story" ? "" : previewCaption}
+                              caption={activePreviewSlide.id.startsWith("story_") ? "" : previewCaption}
                               imageUrl={activePreviewSlide.imageUrl}
                               videoUrl={activePreviewSlide.videoUrl}
                               format={
@@ -2113,8 +2197,8 @@ export function SocialPageInner() {
                               pageName={previewPageName}
                             />
                           ) : null}
-                          {targetInstagram ? (
-                            activePreviewSlide.id === "story" ? (
+                          {showInstagramPreview ? (
+                            activePreviewSlide.id.startsWith("story_") ? (
                               <InstagramPreview
                                 caption=""
                                 imageUrl={activePreviewSlide.imageUrl}
@@ -2138,8 +2222,9 @@ export function SocialPageInner() {
                               />
                             )
                           ) : null}
-                        </div>
-                      )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   ) : null}
                 </>
@@ -2188,6 +2273,8 @@ export function SocialPageInner() {
               }}
               publishingPostId={publishingPostId}
               onCancel={(rowId) => cancelScheduled.mutate({ id: rowId })}
+              onDeletePosts={(input) => deletePosts.mutate(input)}
+              isDeleting={deletePosts.isPending}
             />
           ) : null}
         </TabsContent>

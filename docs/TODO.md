@@ -80,7 +80,7 @@ Vink af bij afronding; verwijs naar PR/issue indien van toepassing.
 |------|--------|---------|
 | Google Ads PMax image replacement live | ⬜ | TODO: bevestigen huidige limiet |
 | Google Ads full budget/bidding strategy edits | ⬜ | TODO: bevestigen scope |
-| Social Planner: uncommitted multi-upload wijzigingen committen | ⬜ | Zie git status |
+| Social Planner multi-upload | ✅ | Op main |
 
 ---
 

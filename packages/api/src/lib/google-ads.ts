@@ -32,6 +32,8 @@ export type GoogleAdCustomerSummary = {
   name: string;
   currency: string;
   timezone: string;
+  loginCustomerId?: string;
+  isManager?: boolean;
 };
 
 function asObject(value: unknown): Record<string, any> {
@@ -50,6 +52,10 @@ function asLongStringArray(value: unknown, max = 80): string[] {
 
 export function centsToBudgetMicros(cents: number) {
   return Math.max(1, Math.round(cents)) * 10_000;
+}
+
+export function microsToCents(micros: number) {
+  return Math.round(Number(micros || 0) / 10_000);
 }
 
 /** Required on all new campaigns (EU political ads regulation). */
@@ -323,50 +329,101 @@ export function getGoogleAdsCustomer(client: GoogleAdsApi, config: GoogleAdsWork
   });
 }
 
+export function normalizeGoogleCampaignStatus(status: unknown) {
+  if (status === 2 || status === "2" || status === "ENABLED" || status === "CampaignStatus.ENABLED") return "ENABLED";
+  if (status === 3 || status === "3" || status === "PAUSED" || status === "CampaignStatus.PAUSED") return "PAUSED";
+  if (status === 4 || status === "4" || status === "REMOVED" || status === "CampaignStatus.REMOVED") return "REMOVED";
+  return String(status || "UNKNOWN");
+}
+
+async function queryGoogleCustomerRow(
+  client: GoogleAdsApi,
+  config: GoogleAdsWorkspaceConfig,
+  customerId: string,
+  loginCustomerId?: string,
+) {
+  const customer = client.Customer({
+    customer_id: customerId,
+    refresh_token: config.refreshToken,
+    login_customer_id: loginCustomerId || undefined,
+  });
+  const rows = await customer.query(`
+    SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.time_zone, customer.manager
+    FROM customer
+    LIMIT 1
+  `);
+  return rows[0] as {
+    customer?: {
+      descriptive_name?: string;
+      currency_code?: string;
+      time_zone?: string;
+      manager?: boolean;
+    };
+  };
+}
+
 export async function listGoogleAdCustomers(config: GoogleAdsWorkspaceConfig): Promise<GoogleAdCustomerSummary[]> {
   const client = await createAdsClient(config);
   const accessible = await client.listAccessibleCustomers(config.refreshToken);
   const resourceNames = Array.isArray(accessible)
     ? accessible
     : ((accessible as { resource_names?: string[] }).resource_names ?? []);
+  if (!resourceNames.length) return [];
+
+  const customerIds = resourceNames.map((resourceName) => resourceName.replace("customers/", ""));
+  const managerIds = new Set<string>();
+
+  for (const customerId of customerIds) {
+    const loginAttempts = [config.loginCustomerId || undefined, undefined, ...customerIds.filter((id) => id !== customerId)];
+    for (const loginId of loginAttempts) {
+      try {
+        const row = await queryGoogleCustomerRow(client, config, customerId, loginId);
+        if (row?.customer?.manager) managerIds.add(customerId);
+        break;
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  const loginCandidates = [
+    config.loginCustomerId,
+    ...Array.from(managerIds),
+    ...customerIds,
+  ].filter(Boolean).filter((id, index, all) => all.indexOf(id) === index) as string[];
+
   const summaries: GoogleAdCustomerSummary[] = [];
 
   for (const resourceName of resourceNames) {
     const customerId = resourceName.replace("customers/", "");
-    try {
-      const customer = client.Customer({
-        customer_id: customerId,
-        refresh_token: config.refreshToken,
-        login_customer_id: config.loginCustomerId || undefined,
-      });
-      const rows = await customer.query(`
-        SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.time_zone
-        FROM customer
-        LIMIT 1
-      `);
-      const row = rows[0] as {
-        customer?: {
-          descriptive_name?: string;
-          currency_code?: string;
-          time_zone?: string;
-        };
-      };
-      summaries.push({
-        customerId,
-        resourceName,
-        name: row.customer?.descriptive_name || `Customer ${customerId}`,
-        currency: row.customer?.currency_code || "EUR",
-        timezone: row.customer?.time_zone || "",
-      });
-    } catch {
-      summaries.push({
-        customerId,
-        resourceName,
-        name: `Customer ${customerId}`,
-        currency: "EUR",
-        timezone: "",
-      });
+    let row: Awaited<ReturnType<typeof queryGoogleCustomerRow>> | null = null;
+    let resolvedLoginCustomerId = config.loginCustomerId || "";
+
+    const attempts: Array<string | undefined> = [
+      config.loginCustomerId || undefined,
+      undefined,
+      ...loginCandidates.filter((id) => id !== config.loginCustomerId && id !== customerId),
+    ];
+
+    for (const loginId of attempts) {
+      try {
+        row = await queryGoogleCustomerRow(client, config, customerId, loginId);
+        resolvedLoginCustomerId = loginId || "";
+        break;
+      } catch {
+        continue;
+      }
     }
+
+    summaries.push({
+      customerId,
+      resourceName,
+      name: row?.customer?.descriptive_name || `Customer ${customerId}`,
+      currency: row?.customer?.currency_code || "EUR",
+      timezone: row?.customer?.time_zone || "",
+      loginCustomerId: resolvedLoginCustomerId || undefined,
+      isManager: Boolean(row?.customer?.manager),
+    });
   }
 
   return summaries;
@@ -389,9 +446,656 @@ export async function listGoogleCampaigns(config: GoogleAdsWorkspaceConfig) {
   return rows.map((row: any) => ({
     id: String(row.campaign?.id || ""),
     name: row.campaign?.name || "",
-    status: row.campaign?.status || "",
+    status: normalizeGoogleCampaignStatus(row.campaign?.status),
     channelType: row.campaign?.advertising_channel_type || "",
   }));
+}
+
+export async function updateGoogleCampaignStatus(
+  config: GoogleAdsWorkspaceConfig,
+  campaignId: string,
+  status: "ENABLED" | "PAUSED",
+) {
+  const client = await createAdsClient(config);
+  const customer = getGoogleAdsCustomer(client, config);
+  const customerId = normalizeGoogleCustomerId(config.customerId);
+  const normalizedCampaignId = normalizeGoogleCustomerId(campaignId);
+  const { enums } = await loadGoogleAdsSdk();
+
+  try {
+    await customer.campaigns.update([
+      {
+        resource_name: `customers/${customerId}/campaigns/${normalizedCampaignId}`,
+        status: status === "ENABLED" ? enums.CampaignStatus.ENABLED : enums.CampaignStatus.PAUSED,
+      },
+    ]);
+  } catch (error) {
+    throw new Error(formatGoogleAdsError(error));
+  }
+
+  return { campaignId: normalizedCampaignId, status };
+}
+
+export async function removeGoogleCampaign(config: GoogleAdsWorkspaceConfig, campaignId: string) {
+  const client = await createAdsClient(config);
+  const customer = getGoogleAdsCustomer(client, config);
+  const customerId = normalizeGoogleCustomerId(config.customerId);
+  const normalizedCampaignId = normalizeGoogleCustomerId(campaignId);
+  const { enums } = await loadGoogleAdsSdk();
+
+  try {
+    await customer.campaigns.update([
+      {
+        resource_name: `customers/${customerId}/campaigns/${normalizedCampaignId}`,
+        status: enums.CampaignStatus.REMOVED,
+      },
+    ]);
+  } catch (error) {
+    throw new Error(formatGoogleAdsError(error));
+  }
+
+  return { campaignId: normalizedCampaignId, status: "REMOVED" as const };
+}
+
+export async function updateGoogleCampaignName(
+  config: GoogleAdsWorkspaceConfig,
+  campaignId: string,
+  name: string,
+) {
+  const trimmed = name.trim();
+  if (trimmed.length < 2) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Campagnenaam moet minstens 2 tekens bevatten." });
+  }
+
+  const client = await createAdsClient(config);
+  const customer = getGoogleAdsCustomer(client, config);
+  const customerId = normalizeGoogleCustomerId(config.customerId);
+  const normalizedCampaignId = normalizeGoogleCustomerId(campaignId);
+
+  try {
+    await customer.campaigns.update([
+      {
+        resource_name: `customers/${customerId}/campaigns/${normalizedCampaignId}`,
+        name: trimmed,
+      },
+    ]);
+  } catch (error) {
+    throw new Error(formatGoogleAdsError(error));
+  }
+
+  return { campaignId: normalizedCampaignId, name: trimmed };
+}
+
+export type GoogleCampaignLiveResources = {
+  campaignResourceName: string;
+  campaignBudgetResourceName: string;
+  adGroupResourceName?: string;
+  adGroupAdResourceName?: string;
+  assetGroupResourceName?: string;
+  keywordCriteria: Array<{ resourceName: string; text: string; negative: boolean }>;
+  campaignCriteria: Array<{ resourceName: string; type: string }>;
+  textAssets: Array<{ resourceName: string; fieldType: string; text: string }>;
+};
+
+export type GoogleCampaignDetails = {
+  campaignId: string;
+  name: string;
+  status: string;
+  campaignType: "SEARCH" | "PERFORMANCE_MAX";
+  dailyBudgetCents: number;
+  currency: string;
+  targeting: ReturnType<typeof defaultSearchTargeting> & {
+    audienceSignals?: string[];
+    campaignSettings?: Record<string, unknown>;
+  };
+  creatives: Record<string, unknown>;
+  resources: GoogleCampaignLiveResources;
+};
+
+type GoogleCampaignPlanInput = {
+  name: string;
+  campaignType: string;
+  dailyBudgetCents?: number | null;
+  targeting?: unknown;
+  creatives?: unknown;
+  publishStatus?: "ENABLED" | "PAUSED";
+};
+
+function normalizeChannelType(value: unknown): "SEARCH" | "PERFORMANCE_MAX" {
+  const normalized = String(value || "").toUpperCase();
+  if (normalized.includes("PERFORMANCE") || normalized === "10") return "PERFORMANCE_MAX";
+  return "SEARCH";
+}
+
+function keywordMatchTypeLabel(value: unknown) {
+  const normalized = String(value || "").toUpperCase();
+  if (normalized.includes("EXACT") || normalized === "2") return "EXACT";
+  if (normalized.includes("BROAD") || normalized === "4") return "BROAD";
+  return "PHRASE";
+}
+
+function mapHeadlinePin(headlines: Array<{ text?: string; pinned_field?: unknown }>) {
+  const pinned = headlines.find((item) => String(item.pinned_field || "").includes("HEADLINE_1"));
+  return pinned?.text?.trim() || "";
+}
+
+function mapDescriptionPin(descriptions: Array<{ text?: string; pinned_field?: unknown }>) {
+  const pinned = descriptions.find((item) => String(item.pinned_field || "").includes("DESCRIPTION_1"));
+  return pinned?.text?.trim() || "";
+}
+
+export async function getGoogleCampaignDetails(
+  config: GoogleAdsWorkspaceConfig,
+  campaignId: string,
+): Promise<GoogleCampaignDetails> {
+  const client = await createAdsClient(config);
+  const customer = getGoogleAdsCustomer(client, config);
+  const normalizedCampaignId = normalizeGoogleCustomerId(campaignId);
+
+  const campaignRows = await customer.query(`
+    SELECT
+      campaign.id,
+      campaign.name,
+      campaign.status,
+      campaign.advertising_channel_type,
+      campaign.campaign_budget,
+      campaign.network_settings.target_google_search,
+      campaign.network_settings.target_search_network,
+      campaign.network_settings.target_content_network,
+      campaign.tracking_url_template,
+      campaign.final_url_suffix,
+      campaign_budget.amount_micros,
+      campaign_budget.resource_name
+    FROM campaign
+    WHERE campaign.id = ${normalizedCampaignId}
+    LIMIT 1
+  `);
+  const campaignRow = campaignRows[0] as any;
+  if (!campaignRow?.campaign?.id) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Google campagne niet gevonden." });
+  }
+
+  const campaignType = normalizeChannelType(campaignRow.campaign.advertising_channel_type);
+  const resources: GoogleCampaignLiveResources = {
+    campaignResourceName: `customers/${normalizeGoogleCustomerId(config.customerId)}/campaigns/${normalizedCampaignId}`,
+    campaignBudgetResourceName: String(campaignRow.campaign_budget?.resource_name || campaignRow.campaign?.campaign_budget || ""),
+    keywordCriteria: [],
+    campaignCriteria: [],
+    textAssets: [],
+  };
+
+  const criterionRows = await customer.query(`
+    SELECT
+      campaign_criterion.resource_name,
+      campaign_criterion.type,
+      campaign_criterion.location.geo_target_constant,
+      campaign_criterion.language.language_constant
+    FROM campaign_criterion
+    WHERE campaign.id = ${normalizedCampaignId}
+      AND campaign_criterion.status != 'REMOVED'
+  `);
+  const geoTargetConstants: string[] = [];
+  const languageConstants: string[] = [];
+  for (const row of criterionRows as any[]) {
+    const criterion = row.campaign_criterion;
+    if (!criterion?.resource_name) continue;
+    resources.campaignCriteria.push({
+      resourceName: String(criterion.resource_name),
+      type: String(criterion.type || ""),
+    });
+    if (criterion.location?.geo_target_constant) {
+      geoTargetConstants.push(String(criterion.location.geo_target_constant));
+    }
+    if (criterion.language?.language_constant) {
+      languageConstants.push(String(criterion.language.language_constant));
+    }
+  }
+
+  let adGroupName = "";
+  let keywords: string[] = [];
+  let negativeKeywords: string[] = [];
+  let matchType = "PHRASE";
+  let creatives: Record<string, unknown> = {
+    finalUrl: "",
+    headlines: [],
+    descriptions: [],
+    longHeadlines: [],
+    path1: "",
+    path2: "",
+    businessName: "",
+    assetGroupName: "",
+  };
+
+  if (campaignType === "SEARCH") {
+    const adGroupRows = await customer.query(`
+      SELECT ad_group.resource_name, ad_group.name
+      FROM ad_group
+      WHERE campaign.id = ${normalizedCampaignId}
+        AND ad_group.status != 'REMOVED'
+      ORDER BY ad_group.id
+      LIMIT 1
+    `);
+    const adGroupRow = adGroupRows[0] as any;
+    resources.adGroupResourceName = String(adGroupRow?.ad_group?.resource_name || "");
+    adGroupName = String(adGroupRow?.ad_group?.name || "");
+
+    if (resources.adGroupResourceName) {
+      const adRows = await customer.query(`
+        SELECT
+          ad_group_ad.resource_name,
+          ad_group_ad.ad.final_urls,
+          ad_group_ad.ad.responsive_search_ad.headlines,
+          ad_group_ad.ad.responsive_search_ad.descriptions,
+          ad_group_ad.ad.responsive_search_ad.path1,
+          ad_group_ad.ad.responsive_search_ad.path2
+        FROM ad_group_ad
+        WHERE campaign.id = ${normalizedCampaignId}
+          AND ad_group_ad.status != 'REMOVED'
+          AND ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD'
+        LIMIT 1
+      `);
+      const adRow = adRows[0] as any;
+      resources.adGroupAdResourceName = String(adRow?.ad_group_ad?.resource_name || "");
+      const rsa = adRow?.ad_group_ad?.ad?.responsive_search_ad;
+      const headlines = Array.isArray(rsa?.headlines) ? rsa.headlines : [];
+      const descriptions = Array.isArray(rsa?.descriptions) ? rsa.descriptions : [];
+      creatives = {
+        finalUrl: String(adRow?.ad_group_ad?.ad?.final_urls?.[0] || ""),
+        headlines: headlines.map((item: { text?: string }) => String(item.text || "").trim()).filter(Boolean),
+        descriptions: descriptions.map((item: { text?: string }) => String(item.text || "").trim()).filter(Boolean),
+        headlinePin1: mapHeadlinePin(headlines),
+        descriptionPin1: mapDescriptionPin(descriptions),
+        path1: String(rsa?.path1 || ""),
+        path2: String(rsa?.path2 || ""),
+      };
+
+      const keywordRows = await customer.query(`
+        SELECT
+          ad_group_criterion.resource_name,
+          ad_group_criterion.keyword.text,
+          ad_group_criterion.keyword.match_type,
+          ad_group_criterion.negative
+        FROM ad_group_criterion
+        WHERE campaign.id = ${normalizedCampaignId}
+          AND ad_group_criterion.type = 'KEYWORD'
+          AND ad_group_criterion.status != 'REMOVED'
+      `);
+      for (const row of keywordRows as any[]) {
+        const criterion = row.ad_group_criterion;
+        const text = String(criterion?.keyword?.text || "").trim();
+        if (!text || !criterion?.resource_name) continue;
+        resources.keywordCriteria.push({
+          resourceName: String(criterion.resource_name),
+          text,
+          negative: Boolean(criterion.negative),
+        });
+        if (!matchType || matchType === "PHRASE") {
+          matchType = keywordMatchTypeLabel(criterion.keyword?.match_type);
+        }
+        if (criterion.negative) negativeKeywords.push(text);
+        else keywords.push(text);
+      }
+    }
+  } else {
+    const assetGroupRows = await customer.query(`
+      SELECT asset_group.resource_name, asset_group.name, asset_group.final_urls
+      FROM asset_group
+      WHERE campaign.id = ${normalizedCampaignId}
+        AND asset_group.status != 'REMOVED'
+      ORDER BY asset_group.id
+      LIMIT 1
+    `);
+    const assetGroupRow = assetGroupRows[0] as any;
+    resources.assetGroupResourceName = String(assetGroupRow?.asset_group?.resource_name || "");
+    creatives.assetGroupName = String(assetGroupRow?.asset_group?.name || "");
+    creatives.finalUrl = String(assetGroupRow?.asset_group?.final_urls?.[0] || "");
+
+    const assetRows = await customer.query(`
+      SELECT
+        asset.resource_name,
+        asset.text_asset.text,
+        asset_group_asset.field_type
+      FROM asset_group_asset
+      WHERE campaign.id = ${normalizedCampaignId}
+        AND asset_group_asset.status != 'REMOVED'
+        AND asset.text_asset.text != ''
+    `);
+    const headlines: string[] = [];
+    const longHeadlines: string[] = [];
+    const descriptions: string[] = [];
+    for (const row of assetRows as any[]) {
+      const text = String(row.asset?.text_asset?.text || "").trim();
+      const fieldType = String(row.asset_group_asset?.field_type || row.field_type || "").toUpperCase();
+      if (!text || !row.asset?.resource_name) continue;
+      resources.textAssets.push({
+        resourceName: String(row.asset.resource_name),
+        fieldType,
+        text,
+      });
+      if (fieldType.includes("LONG_HEADLINE")) longHeadlines.push(text);
+      else if (fieldType.includes("HEADLINE")) headlines.push(text);
+      else if (fieldType.includes("DESCRIPTION")) descriptions.push(text);
+      else if (fieldType.includes("BUSINESS_NAME")) creatives.businessName = text;
+    }
+    creatives.headlines = headlines;
+    creatives.longHeadlines = longHeadlines;
+    creatives.descriptions = descriptions;
+  }
+
+  return {
+    campaignId: normalizedCampaignId,
+    name: String(campaignRow.campaign.name || ""),
+    status: normalizeGoogleCampaignStatus(campaignRow.campaign.status),
+    campaignType,
+    dailyBudgetCents: microsToCents(Number(campaignRow.campaign_budget?.amount_micros || 0)),
+    currency: config.defaultCurrency || "EUR",
+    targeting: {
+      ...defaultSearchTargeting({
+        geoTargetConstants,
+        languageConstants,
+        keywords,
+        negativeKeywords,
+        matchType,
+        adGroupName,
+        searchPartners: campaignRow.campaign?.network_settings?.target_search_network !== false,
+        displayExpansion: Boolean(campaignRow.campaign?.network_settings?.target_content_network),
+        campaignSettings: {
+          trackingTemplate: String(campaignRow.campaign?.tracking_url_template || ""),
+          finalUrlSuffix: String(campaignRow.campaign?.final_url_suffix || ""),
+        },
+      }),
+      campaignSettings: {
+        trackingTemplate: String(campaignRow.campaign?.tracking_url_template || ""),
+        finalUrlSuffix: String(campaignRow.campaign?.final_url_suffix || ""),
+      },
+    },
+    creatives,
+    resources,
+  };
+}
+
+async function syncAdGroupKeywords(params: {
+  customer: ReturnType<GoogleAdsApi["Customer"]>;
+  adGroupResourceName: string;
+  existing: Array<{ resourceName: string; text: string; negative: boolean }>;
+  desired: string[];
+  matchType: string;
+  negative: boolean;
+  enums: GoogleAdsSdk["enums"];
+}) {
+  const desiredSet = new Set(params.desired.map((item) => item.trim().toLowerCase()).filter(Boolean));
+  const existingMap = new Map(
+    params.existing.map((item) => [item.text.trim().toLowerCase(), item.resourceName] as const),
+  );
+
+  const toRemove = params.existing
+    .filter((item) => !desiredSet.has(item.text.trim().toLowerCase()))
+    .map((item) => item.resourceName)
+    .filter(Boolean);
+  if (toRemove.length) {
+    await params.customer.adGroupCriteria.remove(toRemove);
+  }
+
+  const toAdd = params.desired
+    .map((text) => text.trim())
+    .filter(Boolean)
+    .filter((text) => !existingMap.has(text.toLowerCase()));
+  if (toAdd.length) {
+    await params.customer.adGroupCriteria.create(
+      toAdd.map((text) => ({
+        ad_group: params.adGroupResourceName,
+        negative: params.negative,
+        status: params.enums.AdGroupCriterionStatus.ENABLED,
+        keyword: {
+          text,
+          match_type: resolveKeywordMatchType(params.enums, params.matchType),
+        },
+      })),
+    );
+  }
+}
+
+async function syncCampaignGeoLanguageCriteria(params: {
+  customer: ReturnType<GoogleAdsApi["Customer"]>;
+  campaignResourceName: string;
+  existing: Array<{ resourceName: string; type: string }>;
+  geoTargetConstants: string[];
+  languageConstants: string[];
+}) {
+  const removableTypes = new Set(["LOCATION", "LANGUAGE"]);
+  const toRemove = params.existing
+    .filter((item) => removableTypes.has(String(item.type || "").toUpperCase()))
+    .map((item) => item.resourceName)
+    .filter(Boolean);
+  if (toRemove.length) {
+    await params.customer.campaignCriteria.remove(toRemove);
+  }
+
+  const creates: Array<Record<string, unknown>> = [];
+  for (const geo of params.geoTargetConstants.slice(0, 10)) {
+    creates.push({
+      campaign: params.campaignResourceName,
+      location: {
+        geo_target_constant: geo.startsWith("geoTargetConstants/") ? geo : `geoTargetConstants/${geo}`,
+      },
+    });
+  }
+  for (const language of params.languageConstants.slice(0, 5)) {
+    creates.push({
+      campaign: params.campaignResourceName,
+      language: {
+        language_constant: language.startsWith("languageConstants/") ? language : `languageConstants/${language}`,
+      },
+    });
+  }
+  if (creates.length) {
+    await params.customer.campaignCriteria.create(creates);
+  }
+}
+
+async function updateGoogleSearchCampaignLive(params: {
+  customer: ReturnType<GoogleAdsApi["Customer"]>;
+  resources: GoogleCampaignLiveResources;
+  plan: GoogleCampaignPlanInput;
+}) {
+  const { customer, resources, plan } = params;
+  const { enums } = await loadGoogleAdsSdk();
+  const targeting = defaultSearchTargeting(plan.targeting);
+  const creative = normalizeSearchCreatives(plan.creatives);
+  const campaignSettings = asObject(targeting.campaignSettings);
+  const dailyCents = Number(plan.dailyBudgetCents || 0);
+
+  if (resources.campaignBudgetResourceName && dailyCents > 0) {
+    await customer.campaignBudgets.update([
+      {
+        resource_name: resources.campaignBudgetResourceName,
+        amount_micros: centsToBudgetMicros(dailyCents),
+      },
+    ]);
+  }
+
+  const campaignUpdate: Record<string, unknown> = {
+    resource_name: resources.campaignResourceName,
+    name: plan.name,
+    network_settings: {
+      target_google_search: true,
+      target_search_network: targeting.searchPartners,
+      target_content_network: targeting.displayExpansion,
+    },
+  };
+  if (campaignSettings.trackingTemplate) {
+    campaignUpdate.tracking_url_template = String(campaignSettings.trackingTemplate);
+  }
+  if (campaignSettings.finalUrlSuffix) {
+    campaignUpdate.final_url_suffix = String(campaignSettings.finalUrlSuffix);
+  }
+  if (plan.publishStatus) {
+    campaignUpdate.status =
+      plan.publishStatus === "ENABLED" ? enums.CampaignStatus.ENABLED : enums.CampaignStatus.PAUSED;
+  }
+  await customer.campaigns.update([campaignUpdate]);
+
+  if (resources.adGroupResourceName && targeting.adGroupName) {
+    await customer.adGroups.update([
+      { resource_name: resources.adGroupResourceName, name: targeting.adGroupName },
+    ]);
+  }
+
+  if (resources.adGroupAdResourceName) {
+    await customer.adGroupAds.update([
+      {
+        resource_name: resources.adGroupAdResourceName,
+        ad: {
+          responsive_search_ad: {
+            headlines: creative.headlines.map((text) =>
+              textAsset(text, text === creative.headlinePin1 ? enums.ServedAssetFieldType.HEADLINE_1 : undefined),
+            ),
+            descriptions: creative.descriptions.slice(0, 4).map((text) =>
+              textAsset(text, text === creative.descriptionPin1 ? enums.ServedAssetFieldType.DESCRIPTION_1 : undefined),
+            ),
+            path1: creative.path1 || undefined,
+            path2: creative.path1 && creative.path2 ? creative.path2 : undefined,
+          },
+          final_urls: [creative.finalUrl],
+        },
+      },
+    ]);
+  }
+
+  if (resources.adGroupResourceName) {
+    await syncAdGroupKeywords({
+      customer,
+      adGroupResourceName: resources.adGroupResourceName,
+      existing: resources.keywordCriteria.filter((item) => !item.negative),
+      desired: targeting.keywords,
+      matchType: targeting.matchType,
+      negative: false,
+      enums,
+    });
+    await syncAdGroupKeywords({
+      customer,
+      adGroupResourceName: resources.adGroupResourceName,
+      existing: resources.keywordCriteria.filter((item) => item.negative),
+      desired: targeting.negativeKeywords,
+      matchType: targeting.matchType,
+      negative: true,
+      enums,
+    });
+  }
+
+  await syncCampaignGeoLanguageCriteria({
+    customer,
+    campaignResourceName: resources.campaignResourceName,
+    existing: resources.campaignCriteria,
+    geoTargetConstants: targeting.geoTargetConstants,
+    languageConstants: targeting.languageConstants,
+  });
+}
+
+async function updateGooglePerformanceMaxCampaignLive(params: {
+  customer: ReturnType<GoogleAdsApi["Customer"]>;
+  resources: GoogleCampaignLiveResources;
+  plan: GoogleCampaignPlanInput;
+}) {
+  const { customer, resources, plan } = params;
+  const { enums } = await loadGoogleAdsSdk();
+  const creative = normalizeSearchCreatives(plan.creatives);
+  if (creative.headlines.length < 3) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Performance Max vereist minstens 3 headlines." });
+  }
+  if (creative.longHeadlines.length < 1) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Performance Max vereist minstens 1 long headline." });
+  }
+  if (creative.descriptions.length < 2) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Performance Max vereist minstens 2 beschrijvingen." });
+  }
+  const dailyCents = Number(plan.dailyBudgetCents || 0);
+  const targeting = defaultSearchTargeting(plan.targeting);
+  const campaignSettings = asObject(targeting.campaignSettings);
+
+  if (resources.campaignBudgetResourceName && dailyCents > 0) {
+    await customer.campaignBudgets.update([
+      {
+        resource_name: resources.campaignBudgetResourceName,
+        amount_micros: centsToBudgetMicros(dailyCents),
+      },
+    ]);
+  }
+
+  const campaignUpdate: Record<string, unknown> = {
+    resource_name: resources.campaignResourceName,
+    name: plan.name,
+  };
+  if (campaignSettings.finalUrlSuffix) campaignUpdate.final_url_suffix = String(campaignSettings.finalUrlSuffix);
+  if (campaignSettings.trackingTemplate) campaignUpdate.tracking_url_template = String(campaignSettings.trackingTemplate);
+  if (plan.publishStatus) {
+    campaignUpdate.status =
+      plan.publishStatus === "ENABLED" ? enums.CampaignStatus.ENABLED : enums.CampaignStatus.PAUSED;
+  }
+  await customer.campaigns.update([campaignUpdate]);
+
+  if (resources.assetGroupResourceName) {
+    await customer.assetGroups.update([
+      {
+        resource_name: resources.assetGroupResourceName,
+        name: creative.assetGroupName || `${plan.name} Asset Group`,
+        final_urls: [creative.finalUrl],
+      },
+    ]);
+  }
+
+  const desiredTextAssets: Array<{ fieldType: string; texts: string[] }> = [
+    { fieldType: "HEADLINE", texts: creative.headlines.slice(0, 15) },
+    { fieldType: "LONG_HEADLINE", texts: creative.longHeadlines.slice(0, 5) },
+    { fieldType: "DESCRIPTION", texts: creative.descriptions.slice(0, 5) },
+    { fieldType: "BUSINESS_NAME", texts: creative.businessName ? [creative.businessName] : [] },
+  ];
+
+  for (const group of desiredTextAssets) {
+    const existing = resources.textAssets.filter((item) => item.fieldType.toUpperCase().includes(group.fieldType));
+    for (let index = 0; index < group.texts.length; index += 1) {
+      const text = group.texts[index];
+      const asset = existing[index];
+      if (asset?.resourceName) {
+        await customer.assets.update([{ resource_name: asset.resourceName, text_asset: { text } }]);
+      }
+    }
+  }
+
+  if (creative.imageUrl || creative.squareImageUrl || creative.logoUrl) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message:
+        "Performance Max afbeeldingen kunnen in deze versie nog niet live vervangen worden. Pas teksten, budget, URL en status aan, of wijzig afbeeldingen in Google Ads.",
+    });
+  }
+}
+
+export async function updateGoogleCampaignFromPlan(
+  config: GoogleAdsWorkspaceConfig,
+  campaignId: string,
+  plan: GoogleCampaignPlanInput,
+) {
+  validateBudgetGuard(plan, config.maxDailyBudgetCents);
+  const details = await getGoogleCampaignDetails(config, campaignId);
+  const client = await createAdsClient(config);
+  const customer = getGoogleAdsCustomer(client, config);
+  const campaignType = String(plan.campaignType || details.campaignType).toUpperCase();
+
+  try {
+    if (campaignType === "PERFORMANCE_MAX") {
+      await updateGooglePerformanceMaxCampaignLive({ customer, resources: details.resources, plan });
+    } else {
+      await updateGoogleSearchCampaignLive({ customer, resources: details.resources, plan });
+    }
+  } catch (error) {
+    throw new Error(formatGoogleAdsError(error));
+  }
+
+  return {
+    campaignId: normalizeGoogleCustomerId(campaignId),
+    status: plan.publishStatus || details.status,
+  };
 }
 
 export async function getGoogleAdsInsights(config: GoogleAdsWorkspaceConfig) {

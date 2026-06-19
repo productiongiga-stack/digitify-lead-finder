@@ -8,11 +8,17 @@ vi.mock("../lib/google-ads", async (importActual) => {
     listGoogleAdCustomers: vi.fn(),
     listGoogleCampaigns: vi.fn(),
     getGoogleAdsInsights: vi.fn(),
+    updateGoogleCampaignStatus: vi.fn(),
+    removeGoogleCampaign: vi.fn(),
+    updateGoogleCampaignName: vi.fn(),
+    getGoogleCampaignDetails: vi.fn(),
+    updateGoogleCampaignFromPlan: vi.fn(),
     loadGoogleAdsWorkspaceConfig: vi.fn(),
   };
 });
 
 import * as googleAdsLib from "../lib/google-ads";
+import { defaultSearchTargeting } from "../lib/google-ads";
 import { googleAdsRouter } from "../routers/google-ads.router";
 
 const TEST_USER_ID = "ws_1";
@@ -137,5 +143,82 @@ describe("googleAds router flow", () => {
     expect(status.missingOperationalRequirements).toContain("GOOGLE_OAUTH_MISSING");
     expect(status.missingOperationalRequirements).toContain("GOOGLE_CUSTOMER_NOT_SELECTED");
     expect(status.missingOperationalRequirements).toContain("GOOGLE_AUTOMATION_DISABLED");
+  });
+
+  it("fails listCampaigns clearly when no customer is selected", async () => {
+    vi.mocked(googleAdsLib.loadGoogleAdsWorkspaceConfig).mockResolvedValue({
+      ...baseConfig,
+      customerId: "",
+    } as any);
+
+    const caller = googleAdsRouter.createCaller(makeCtx({}));
+
+    await expect(caller.listCampaigns()).rejects.toThrow("Selecteer eerst een Google Ads customer");
+  });
+
+  it("pauses and resumes a live Google campaign", async () => {
+    vi.mocked(googleAdsLib.updateGoogleCampaignStatus)
+      .mockResolvedValueOnce({ campaignId: "123", status: "PAUSED" })
+      .mockResolvedValueOnce({ campaignId: "123", status: "ENABLED" });
+
+    const caller = googleAdsRouter.createCaller(makeCtx({}));
+
+    await expect(caller.pauseInGoogle({ campaignId: "123" })).resolves.toEqual({
+      campaignId: "123",
+      status: "PAUSED",
+    });
+    await expect(caller.resumeInGoogle({ campaignId: "123" })).resolves.toEqual({
+      campaignId: "123",
+      status: "ENABLED",
+    });
+  });
+
+  it("loads and saves live campaign details", async () => {
+    vi.mocked(googleAdsLib.getGoogleCampaignDetails).mockResolvedValue({
+      campaignId: "123",
+      name: "Live campagne",
+      status: "PAUSED",
+      campaignType: "SEARCH",
+      dailyBudgetCents: 2500,
+      currency: "EUR",
+      targeting: defaultSearchTargeting(undefined),
+      creatives: {
+        finalUrl: "https://example.com",
+        headlines: ["H1", "H2", "H3"],
+        descriptions: ["D1", "D2"],
+      },
+      resources: {
+        campaignResourceName: "customers/123/campaigns/1",
+        campaignBudgetResourceName: "customers/123/campaignBudgets/1",
+        keywordCriteria: [],
+        campaignCriteria: [],
+        textAssets: [],
+      },
+    } as any);
+    vi.mocked(googleAdsLib.updateGoogleCampaignFromPlan).mockResolvedValue({
+      campaignId: "123",
+      status: "ENABLED",
+    });
+
+    const caller = googleAdsRouter.createCaller(
+      makeCtx({
+        activity: { create: vi.fn().mockResolvedValue({ id: "act_1" }) },
+      }),
+    );
+
+    const details = await caller.getCampaignDetails({ campaignId: "123" });
+    expect(details.name).toBe("Live campagne");
+
+    const saved = await caller.saveCampaignToGoogle({
+      campaignId: "123",
+      name: "Live campagne",
+      campaignType: "SEARCH",
+      dailyBudgetCents: 2500,
+      publishStatus: "ENABLED",
+      creatives: { finalUrl: "https://example.com", headlines: ["H1", "H2", "H3"], descriptions: ["D1", "D2"] },
+      targeting: { keywords: ["leads belgie"] },
+    });
+    expect(saved.status).toBe("ENABLED");
+    expect(googleAdsLib.updateGoogleCampaignFromPlan).toHaveBeenCalled();
   });
 });

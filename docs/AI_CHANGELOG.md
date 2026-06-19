@@ -24,7 +24,7 @@ Chronologisch logboek van significante wijzigingen (mens + AI).
 
 **Type:** Feature fix + UX  
 **Agent:** Cursor  
-**Status:** TODO: bevestigen commit/merge status  
+**Commit:** main (deployed via Vercel)  
 
 **Wijziging:**
 - Preview/editor labels: "Slide" → "Item N"
@@ -41,10 +41,10 @@ Chronologisch logboek van significante wijzigingen (mens + AI).
 
 ---
 
-## 2026-06 (periode) — Google Ads Studio live editing
+## 2026-06-19 — Google Ads Studio live editing
 
 **Type:** Feature  
-**Status:** TODO: bevestigen commit/merge status  
+**Commit:** main (deployed via Vercel)  
 
 **Wijziging (samenvatting uit conversatie):**
 - Live campagnedata ophalen uit Google Ads API
@@ -59,10 +59,10 @@ Chronologisch logboek van significante wijzigingen (mens + AI).
 
 ---
 
-## 2026-06 (periode) — Social Planner Multi-upload
+## 2026-06-19 — Social Planner Multi-upload
 
 **Type:** Feature  
-**Status:** TODO: bevestigen commit/merge status  
+**Commit:** main (deployed via Vercel)  
 
 **Wijziging (samenvatting):**
 - UI "Instagram carousel" → "Multi-upload"

@@ -1,4 +1,11 @@
-import type { PlacementAssets, SocialPlacement, FeedAspectFormat } from "@/components/social/social-placement-editor";
+import type {
+  FeedAspectFormat,
+  PlacementAssets,
+  PlatformAssets,
+  SocialPlacement,
+  SocialPlatform,
+  SocialStoryItem,
+} from "@/components/social/social-placement-editor";
 import type { SocialCarouselState } from "@/components/social/social-carousel-editor";
 import { cropImageSourceToPlacement } from "@/lib/social-image-crop";
 import { uploadClientAsset } from "@/lib/upload-client-asset";
@@ -129,6 +136,50 @@ export async function persistPlacementAssets(
   return next;
 }
 
+export async function persistPlatformAssets(
+  assets: PlatformAssets,
+  options: {
+    feedFormats: Partial<Record<SocialPlatform, FeedAspectFormat>>;
+  },
+): Promise<PlatformAssets> {
+  const next: PlatformAssets = { ...assets };
+
+  for (const platform of ["FACEBOOK", "INSTAGRAM"] as const) {
+    const feedAsset = next[platform]?.FEED;
+    if (!feedAsset) continue;
+    const platformTarget = [platform];
+    const feedFormat = options.feedFormats[platform] || "SQUARE";
+
+    let imageUrl = feedAsset.imageUrl?.trim();
+    if (imageUrl) {
+      const prepared = await preparePlacementImageUrl({
+        imageUrl,
+        placement: "FEED",
+        feedFormat,
+        targetPlatforms: platformTarget,
+      });
+      imageUrl = prepared.url;
+    }
+
+    let videoUrl = feedAsset.videoUrl?.trim();
+    if (videoUrl && isLocalBrowserAsset(videoUrl)) {
+      const file = await dataUrlToFile(videoUrl, videoFilename(videoUrl, "FEED"));
+      videoUrl = await uploadSocialAssetFile(file);
+    }
+
+    next[platform] = {
+      ...(next[platform] || {}),
+      FEED: {
+        ...feedAsset,
+        imageUrl: imageUrl || undefined,
+        videoUrl: videoUrl || undefined,
+      },
+    };
+  }
+
+  return next;
+}
+
 export async function persistCarouselAssets(carousel: SocialCarouselState): Promise<SocialCarouselState> {
   if (!carousel.enabled) return { enabled: false, slides: [] };
 
@@ -152,4 +203,38 @@ export async function persistCarouselAssets(carousel: SocialCarouselState): Prom
   );
 
   return { ...carousel, slides };
+}
+
+export async function persistStoryItems(
+  items: SocialStoryItem[],
+  options?: {
+    feedFormat?: FeedAspectFormat;
+    targetPlatforms?: string[];
+  },
+): Promise<SocialStoryItem[]> {
+  const feedFormat = options?.feedFormat || "SQUARE";
+  const targetPlatforms = options?.targetPlatforms || ["FACEBOOK", "INSTAGRAM"];
+
+  return Promise.all(
+    items.map(async (item) => {
+      if (item.mediaType === "VIDEO") {
+        const videoUrl = item.videoUrl?.trim();
+        if (!videoUrl) return item;
+        if (!isLocalBrowserAsset(videoUrl)) return { ...item, videoUrl };
+        const file = await dataUrlToFile(videoUrl, videoFilename(videoUrl, "STORY"));
+        return { ...item, videoUrl: await uploadSocialAssetFile(file), imageUrl: undefined };
+      }
+
+      const imageUrl = item.imageUrl?.trim();
+      if (!imageUrl) return item;
+      const prepared = await preparePlacementImageUrl({
+        imageUrl,
+        placement: "STORY",
+        feedFormat,
+        targetPlatforms,
+        forceCrop: true,
+      });
+      return { ...item, imageUrl: prepared.url, videoUrl: undefined };
+    }),
+  );
 }

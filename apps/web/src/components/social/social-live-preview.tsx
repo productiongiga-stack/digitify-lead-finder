@@ -58,8 +58,8 @@ export function buildPreviewSlides(input: {
         slides.push({
           id: `carousel_${slide.id}`,
           placement: "FEED",
-          label: `Carousel ${index + 1}`,
-          description: slide.mediaType === "VIDEO" ? "Video-slide" : "Foto-slide",
+          label: `Item ${index + 1}`,
+          description: slide.mediaType === "VIDEO" ? "Video" : "Foto",
           format: input.feedFormat,
           imageUrl,
           videoUrl: videoUrl || undefined,

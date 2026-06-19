@@ -6,12 +6,18 @@ import { adminProcedure, protectedProcedure, aiRateLimitedProcedure, router, mut
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import {
   defaultSearchTargeting,
+  formatGoogleAdsError,
   getGoogleAdsInsights,
+  getGoogleCampaignDetails,
   listGoogleAdCustomers,
   listGoogleCampaigns,
   loadGoogleAdsWorkspaceConfig,
   pushPausedGoogleAdPlan,
+  removeGoogleCampaign,
   suggestBeneluxGeoTargets,
+  updateGoogleCampaignFromPlan,
+  updateGoogleCampaignName,
+  updateGoogleCampaignStatus,
   validateBudgetGuard,
 } from "../lib/google-ads";
 import {
@@ -319,6 +325,38 @@ async function pushPlanToGoogle(
   }
 }
 
+async function loadReadableGoogleAdsConfig(db: PrismaClient, scope: ReturnType<typeof workspaceScopeFromAuthenticatedUser>) {
+  const config = await loadGoogleAdsWorkspaceConfig(db, scope);
+  if (!config.refreshToken) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Koppel Google Ads eerst via Integraties." });
+  }
+  if (!config.developerToken) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "GOOGLE_ADS_DEVELOPER_TOKEN ontbreekt op de server. Zet deze in Vercel of .env.",
+    });
+  }
+  if (!config.customerId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Selecteer eerst een Google Ads customer in Instellingen.",
+    });
+  }
+  return config;
+}
+
+async function runGoogleAdsRead<T>(db: PrismaClient, scope: ReturnType<typeof workspaceScopeFromAuthenticatedUser>, fn: (config: Awaited<ReturnType<typeof loadReadableGoogleAdsConfig>>) => Promise<T>) {
+  const config = await loadReadableGoogleAdsConfig(db, scope);
+  try {
+    return await fn(config);
+  } catch (error) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: formatGoogleAdsError(error),
+    });
+  }
+}
+
 export const googleAdsRouter = router({
   connectionStatus: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
@@ -355,14 +393,24 @@ export const googleAdsRouter = router({
     };
   }),
 
-  listCustomers: adminProcedure.query(async ({ ctx }) => {
+  listCustomers: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadGoogleAdsWorkspaceConfig(ctx.db, scope);
     if (!config.refreshToken) throw new TRPCError({ code: "BAD_REQUEST", message: "Koppel Google Ads eerst via Integraties." });
-    return listGoogleAdCustomers(config);
+    if (!config.developerToken) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "GOOGLE_ADS_DEVELOPER_TOKEN ontbreekt op de server. Zet deze in Vercel of .env.",
+      });
+    }
+    try {
+      return await listGoogleAdCustomers(config);
+    } catch (error) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: formatGoogleAdsError(error) });
+    }
   }),
 
-  selectCustomer: adminProcedure
+  selectCustomer: mutationProcedure
     .input(
       z.object({
         customerId: z.string().min(3),
@@ -375,10 +423,14 @@ export const googleAdsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const customerId = normalizeGoogleCustomerId(input.customerId);
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
-      await upsertGoogleAdsSettings(ctx.db, scope, [
-        { key: "ads.google_customer_id", value: customerId },
-        { key: "ads.google_login_customer_id", value: normalizeGoogleCustomerId(input.loginCustomerId || "") },
-      ]);
+      const settings = [{ key: "ads.google_customer_id", value: customerId }];
+      if (input.loginCustomerId?.trim()) {
+        settings.push({
+          key: "ads.google_login_customer_id",
+          value: normalizeGoogleCustomerId(input.loginCustomerId),
+        });
+      }
+      await upsertGoogleAdsSettings(ctx.db, scope, settings);
       await ctx.db.googleAdAccount.updateMany({
         where: { createdById: ctx.user.workspaceId! },
         data: { isSelected: false },
@@ -416,19 +468,88 @@ export const googleAdsRouter = router({
       return { enabled: input.enabled };
     }),
 
+  setLoginCustomerId: mutationProcedure
+    .input(z.object({ loginCustomerId: z.string().max(32) }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      await upsertGoogleAdsSettings(ctx.db, scope, [
+        { key: "ads.google_login_customer_id", value: normalizeGoogleCustomerId(input.loginCustomerId) },
+      ]);
+      return { loginCustomerId: normalizeGoogleCustomerId(input.loginCustomerId) || null };
+    }),
+
   listCampaigns: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
-    const config = await loadGoogleAdsWorkspaceConfig(ctx.db, scope);
-    if (!config.refreshToken || !config.customerId) return [];
-    return listGoogleCampaigns(config);
+    return runGoogleAdsRead(ctx.db, scope, (config) => listGoogleCampaigns(config));
   }),
 
   getInsights: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
-    const config = await loadGoogleAdsWorkspaceConfig(ctx.db, scope);
-    if (!config.refreshToken || !config.customerId) return [];
-    return getGoogleAdsInsights(config);
+    return runGoogleAdsRead(ctx.db, scope, (config) => getGoogleAdsInsights(config));
   }),
+
+  pauseInGoogle: adminProcedure
+    .input(z.object({ campaignId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      return runGoogleAdsRead(ctx.db, scope, (config) => updateGoogleCampaignStatus(config, input.campaignId, "PAUSED"));
+    }),
+
+  resumeInGoogle: adminProcedure
+    .input(z.object({ campaignId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      return runGoogleAdsRead(ctx.db, scope, (config) => updateGoogleCampaignStatus(config, input.campaignId, "ENABLED"));
+    }),
+
+  removeCampaign: adminProcedure
+    .input(z.object({ campaignId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      return runGoogleAdsRead(ctx.db, scope, (config) => removeGoogleCampaign(config, input.campaignId));
+    }),
+
+  updateCampaignName: adminProcedure
+    .input(z.object({ campaignId: z.string().min(1), name: z.string().min(2).max(160) }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      return runGoogleAdsRead(ctx.db, scope, (config) => updateGoogleCampaignName(config, input.campaignId, input.name));
+    }),
+
+  getCampaignDetails: protectedProcedure
+    .input(z.object({ campaignId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      return runGoogleAdsRead(ctx.db, scope, (config) => getGoogleCampaignDetails(config, input.campaignId));
+    }),
+
+  saveCampaignToGoogle: adminProcedure
+    .input(
+      z.object({
+        campaignId: z.string().min(1),
+        publishStatus: z.enum(["ENABLED", "PAUSED"]).optional(),
+      }).merge(draftInputSchema),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      const config = await loadReadableGoogleAdsConfig(ctx.db, scope);
+      const { campaignId, publishStatus, ...plan } = input;
+      try {
+        const result = await updateGoogleCampaignFromPlan(config, campaignId, { ...plan, publishStatus });
+        await createGoogleAdsActivity(ctx.db, {
+          userId: ctx.user.id,
+          type: "GOOGLE_AD_PUSHED_PAUSED",
+          title: publishStatus === "ENABLED" ? "Google campagne live bijgewerkt" : "Google campagne bijgewerkt",
+          metadata: { campaignId, publishStatus: publishStatus || null },
+        });
+        return result;
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: formatGoogleAdsError(error),
+        });
+      }
+    }),
 
   searchGeoLocations: protectedProcedure
     .input(z.object({ query: z.string().min(2).max(80) }))

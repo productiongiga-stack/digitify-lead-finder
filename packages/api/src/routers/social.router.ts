@@ -585,6 +585,68 @@ export const socialRouter = router({
       });
     }),
 
+  deletePosts: mutationProcedure
+    .input(
+      z
+        .object({
+          ids: z.array(z.string().min(1)).min(1).max(100).optional(),
+          status: socialStatusEnum.optional(),
+          all: z.boolean().optional(),
+        })
+        .refine((input) => input.all || input.status || input.ids?.length, {
+          message: "Kies minstens één post, statusfilter of all=true.",
+        }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      const targetWhere: Record<string, unknown> = { createdById: workspaceId };
+      if (input.ids?.length) {
+        targetWhere.id = { in: input.ids };
+      } else if (input.status) {
+        targetWhere.status = input.status;
+      }
+
+      const candidates = await ctx.db.socialPost.findMany({
+        where: targetWhere,
+        select: {
+          id: true,
+          status: true,
+          externalPostIds: true,
+        },
+      });
+      const deletable = candidates.filter((row) => row.status !== "PUBLISHING");
+      const deletableIds = deletable.map((row) => row.id);
+      const skippedPublishing = candidates.length - deletable.length;
+      const publishedLocalOnly = deletable.filter((row) =>
+        hasPublishedExternally(parseStoredExternalIds(row.externalPostIds)),
+      ).length;
+      const missing = input.ids?.length ? Math.max(0, input.ids.length - candidates.length) : 0;
+
+      if (!deletableIds.length) {
+        return {
+          deleted: 0,
+          skippedPublishing,
+          missing,
+          publishedLocalOnly,
+        };
+      }
+
+      const deleted = await ctx.db.socialPost.deleteMany({
+        where: {
+          createdById: workspaceId,
+          id: { in: deletableIds },
+          status: { not: "PUBLISHING" },
+        },
+      });
+
+      return {
+        deleted: deleted.count,
+        skippedPublishing,
+        missing,
+        publishedLocalOnly,
+      };
+    }),
+
   generateSuggestion: aiRateLimitedProcedure
     .input(
       z.object({
