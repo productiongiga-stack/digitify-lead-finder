@@ -148,7 +148,7 @@ function explainMetaError(message: string) {
     return {
       title: "Afbeeldingsratio ongeldig",
       description:
-        "Instagram feed accepteert geen extreem brede of hoge beelden. Gebruik bij voorkeur 1080x1080, 1080x1350 of een ratio tussen 4:5 en 1.91:1.",
+        "Instagram feed accepteert geen extreem brede of hoge beelden. Gebruik bij voorkeur 1080x1080, 1080x1440 of een ratio tussen 3:4 en 1.91:1.",
     };
   }
   if (/code\s+10\b|does not have permission for this action/i.test(message)) {

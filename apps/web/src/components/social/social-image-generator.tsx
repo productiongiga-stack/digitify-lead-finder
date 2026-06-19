@@ -36,7 +36,7 @@ type Props = {
 
 function placementFormat(feedFormat: FeedAspectFormat, placements: SocialPlacement[]): "SQUARE" | "PORTRAIT" | "LANDSCAPE" | "STORY" {
   if (!placements.includes("FEED") && (placements.includes("STORY") || placements.includes("REEL"))) return "STORY";
-  if (feedFormat === "PORTRAIT") return "PORTRAIT";
+  if (feedFormat === "PORTRAIT" || feedFormat === "PORTRAIT_34") return "PORTRAIT";
   if (feedFormat === "LANDSCAPE") return "LANDSCAPE";
   return "SQUARE";
 }

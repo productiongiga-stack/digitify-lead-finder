@@ -377,7 +377,7 @@ const META_API_ERROR_HINTS: Record<number, string> = {
   2207052:
     "Instagram kon de media-URL niet downloaden. Gebruik een publieke HTTPS-URL zonder login, redirects of tijdelijke lokale link.",
   2207009:
-    "Afbeeldingsverhouding ongeldig voor Instagram. Gebruik een publieke JPG/PNG/WebP tussen 4:5 en 1.91:1, bijvoorbeeld 1080x1080 of 1080x1350.",
+    "Afbeeldingsverhouding ongeldig voor Instagram. Gebruik een publieke JPG/PNG/WebP tussen 3:4 en 1.91:1, bijvoorbeeld 1080x1080 of 1080x1440.",
   33:
     "Meta ondersteunt deze edge mogelijk niet voor jouw app of Page. Controleer of Page Stories publishing beschikbaar is en of je app de juiste rechten/App Review heeft.",
 };

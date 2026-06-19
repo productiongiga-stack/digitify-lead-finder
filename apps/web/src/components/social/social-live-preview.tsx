@@ -35,6 +35,7 @@ type PreviewSlide = {
 
 const FEED_FORMAT_META: Record<FeedAspectFormat, { label: string; description: string; className: string; ratio: number }> = {
   SQUARE: { label: "Square", description: "1:1 · FB + IG feed", className: "aspect-square", ratio: 1 },
+  PORTRAIT_34: { label: "Portrait", description: "3:4 · feed", className: "aspect-[3/4]", ratio: 3 / 4 },
   PORTRAIT: { label: "Portrait", description: "4:5 · IG feed", className: "aspect-[4/5]", ratio: 4 / 5 },
   LANDSCAPE: { label: "Landscape", description: "1.91:1 · breed", className: "aspect-[1.91/1]", ratio: 1.91 },
 };
@@ -439,7 +440,7 @@ export function SocialLivePreview({
             <Palette className="mr-1 inline h-3.5 w-3.5" /> Publicatie-regels
           </p>
           <p>
-            Feed: 4:5 tot 1.91:1 · Story/Reel: 9:16 (1080×1920). Reels vereisen een publieke MP4-video.
+            Feed: 3:4 tot 1.91:1 · Story/Reel: 9:16 (1080×1920). Reels vereisen een publieke MP4-video.
             {placementCount > 1 ? ` Je plant ${placementCount} varianten; ${slidesWithMedia} met media klaar voor preview.` : ""}
           </p>
         </div>

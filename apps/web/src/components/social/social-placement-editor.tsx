@@ -33,7 +33,7 @@ import { SocialComposerSection } from "./social-composer-section";
 
 export type SocialPlacement = "FEED" | "STORY" | "REEL";
 export type SocialPlatform = "FACEBOOK" | "INSTAGRAM";
-export type FeedAspectFormat = "SQUARE" | "PORTRAIT" | "LANDSCAPE";
+export type FeedAspectFormat = "SQUARE" | "PORTRAIT" | "PORTRAIT_34" | "LANDSCAPE";
 export type PlatformFeedFormats = Partial<Record<SocialPlatform, FeedAspectFormat>>;
 
 export type PlacementAssets = Partial<
@@ -66,12 +66,10 @@ const FEED_FORMAT_OPTIONS: Array<{
   className: string;
 }> = [
   { value: "SQUARE", label: "Vierkant", ratio: "1:1", className: "aspect-square" },
+  { value: "PORTRAIT_34", label: "Staand", ratio: "3:4", className: "aspect-[3/4]" },
   { value: "PORTRAIT", label: "Staand", ratio: "4:5", className: "aspect-[4/5]" },
   { value: "LANDSCAPE", label: "Liggend", ratio: "1.91:1", className: "aspect-[1.91/1]" },
 ];
-
-const FACEBOOK_FEED_FORMAT_OPTIONS = FEED_FORMAT_OPTIONS.filter((option) => option.value !== "PORTRAIT");
-const INSTAGRAM_FEED_FORMAT_OPTIONS = FEED_FORMAT_OPTIONS.filter((option) => option.value !== "LANDSCAPE");
 
 function createStoryItem(mediaType: SocialStoryItem["mediaType"] = "IMAGE"): SocialStoryItem {
   return {
@@ -84,75 +82,6 @@ function createStoryItem(mediaType: SocialStoryItem["mediaType"] = "IMAGE"): Soc
 
 export function storyItemHasMedia(item: SocialStoryItem) {
   return item.mediaType === "VIDEO" ? Boolean(item.videoUrl?.trim()) : Boolean(item.imageUrl?.trim());
-}
-
-function PlatformFormatPanel({
-  platform,
-  placements,
-  feedFormat,
-  disabled,
-  onFeedFormatChange,
-}: {
-  platform: SocialPlatform;
-  placements: SocialPlacement[];
-  feedFormat: FeedAspectFormat;
-  disabled?: boolean;
-  onFeedFormatChange: (format: FeedAspectFormat) => void;
-}) {
-  const isFacebook = platform === "FACEBOOK";
-  const options = isFacebook ? FACEBOOK_FEED_FORMAT_OPTIONS : INSTAGRAM_FEED_FORMAT_OPTIONS;
-  const placementLabels = [
-    placements.includes("FEED") ? "Feed-post" : null,
-    placements.includes("STORY") ? "Story (9:16)" : null,
-    placements.includes("REEL") && !isFacebook ? "Reel (9:16)" : null,
-  ].filter(Boolean);
-
-  if (!placementLabels.length) return null;
-
-  return (
-    <div
-      className={cn(
-        "space-y-3 rounded-2xl border p-4",
-        isFacebook
-          ? "border-blue-200/70 bg-blue-50/40 dark:border-blue-900/50 dark:bg-blue-950/20"
-          : "border-fuchsia-200/70 bg-fuchsia-50/40 dark:border-fuchsia-900/50 dark:bg-fuchsia-950/20",
-      )}
-    >
-      <div className="space-y-1">
-        <p className="text-sm font-semibold">{isFacebook ? "Facebook" : "Instagram"}</p>
-        <p className="text-xs text-muted-foreground">
-          {placementLabels.join(" · ")}
-          {isFacebook ? " · feed werkt het best in 1:1 of liggend" : " · feed werkt het best in 4:5 of vierkant"}
-        </p>
-      </div>
-
-      {placements.includes("FEED") ? (
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground">Feed-formaat</p>
-          <div className="inline-flex flex-wrap gap-1.5 rounded-lg border bg-background/70 p-1">
-            {options.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                disabled={disabled}
-                onClick={() => onFeedFormatChange(option.value)}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-medium transition",
-                  feedFormat === option.value
-                    ? isFacebook
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "bg-fuchsia-600 text-white shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {option.label} <span className="opacity-70">({option.ratio})</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 function formatRatio(value: number) {
@@ -1107,7 +1036,7 @@ function feedSectionDescription(carousel: SocialCarouselState, assets: Placement
 export function SocialPlacementEditor({
   placements,
   feedFormat,
-  feedFormats,
+  feedFormats: _feedFormats,
   assets,
   platformAssets,
   carousel,
@@ -1117,7 +1046,7 @@ export function SocialPlacementEditor({
   targetInstagram,
   onPlacementsChange,
   onFeedFormatChange,
-  onFeedFormatsChange,
+  onFeedFormatsChange: _onFeedFormatsChange,
   onAssetsChange,
   onPlatformAssetsChange,
   onCarouselChange,
@@ -1174,12 +1103,6 @@ export function SocialPlacementEditor({
   const openPlacement = primaryPlacementForOpen(placements);
   const feedBadge = carousel.enabled ? "Multi" : FEED_FORMAT_OPTIONS.find((f) => f.value === feedFormat)?.ratio;
   const reelVideo = assets.REEL?.videoUrl?.trim();
-  const resolvedFeedFormats: PlatformFeedFormats = {
-    FACEBOOK: feedFormats?.FACEBOOK || feedFormat,
-    INSTAGRAM: feedFormats?.INSTAGRAM || feedFormat,
-  };
-  const showPlatformPanels =
-    !carousel.enabled && (targetFacebook || targetInstagram) && placements.includes("FEED");
 
   function setFeedUploadMode(mode: FeedUploadMode) {
     if (mode === "multi") {
@@ -1191,14 +1114,6 @@ export function SocialPlacementEditor({
     if (carousel.enabled) {
       onCarouselChange({ enabled: false, slides: [] });
     }
-  }
-
-  function updatePlatformFeedFormat(platform: SocialPlatform, format: FeedAspectFormat) {
-    if (onFeedFormatsChange) {
-      onFeedFormatsChange({ ...resolvedFeedFormats, [platform]: format });
-      return;
-    }
-    onFeedFormatChange(format);
   }
 
   return (
@@ -1233,29 +1148,6 @@ export function SocialPlacementEditor({
           </p>
         ) : null}
       </div>
-
-      {showPlatformPanels ? (
-        <div className={cn("grid gap-4", targetFacebook && targetInstagram ? "lg:grid-cols-2" : "grid-cols-1")}>
-          {targetFacebook ? (
-            <PlatformFormatPanel
-              platform="FACEBOOK"
-              placements={placements}
-              feedFormat={resolvedFeedFormats.FACEBOOK || feedFormat}
-              disabled={disabled}
-              onFeedFormatChange={(format) => updatePlatformFeedFormat("FACEBOOK", format)}
-            />
-          ) : null}
-          {targetInstagram ? (
-            <PlatformFormatPanel
-              platform="INSTAGRAM"
-              placements={placements}
-              feedFormat={resolvedFeedFormats.INSTAGRAM || feedFormat}
-              disabled={disabled}
-              onFeedFormatChange={(format) => updatePlatformFeedFormat("INSTAGRAM", format)}
-            />
-          ) : null}
-        </div>
-      ) : null}
 
       {placements.includes("FEED") ? (
         <SocialComposerSection
@@ -1296,36 +1188,30 @@ export function SocialPlacementEditor({
 
             {!carousel.enabled ? (
               <>
-                {!showPlatformPanels ? (
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-xs font-medium text-muted-foreground">Beeldverhouding feed</p>
-                      <p className="text-[11px] text-muted-foreground">Verkeerde verhouding? Automatisch bijgeknipt.</p>
-                    </div>
-                    <div className="inline-flex flex-wrap gap-1.5 rounded-lg border bg-muted/20 p-1">
-                      {FEED_FORMAT_OPTIONS.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          disabled={disabled}
-                          onClick={() => onFeedFormatChange(option.value)}
-                          className={cn(
-                            "rounded-md px-3 py-1.5 text-xs font-medium transition",
-                            feedFormat === option.value
-                              ? "bg-amber-500 text-white shadow-sm"
-                              : "text-muted-foreground hover:text-foreground",
-                          )}
-                        >
-                          {option.label} <span className="opacity-70">({option.ratio})</span>
-                        </button>
-                      ))}
-                    </div>
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-muted-foreground">Beeldverhouding feed</p>
+                    <p className="text-[11px] text-muted-foreground">Verkeerde verhouding? Automatisch bijgeknipt.</p>
                   </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    Eén media-upload voor alle kanalen. Facebook en Instagram krijgen elk het juiste formaat bij publicatie.
-                  </p>
-                )}
+                  <div className="inline-flex flex-wrap gap-1.5 rounded-lg border bg-muted/20 p-1">
+                    {FEED_FORMAT_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => onFeedFormatChange(option.value)}
+                        className={cn(
+                          "rounded-md px-3 py-1.5 text-xs font-medium transition",
+                          feedFormat === option.value
+                            ? "bg-amber-500 text-white shadow-sm"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {option.label} <span className="opacity-70">({option.ratio})</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 <PlacementMediaEditor
                   placement="FEED"

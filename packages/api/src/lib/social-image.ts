@@ -8,7 +8,7 @@ export type SocialImageInfo = {
   byteLength: number;
 };
 
-const INSTAGRAM_FEED_MIN_ASPECT_RATIO = 0.8; // 4:5
+const INSTAGRAM_FEED_MIN_ASPECT_RATIO = 0.75; // 3:4
 const INSTAGRAM_FEED_MAX_ASPECT_RATIO = 1.91; // 1.91:1
 const STORY_MIN_ASPECT_RATIO = 0.5; // 1:2, keeps a little tolerance around 9:16
 const STORY_MAX_ASPECT_RATIO = 0.75; // 3:4, avoids square/feed assets for stories
@@ -384,7 +384,7 @@ export async function validateSocialImageForPublish(input: {
   if (input.targetPlatforms.includes("INSTAGRAM")) {
     if (info.aspectRatio < INSTAGRAM_FEED_MIN_ASPECT_RATIO || info.aspectRatio > INSTAGRAM_FEED_MAX_ASPECT_RATIO) {
       throw new Error(
-        `Afbeeldingsverhouding ongeldig voor Instagram feed: ${info.width}x${info.height} (${ratioLabel(info.aspectRatio)}). Gebruik bijvoorbeeld 1080x1080, 1080x1350 of een verhouding tussen 4:5 en 1.91:1.`,
+        `Afbeeldingsverhouding ongeldig voor Instagram feed: ${info.width}x${info.height} (${ratioLabel(info.aspectRatio)}). Gebruik bijvoorbeeld 1080x1080, 1080x1440 of een verhouding tussen 3:4 en 1.91:1.`,
       );
     }
 

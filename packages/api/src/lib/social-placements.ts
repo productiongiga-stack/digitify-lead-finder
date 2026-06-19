@@ -1,6 +1,6 @@
 export type SocialPlacement = "FEED" | "STORY" | "REEL";
 export type SocialPlatform = "FACEBOOK" | "INSTAGRAM";
-export type FeedAspectFormat = "SQUARE" | "PORTRAIT" | "LANDSCAPE";
+export type FeedAspectFormat = "SQUARE" | "PORTRAIT" | "PORTRAIT_34" | "LANDSCAPE";
 export type PlatformFeedFormats = Partial<Record<SocialPlatform, FeedAspectFormat>>;
 export type StoryPublishKind = "IMAGE" | "VIDEO";
 export type SocialCarouselSlideMediaType = "IMAGE" | "VIDEO";
@@ -68,7 +68,7 @@ export function normalizePlacements(metadata?: SocialPlacementsMetadata | null):
 
 export function normalizeFeedFormat(metadata?: SocialPlacementsMetadata | null): FeedAspectFormat {
   const format = metadata?.feedFormat || metadata?.postFormat;
-  if (format === "PORTRAIT" || format === "LANDSCAPE" || format === "SQUARE") return format;
+  if (format === "PORTRAIT" || format === "PORTRAIT_34" || format === "LANDSCAPE" || format === "SQUARE") return format;
   return "SQUARE";
 }
 

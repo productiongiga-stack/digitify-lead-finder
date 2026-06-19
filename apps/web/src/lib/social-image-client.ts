@@ -1,6 +1,6 @@
 /** Client-side image checks (data URLs). Ratios match packages/api/src/lib/social-image.ts */
 
-const INSTAGRAM_FEED_MIN_ASPECT_RATIO = 0.8;
+const INSTAGRAM_FEED_MIN_ASPECT_RATIO = 0.75; // 3:4
 const INSTAGRAM_FEED_MAX_ASPECT_RATIO = 1.91;
 const STORY_MIN_ASPECT_RATIO = 0.5;
 const STORY_MAX_ASPECT_RATIO = 0.75;

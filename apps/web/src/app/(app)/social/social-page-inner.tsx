@@ -118,7 +118,7 @@ const SocialBrandKitPicker = dynamic(
 );
 
 type Platform = "FACEBOOK" | "INSTAGRAM";
-type PostFormat = "SQUARE" | "PORTRAIT" | "LANDSCAPE" | "STORY";
+type PostFormat = "SQUARE" | "PORTRAIT" | "PORTRAIT_34" | "LANDSCAPE" | "STORY";
 
 type SocialMetadata = {
   headline?: string;
@@ -153,6 +153,7 @@ type ManagedMetaPage = {
 
 const FORMAT_OPTIONS: Array<{ value: PostFormat; label: string; description: string; className: string; ratio: number }> = [
   { value: "SQUARE", label: "Square", description: "1:1 · veilig voor FB + IG", className: "aspect-square", ratio: 1 },
+  { value: "PORTRAIT_34", label: "Portrait", description: "3:4 · feed", className: "aspect-[3/4]", ratio: 3 / 4 },
   { value: "PORTRAIT", label: "Portrait", description: "4:5 · sterk voor IG feed", className: "aspect-[4/5]", ratio: 4 / 5 },
   { value: "LANDSCAPE", label: "Landscape", description: "1.91:1 · breed beeld", className: "aspect-[1.91/1]", ratio: 1.91 },
   { value: "STORY", label: "Story", description: "9:16 · FB + IG Stories", className: "aspect-[9/16]", ratio: 9 / 16 },
@@ -1643,7 +1644,12 @@ export function SocialPageInner() {
     const legacyFormat = metadata.postFormat;
     setFeedFormat(
       metadata.feedFormat ||
-        (legacyFormat === "PORTRAIT" || legacyFormat === "LANDSCAPE" || legacyFormat === "SQUARE" ? legacyFormat : "SQUARE"),
+        (legacyFormat === "PORTRAIT" ||
+        legacyFormat === "PORTRAIT_34" ||
+        legacyFormat === "LANDSCAPE" ||
+        legacyFormat === "SQUARE"
+          ? legacyFormat
+          : "SQUARE"),
     );
     setFeedFormats({
       FACEBOOK: metadata.feedFormats?.FACEBOOK || metadata.feedFormat || "LANDSCAPE",

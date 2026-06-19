@@ -47,9 +47,9 @@ import {
   type SocialStoryItem,
 } from "./social-placements";
 
-const socialPostFormatEnum = z.enum(["SQUARE", "PORTRAIT", "LANDSCAPE", "STORY"]);
+const socialPostFormatEnum = z.enum(["SQUARE", "PORTRAIT", "PORTRAIT_34", "LANDSCAPE", "STORY"]);
 const socialPlacementEnum = z.enum(["FEED", "STORY", "REEL"]);
-const socialFeedFormatEnum = z.enum(["SQUARE", "PORTRAIT", "LANDSCAPE"]);
+const socialFeedFormatEnum = z.enum(["SQUARE", "PORTRAIT", "PORTRAIT_34", "LANDSCAPE"]);
 
 const socialImageUrlSchema = z
   .string()

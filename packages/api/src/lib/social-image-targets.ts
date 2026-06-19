@@ -11,7 +11,7 @@ export type SocialImageTargetSpec = {
   label: string;
 };
 
-const INSTAGRAM_FEED_MIN_ASPECT_RATIO = 0.8;
+const INSTAGRAM_FEED_MIN_ASPECT_RATIO = 0.75; // 3:4
 const INSTAGRAM_FEED_MAX_ASPECT_RATIO = 1.91;
 const STORY_MIN_ASPECT_RATIO = 0.5;
 const STORY_MAX_ASPECT_RATIO = 0.75;
@@ -39,6 +39,17 @@ export function targetSpecForPlacement(
       minWidth: 320,
       minHeight: 320,
       label: "4:5",
+    };
+  }
+
+  if (feedFormat === "PORTRAIT_34") {
+    return {
+      width: 1080,
+      height: 1440,
+      aspectRatio: 3 / 4,
+      minWidth: 320,
+      minHeight: 320,
+      label: "3:4",
     };
   }
 
