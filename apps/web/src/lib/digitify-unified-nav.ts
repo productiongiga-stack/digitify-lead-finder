@@ -15,7 +15,7 @@ export type DigitifySiteUrls = {
 };
 
 export type DigitifyNavChild = {
-  key: Extract<DigitifyNavKey, "designer">;
+  key: "designer" | "shop-home";
   label: string;
   href: string;
   external?: boolean;
