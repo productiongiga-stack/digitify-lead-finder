@@ -1,5 +1,6 @@
 "use client";
 
+import { notFound } from "next/navigation";
 import {
   getSolutionModuleBySlug,
   SolutionDetailMarketingPage,
@@ -10,7 +11,7 @@ export function SolutionDetailClient({ slug }: { slug: string }) {
   const module = getSolutionModuleBySlug(slug);
 
   if (!module) {
-    return <SolutionDetailMarketingPage slug="lead-search" />;
+    notFound();
   }
 
   return <SolutionDetailMarketingPage slug={module.slug as SolutionSlug} />;

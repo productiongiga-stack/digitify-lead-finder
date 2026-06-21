@@ -43,7 +43,7 @@ function normalizeOgLocale(value: string) {
 
 const PAGE_FIELDS = [
   { key: "home", label: "Home", titleKey: "seo.page_home_title", descKey: "seo.page_home_description" },
-  { key: "product", label: "Product", titleKey: "seo.page_product_title", descKey: "seo.page_product_description" },
+  { key: "product", label: "Lead Finder", titleKey: "seo.page_product_title", descKey: "seo.page_product_description" },
   { key: "solutions", label: "Oplossingen", titleKey: "seo.page_solutions_title", descKey: "seo.page_solutions_description" },
   { key: "about", label: "Over ons", titleKey: "seo.page_about_title", descKey: "seo.page_about_description" },
   { key: "contact", label: "Contact", titleKey: "seo.page_contact_title", descKey: "seo.page_contact_description" },

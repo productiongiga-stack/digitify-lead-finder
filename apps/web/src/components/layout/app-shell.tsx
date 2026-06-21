@@ -1,9 +1,19 @@
 "use client";
 
+import { useLayoutEffect } from "react";
 import { useSidebarLayout, useUIStore } from "@/stores/ui-store";
 import { cn } from "@/lib/utils";
 
+function clearMarketingShellClasses() {
+  document.body.classList.remove("digitify-leads-body", "theme-light", "digitify-menu-open", "digitify-scrolled");
+  document.documentElement.classList.remove("digitify-shell-booting", "digitify-page-ready", "digitify-shell-ready");
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
+  useLayoutEffect(() => {
+    clearMarketingShellClasses();
+  }, []);
+
   const { collapsed: sidebarCollapsed } = useSidebarLayout();
   const mobileSidebarOpen = useUIStore((state) => state.mobileSidebarOpen);
 

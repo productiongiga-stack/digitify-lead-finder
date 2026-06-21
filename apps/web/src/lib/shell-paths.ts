@@ -1,3 +1,7 @@
+export function isMarketingShellPath(pathname: string) {
+  return pathname === "/" || pathname === "/product" || pathname === "/oplossingen" || pathname.startsWith("/oplossingen/");
+}
+
 export function isPublicRuntimePath(pathname: string) {
   const isPublicMarketingPath = ["/", "/product", "/oplossingen", "/over-ons", "/contact"].includes(pathname);
   const isAuthPath = pathname.startsWith("/login") || pathname.startsWith("/register");

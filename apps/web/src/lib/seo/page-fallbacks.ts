@@ -12,7 +12,7 @@ export const MARKETING_PAGE_FALLBACKS: Record<
     path: "/",
   },
   product: {
-    title: "Product",
+    title: "Lead Finder",
     description: "Ontdek hoe Digitify Lead Finder leads, outreach, offertes, afspraken en reviews samenbrengt.",
     path: "/product",
   },

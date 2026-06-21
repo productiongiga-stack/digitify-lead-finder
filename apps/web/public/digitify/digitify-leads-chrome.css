@@ -1,0 +1,210 @@
+/* Lead Finder marketing shell — WP header chrome + site auth */
+body.digitify-leads-body {
+  padding-top: var(--digitify-site-offset, var(--digitify-header-h, 65px));
+  background: #fff9f2;
+  color: #0a0a0a;
+}
+
+body.digitify-leads-body.digitify-scrolled {
+  padding-top: var(--digitify-site-offset, var(--digitify-header-h, 65px));
+}
+
+body.digitify-leads-body.theme-light {
+  background: #fff9f2;
+  color: #0a0a0a;
+}
+
+body.digitify-leads-body .digitify-page-content {
+  position: relative;
+  z-index: 1;
+}
+
+/* Flex header — WP 3-col grid lets wide end content overflow into nav */
+body.digitify-leads-body .digitify-header__grid--leads {
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: clamp(10px, 1.6vw, 22px);
+  width: 100%;
+  max-width: min(100%, var(--digitify-max-w, 1360px));
+  height: var(--digitify-header-bar-h, 62px);
+  min-height: var(--digitify-header-bar-h, 62px);
+  margin: 0 auto;
+}
+
+body.digitify-leads-body .digitify-header__start {
+  justify-self: start;
+  min-width: 0;
+  max-width: min(42vw, 320px);
+}
+
+body.digitify-leads-body .digitify-header__brand a {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+
+body.digitify-leads-body .digitify-header__end {
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: clamp(6px, 0.8vw, 10px);
+  min-width: 0;
+  white-space: nowrap;
+  transform: translateY(-2px);
+  position: relative;
+  z-index: 2;
+  padding-left: 0;
+  background: none;
+}
+
+body.digitify-leads-body .digitify-header__contact {
+  display: none;
+}
+
+body.digitify-leads-body .digitify-header__shop-tools {
+  display: none;
+}
+
+body.digitify-leads-body .digitify-header__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+body.digitify-leads-body .digitify-header__auth {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 34px;
+  padding-left: 0;
+  border-left: none;
+}
+
+body.digitify-leads-body .digitify-header__auth-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(26, 21, 16, 0.1);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.72);
+  color: #1a1510;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+body.digitify-leads-body .digitify-header__auth-link:hover {
+  border-color: rgba(240, 160, 74, 0.42);
+  background: rgba(255, 252, 247, 0.98);
+  color: #1a1510;
+}
+
+body.digitify-leads-body .digitify-header__auth-link--solid {
+  border-color: rgba(240, 160, 74, 0.34);
+  background: linear-gradient(135deg, rgba(255, 175, 81, 0.24) 0%, rgba(255, 175, 81, 0.1) 100%);
+}
+
+body.digitify-leads-body .digitify-header__auth-link[type="button"],
+body.digitify-leads-body button.digitify-header__auth-link {
+  cursor: pointer;
+  font: inherit;
+}
+
+body.digitify-leads-body .digitify-header__cta {
+  min-height: 32px;
+  padding-inline: 14px;
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+}
+
+@media (min-width: 961px) and (max-width: 1360px) {
+  body.digitify-leads-body .digitify-header__auth-link:not(.digitify-header__auth-link--solid) {
+    display: none;
+  }
+}
+
+@media (min-width: 961px) and (max-width: 1120px) {
+  body.digitify-leads-body .digitify-header__cta-label {
+    display: none;
+  }
+
+  body.digitify-leads-body .digitify-header__cta {
+    min-width: 52px;
+    padding-inline: 14px;
+  }
+}
+
+@media (max-width: 960px) {
+  body.digitify-leads-body .digitify-header__grid--leads {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0;
+  }
+
+  body.digitify-leads-body .digitify-header__nav {
+    display: none;
+  }
+
+  body.digitify-leads-body .digitify-header__end {
+    padding-left: 0;
+    background: none;
+  }
+
+  body.digitify-leads-body .digitify-header__auth {
+    display: none !important;
+  }
+}
+
+/* Atelier mobile footer — legacy, drawer styles in digitify-mobile-drawer.css */
+.digitify-mobile-nav--atelier .digitify-mobile-nav__contact-copy span {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #1a1510;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.digitify-mobile-nav--atelier .digitify-mobile-nav__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 0;
+  padding: 12px 18px max(16px, env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(26, 21, 16, 0.06);
+  background:
+    linear-gradient(180deg, rgba(255, 249, 242, 0) 0%, rgba(255, 249, 242, 0.92) 100%);
+}
+
+.digitify-mobile-nav--atelier .digitify-mobile-nav__cta {
+  width: 100%;
+  justify-content: center;
+  min-height: 46px;
+  border-radius: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.digitify-mobile-nav--atelier .digitify-mobile-nav__footnote {
+  margin: 8px 0 0;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-align: center;
+  color: rgba(26, 21, 16, 0.44);
+}
+
+.digitify-mobile-nav--atelier .digitify-mobile-nav__chip--button {
+  border: 1px solid rgba(26, 21, 16, 0.08);
+  background: rgba(255, 249, 242, 0.88);
+  cursor: pointer;
+  font: inherit;
+}

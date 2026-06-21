@@ -3,8 +3,13 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { trpc } from "@/lib/trpc/client";
-import { safeExternalUrl } from "@/lib/utils";
+import {
+  SOLUTION_MODULE_DEFINITIONS,
+  type MarketingSolutionSlug,
+  type SolutionModuleDefinition,
+} from "@/lib/marketing/solution-modules";
+import { getDigitifySiteUrls } from "@/lib/digitify-unified-nav";
+import { DigitifyMarketingFooter, DigitifyMarketingHeader } from "@/components/marketing/digitify-marketing-shell";
 import {
   ArrowRight,
   BarChart3,
@@ -35,9 +40,6 @@ import {
   Lightbulb,
   Heart,
   ExternalLink,
-  Menu,
-  X,
-  ChevronDown,
   Circle,
   Tag,
   Filter,
@@ -90,371 +92,28 @@ function AnimatedNumber({ target, suffix = "" }: { target: number; suffix?: stri
   return <span ref={ref}>{val}{suffix}</span>;
 }
 
-const navItems = [
-  { label: "Product",     href: "/product" },
-  { label: "Oplossingen", href: "/oplossingen" },
-  { label: "Over ons",    href: "/over-ons" },
-  { label: "Contact",     href: "/contact" },
-];
+export type SolutionSlug = MarketingSolutionSlug;
 
-export type SolutionSlug =
-  | "lead-search"
-  | "outreach-ai"
-  | "rapporten"
-  | "white-label"
-  | "offerte-configurator"
-  | "booking-agenda"
-  | "chatbot-widget"
-  | "reviewsysteem";
-
-type SolutionModule = {
-  slug: SolutionSlug;
+type SolutionModule = SolutionModuleDefinition & {
   icon: LucideIcon;
-  label: string;
-  title: string;
-  description: string;
-  bullets: string[];
-  chipClass: string;
   mockup: ReactNode;
-  detailIntro: string;
-  detailSteps: string[];
-  detailImpact: string[];
 };
-
-export const SOLUTION_MODULES: SolutionModule[] = [
-  {
-    slug: "lead-search",
-    icon: Search,
-    label: "Lead Search",
-    title: "Vind en kwalificeer leads vanuit kaartdata.",
-    description: "Zoek lokaal op niche en regio, score automatisch op potentieel en zet interessante profielen direct door naar je pipeline.",
-    bullets: [
-      "Zoeken op niche, stad en regio in enkele seconden.",
-      "Directe scoring op commerciële fit en prioriteit.",
-      "Leads meteen doorzetten naar campagne of CRM flow.",
-    ],
-    chipClass: "border-[#f9ae5a]/30 bg-[#fff8ee] text-[#b66d1e]",
-    mockup: <SolutionsLeadSearchMockup />,
-    detailIntro: "Lead Search geeft je team een snelle prospectielijn vanuit lokale kaartdata, met directe focus op leadkwaliteit in plaats van ruwe volume-lijsten.",
-    detailSteps: [
-      "Selecteer niche, regio en zoekfilters per campagne.",
-      "Laat de app automatisch profielen ophalen en verrijken.",
-      "Gebruik score + tags om direct je prioriteiten te bepalen.",
-      "Stuur warme leads meteen door naar outreach of CRM.",
-    ],
-    detailImpact: ["Sneller prospecteren zonder manueel opzoekwerk.", "Hogere relevantie in je eerste contactmoment.", "Minder ruis in de pipeline door directe kwalificatie."],
-  },
-  {
-    slug: "outreach-ai",
-    icon: MailCheck,
-    label: "Outreach met AI",
-    title: "Laat AI je outreachflow versnellen.",
-    description: "Stel mails op in jouw tone of voice, werk met goedkeuringsflows en verstuur rechtstreeks vanuit je eigen merkidentiteit.",
-    bullets: [
-      "Automatische drafts per doelgroep en intentie.",
-      "Goedkeuringsflow voor teamcontrole en kwaliteitsniveau.",
-      "Versturen in jouw branding zonder extra tools.",
-    ],
-    chipClass: "border-[#06b6d4]/25 bg-[#06b6d4]/10 text-[#0f7b8f]",
-    mockup: <SolutionsOutreachMockup />,
-    detailIntro: "Outreach met AI combineert snelheid en consistentie: je team vertrekt van sterke drafts, maar behoudt controle via approvals en branding.",
-    detailSteps: [
-      "Kies doelgroep, template en gewenste intentie.",
-      "Genereer AI-drafts met context uit leaddata.",
-      "Laat mails valideren in de interne goedkeuringsstap.",
-      "Verstuur en volg replies op vanuit dezelfde flow.",
-    ],
-    detailImpact: ["Kortere tijd van lead naar eerste contact.", "Consistente tone of voice per account.", "Betere opvolging dankzij centrale campagnecontext."],
-  },
-  {
-    slug: "rapporten",
-    icon: BarChart3,
-    label: "Rapporten",
-    title: "Verkooprapporten die meteen sturen op prioriteit.",
-    description: "Zet lead score, pipeline-status en opvolgacties om in duidelijke rapporten die klanten en teams in één oogopslag begrijpen.",
-    bullets: [
-      "Leadscore, status en actiepunten in 1 rapport.",
-      "Realtime zicht op pipeline-gezondheid en kansen.",
-      "Klaar voor klantpresentatie of intern overleg.",
-    ],
-    chipClass: "border-[#8b5cf6]/25 bg-[#8b5cf6]/10 text-[#6d3dc2]",
-    mockup: <SolutionsReportsMockup />,
-    detailIntro: "Rapporten maken prestaties leesbaar voor team en klant, met focus op scoringslogica, opvolging en concrete prioriteiten.",
-    detailSteps: [
-      "Bundel score, status en activiteit per leadsegment.",
-      "Toon trends over pipelinewaarde en conversiemomenten.",
-      "Export in een white-label presentatieformat.",
-      "Gebruik rapporten als vaste ritmiek in opvolgmeetings.",
-    ],
-    detailImpact: ["Snellere beslissingen op basis van heldere data.", "Betere klantcommunicatie over voortgang.", "Meer grip op commerciële bottlenecks."],
-  },
-  {
-    slug: "white-label",
-    icon: ShieldCheck,
-    label: "White-labelbaar",
-    title: "Volledig in je eigen branding, zonder compromissen.",
-    description: "Van login tot widgets en exports: kleuren, logo, stijl en communicatie lopen consistent door in elke flow van de app.",
-    bullets: [
-      "Eigen logo, kleurpalet en tone of voice per account.",
-      "Consistente ervaring in login, app en embeds.",
-      "Branding blijft uniform tot de gebruiker die wijzigt.",
-    ],
-    chipClass: "border-[#10b981]/25 bg-[#10b981]/10 text-[#0f7f5b]",
-    mockup: <SolutionsWhiteLabelMockup />,
-    detailIntro: "White-label houdt je merk centraal in elke gebruikersstap, zodat klanten en prospects altijd jouw identiteit ervaren in plaats van een generieke tool.",
-    detailSteps: [
-      "Stel primaire kleur, logo en merkaccenten per account in.",
-      "Pas widget- en exportstijlen aan op je huisstijl.",
-      "Beheer branding-consistentie over alle modules.",
-      "Schaal dit model naar meerdere teams of klanten.",
-    ],
-    detailImpact: ["Professionelere klantervaring end-to-end.", "Meer vertrouwen door consistente merkpresentatie.", "Minder design-frictie bij groei van het team."],
-  },
-  {
-    slug: "offerte-configurator",
-    icon: FileText,
-    label: "Offerte configurator",
-    title: "Configureer, bereken en verstuur in één flow.",
-    description: "De configurator begeleidt bezoekers stap voor stap van dienstkeuze tot aanvraag. Prijzen, opties en totalen worden live opgebouwd zodat je team meteen een volledige draft-offerte heeft.",
-    bullets: [
-      "Duidelijke stappen: dienst, product, specificaties en gegevens.",
-      "Live prijsopbouw met subtotalen, btw en totaal.",
-      "Aanvraag komt direct per account in je eigen offerteflow.",
-    ],
-    chipClass: "border-[#e85d3a]/25 bg-[#e85d3a]/10 text-[#b94d2f]",
-    mockup: <SolutionsQuoteMockup />,
-    detailIntro: "De offerteconfigurator reduceert heen-en-weer tussen sales en prospect door duidelijke stappen en realtime prijsopbouw in één gebruikersflow.",
-    detailSteps: [
-      "Laat bezoekers diensten en opties selecteren.",
-      "Bereken live subtotaal, btw en totaalprijs.",
-      "Capture contactgegevens en context direct in de app.",
-      "Start opvolging meteen vanuit je offertepipeline.",
-    ],
-    detailImpact: ["Minder manuele offerte-opmaak.", "Snellere reactie op inkomende aanvragen.", "Betere kwaliteit van offertebriefings."],
-  },
-  {
-    slug: "booking-agenda",
-    icon: CalendarCheck,
-    label: "Booking agenda",
-    title: "Planning die meteen werkt op je website.",
-    description: "Bezoekers kiezen rechtstreeks een beschikbaar slot. De agenda respecteert je ingestelde uren, blokkeert overlap en kan synchroniseren met Google Calendar voor realtime beschikbaarheid.",
-    bullets: [
-      "Week- en dagbeschikbaarheid met configureerbare slotduur.",
-      "Conflictcheck tegen bestaande afspraken en kalenderblokkeringen.",
-      "Automatische bevestiging voor klant en team.",
-    ],
-    chipClass: "border-[#f59e0b]/25 bg-[#f59e0b]/10 text-[#b66d1e]",
-    mockup: <SolutionsBookingMockup />,
-    detailIntro: "Booking agenda zet interesse om in concrete afspraken via een snelle, conflictvrije flow die direct met je planning meeloopt.",
-    detailSteps: [
-      "Definieer beschikbaarheid en slotlengtes per account.",
-      "Toon enkel vrije momenten op je website of landingspagina.",
-      "Voer automatische conflictchecks uit bij boeking.",
-      "Verzend bevestigingen en synchroniseer met agenda's.",
-    ],
-    detailImpact: ["Meer afspraken zonder manuele planning.", "Minder no-shows door duidelijke bevestigingen.", "Efficiëntere intake over alle teams."],
-  },
-  {
-    slug: "chatbot-widget",
-    icon: Bot,
-    label: "Chatbot widget",
-    title: "AI-gesprekken die leads meteen kwalificeren.",
-    description: "De chatbot draait in je branding, geeft directe antwoorden en stuurt elk gesprek door naar je inbox. Zo blijft support snel en worden commerciële kansen automatisch vastgelegd.",
-    bullets: [
-      "Gebaseerd op account-specifieke settings en kenniscontext.",
-      "Slimme intentdetectie voor afspraak, offerte of support.",
-      "Gesprekken direct bruikbaar in opvolging en pipeline.",
-    ],
-    chipClass: "border-[#06b6d4]/25 bg-[#06b6d4]/10 text-[#0f7b8f]",
-    mockup: <SolutionsChatbotMockup />,
-    detailIntro: "De chatbot widget combineert support en saleskwalificatie in één branded kanaal, zodat gesprekken niet verloren gaan tussen inboxen en losse tools.",
-    detailSteps: [
-      "Configureer kenniscontext per account.",
-      "Detecteer intentie zoals offerte, booking of supportvraag.",
-      "Stuur relevante gesprekken direct naar opvolging.",
-      "Gebruik gespreksdata voor betere leadprioritering.",
-    ],
-    detailImpact: ["Snellere antwoorden buiten kantooruren.", "Meer gekwalificeerde inbound leads.", "Minder gemiste commerciële kansen."],
-  },
-  {
-    slug: "reviewsysteem",
-    icon: Star,
-    label: "Reviewsysteem",
-    title: "Van interne feedback naar publieke reviewgroei.",
-    description: "Het systeem splitst automatisch op basis van score: lagere scores gaan naar interne feedback, hogere scores sturen klanten door naar jouw reviewplatforms om reputatie actief te versterken.",
-    bullets: [
-      "Tweeledige flow voor kwaliteitsopvolging en reputatie-opbouw.",
-      "Platformkeuze per account: Google, Trustpilot of Facebook.",
-      "Heldere statusopvolging van ingestuurde reviews.",
-    ],
-    chipClass: "border-[#ec4899]/25 bg-[#ec4899]/10 text-[#b93c79]",
-    mockup: <SolutionsReviewMockup />,
-    detailIntro: "Het reviewsysteem structureert reputatiemanagement met een duidelijke split tussen interne kwaliteitsfeedback en publieke reviewgroei.",
-    detailSteps: [
-      "Verzamel score en korte feedback na oplevering.",
-      "Route lage scores intern voor snelle opvolging.",
-      "Route hoge scores naar publieke reviewplatforms.",
-      "Volg status en impact op reputatie per account op.",
-    ],
-    detailImpact: ["Hogere reviewscore op publieke platformen.", "Snellere correctie van kwaliteitsissues.", "Meer geloofwaardigheid in nieuwe salesgesprekken."],
-  },
-];
-
-export function getSolutionModuleBySlug(slug: string) {
-  return SOLUTION_MODULES.find((module) => module.slug === slug);
-}
 
 /* ─── MAIN ─── */
 export function MarketingPage({ page }: { page: PageKey }) {
   useReveal();
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#f7f8f6] pt-16 text-[#0d1520]">
-      <MarketingHeader activePage={page} />
-      {page === "home"      && <HomePage />}
-      {page === "product"   && <ProductPage />}
-      {page === "solutions" && <SolutionsPage />}
-      {page === "about"     && <AboutPage />}
-      {page === "contact"   && <ContactPage />}
-      <MarketingFooter />
-    </main>
-  );
-}
-
-/* ══════════════════════════════════════════════
-   HEADER
-══════════════════════════════════════════════ */
-function MarketingHeader({ activePage }: { activePage: PageKey }) {
-  const [open, setOpen] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
-  const [solutionsOpen, setSolutionsOpen] = useState(false);
-
-  useEffect(() => {
-    const fn = () => setScrolled(window.scrollY > 8);
-    window.addEventListener("scroll", fn, { passive: true });
-    return () => window.removeEventListener("scroll", fn);
-  }, []);
-
-  const pageHrefs: Record<PageKey, string> = {
-    home: "/", product: "/product", solutions: "/oplossingen",
-    about: "/over-ons", contact: "/contact",
-  };
-
-  return (
-    <header className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${scrolled ? "border-b border-[#e2e8e3] bg-white/95 shadow-[0_1px_20px_rgba(13,21,32,0.06)] backdrop-blur-xl" : "border-b border-[#e9ece9]/80 bg-white/90 backdrop-blur-xl"}`}>
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
-        <Link href="/" className="flex items-center gap-2.5 animate-fade-in">
-          <span className="flex h-9 w-9 items-center justify-center">
-            <Image src="/favicon.ico" alt="Digitify" width={36} height={36} className="rounded-xl" priority />
-          </span>
-          <span className="leading-tight">
-            <span className="block text-[13px] font-extrabold tracking-tight text-[#0d1520]">Digitify</span>
-            <span className="block text-[11px] font-semibold text-[#f9ae5a]">Lead Finder</span>
-          </span>
-        </Link>
-
-        <nav className="hidden items-center gap-0.5 md:flex">
-          {navItems.map((item) => {
-            const isActive = pageHrefs[activePage] === item.href;
-            if (item.href === "/oplossingen") {
-              return (
-                <div key={item.href} className="group relative">
-                  <Link
-                    href={item.href}
-                    className={`relative inline-flex items-center gap-1 rounded-lg px-3.5 py-2 text-sm font-semibold transition-all duration-200 ${isActive ? "text-[#f9ae5a]" : "text-[#4a5568] hover:text-[#0d1520]"}`}
-                  >
-                    {item.label}
-                    <ChevronDown className="h-3.5 w-3.5" />
-                    {isActive && <span className="absolute bottom-1 left-3.5 right-3.5 h-0.5 rounded-full bg-[#f9ae5a]" />}
-                  </Link>
-                  <div className="invisible absolute left-0 top-[calc(100%+8px)] z-30 w-[270px] translate-y-2 rounded-xl border border-[#e2e8e3] bg-white p-2 opacity-0 shadow-[0_14px_34px_rgba(13,21,32,0.12)] transition-all duration-200 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100">
-                    {SOLUTION_MODULES.map((module) => (
-                      <Link
-                        key={module.slug}
-                        href={`/oplossingen/${module.slug}`}
-                        className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold text-[#4a5568] transition hover:bg-[#fff8ee] hover:text-[#b66d1e]"
-                      >
-                        <module.icon className="h-3.5 w-3.5 text-[#f9ae5a]" />
-                        {module.label}
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <Link key={item.href} href={item.href}
-                className={`relative rounded-lg px-3.5 py-2 text-sm font-semibold transition-all duration-200 ${isActive ? "text-[#f9ae5a]" : "text-[#4a5568] hover:text-[#0d1520]"}`}>
-                {item.label}
-                {isActive && <span className="absolute bottom-1 left-3.5 right-3.5 h-0.5 rounded-full bg-[#f9ae5a]" />}
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className="flex items-center gap-2">
-          <Link href="/login" className="hidden h-9 items-center rounded-lg border border-[#dde3e8] bg-white px-4 text-sm font-semibold text-[#344052] shadow-sm transition hover:border-[#f9ae5a]/50 hover:text-[#f9ae5a] sm:inline-flex">
-            Login
-          </Link>
-          <Link href="/register" className="inline-flex h-9 items-center rounded-lg bg-[#f9ae5a] px-4 text-sm font-bold text-[#14100b] shadow-[0_4px_16px_rgba(249,174,90,0.45)] transition hover:bg-[#eca04e] hover:shadow-[0_6px_20px_rgba(249,174,90,0.6)]">
-            Aanmelden
-          </Link>
-          <button className="ml-1 flex h-9 w-9 items-center justify-center rounded-lg border border-[#dde3e8] md:hidden" onClick={() => setOpen(!open)}>
-            {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-          </button>
-        </div>
-      </div>
-
-      {open && (
-        <div className="border-t border-[#e2e8e3] bg-white px-5 pb-5 md:hidden animate-fade-in">
-          <nav className="mt-4 space-y-1">
-            {navItems.map((item) => {
-              if (item.href === "/oplossingen") {
-                return (
-                  <div key={item.href} className="rounded-lg border border-[#edf1ee] bg-[#fbfcfb]">
-                    <button
-                      type="button"
-                      onClick={() => setSolutionsOpen((value) => !value)}
-                      className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-[#344052]"
-                    >
-                      <span>{item.label}</span>
-                      <ChevronDown className={`h-4 w-4 transition-transform ${solutionsOpen ? "rotate-180" : ""}`} />
-                    </button>
-                    {solutionsOpen && (
-                      <div className="space-y-1 pb-2">
-                        <Link href="/oplossingen" onClick={() => setOpen(false)} className="mx-1.5 block rounded-md px-2.5 py-2 text-sm font-semibold text-[#4a5568] hover:bg-[#fff8ee] hover:text-[#b66d1e]">
-                          Overzicht Oplossingen
-                        </Link>
-                        {SOLUTION_MODULES.map((module) => (
-                          <Link
-                            key={module.slug}
-                            href={`/oplossingen/${module.slug}`}
-                            onClick={() => setOpen(false)}
-                            className="mx-1.5 flex items-center gap-2 rounded-md px-2.5 py-2 text-sm font-semibold text-[#4a5568] hover:bg-[#fff8ee] hover:text-[#b66d1e]"
-                          >
-                            <module.icon className="h-3.5 w-3.5 text-[#f9ae5a]" />
-                            {module.label}
-                          </Link>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-              return (
-                <Link key={item.href} href={item.href} onClick={() => setOpen(false)}
-                  className="block rounded-lg px-3 py-2.5 text-sm font-semibold text-[#344052] hover:bg-[#fff8ee] hover:text-[#f9ae5a]">
-                  {item.label}
-                </Link>
-              );
-            })}
-            <Link href="/login" onClick={() => setOpen(false)}
-              className="block rounded-lg px-3 py-2.5 text-sm font-semibold text-[#344052] hover:bg-[#f7f8f6]">
-              Login
-            </Link>
-          </nav>
-        </div>
-      )}
-    </header>
+    <>
+      <DigitifyMarketingHeader activePage={page} />
+      <main className="digitify-page-content min-h-screen overflow-x-hidden bg-[#fff9f2] text-[#0d1520]">
+        {page === "home" && <HomePage />}
+        {page === "product" && <ProductPage />}
+        {page === "solutions" && <SolutionsPage />}
+        {page === "about" && <AboutPage />}
+        {page === "contact" && <ContactPage />}
+      </main>
+      <DigitifyMarketingFooter />
+    </>
   );
 }
 
@@ -757,7 +416,7 @@ function ProductPage() {
           <div className="mx-auto max-w-2xl text-center animate-fade-in">
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#f9ae5a]/30 bg-[#f9ae5a]/10 px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-widest text-[#b66d1e]">
               <Image src="/favicon.ico" alt="" width={14} height={14} className="rounded-sm" />
-              Product overzicht
+              Lead Finder overzicht
             </div>
             <h1 className="text-[2.6rem] font-extrabold leading-tight text-[#0d1520] sm:text-5xl">
               Alles in één <span className="gradient-text">commerciële hub.</span>
@@ -769,9 +428,9 @@ function ProductPage() {
               <Link href="/register" className="group inline-flex h-11 items-center rounded-xl bg-[#f9ae5a] px-7 text-sm font-bold text-[#14100b] shadow-[0_6px_24px_rgba(249,174,90,0.5)] transition-all hover:-translate-y-0.5 hover:bg-[#eca04e]">
                 Gratis aanmelden <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
               </Link>
-              <Link href="/contact" className="inline-flex h-11 items-center rounded-xl border border-[#cfd8d2] bg-white px-7 text-sm font-semibold text-[#172131] shadow-sm transition hover:border-[#f9ae5a]/40">
+              <a href={`${getDigitifySiteUrls().wordpress}/contact/`} className="inline-flex h-11 items-center rounded-xl border border-[#cfd8d2] bg-white px-7 text-sm font-semibold text-[#172131] shadow-sm transition hover:border-[#f9ae5a]/40">
                 Plan een demo
-              </Link>
+              </a>
             </div>
           </div>
 
@@ -1221,10 +880,12 @@ export function SolutionDetailMarketingPage({ slug }: { slug: SolutionSlug }) {
   useReveal();
   const module = getSolutionModuleBySlug(slug) ?? SOLUTION_MODULES[0];
   const ModuleIcon = module.icon;
+  const wpContact = `${getDigitifySiteUrls().wordpress}/contact/`;
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#f7f8f6] pt-16 text-[#0d1520]">
-      <MarketingHeader activePage="solutions" />
+    <>
+      <DigitifyMarketingHeader activePage="solutions" />
+      <main className="digitify-page-content min-h-screen overflow-x-hidden bg-[#fff9f2] text-[#0d1520]">
 
       <section className="relative overflow-hidden border-b border-[#e2e8e3]">
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[#fffdf9] via-[#faf7f2] to-[#f0ede7]" />
@@ -1301,10 +962,10 @@ export function SolutionDetailMarketingPage({ slug }: { slug: SolutionSlug }) {
                   </li>
                 ))}
               </ul>
-              <Link href="/contact" className="mt-6 inline-flex items-center gap-1 text-sm font-bold text-[#f9ae5a] transition hover:text-[#ffd19a]">
+              <a href={wpContact} className="mt-6 inline-flex items-center gap-1 text-sm font-bold text-[#f9ae5a] transition hover:text-[#ffd19a]">
                 Plan een demo voor deze flow
                 <ArrowRight className="h-4 w-4" />
-              </Link>
+              </a>
             </article>
           </div>
         </div>
@@ -1330,8 +991,9 @@ export function SolutionDetailMarketingPage({ slug }: { slug: SolutionSlug }) {
         </div>
       </section>
 
-      <MarketingFooter />
-    </main>
+      </main>
+      <DigitifyMarketingFooter />
+    </>
   );
 }
 
@@ -1728,6 +1390,26 @@ function SolutionsReviewMockup() {
   );
 }
 
+const SOLUTION_MODULE_UI: Record<SolutionSlug, { icon: LucideIcon; mockup: ReactNode }> = {
+  "lead-search": { icon: Search, mockup: <SolutionsLeadSearchMockup /> },
+  "outreach-ai": { icon: MailCheck, mockup: <SolutionsOutreachMockup /> },
+  rapporten: { icon: BarChart3, mockup: <SolutionsReportsMockup /> },
+  "white-label": { icon: ShieldCheck, mockup: <SolutionsWhiteLabelMockup /> },
+  "offerte-configurator": { icon: FileText, mockup: <SolutionsQuoteMockup /> },
+  "booking-agenda": { icon: CalendarCheck, mockup: <SolutionsBookingMockup /> },
+  "chatbot-widget": { icon: Bot, mockup: <SolutionsChatbotMockup /> },
+  reviewsysteem: { icon: Star, mockup: <SolutionsReviewMockup /> },
+};
+
+export const SOLUTION_MODULES: SolutionModule[] = SOLUTION_MODULE_DEFINITIONS.map((definition) => ({
+  ...definition,
+  ...SOLUTION_MODULE_UI[definition.slug],
+}));
+
+export function getSolutionModuleBySlug(slug: string) {
+  return SOLUTION_MODULES.find((module) => module.slug === slug);
+}
+
 /* ══════════════════════════════════════════════
    ABOUT
 ══════════════════════════════════════════════ */
@@ -2102,81 +1784,5 @@ function HomeDashboard() {
         </div>
       </div>
     </div>
-  );
-}
-
-/* ─── FOOTER ─── */
-function MarketingFooter() {
-  const { data: footerSettings } = trpc.settings.getPublicMarketingFooter.useQuery(undefined, {
-    staleTime: 1000 * 60 * 5,
-  });
-  const footer = {
-    brandName: footerSettings?.brandName || "Digitify Lead Finder",
-    tagline: footerSettings?.tagline || "Partner in Digital Solutions",
-    description: footerSettings?.description || "Premium lead discovery en opvolging voor bedrijven die digitale groei praktisch willen organiseren.",
-    email: footerSettings?.email || "hello@digitify.be",
-    phone: footerSettings?.phone || "+32 (0) 486 51 57 73",
-    location: footerSettings?.location || "België",
-    websiteLabel: footerSettings?.websiteLabel || "www.digitify.be",
-    websiteUrl: safeExternalUrl(footerSettings?.websiteUrl || "https://www.digitify.be"),
-    legalLine: footerSettings?.legalLine || `© ${new Date().getFullYear()} Digitify`,
-    copyrightLine: footerSettings?.copyrightLine || `© ${new Date().getFullYear()} Digitify. Webdesign, media en marketing voor digitale groei.`,
-  };
-
-  return (
-    <footer className="border-t border-[#1a1510] bg-[#0d1117] text-white">
-      <div className="mx-auto grid max-w-7xl gap-10 px-5 py-14 sm:px-8 lg:grid-cols-[1.5fr_0.8fr_0.8fr_0.8fr]">
-        <div>
-          <div className="flex items-center gap-3">
-            <Image src="/favicon.ico" alt="Digitify" width={36} height={36} className="rounded-xl" />
-            <div>
-              <div className="text-[15px] font-extrabold">{footer.brandName}</div>
-              <div className="text-xs text-[#9d948b]">{footer.tagline}</div>
-            </div>
-          </div>
-          <p className="mt-5 max-w-xs text-sm leading-7 text-[#b8b0a6]">
-            {footer.description}
-          </p>
-          <div className="mt-4 space-y-2">
-            {[{ icon: Mail, t: footer.email, h: footer.email ? `mailto:${footer.email}` : undefined }, { icon: Phone, t: footer.phone, h: footer.phone ? `tel:${footer.phone.replace(/[^\d+]/g, "")}` : undefined }, { icon: MapPin, t: footer.location, h: undefined }].map(({ icon: Icon, t, h }) => (
-              <div key={t} className="flex items-center gap-2 text-sm text-[#9d948b]">
-                <Icon className="h-3.5 w-3.5 text-[#f9ae5a]" />
-                {h ? <a href={h} className="hover:text-[#f9ae5a]">{t}</a> : t}
-              </div>
-            ))}
-          </div>
-        </div>
-        <div>
-          <div className="mb-4 text-[10px] font-extrabold uppercase tracking-widest text-[#f9ae5a]">Website</div>
-          <div className="space-y-2.5 text-sm text-[#b8b0a6]">
-            {navItems.map((item) => (
-              <Link key={item.href} href={item.href} className="block transition hover:text-[#f9ae5a]">{item.label}</Link>
-            ))}
-          </div>
-        </div>
-        <div>
-          <div className="mb-4 text-[10px] font-extrabold uppercase tracking-widest text-[#f9ae5a]">Actie</div>
-          <div className="space-y-2.5 text-sm text-[#b8b0a6]">
-            <Link href="/login" className="block transition hover:text-[#f9ae5a]">Login</Link>
-            <Link href="/register" className="block transition hover:text-[#f9ae5a]">Toegang aanvragen</Link>
-            {footer.websiteUrl ? (
-              <a href={footer.websiteUrl} target="_blank" rel="noopener noreferrer" className="block transition hover:text-[#f9ae5a]">{footer.websiteLabel}</a>
-            ) : (
-              <span className="block">{footer.websiteLabel}</span>
-            )}
-          </div>
-        </div>
-        <div>
-          <div className="mb-4 text-[10px] font-extrabold uppercase tracking-widest text-[#f9ae5a]">Juridisch</div>
-          <div className="space-y-2.5 text-sm text-[#9d948b]">
-            <div>BTW BE0685.556.507</div>
-            <div>{footer.legalLine}</div>
-          </div>
-        </div>
-      </div>
-      <div className="border-t border-white/[0.06] py-4 text-center text-xs text-[#5a5450]">
-        {footer.copyrightLine}
-      </div>
-    </footer>
   );
 }
