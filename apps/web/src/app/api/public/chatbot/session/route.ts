@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma, revealSettingValue } from "@digitify/db";
-import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
+import {
+  ensurePublicTenantToken,
+  resolveMarketingWorkspaceOwnerId,
+  resolvePublicTenantUserId,
+} from "@digitify/api/src/lib/public-tenant";
 import { log } from "@digitify/api/src/lib/logger";
 import { createHash } from "node:crypto";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
@@ -15,6 +19,14 @@ type IntentResult = {
 type FallbackReply = IntentResult & {
   reply: string;
   summary: string;
+};
+
+type PreChatQuestion = {
+  id: string;
+  label: string;
+  type: "text" | "email" | "phone" | "company" | "select";
+  required: boolean;
+  options: string[];
 };
 
 type AiConfig = {
@@ -104,6 +116,53 @@ function parseBooleanValue(raw: string, fallback: boolean) {
   if (["true", "1", "yes", "on"].includes(normalized)) return true;
   if (["false", "0", "no", "off"].includes(normalized)) return false;
   return fallback;
+}
+
+function parsePreChatQuestions(raw: string): PreChatQuestion[] {
+  if (!raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item, index) => {
+        if (!item || typeof item !== "object") return null;
+        const record = item as Record<string, unknown>;
+        const label = typeof record.label === "string" ? record.label.trim().slice(0, 120) : "";
+        if (!label) return null;
+        const type =
+          record.type === "email" || record.type === "phone" || record.type === "company" || record.type === "select"
+            ? record.type
+            : "text";
+        const id =
+          typeof record.id === "string" && record.id.trim()
+            ? record.id.trim().replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 40)
+            : `vraag_${index + 1}`;
+        const options = Array.isArray(record.options)
+          ? record.options
+              .map((option) => (typeof option === "string" ? option.trim().slice(0, 80) : ""))
+              .filter(Boolean)
+              .slice(0, 8)
+          : [];
+        return { id, label, type, required: record.required !== false, options };
+      })
+      .filter((question): question is PreChatQuestion => Boolean(question))
+      .slice(0, 8);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeVisitorFields(raw: unknown) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const output: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const safeKey = key.replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 40);
+    if (!safeKey) continue;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      output[safeKey] = String(value).trim().slice(0, 500);
+    }
+  }
+  return output;
 }
 
 function getAiConfig(settings: Array<{ key: string; value: unknown }>): AiConfig | null {
@@ -351,7 +410,10 @@ async function generateAiReply(args: {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const sessionId = url.searchParams.get("sessionId")?.trim();
-  const tenantUserId = await resolvePublicTenantUserId(prisma, url.searchParams.get("tenant"));
+  const tenantToken = url.searchParams.get("tenant")?.trim() || "";
+  const tenantUserId = tenantToken
+    ? await resolvePublicTenantUserId(prisma, tenantToken)
+    : await resolveMarketingWorkspaceOwnerId(prisma);
   const ip = getClientIp(request);
 
   if (!sessionId) {
@@ -395,12 +457,14 @@ export async function GET(request: Request) {
     success: true,
     sessionId: session.id,
     status: session.status,
-    messages: session.messages.map((message) => ({
-      id: message.id,
-      role: message.role,
-      content: message.content,
-      createdAt: message.createdAt,
-    })),
+    messages: session.messages
+      .filter((message) => ["VISITOR", "BOT", "AGENT"].includes(message.role))
+      .map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        createdAt: message.createdAt,
+      })),
   });
 }
 
@@ -412,9 +476,12 @@ export async function POST(request: Request) {
     const message = String(body.message || "").trim();
     const requestedSessionId = String(body.sessionId || "").trim();
     const requestedVisitorName = String(body.visitorName || "").trim();
+    const visitorFields = normalizeVisitorFields(body.visitorFields);
     const pageUrl = String(body.pageUrl || "").trim();
     const tenantToken = String(body.tenant || "").trim();
-    const tenantUserId = await resolvePublicTenantUserId(prisma, tenantToken);
+    const tenantUserId = tenantToken
+      ? await resolvePublicTenantUserId(prisma, tenantToken)
+      : await resolveMarketingWorkspaceOwnerId(prisma);
 
     if (!message) {
       return NextResponse.json({ error: "Bericht is verplicht." }, { status: 400 });
@@ -444,21 +511,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Naam is te lang." }, { status: 400 });
     }
 
-    const dedupeKey = createHash("sha256")
-      .update(`${ip}|${tenantUserId}|${requestedSessionId}|${message.toLowerCase()}`)
-      .digest("hex");
-    const now = Date.now();
-    for (const [key, ts] of recentMessages.entries()) {
-      if (now - ts > 30_000) recentMessages.delete(key);
-    }
-    if (recentMessages.has(dedupeKey)) {
-      return NextResponse.json(
-        { error: "Dit bericht lijkt net al verstuurd." },
-        { status: 409 },
-      );
-    }
-    recentMessages.set(dedupeKey, now);
-
     const settingsKeys = [
       "chatbot.enabled",
       "chatbot.company_name",
@@ -469,6 +521,7 @@ export async function POST(request: Request) {
       "chatbot.auto_messages_enabled",
       "chatbot.ai_responses_enabled",
       "chatbot.ask_name_before_chat",
+      "chatbot.pre_chat_questions_json",
       "chatbot.language",
       "api.ai_provider",
       "api.openai_key",
@@ -515,15 +568,21 @@ export async function POST(request: Request) {
     const autoMessagesEnabled = parseBooleanValue(getSetting(settings, "chatbot.auto_messages_enabled", "true"), true);
     const aiResponsesEnabled = parseBooleanValue(getSetting(settings, "chatbot.ai_responses_enabled", "true"), true);
     const askNameBeforeChat = parseBooleanValue(getSetting(settings, "chatbot.ask_name_before_chat", "false"), false);
+    const preChatQuestions = parsePreChatQuestions(getSetting(settings, "chatbot.pre_chat_questions_json", ""));
     const offlineMessage = getSetting(
       settings,
       "chatbot.offline_message",
       "We zijn momenteel offline. Laat een bericht achter en we nemen zo snel mogelijk contact met u op."
     );
-    const bookingUrl = `${getAppUrl()}/embed/bookings?tenant=${encodeURIComponent(tenantToken)}`;
+    const effectiveTenantToken = tenantToken || (tenantUserId ? await ensurePublicTenantToken(prisma, tenantUserId) : "");
+    const bookingUrl = `${getAppUrl()}/embed/bookings?tenant=${encodeURIComponent(effectiveTenantToken)}`;
 
-    const extractedEmail = extractEmail(message);
-    const extractedPhone = extractPhone(message);
+    const questionEmail = preChatQuestions.find((question) => question.type === "email" && visitorFields[question.id])?.id;
+    const questionPhone = preChatQuestions.find((question) => question.type === "phone" && visitorFields[question.id])?.id;
+    const questionCompany = preChatQuestions.find((question) => question.type === "company" && visitorFields[question.id])?.id;
+    const extractedEmail = (questionEmail ? visitorFields[questionEmail] : "") || extractEmail(message);
+    const extractedPhone = (questionPhone ? visitorFields[questionPhone] : "") || extractPhone(message);
+    const extractedCompany = questionCompany ? visitorFields[questionCompany] : "";
     const existingSession = requestedSessionId
       ? await prisma.chatSession.findFirst({
           where: {
@@ -551,6 +610,32 @@ export async function POST(request: Request) {
     if (askNameBeforeChat && !visitorName.trim()) {
       return NextResponse.json({ error: "Naam is verplicht vóór start chat." }, { status: 400 });
     }
+    if (!existingSession) {
+      for (const question of preChatQuestions) {
+        const answer = (visitorFields[question.id] || "").trim();
+        if (question.required && !answer) {
+          return NextResponse.json({ error: `${question.label} is verplicht.` }, { status: 400 });
+        }
+        if (question.type === "email" && answer && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(answer)) {
+          return NextResponse.json({ error: `${question.label} bevat geen geldig e-mailadres.` }, { status: 400 });
+        }
+      }
+    }
+
+    const dedupeKey = createHash("sha256")
+      .update(`${ip}|${tenantUserId}|${requestedSessionId}|${message.toLowerCase()}`)
+      .digest("hex");
+    const now = Date.now();
+    for (const [key, ts] of recentMessages.entries()) {
+      if (now - ts > 30_000) recentMessages.delete(key);
+    }
+    if (recentMessages.has(dedupeKey)) {
+      return NextResponse.json(
+        { error: "Dit bericht lijkt net al verstuurd." },
+        { status: 409 },
+      );
+    }
+    recentMessages.set(dedupeKey, now);
 
     const intent = detectIntent(message);
     const fallback = buildFallbackReply(message, {
@@ -566,9 +651,12 @@ export async function POST(request: Request) {
       aiResponsesEnabled,
     });
 
+    const effectiveIntent = !enabled || !autoMessagesEnabled ? fallback.intent : intent.intent;
+    const effectiveTags = Array.from(new Set([...intent.tags, ...fallback.tags, tenantTag(tenantUserId)]));
+    const nextStatus = !enabled || !autoMessagesEnabled ? "WAITING" : "OPEN";
     const history = (existingSession?.messages || []).slice().reverse();
 
-    let reply = fallback.reply;
+    let reply: string | null = fallback.reply || null;
     if (enabled && autoMessagesEnabled && aiResponsesEnabled) {
       const aiConfig = getAiConfig(settings);
       if (aiConfig) {
@@ -616,7 +704,7 @@ export async function POST(request: Request) {
       reply = `${reply}\n\nKan je kort aangeven wat voor jou nu het belangrijkste doel is?`;
     }
 
-    const summary = `${companyName}: ${intent.intent}${message ? ` - ${message.slice(0, 120)}` : ""}`;
+    const summary = `${companyName}: ${effectiveIntent}${message ? ` - ${message.slice(0, 120)}` : ""}`;
 
     const session = existingSession
       ? await prisma.chatSession.update({
@@ -626,17 +714,17 @@ export async function POST(request: Request) {
             updatedAt: new Date(),
             pageUrl: pageUrl || existingSession.pageUrl,
             isRead: false,
-            status: "OPEN",
+            status: nextStatus,
             visitorName: existingSession.visitorName || visitorName || null,
             visitorEmail: existingSession.visitorEmail || extractedEmail,
             visitorPhone: existingSession.visitorPhone || extractedPhone,
-            intent: intent.intent,
+            visitorCompany: existingSession.visitorCompany || extractedCompany || null,
+            intent: effectiveIntent,
             summary,
             tags: Array.from(
               new Set([
                 ...(existingSession.tags || []),
-                ...intent.tags,
-                tenantTag(tenantUserId),
+                ...effectiveTags,
               ]),
             ),
           },
@@ -646,18 +734,14 @@ export async function POST(request: Request) {
             assignedToId: tenantUserId,
             pageUrl: pageUrl || null,
             isRead: false,
-            status: "OPEN",
+            status: nextStatus,
             visitorName: visitorName || null,
             visitorEmail: extractedEmail,
             visitorPhone: extractedPhone,
-            intent: intent.intent,
+            visitorCompany: extractedCompany || null,
+            intent: effectiveIntent,
             summary,
-            tags: Array.from(
-              new Set([
-                ...intent.tags,
-                tenantTag(tenantUserId),
-              ]),
-            ),
+            tags: effectiveTags,
           },
         });
 
@@ -672,6 +756,12 @@ export async function POST(request: Request) {
               pageUrl: pageUrl || null,
               email: extractedEmail,
               phone: extractedPhone,
+              visitorFields,
+              preChatQuestions: preChatQuestions.map((question) => ({
+                id: question.id,
+                label: question.label,
+                type: question.type,
+              })),
           },
         },
         ...(reply
@@ -681,8 +771,8 @@ export async function POST(request: Request) {
                 role: "BOT" as const,
                 content: reply,
                 metadata: {
-                  intent: intent.intent,
-                  tags: intent.tags,
+                  intent: effectiveIntent,
+                  tags: effectiveTags,
                 },
               },
             ]
@@ -692,10 +782,11 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
+      accepted: true,
       sessionId: session.id,
       visitorName: session.visitorName,
       reply,
-      intent: intent.intent,
+      intent: effectiveIntent,
     });
   } catch (error) {
     log.api.error("Public chatbot session POST failed", {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
+import { resolveMarketingWorkspaceOwnerId, resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
 import { log } from "@digitify/api/src/lib/logger";
 import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
@@ -8,10 +8,51 @@ function userSettingKey(userId: string, key: string) {
   return `user:${userId}:${key.trim()}`;
 }
 
+function normalizeHexColor(value: string, fallback = "#6366f1") {
+  const trimmed = value.trim();
+  return /^#[0-9a-fA-F]{6}$/.test(trimmed) ? trimmed : fallback;
+}
+
+function parsePreChatQuestions(raw: unknown) {
+  if (raw === null || raw === undefined || raw === "") return [];
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) as unknown : raw;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item, index) => {
+        if (!item || typeof item !== "object") return null;
+        const record = item as Record<string, unknown>;
+        const label = typeof record.label === "string" ? record.label.trim().slice(0, 120) : "";
+        if (!label) return null;
+        const type =
+          record.type === "email" || record.type === "phone" || record.type === "company" || record.type === "select"
+            ? record.type
+            : "text";
+        const id =
+          typeof record.id === "string" && record.id.trim()
+            ? record.id.trim().replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 40)
+            : `vraag_${index + 1}`;
+        const options = Array.isArray(record.options)
+          ? record.options
+              .map((option) => (typeof option === "string" ? option.trim().slice(0, 80) : ""))
+              .filter(Boolean)
+              .slice(0, 8)
+          : [];
+        return { id, label, type, required: record.required !== false, options };
+      })
+      .filter(Boolean)
+      .slice(0, 8);
+  } catch {
+    return [];
+  }
+}
+
 export async function GET(request: Request) {
   try {
     const tenantToken = new URL(request.url).searchParams.get("tenant")?.trim() || "";
-    const tenantUserId = await resolvePublicTenantUserId(prisma, tenantToken);
+    const tenantUserId = tenantToken
+      ? await resolvePublicTenantUserId(prisma, tenantToken)
+      : await resolveMarketingWorkspaceOwnerId(prisma);
     if (!tenantUserId) {
       log.security.warn("Public chatbot settings rejected: invalid tenant token");
       return NextResponse.json({ error: "Ongeldige tenant." }, { status: 400 });
@@ -31,6 +72,7 @@ export async function GET(request: Request) {
       "chatbot.offline_message",
       "chatbot.primary_color",
       "chatbot.avatar_url",
+      "chatbot.pre_chat_questions_json",
       "chatbot.response_style",
       "chatbot.language",
       "chatbot.auto_messages_enabled",
@@ -86,8 +128,9 @@ export async function GET(request: Request) {
       welcomeMessage: getString("chatbot.welcome_message") || "Hallo! Hoe kan ik u helpen?",
       offlineMessage: getString("chatbot.offline_message") ||
         "We zijn momenteel offline. Laat een bericht achter en we nemen zo snel mogelijk contact met u op.",
-      primaryColor: getString("chatbot.primary_color") || getString("branding.primary_color") || "#6366f1",
+      primaryColor: normalizeHexColor(getString("chatbot.primary_color") || getString("branding.primary_color"), "#6366f1"),
       avatarUrl: getString("chatbot.avatar_url") || getString("branding.logo_url"),
+      preChatQuestions: parsePreChatQuestions(map["chatbot.pre_chat_questions_json"]),
       responseStyle: getString("chatbot.response_style", "Professioneel, kort en duidelijk"),
       language: getString("chatbot.language", "Nederlands"),
       autoMessagesEnabled: getBool("chatbot.auto_messages_enabled", true),

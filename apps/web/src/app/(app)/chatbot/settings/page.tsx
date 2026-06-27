@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, type ComponentType, type ReactNode } from 
 import { trpc } from "@/lib/trpc/client";
 import { SETTINGS_PAGE_QUERY_OPTS } from "@/lib/settings-query-options";
 import Link from "next/link";
+import { uploadClientAsset } from "@/lib/upload-client-asset";
 import {
   Button,
   Card,
@@ -34,13 +35,26 @@ import {
   MessageSquare,
   Bot,
   Paintbrush,
+  Plus,
+  Upload,
+  X,
 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
 import { getAppUrl } from "@/lib/config";
 import { readSettingBoolean, readSettingString } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 
-type SettingsSectionId = "behavior" | "messages" | "ai" | "appearance" | "embed";
+type SettingsSectionId = "behavior" | "questions" | "messages" | "ai" | "appearance" | "embed";
+
+type PreChatQuestionType = "text" | "email" | "phone" | "company" | "select";
+
+type PreChatQuestion = {
+  id: string;
+  label: string;
+  type: PreChatQuestionType;
+  required: boolean;
+  options: string[];
+};
 
 function CollapsibleSection({
   id,
@@ -104,6 +118,14 @@ function normalizeHexColor(value: string, fallback = "#f9ae5a") {
   return /^#[0-9a-fA-F]{6}$/.test(trimmed) ? trimmed : fallback;
 }
 
+function escapeHtmlAttribute(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function normalizePosition(value: string): "bottom-right" | "bottom-left" {
   return value === "bottom-left" ? "bottom-left" : "bottom-right";
 }
@@ -112,6 +134,67 @@ function normalizeAutoOpenDelay(value: string, fallback = "0") {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return String(Math.max(0, Math.min(120, Math.round(parsed))));
+}
+
+function normalizeQuestionType(value: unknown): PreChatQuestionType {
+  return value === "email" || value === "phone" || value === "company" || value === "select" ? value : "text";
+}
+
+function normalizeQuestionId(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40) || `vraag_${Date.now()}`;
+}
+
+function parsePreChatQuestions(raw: string): PreChatQuestion[] {
+  if (!raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item, index) => {
+        if (!item || typeof item !== "object") return null;
+        const record = item as Record<string, unknown>;
+        const label = typeof record.label === "string" ? record.label.trim().slice(0, 120) : "";
+        if (!label) return null;
+        const options = Array.isArray(record.options)
+          ? record.options
+              .map((option) => (typeof option === "string" ? option.trim().slice(0, 80) : ""))
+              .filter(Boolean)
+              .slice(0, 8)
+          : [];
+        return {
+          id: typeof record.id === "string" && record.id.trim() ? normalizeQuestionId(record.id) : normalizeQuestionId(label || `vraag_${index + 1}`),
+          label,
+          type: normalizeQuestionType(record.type),
+          required: record.required !== false,
+          options,
+        };
+      })
+      .filter((item): item is PreChatQuestion => Boolean(item))
+      .slice(0, 8);
+  } catch {
+    return [];
+  }
+}
+
+function serializePreChatQuestions(questions: PreChatQuestion[]) {
+  return JSON.stringify(
+    questions
+      .filter((question) => question.label.trim())
+      .map((question) => ({
+        id: normalizeQuestionId(question.id || question.label),
+        label: question.label.trim(),
+        type: question.type,
+        required: question.required,
+        options:
+          question.type === "select"
+            ? question.options.map((option) => option.trim()).filter(Boolean).slice(0, 8)
+            : [],
+      })),
+  );
 }
 
 export default function ChatbotSettingsPage() {
@@ -148,6 +231,9 @@ export default function ChatbotSettingsPage() {
   );
   const [autoOpenDelay, setAutoOpenDelay] = useState("0");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [preChatQuestions, setPreChatQuestions] = useState<PreChatQuestion[]>([]);
   const [trainingNotes, setTrainingNotes] = useState("");
   const [knowledgePages, setKnowledgePages] = useState("");
   const [responseStyle, setResponseStyle] = useState("Professioneel, kort en duidelijk");
@@ -156,6 +242,7 @@ export default function ChatbotSettingsPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [openSections, setOpenSections] = useState<Record<SettingsSectionId, boolean>>({
     behavior: true,
+    questions: false,
     messages: false,
     ai: false,
     appearance: false,
@@ -187,6 +274,7 @@ export default function ChatbotSettingsPage() {
     setPosition(normalizePosition(readSettingString(settings, "chatbot.position", "bottom-right")));
     setAutoOpenDelay(normalizeAutoOpenDelay(readSettingString(settings, "chatbot.auto_open_delay", "0")));
     setAvatarUrl(readSettingString(settings, "chatbot.avatar_url", ""));
+    setPreChatQuestions(parsePreChatQuestions(readSettingString(settings, "chatbot.pre_chat_questions_json", "")));
     setTrainingNotes(readSettingString(settings, "chatbot.training_notes", ""));
     setKnowledgePages(readSettingString(settings, "chatbot.knowledge_pages", ""));
     setResponseStyle(readSettingString(settings, "chatbot.response_style", "Professioneel, kort en duidelijk"));
@@ -210,11 +298,69 @@ export default function ChatbotSettingsPage() {
       { key: "chatbot.position", value: position },
       { key: "chatbot.auto_open_delay", value: normalizedDelay },
       { key: "chatbot.avatar_url", value: avatarUrl.trim() },
+      { key: "chatbot.pre_chat_questions_json", value: serializePreChatQuestions(preChatQuestions) },
       { key: "chatbot.training_notes", value: trainingNotes.trim() },
       { key: "chatbot.knowledge_pages", value: knowledgePages.trim() },
       { key: "chatbot.response_style", value: responseStyle.trim() || "Professioneel, kort en duidelijk" },
       { key: "chatbot.language", value: botLanguage.trim() || "Nederlands" },
     ]);
+  }
+
+  async function handleAvatarUpload(file: File) {
+    if (!file.type.startsWith("image/")) {
+      showToast({ title: "Ongeldig bestand", description: "Gebruik een afbeelding voor het chatbot-icoon.", variant: "error" });
+      return;
+    }
+    setAvatarUploading(true);
+    try {
+      const url = await uploadClientAsset(file);
+      setAvatarUrl(url);
+      showToast({ title: "Icoon geupload", description: "Sla de instellingen op om dit icoon te publiceren." });
+    } catch (uploadError) {
+      showToast({
+        title: "Upload mislukt",
+        description: uploadError instanceof Error ? uploadError.message : "Kon het icoon niet uploaden.",
+        variant: "error",
+      });
+    } finally {
+      setAvatarUploading(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+    }
+  }
+
+  function addQuestion() {
+    setPreChatQuestions((current) => [
+      ...current,
+      {
+        id: `vraag_${current.length + 1}`,
+        label: "Waarmee kunnen we u helpen?",
+        type: "text",
+        required: true,
+        options: [],
+      },
+    ]);
+    setOpenSections((current) => ({ ...current, questions: true }));
+  }
+
+  function updateQuestion(index: number, patch: Partial<PreChatQuestion>) {
+    setPreChatQuestions((current) =>
+      current.map((question, questionIndex) =>
+        questionIndex === index
+          ? {
+              ...question,
+              ...patch,
+              id:
+                patch.label && (!question.id || question.id.startsWith("vraag_"))
+                  ? normalizeQuestionId(patch.label)
+                  : patch.id || question.id,
+            }
+          : question,
+      ),
+    );
+  }
+
+  function removeQuestion(index: number) {
+    setPreChatQuestions((current) => current.filter((_, questionIndex) => questionIndex !== index));
   }
 
   async function handleCopy(code: string, mode: "script" | "iframe") {
@@ -243,18 +389,22 @@ export default function ChatbotSettingsPage() {
   const safePrimaryColor = normalizeHexColor(primaryColor);
   const safeAutoOpenDelay = normalizeAutoOpenDelay(autoOpenDelay);
   const tenantToken = readSettingString(settings || {}, "chatbot.public_tenant_token", "");
-  const tenantAttribute = tenantToken ? `\n  data-tenant="${tenantToken}"` : "";
+  const safeCompanyName = escapeHtmlAttribute(companyName || "MijnBedrijf");
+  const safeWelcomeMessage = escapeHtmlAttribute(welcomeMessage);
+  const safeTenantToken = escapeHtmlAttribute(tenantToken);
+  const tenantAttribute = safeTenantToken ? `\n  data-tenant="${safeTenantToken}"` : "";
   const tenantQuery = tenantToken ? `&tenant=${encodeURIComponent(tenantToken)}` : "";
   const embedCode = `<script src="${appUrl}/chatbot/widget.js"
-  data-company="${companyName || "MijnBedrijf"}"
-  data-color="${safePrimaryColor}"
+  data-company="${safeCompanyName}"
+  data-color="${escapeHtmlAttribute(safePrimaryColor)}"
   data-position="${position}"
-  data-welcome="${welcomeMessage}"
+  data-welcome="${safeWelcomeMessage}"
   data-ask-name="${askNameBeforeChat ? "1" : "0"}"${tenantAttribute}
   data-auto-open="${safeAutoOpenDelay}">
 </script>`;
+  const iframeSrc = `${appUrl}/embed/chatbot?company=${encodeURIComponent(companyName || "MijnBedrijf")}&color=${encodeURIComponent(safePrimaryColor)}&welcome=${encodeURIComponent(welcomeMessage)}&askName=${askNameBeforeChat ? "1" : "0"}${tenantQuery}`;
   const iframeCode = `<iframe
-  src="${appUrl}/embed/chatbot?company=${encodeURIComponent(companyName || "MijnBedrijf")}&color=${encodeURIComponent(safePrimaryColor)}&welcome=${encodeURIComponent(welcomeMessage)}&askName=${askNameBeforeChat ? "1" : "0"}${tenantQuery}"
+  src="${escapeHtmlAttribute(iframeSrc)}"
   width="100%"
   height="720"
   style="border:0;border-radius:24px;overflow:hidden"
@@ -409,6 +559,92 @@ export default function ChatbotSettingsPage() {
             </CollapsibleSection>
 
             <CollapsibleSection
+              id="questions"
+              title="Vragen vóór start"
+              description="Vraag extra gegevens vóór het eerste bericht."
+              icon={Plus}
+              open={openSections.questions}
+              onToggle={toggleSection}
+              trailing={
+                preChatQuestions.length > 0 ? (
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                    {preChatQuestions.length} vraag{preChatQuestions.length === 1 ? "" : "en"}
+                  </span>
+                ) : null
+              }
+            >
+              <div className="space-y-3">
+                {preChatQuestions.length === 0 ? (
+                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                    Voeg vragen toe zoals e-mail, telefoon, bedrijf of een eigen keuzelijst. Antwoorden worden bij het eerste bericht opgeslagen.
+                  </div>
+                ) : null}
+                {preChatQuestions.map((question, index) => (
+                  <div key={`${question.id}-${index}`} className="space-y-3 rounded-lg border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="grid flex-1 gap-3 sm:grid-cols-[1fr_150px]">
+                        <div className="space-y-1.5">
+                          <Label>Vraag</Label>
+                          <Input
+                            value={question.label}
+                            onChange={(event) => updateQuestion(index, { label: event.target.value })}
+                            placeholder="Bijv. Wat is uw e-mailadres?"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Type</Label>
+                          <select
+                            value={question.type}
+                            onChange={(event) => updateQuestion(index, { type: event.target.value as PreChatQuestionType })}
+                            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          >
+                            <option value="text">Tekst</option>
+                            <option value="email">E-mail</option>
+                            <option value="phone">Telefoon</option>
+                            <option value="company">Bedrijf</option>
+                            <option value="select">Keuzelijst</option>
+                          </select>
+                        </div>
+                      </div>
+                      <Button type="button" variant="ghost" size="icon" onClick={() => removeQuestion(index)} aria-label="Vraag verwijderen">
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
+                      <div>
+                        <p className="text-xs font-medium">Verplicht</p>
+                        <p className="text-[11px] text-muted-foreground">Bezoeker moet dit invullen vóór de chat start.</p>
+                      </div>
+                      <Switch checked={question.required} onCheckedChange={(checked) => updateQuestion(index, { required: checked })} />
+                    </div>
+                    {question.type === "select" ? (
+                      <div className="space-y-1.5">
+                        <Label>Opties</Label>
+                        <Textarea
+                          value={question.options.join("\n")}
+                          onChange={(event) =>
+                            updateQuestion(index, {
+                              options: event.target.value
+                                .split("\n")
+                                .map((option) => option.trim())
+                                .filter(Boolean),
+                            })
+                          }
+                          rows={3}
+                          placeholder={"Website\nMarketing\nSupport"}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+                <Button type="button" variant="outline" size="sm" onClick={addQuestion} disabled={preChatQuestions.length >= 8}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Vraag toevoegen
+                </Button>
+              </div>
+            </CollapsibleSection>
+
+            <CollapsibleSection
               id="messages"
               title="Berichten"
               description="Bedrijfsnaam, welkomst- en offlinebericht."
@@ -526,13 +762,34 @@ export default function ChatbotSettingsPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="avatarUrl">Bot avatar URL</Label>
+                <Label htmlFor="avatarUrl">Bot avatar URL of upload</Label>
                 <Input
                   id="avatarUrl"
                   value={avatarUrl}
                   onChange={(e) => setAvatarUrl(e.target.value)}
                   placeholder="https://voorbeeld.be/avatar.png"
                 />
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void handleAvatarUpload(file);
+                  }}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading}>
+                    {avatarUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                    {avatarUploading ? "Uploaden..." : "Icoon uploaden"}
+                  </Button>
+                  {avatarUrl ? (
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setAvatarUrl("")}>
+                      Verwijder icoon
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </CollapsibleSection>
           </CardContent>

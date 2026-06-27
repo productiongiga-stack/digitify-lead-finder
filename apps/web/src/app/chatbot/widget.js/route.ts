@@ -31,9 +31,14 @@ export async function GET(request: Request) {
     return fallback;
   }
 
+  function normalizeHexColor(value, fallback) {
+    var candidate = String(value || "").trim();
+    return /^#[0-9a-fA-F]{6}$/.test(candidate) ? candidate : fallback;
+  }
+
   function mount(remote) {
     var company = dataset.company || (remote && remote.companyName) || "Digitify";
-    var color = dataset.color || (remote && remote.primaryColor) || "#6366f1";
+    var color = normalizeHexColor(dataset.color || (remote && remote.primaryColor), "#6366f1");
     var avatarUrl = dataset.avatar || (remote && remote.avatarUrl) || "";
     var askNameRemote = !!(remote && remote.askNameBeforeChat);
     var askName = parseBoolean(dataset.askName, askNameRemote);

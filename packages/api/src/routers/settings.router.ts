@@ -42,6 +42,7 @@ import { applyWorkspaceCacheSettings, getDefaultCacheSettings } from "../lib/cac
 import { clearAllDashboardCache, invalidateDashboardCacheForUser } from "../lib/dashboard-cache";
 import { clearAllSettingsCache } from "../lib/user-settings";
 import { verifyGooglePlacesApiKey } from "../lib/google-places";
+import { ensurePublicTenantToken } from "../lib/public-tenant";
 
 /* ---------- helpers ---------- */
 
@@ -396,7 +397,11 @@ export const settingsRouter = router({
   getBookingsSettings: protectedProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, BOOKINGS_SETTINGS_KEYS)),
 
   /** Chatbot widget settings (avoids getAll). */
-  getChatbotSettings: protectedProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, CHATBOT_SETTINGS_KEYS)),
+  getChatbotSettings: protectedProcedure.query(async ({ ctx }) => {
+    const scope = workspaceScopeFromUser(ctx.user);
+    await ensurePublicTenantToken(ctx.db, scope.workspaceId);
+    return loadSettingsBundle(ctx, CHATBOT_SETTINGS_KEYS);
+  }),
 
   /** Website trackers & product analytics (owner only). */
   getAnalyticsSettings: ownerProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, ANALYTICS_SETTINGS_KEYS)),

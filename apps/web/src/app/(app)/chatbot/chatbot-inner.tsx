@@ -1,14 +1,16 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type FormEvent } from "react";
 import { trpc } from "@/lib/trpc/client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useToast } from "@/components/feedback/toast-provider";
 import {
   Button,
   Card,
   Badge,
   Input,
+  Label,
   Textarea,
   ScrollArea,
   Skeleton,
@@ -75,6 +77,8 @@ const FILTER_TABS: { label: string; value: SessionStatus | "ALL" }[] = [
   { label: "Gearchiveerd", value: "ARCHIVED" },
 ];
 
+const DURATION_OPTIONS = [15, 30, 45, 60, 90, 120];
+
 /* ---------- Helpers ---------- */
 
 function timeAgo(date: string | Date): string {
@@ -101,10 +105,31 @@ function formatTimestamp(date: string | Date): string {
   });
 }
 
+function formatDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function defaultBookingDate() {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setHours(10, 0, 0, 0);
+  return date;
+}
+
+function toLocalDateTimeIso(dateKey: string, time: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  return new Date(year, (month || 1) - 1, day || 1, hour || 0, minute || 0, 0, 0).toISOString();
+}
+
 /* ---------- Main component ---------- */
 
 export function ChatbotInner() {
   const router = useRouter();
+  const { showToast } = useToast();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<SessionStatus | "ALL">(
     "ALL"
@@ -117,8 +142,15 @@ export function ChatbotInner() {
   const [internalNotes, setInternalNotes] = useState("");
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [leadSearchQuery, setLeadSearchQuery] = useState("");
+  const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
+  const [bookingDate, setBookingDate] = useState(() => formatDateInputValue(defaultBookingDate()));
+  const [bookingTime, setBookingTime] = useState("10:00");
+  const [bookingDuration, setBookingDuration] = useState("60");
+  const [bookingLocation, setBookingLocation] = useState("Google Meet");
+  const [bookingNotes, setBookingNotes] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const readRefreshRef = useRef<Set<string>>(new Set());
 
   const utils = trpc.useUtils();
 
@@ -169,7 +201,10 @@ export function ChatbotInner() {
       setReplyText("");
       utils.chatbot.getSession.invalidate({ id: selectedId! });
       utils.chatbot.listSessions.invalidate();
+      showToast({ title: "Antwoord verstuurd" });
     },
+    onError: (error) =>
+      showToast({ title: "Versturen mislukt", description: error.message, variant: "error" }),
   });
 
   const updateSession = trpc.chatbot.updateSession.useMutation({
@@ -177,34 +212,49 @@ export function ChatbotInner() {
       utils.chatbot.getSession.invalidate({ id: selectedId! });
       utils.chatbot.listSessions.invalidate();
     },
+    onError: (error) =>
+      showToast({ title: "Gesprek bijwerken mislukt", description: error.message, variant: "error" }),
   });
 
   const generateSummary = trpc.chatbot.generateSummary.useMutation({
     onSuccess: () => {
       utils.chatbot.getSession.invalidate({ id: selectedId! });
       utils.chatbot.listSessions.invalidate();
+      showToast({ title: "Samenvatting bijgewerkt" });
     },
+    onError: (error) =>
+      showToast({ title: "Samenvatting mislukt", description: error.message, variant: "error" }),
   });
 
   const convertToLead = trpc.chatbot.convertToLead.useMutation({
     onSuccess: () => {
       utils.chatbot.getSession.invalidate({ id: selectedId! });
       utils.chatbot.listSessions.invalidate();
+      showToast({ title: "Lead aangemaakt" });
     },
+    onError: (error) =>
+      showToast({ title: "Lead aanmaken mislukt", description: error.message, variant: "error" }),
   });
 
   const convertToBooking = trpc.chatbot.convertToBooking.useMutation({
     onSuccess: () => {
+      setBookingDialogOpen(false);
       utils.chatbot.getSession.invalidate({ id: selectedId! });
       utils.chatbot.listSessions.invalidate();
+      showToast({ title: "Boeking aangemaakt", description: "De pending boeking staat nu in Boekingen." });
     },
+    onError: (error) =>
+      showToast({ title: "Boeking aanmaken mislukt", description: error.message, variant: "error" }),
   });
 
   const startLiveTakeover = trpc.chatbot.startLiveTakeover.useMutation({
     onSuccess: () => {
       utils.chatbot.getSession.invalidate({ id: selectedId! });
       utils.chatbot.listSessions.invalidate();
+      showToast({ title: "Live takeover gestart" });
     },
+    onError: (error) =>
+      showToast({ title: "Live takeover mislukt", description: error.message, variant: "error" }),
   });
 
   const linkToLead = trpc.chatbot.linkToLead.useMutation({
@@ -213,7 +263,10 @@ export function ChatbotInner() {
       setLeadSearchQuery("");
       utils.chatbot.getSession.invalidate({ id: selectedId! });
       utils.chatbot.listSessions.invalidate();
+      showToast({ title: "Lead gekoppeld" });
     },
+    onError: (error) =>
+      showToast({ title: "Lead koppelen mislukt", description: error.message, variant: "error" }),
   });
 
   const deleteSession = trpc.chatbot.deleteSession.useMutation({
@@ -221,7 +274,10 @@ export function ChatbotInner() {
       setSelectedId(null);
       setDeleteConfirmId(null);
       utils.chatbot.listSessions.invalidate();
+      showToast({ title: "Gesprek verwijderd" });
     },
+    onError: (error) =>
+      showToast({ title: "Verwijderen mislukt", description: error.message, variant: "error" }),
   });
 
   /* ---------- Handlers ---------- */
@@ -233,12 +289,40 @@ export function ChatbotInner() {
 
   function handleStatusChange(status: SessionStatus) {
     if (!selectedId) return;
-    updateSession.mutate({ id: selectedId, status });
+    updateSession.mutate(
+      { id: selectedId, status },
+      { onSuccess: () => showToast({ title: "Status bijgewerkt" }) },
+    );
   }
 
   function handleSaveNotes() {
     if (!selectedId) return;
-    updateSession.mutate({ id: selectedId, internalNotes });
+    updateSession.mutate(
+      { id: selectedId, internalNotes },
+      { onSuccess: () => showToast({ title: "Notities opgeslagen" }) },
+    );
+  }
+
+  function openBookingDialog() {
+    const nextDefault = defaultBookingDate();
+    setBookingDate(formatDateInputValue(nextDefault));
+    setBookingTime("10:00");
+    setBookingDuration("60");
+    setBookingLocation("Google Meet");
+    setBookingNotes("");
+    setBookingDialogOpen(true);
+  }
+
+  function handleCreateBooking(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedId) return;
+    convertToBooking.mutate({
+      sessionId: selectedId,
+      date: toLocalDateTimeIso(bookingDate, bookingTime),
+      duration: Number(bookingDuration),
+      location: bookingLocation.trim() || undefined,
+      notes: bookingNotes.trim() || undefined,
+    });
   }
 
   // Scroll to bottom when messages change
@@ -248,10 +332,14 @@ export function ChatbotInner() {
 
   // Sync internal notes when session changes
   useEffect(() => {
-    if (session) {
-      setInternalNotes((session as any).internalNotes || "");
-    }
-  }, [session?.id]);
+    setInternalNotes(session?.internalNotes || "");
+  }, [session?.id, session?.internalNotes]);
+
+  useEffect(() => {
+    if (!session?.id || session.isRead || readRefreshRef.current.has(session.id)) return;
+    readRefreshRef.current.add(session.id);
+    utils.chatbot.listSessions.invalidate();
+  }, [session?.id, session?.isRead, utils.chatbot.listSessions]);
 
   const sessions = listData?.sessions ?? [];
   const unreadCount = listData?.unreadCount ?? 0;
@@ -598,24 +686,18 @@ export function ChatbotInner() {
                     disabled={!selectedId}
                   >
                     <FilePlus2 className="mr-1.5 h-3 w-3" />
-                    Naar offerte
+                    Offerte maken
                   </Button>
 
                   <Button
                     variant="outline"
                     size="sm"
                     className="h-8 text-xs"
-                    onClick={() =>
-                      convertToBooking.mutate({
-                        sessionId: selectedId!,
-                        date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-                        duration: 60,
-                      })
-                    }
-                    disabled={convertToBooking.isPending}
+                    onClick={openBookingDialog}
+                    disabled={!selectedId}
                   >
                     <CalendarPlus className="mr-1.5 h-3 w-3" />
-                    Naar boeking
+                    Boeking maken
                   </Button>
 
                   <Button
@@ -744,6 +826,23 @@ export function ChatbotInner() {
                             </span>
                           </div>
                           <p className="whitespace-pre-wrap">{msg.content}</p>
+                          {isVisitor && msg.metadata?.visitorFields && msg.metadata?.preChatQuestions ? (
+                            <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/90 p-2 text-[11px] text-slate-700">
+                              <p className="mb-1 font-medium text-slate-900">Startvragen</p>
+                              <div className="space-y-1">
+                                {msg.metadata.preChatQuestions.map((question: any) => {
+                                  const answer = msg.metadata.visitorFields?.[question.id];
+                                  if (!answer) return null;
+                                  return (
+                                    <div key={question.id} className="grid grid-cols-[90px_1fr] gap-2">
+                                      <span className="truncate text-slate-500">{question.label}</span>
+                                      <span className="break-words font-medium">{String(answer)}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : null}
                           <p
                             className={cn(
                               "mt-1 text-[10px]",
@@ -773,9 +872,9 @@ export function ChatbotInner() {
                     Interne notities
                   </span>
                   {notesOpen ? (
-                    <ChevronDown className="h-3 w-3" />
-                  ) : (
                     <ChevronUp className="h-3 w-3" />
+                  ) : (
+                    <ChevronDown className="h-3 w-3" />
                   )}
                 </button>
                 {notesOpen && (
@@ -913,6 +1012,95 @@ export function ChatbotInner() {
               Annuleren
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ======== Convert to Booking Dialog ======== */}
+      <Dialog open={bookingDialogOpen} onOpenChange={setBookingDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Boeking maken</DialogTitle>
+            <DialogDescription>
+              Kies het moment en de context voor deze pending boeking.
+            </DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={handleCreateBooking}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="chatbot-booking-date">Datum</Label>
+                <Input
+                  id="chatbot-booking-date"
+                  type="date"
+                  value={bookingDate}
+                  onChange={(event) => setBookingDate(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="chatbot-booking-time">Tijd</Label>
+                <Input
+                  id="chatbot-booking-time"
+                  type="time"
+                  value={bookingTime}
+                  onChange={(event) => setBookingTime(event.target.value)}
+                  required
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>Duur</Label>
+                <Select value={bookingDuration} onValueChange={setBookingDuration}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Duur" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DURATION_OPTIONS.map((duration) => (
+                      <SelectItem key={duration} value={String(duration)}>
+                        {duration} min
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="chatbot-booking-location">Locatie</Label>
+                <Input
+                  id="chatbot-booking-location"
+                  value={bookingLocation}
+                  onChange={(event) => setBookingLocation(event.target.value)}
+                  placeholder="Google Meet"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="chatbot-booking-notes">Notities</Label>
+              <Textarea
+                id="chatbot-booking-notes"
+                value={bookingNotes}
+                onChange={(event) => setBookingNotes(event.target.value)}
+                placeholder="Extra context voor de afspraak..."
+                rows={3}
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setBookingDialogOpen(false)}
+              >
+                Annuleren
+              </Button>
+              <Button type="submit" disabled={convertToBooking.isPending}>
+                {convertToBooking.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CalendarPlus className="mr-2 h-4 w-4" />
+                )}
+                Boeking aanmaken
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

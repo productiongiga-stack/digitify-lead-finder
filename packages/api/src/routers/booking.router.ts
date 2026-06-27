@@ -53,6 +53,14 @@ function getBookingEndDate(booking: { date: Date; duration: number }) {
   return new Date(booking.date.getTime() + booking.duration * 60 * 1000);
 }
 
+function parseDateFilterEnd(value: string) {
+  const date = new Date(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    date.setHours(23, 59, 59, 999);
+  }
+  return date;
+}
+
 const BOOKING_SYNC_RETRY_DELAY_MS = 5 * 60 * 1000;
 
 function normalizeSyncError(error: unknown) {
@@ -383,7 +391,7 @@ export const bookingRouter = router({
       if (dateFrom || dateTo) {
         where.date = {
           ...(dateFrom ? { gte: new Date(dateFrom) } : {}),
-          ...(dateTo ? { lte: new Date(dateTo) } : {}),
+          ...(dateTo ? { lte: parseDateFilterEnd(dateTo) } : {}),
         };
       }
       if (search?.trim()) {
@@ -731,7 +739,13 @@ export const bookingRouter = router({
     }),
 
   confirm: mutationProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.object({
+      id: z.string(),
+      clientName: z.string().min(1).optional(),
+      clientEmail: z.union([z.string().email(), z.literal(""), z.undefined()]),
+      notes: z.string().optional(),
+      location: z.string().optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       const booking = await ctx.db.booking.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! } });
       if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Boeking niet gevonden" });
@@ -744,7 +758,13 @@ export const bookingRouter = router({
 
       const updated = await ctx.db.booking.update({
         where: { id: input.id },
-        data: { status: "CONFIRMED" },
+        data: {
+          status: "CONFIRMED",
+          ...(input.clientName !== undefined ? { clientName: input.clientName } : {}),
+          ...(input.clientEmail !== undefined ? { clientEmail: input.clientEmail || null } : {}),
+          ...(input.notes !== undefined ? { notes: removeLegacyGoogleEventId(input.notes || null) } : {}),
+          ...(input.location !== undefined ? { location: input.location || null } : {}),
+        },
       });
       const emailCfg = await loadEmailSettings(ctx.db, {
         workspaceId: ctx.user.workspaceId!,

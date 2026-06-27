@@ -14,6 +14,15 @@ type RemoteSettings = {
   autoMessagesEnabled: boolean;
   aiResponsesEnabled: boolean;
   askNameBeforeChat: boolean;
+  preChatQuestions: PreChatQuestion[];
+};
+
+type PreChatQuestion = {
+  id: string;
+  label: string;
+  type: "text" | "email" | "phone" | "company" | "select";
+  required: boolean;
+  options?: string[];
 };
 
 type ChatMessage = {
@@ -30,6 +39,11 @@ function hexToRgba(hex: string, alpha: number) {
   const g = (value >> 8) & 255;
   const b = value & 255;
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function normalizeHexColor(value: string, fallback = "#6366f1") {
+  const trimmed = value.trim();
+  return /^#[0-9a-fA-F]{6}$/.test(trimmed) ? trimmed : fallback;
 }
 
 function parseBooleanParam(value: string | null, fallback: boolean) {
@@ -51,6 +65,10 @@ function ChatbotEmbedContent() {
   const [visitorName, setVisitorName] = useState("");
   const [nameDraft, setNameDraft] = useState("");
   const [nameError, setNameError] = useState("");
+  const [preChatComplete, setPreChatComplete] = useState(false);
+  const [visitorFields, setVisitorFields] = useState<Record<string, string>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [sentNotice, setSentNotice] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -86,11 +104,12 @@ function ChatbotEmbedContent() {
 
   const companyName = params.get("company") || settings?.companyName || "Digitify";
   const companySlogan = settings?.companySlogan || "";
-  const primaryColor = params.get("color") || settings?.primaryColor || "#6366f1";
+  const primaryColor = normalizeHexColor(params.get("color") || settings?.primaryColor || "#6366f1");
   const welcomeMessage = params.get("welcome") || settings?.welcomeMessage || "Hallo! Hoe kan ik u helpen?";
   const enabled = settings?.enabled ?? true;
   const autoMessagesEnabled = settings?.autoMessagesEnabled ?? true;
   const avatarUrl = settings?.avatarUrl || "";
+  const preChatQuestions = settings?.preChatQuestions || [];
   const askNameBeforeChat = parseBooleanParam(
     params.get("askName"),
     settings?.askNameBeforeChat ?? false,
@@ -101,7 +120,7 @@ function ChatbotEmbedContent() {
   useEffect(() => {
     if (messages.length > 0) return;
     if (!autoMessagesEnabled) return;
-    if (askNameBeforeChat && !visitorName.trim()) return;
+    if ((askNameBeforeChat || preChatQuestions.length > 0) && !preChatComplete) return;
 
     setMessages([
       {
@@ -109,16 +128,17 @@ function ChatbotEmbedContent() {
         content: enabled ? welcomeMessage : settings?.offlineMessage || "We zijn momenteel offline.",
       },
     ]);
-  }, [messages.length, autoMessagesEnabled, askNameBeforeChat, visitorName, enabled, welcomeMessage, settings?.offlineMessage]);
+  }, [messages.length, autoMessagesEnabled, askNameBeforeChat, preChatQuestions.length, preChatComplete, enabled, welcomeMessage, settings?.offlineMessage]);
 
-  const blockedByName = askNameBeforeChat && !visitorName.trim();
-  const sendDisabled = blockedByName || !enabled || loading || !input.trim();
+  const shouldShowPreChat = (askNameBeforeChat || preChatQuestions.length > 0) && !preChatComplete;
+  const sendDisabled = shouldShowPreChat || loading || !input.trim();
 
   async function handleSend() {
     const message = input.trim();
-    if (!message || blockedByName) return;
+    if (!message || shouldShowPreChat) return;
 
     setLoading(true);
+    setSentNotice("");
     setMessages((current) => [...current, { role: "VISITOR", content: message }]);
     setInput("");
 
@@ -129,6 +149,7 @@ function ChatbotEmbedContent() {
         body: JSON.stringify({
           sessionId: sessionId || undefined,
           visitorName: visitorName || undefined,
+          visitorFields,
           message,
           pageUrl: typeof document !== "undefined" ? document.referrer : undefined,
           tenant: tenant || undefined,
@@ -143,6 +164,8 @@ function ChatbotEmbedContent() {
             ...current,
             { id: `bot-${Date.now()}`, role: "BOT", content: data.reply || welcomeMessage },
           ]);
+        } else if (data.accepted) {
+          setSentNotice("Bericht ontvangen. We volgen dit manueel op.");
         }
       } else {
         setMessages((current) => [
@@ -162,11 +185,24 @@ function ChatbotEmbedContent() {
 
   function handleStartChat() {
     const candidate = nameDraft.trim();
-    if (!candidate) {
+    if (askNameBeforeChat && !candidate) {
       setNameError("Vul eerst je naam in.");
       return;
     }
+    const nextErrors: Record<string, string> = {};
+    for (const question of preChatQuestions) {
+      const value = (visitorFields[question.id] || "").trim();
+      if (question.required && !value) {
+        nextErrors[question.id] = "Vul dit veld in.";
+      }
+      if (question.type === "email" && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+        nextErrors[question.id] = "Vul een geldig e-mailadres in.";
+      }
+    }
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
     setVisitorName(candidate);
+    setPreChatComplete(true);
     setNameError("");
   }
 
@@ -196,28 +232,69 @@ function ChatbotEmbedContent() {
       </div>
 
       <div className="flex-1 space-y-2.5 overflow-y-auto px-2.5 py-3 sm:px-3">
-        {blockedByName ? (
+        {shouldShowPreChat ? (
           <div className="mx-auto mt-3 w-full max-w-sm rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-sm">
             <p className="text-sm font-semibold text-slate-900">Start chat</p>
             <p className="mt-1 text-xs text-slate-600">
-              Vul je naam in voordat je het eerste bericht verstuurt.
+              Vul de gegevens in voordat je het eerste bericht verstuurt.
             </p>
-            <input
-              value={nameDraft}
-              onChange={(event) => {
-                setNameDraft(event.target.value);
-                if (nameError) setNameError("");
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  handleStartChat();
-                }
-              }}
-              placeholder="Jouw naam"
-              className="mt-3 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-slate-400"
-            />
-            {nameError ? <p className="mt-1.5 text-[11px] text-red-600">{nameError}</p> : null}
+            {askNameBeforeChat ? (
+              <>
+                <input
+                  value={nameDraft}
+                  onChange={(event) => {
+                    setNameDraft(event.target.value);
+                    if (nameError) setNameError("");
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handleStartChat();
+                    }
+                  }}
+                  placeholder="Jouw naam"
+                  className="mt-3 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-slate-400"
+                />
+                {nameError ? <p className="mt-1.5 text-[11px] text-red-600">{nameError}</p> : null}
+              </>
+            ) : null}
+            {preChatQuestions.map((question) => (
+              <div key={question.id} className="mt-3">
+                <label className="text-xs font-medium text-slate-700">
+                  {question.label}
+                  {question.required ? " *" : ""}
+                </label>
+                {question.type === "select" ? (
+                  <select
+                    value={visitorFields[question.id] || ""}
+                    onChange={(event) => {
+                      setVisitorFields((current) => ({ ...current, [question.id]: event.target.value }));
+                      setFieldErrors((current) => ({ ...current, [question.id]: "" }));
+                    }}
+                    className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-slate-400"
+                  >
+                    <option value="">Kies een optie</option>
+                    {(question.options || []).map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={visitorFields[question.id] || ""}
+                    type={question.type === "email" ? "email" : question.type === "phone" ? "tel" : "text"}
+                    onChange={(event) => {
+                      setVisitorFields((current) => ({ ...current, [question.id]: event.target.value }));
+                      setFieldErrors((current) => ({ ...current, [question.id]: "" }));
+                    }}
+                    placeholder={question.type === "email" ? "naam@voorbeeld.be" : question.type === "phone" ? "+32 ..." : ""}
+                    className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-slate-400"
+                  />
+                )}
+                {fieldErrors[question.id] ? <p className="mt-1.5 text-[11px] text-red-600">{fieldErrors[question.id]}</p> : null}
+              </div>
+            ))}
             <button
               type="button"
               onClick={handleStartChat}
@@ -254,6 +331,11 @@ function ChatbotEmbedContent() {
             </div>
           </div>
         ))}
+        {sentNotice ? (
+          <div className="mx-auto max-w-[88%] rounded-full border border-slate-200 bg-white/80 px-3 py-1.5 text-center text-[11px] text-slate-500">
+            {sentNotice}
+          </div>
+        ) : null}
       </div>
 
       <div className="border-t border-slate-200/80 bg-white/95 p-2.5 backdrop-blur">
@@ -268,15 +350,15 @@ function ChatbotEmbedContent() {
               }
             }}
             placeholder={
-              blockedByName
-                ? "Vul eerst je naam in"
+              shouldShowPreChat
+                ? "Vul eerst de startvragen in"
                 : !enabled
                   ? "Chatbot is momenteel offline"
                   : autoMessagesEnabled
                     ? "Typ je bericht..."
                     : "Laat een bericht achter voor manuele opvolging"
             }
-            disabled={!enabled || loading || blockedByName}
+            disabled={loading || shouldShowPreChat}
             className="h-10 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-slate-400 disabled:bg-slate-50"
           />
           <button
