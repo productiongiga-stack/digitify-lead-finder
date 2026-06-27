@@ -3,6 +3,25 @@ import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { assertLeadAccess, ownedChatSessionWhere } from "../lib/tenant";
 import { enforceRateLimit } from "../lib/rate-limit";
+import { isGoogleSlotAvailable } from "../lib/google-calendar";
+import {
+  DEFAULT_BOOKING_TIMEZONE,
+  buildManageUrl,
+  createPublicToken,
+  ensureDefaultBookingEventType,
+  hashPublicToken,
+  hasBookingOverlap,
+} from "../lib/booking-utils";
+
+function resolveAppUrl() {
+  const candidates = [
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.NEXTAUTH_URL,
+    process.env.APP_URL,
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "",
+  ];
+  return (candidates.find((value) => value?.trim()) || "http://localhost:3000").replace(/\/$/, "");
+}
 
 async function enforceChatbotRateLimit(params: {
   userId: string;
@@ -273,6 +292,8 @@ export const chatbotRouter = router({
         sessionId: z.string(),
         date: z.string().datetime(),
         duration: z.number().min(15).max(240).default(60),
+        location: z.string().max(200).optional(),
+        notes: z.string().max(4000).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -280,14 +301,65 @@ export const chatbotRouter = router({
         where: { AND: [ownedChatSessionWhere(ctx.user.workspaceId!, ctx.user.id), { id: input.sessionId }] },
       });
       if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Sessie niet gevonden" });
+
+      const bookingDate = new Date(input.date);
+      if (Number.isNaN(bookingDate.getTime())) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Ongeldige boekingsdatum." });
+      }
+      const now = new Date();
+      now.setMinutes(now.getMinutes() - 5);
+      if (bookingDate < now) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Boeking kan niet in het verleden liggen." });
+      }
+
+      const eventType = await ensureDefaultBookingEventType(ctx.db, ctx.user.workspaceId!);
+      if (!eventType) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Standaard boekingstype kon niet worden geladen." });
+      }
+      const duration = input.duration || eventType.duration || 60;
+      const bookingEnd = new Date(bookingDate.getTime() + duration * 60_000);
+      const overlapStart = new Date(bookingDate.getTime() - (eventType.bufferBefore || 0) * 60_000);
+      const overlapEnd = new Date(bookingEnd.getTime() + (eventType.bufferAfter || 0) * 60_000);
+      const hostUserId = ctx.user.id;
+
+      const hasOverlap = await hasBookingOverlap(ctx.db, {
+        ownerUserId: ctx.user.workspaceId!,
+        hostUserId,
+        start: overlapStart,
+        end: overlapEnd,
+      });
+      if (hasOverlap) {
+        throw new TRPCError({ code: "CONFLICT", message: "Dit tijdslot overlapt met een bestaande boeking." });
+      }
+
+      const googleSlot = await isGoogleSlotAvailable(ctx.db as any, {
+        start: bookingDate,
+        end: bookingEnd,
+        userId: hostUserId,
+      });
+      if (googleSlot.enabled && !googleSlot.available) {
+        throw new TRPCError({ code: "CONFLICT", message: "Dit tijdslot is bezet in Google Calendar." });
+      }
+
+      const cancelToken = createPublicToken();
+      const rescheduleToken = createPublicToken();
+      const manageUrl = buildManageUrl(resolveAppUrl(), rescheduleToken);
+      const notes = input.notes?.trim() || `Aangemaakt vanuit chatsessie ${session.id}`;
+
       const booking = await ctx.db.booking.create({
         data: {
           clientName: session.visitorName || session.visitorCompany || "Chatbot bezoeker",
           clientEmail: session.visitorEmail || null,
-          date: new Date(input.date),
-          duration: input.duration,
-          notes: `Aangemaakt vanuit chatsessie ${session.id}`,
+          date: bookingDate,
+          duration,
+          notes,
           status: "PENDING",
+          timezone: eventType.timezone || DEFAULT_BOOKING_TIMEZONE,
+          location: input.location?.trim() || eventType.location || null,
+          hostUserId,
+          eventTypeId: eventType.id,
+          cancelTokenHash: hashPublicToken(cancelToken),
+          rescheduleTokenHash: hashPublicToken(rescheduleToken),
           leadId: session.leadId || null,
           createdById: ctx.user.workspaceId!,
         },
@@ -297,11 +369,16 @@ export const chatbotRouter = router({
         data: {
           sessionId: session.id,
           role: "AGENT",
-          content: `Ik heb een boeking aangemaakt voor ${new Date(booking.date).toLocaleString("nl-BE")}.`,
-          metadata: { action: "convert_to_booking", bookingId: booking.id },
+          content: `Ik heb een pending boeking aangemaakt voor ${new Date(booking.date).toLocaleString("nl-BE")}. Beheerlink: ${manageUrl}`,
+          metadata: {
+            action: "convert_to_booking",
+            bookingId: booking.id,
+            manageUrl,
+            status: booking.status,
+          },
         },
       });
-      return booking;
+      return { ...booking, manageUrl };
     }),
 
   // Live takeover by admin/agent

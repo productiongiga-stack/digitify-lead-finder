@@ -1,5 +1,12 @@
 export function isMarketingShellPath(pathname: string) {
-  return pathname === "/" || pathname === "/product" || pathname === "/oplossingen" || pathname.startsWith("/oplossingen/");
+  return (
+    pathname === "/" ||
+    pathname === "/product" ||
+    pathname === "/oplossingen" ||
+    pathname === "/over-ons" ||
+    pathname === "/contact" ||
+    pathname.startsWith("/oplossingen/")
+  );
 }
 
 export function isPublicRuntimePath(pathname: string) {

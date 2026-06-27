@@ -104,7 +104,13 @@ const nextConfig = {
       },
       {
         source: "/embed/:path*",
-        headers: securityHeaders.filter((h) => h.key !== "X-Frame-Options"),
+        headers: [
+          ...securityHeaders.filter((h) => h.key !== "X-Frame-Options"),
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors *",
+          },
+        ],
       },
     ];
   },

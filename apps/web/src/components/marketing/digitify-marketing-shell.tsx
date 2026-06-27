@@ -13,6 +13,7 @@ import {
   type DigitifyNavItem,
 } from "@/lib/digitify-unified-nav";
 import { isMarketingShellPath } from "@/lib/shell-paths";
+import { DigitifyChatbotLoader } from "@/components/marketing/digitify-chatbot-loader";
 
 type MarketingPageKey = "home" | "product" | "solutions" | "about" | "contact";
 
@@ -673,6 +674,7 @@ export function DigitifyMarketingShell({
       <DigitifyMarketingHeader activePage={activePage} />
       <div className="digitify-page-content">{children}</div>
       <DigitifyMarketingFooter />
+      <DigitifyChatbotLoader />
     </>
   );
 }
