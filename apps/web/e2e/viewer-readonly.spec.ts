@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { login } from "./helpers/auth";
 
 const viewerEmail = process.env.PLAYWRIGHT_VIEWER_EMAIL ?? process.env.SEED_VIEWER_EMAIL ?? "";
 const viewerPassword =
@@ -11,11 +12,7 @@ test.describe("VIEWER read-only RBAC", () => {
   test.beforeEach(async ({ page }) => {
     test.skip(!viewerEmail, "Seed a VIEWER user with SEED_VIEWER_EMAIL / PLAYWRIGHT_VIEWER_EMAIL.");
 
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(viewerEmail);
-    await page.getByLabel("Wachtwoord").fill(viewerPassword);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
+    await login(page, viewerEmail, viewerPassword);
   });
 
   test("VIEWER cannot access bulk delete controls", async ({ page }) => {

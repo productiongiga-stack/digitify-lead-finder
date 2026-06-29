@@ -1,15 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { login } from "./helpers/auth";
 
 const email = process.env.PLAYWRIGHT_LOGIN_EMAIL ?? "admin@digitify.local";
 const password = process.env.PLAYWRIGHT_LOGIN_PASSWORD ?? "DigitifyDev2026!";
 
 test.describe("Creative Studio smoke", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(email);
-    await page.getByLabel("Wachtwoord").fill(password);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
+    await login(page, email, password);
   });
 
   test("creative studio page loads with tabs", async ({ page }) => {

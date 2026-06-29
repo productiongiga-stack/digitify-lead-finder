@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { login } from "./helpers/auth";
 
 const viewerEmail = process.env.PLAYWRIGHT_VIEWER_EMAIL ?? process.env.SEED_VIEWER_EMAIL ?? "viewer@digitify.local";
 const viewerPassword =
@@ -9,11 +10,7 @@ const viewerPassword =
 
 test.describe("Settings RBAC matrix", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(viewerEmail);
-    await page.getByLabel("Wachtwoord").fill(viewerPassword);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
+    await login(page, viewerEmail, viewerPassword);
   });
 
   test("VIEWER sees only allowed settings sections", async ({ page }) => {
@@ -34,11 +31,7 @@ const memberEmail = process.env.PLAYWRIGHT_MEMBER_EMAIL ?? process.env.SEED_MEMB
 
 test.describe("Settings RBAC — MODERATOR", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(moderatorEmail);
-    await page.getByLabel("Wachtwoord").fill(viewerPassword);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
+    await login(page, moderatorEmail, viewerPassword);
   });
 
   test("MODERATOR cannot open branding settings", async ({ page }) => {
@@ -49,11 +42,7 @@ test.describe("Settings RBAC — MODERATOR", () => {
 
 test.describe("Settings RBAC — MEMBER", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(memberEmail);
-    await page.getByLabel("Wachtwoord").fill(viewerPassword);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
+    await login(page, memberEmail, viewerPassword);
   });
 
   test("MEMBER cannot open team settings", async ({ page }) => {

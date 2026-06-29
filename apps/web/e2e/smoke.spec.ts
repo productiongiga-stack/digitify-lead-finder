@@ -1,15 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { login } from "./helpers/auth";
 
 const email = process.env.PLAYWRIGHT_LOGIN_EMAIL ?? "admin@digitify.local";
 const password = process.env.PLAYWRIGHT_LOGIN_PASSWORD ?? "DigitifyDev2026!";
 
 test.describe("authenticated smoke", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(email);
-    await page.getByLabel("Wachtwoord").fill(password);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
+    await login(page, email, password);
   });
 
   test("templates studio loads", async ({ page }) => {
@@ -49,7 +46,7 @@ test.describe("authenticated smoke", () => {
 
   test("outbound center shows approval flow", async ({ page }) => {
     await page.goto("/contacts");
-    await expect(page.getByRole("heading", { name: "Outbound Center" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Outbound Center", level: 1 })).toBeVisible();
     await expect(page.getByText(/Concept.*goedkeuren.*verzenden/i)).toBeVisible();
     await page.getByRole("tab", { name: /info/i }).click();
     await expect(page.getByText(/klaar om te verzenden/i)).toBeVisible();

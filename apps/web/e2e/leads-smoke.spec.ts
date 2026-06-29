@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { login } from "./helpers/auth";
 
 const email = process.env.PLAYWRIGHT_LOGIN_EMAIL ?? process.env.SEED_ADMIN_EMAIL ?? "admin@digitify.local";
 const password =
@@ -6,11 +7,7 @@ const password =
 
 test.describe("Leads list smoke", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(email);
-    await page.getByLabel("Wachtwoord").fill(password);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
+    await login(page, email, password);
   });
 
   test("leads list renders table shell", async ({ page }) => {
