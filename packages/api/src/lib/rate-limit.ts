@@ -22,6 +22,10 @@ export async function enforceRateLimit(params: {
   windowMs: number;
   message?: string;
 }) {
+  if (process.env.E2E_DISABLE_RATE_LIMITS === "true") {
+    return { allowed: true, remaining: params.limit, resetAt: Date.now() + params.windowMs };
+  }
+
   const result = await checkRateLimit(params);
   if (!result.allowed) {
     throw new TRPCError({

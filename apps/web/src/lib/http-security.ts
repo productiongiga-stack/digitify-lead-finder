@@ -23,6 +23,8 @@ export async function enforceRateLimit(
     message: string;
   },
 ) {
+  if (process.env.E2E_DISABLE_RATE_LIMITS === "true") return null;
+
   const result = await checkRateLimit({
     key: `${options.key}:${getClientIp(request)}`,
     limit: options.limit,
