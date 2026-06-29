@@ -365,7 +365,7 @@ const META_API_ERROR_HINTS: Record<number, string> = {
   100:
     "Meta accepteerde een parameter of object niet. Controleer vooral of de media-URL publiek bereikbaar is en bij de gekozen Page/Instagram Business-account hoort.",
   10:
-    "De Meta-app mist publishing-rechten. Voeg pages_manage_posts en instagram_content_publish toe in Meta → Use cases → Facebook Login for Business, zet de app op Live, en koppel Meta opnieuw in Integraties.",
+    "Meta weigert deze publicatie door ontbrekende publish-rechten op de app, token of gekozen Page/Instagram-account. Controleer in Integraties of pages_manage_posts en instagram_content_publish actief zijn, zet de Meta-app op Live en koppel Meta opnieuw met de juiste accounts aangevinkt.",
   190:
     "Meta access token is ongeldig of verlopen. Koppel Meta opnieuw via Integraties zodat user- en page-token vernieuwd worden.",
   200:

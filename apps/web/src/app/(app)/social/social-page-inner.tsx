@@ -777,10 +777,22 @@ export function SocialPageInner() {
         description: status.tokenDebugError || "Koppel Meta opnieuw via Integraties.",
       };
     }
+    if (status.pageTokenValid === false) {
+      return {
+        title: "Facebook Page-token ongeldig",
+        description: status.pageTokenDebugError || "Koppel Meta opnieuw via Integraties en kies de Page opnieuw.",
+      };
+    }
     if (status.missingPublishScopes?.length) {
       return {
         title: "Meta publishing-rechten ontbreken",
         description: `Ontbrekend: ${status.missingPublishScopes.join(", ")}. Koppel Meta opnieuw nadat deze rechten op de Meta-app staan.`,
+      };
+    }
+    if (status.missingPageTokenPublishScopes?.length) {
+      return {
+        title: "Facebook Page-token mist publicatierecht",
+        description: `Ontbrekend op de gekozen Page-token: ${status.missingPageTokenPublishScopes.join(", ")}. Koppel Meta opnieuw en vink deze Facebook Page expliciet aan.`,
       };
     }
     if (status.missingGranularPublishScopes?.length) {

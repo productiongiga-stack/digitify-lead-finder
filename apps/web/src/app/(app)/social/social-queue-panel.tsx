@@ -153,9 +153,9 @@ function explainMetaError(message: string) {
   }
   if (/code\s+10\b|does not have permission for this action/i.test(message)) {
     return {
-      title: "Meta-app mist publishing-rechten",
+      title: "Meta publicatierecht geweigerd",
       description:
-        "Fout #10: koppeling actief, maar Meta-app heeft geen pages_manage_posts / instagram_content_publish. Pas Use cases aan, zet app op Live, koppel opnieuw via Integraties.",
+        "Fout #10: Meta weigert deze actie door ontbrekende rechten op de app, user-token, Page-token of het gekozen Page/Instagram-account. Controleer Integraties en koppel Meta opnieuw met de juiste accounts aangevinkt.",
     };
   }
   if (/190|token expired|verlopen/i.test(message)) {

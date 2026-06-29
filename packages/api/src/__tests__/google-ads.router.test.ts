@@ -18,7 +18,7 @@ vi.mock("../lib/google-ads", async (importActual) => {
 });
 
 import * as googleAdsLib from "../lib/google-ads";
-import { defaultSearchTargeting } from "../lib/google-ads";
+import { defaultSearchTargeting, formatGoogleAdsError } from "../lib/google-ads";
 import { googleAdsRouter } from "../routers/google-ads.router";
 
 const TEST_USER_ID = "ws_1";
@@ -143,6 +143,15 @@ describe("googleAds router flow", () => {
     expect(status.missingOperationalRequirements).toContain("GOOGLE_OAUTH_MISSING");
     expect(status.missingOperationalRequirements).toContain("GOOGLE_CUSTOMER_NOT_SELECTED");
     expect(status.missingOperationalRequirements).toContain("GOOGLE_AUTOMATION_DISABLED");
+  });
+
+  it("explains deprecated Google Ads API version errors", () => {
+    const message = formatGoogleAdsError(
+      new Error("Version v20 is deprecated. Requests to this version will be blocked. — request_error: 38"),
+    );
+
+    expect(message).toContain("Google Ads API client library is verouderd");
+    expect(message).toContain("google-ads-api v24+");
   });
 
   it("fails listCampaigns clearly when no customer is selected", async () => {

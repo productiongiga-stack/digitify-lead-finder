@@ -778,6 +778,10 @@ export const socialRouter = router({
     let tokenDebugError: string | null = null;
     let tokenAppId: string | null = null;
     let tokenApplication: string | null = null;
+    let pageTokenValid: boolean | null = null;
+    let pageTokenDebugError: string | null = null;
+    let pageTokenScopes: string[] = [];
+    let missingPageTokenPublishScopes: string[] = [];
 
     if (config.accessToken && config.appId && config.appSecret) {
       const debug = await fetchMetaTokenDebugInfo({
@@ -808,6 +812,20 @@ export const socialRouter = router({
       ];
     }
 
+    if (config.pageAccessToken && config.appId && config.appSecret) {
+      const pageDebug = await fetchMetaTokenDebugInfo({
+        inputToken: config.pageAccessToken,
+        appId: config.appId,
+        appSecret: config.appSecret,
+      });
+      pageTokenValid = pageDebug.isValid;
+      pageTokenDebugError = pageDebug.error;
+      pageTokenScopes = pageDebug.scopes;
+      missingPageTokenPublishScopes = pageDebug.scopes.length
+        ? missingMetaPublishScopes(pageDebug.scopes, ["pages_manage_posts"])
+        : [];
+    }
+
     return {
       hasAppCredentials: Boolean(config.appId && config.appSecret),
       connected: Boolean(config.pageId && config.pageAccessToken),
@@ -827,6 +845,10 @@ export const socialRouter = router({
       tokenDebugError,
       tokenAppId,
       tokenApplication,
+      pageTokenValid,
+      pageTokenDebugError,
+      pageTokenScopes,
+      missingPageTokenPublishScopes,
       oauthLoginMode: oauthScopes.loginMode,
       oauthScopeLevel: oauthScopes.scopeLevel,
       oauthScopes: oauthScopes.scopes,

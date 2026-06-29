@@ -11,10 +11,21 @@ const mockedMeta = vi.hoisted(() => ({
     if (platforms.includes("INSTAGRAM")) scopes.push("instagram_basic", "instagram_content_publish");
     return scopes;
   }),
-  missingMetaPublishScopes: vi.fn(() => []),
-  missingMetaGranularTargetScopes: vi.fn(() => []),
+  missingMetaPublishScopes: vi.fn((_grantedScopes: string[], _requiredScopes: string[]): string[] => []),
+  missingMetaGranularTargetScopes: vi.fn(
+    (_granularScopes: Array<{ scope: string; targetIds: string[] }>, _requiredScopes: string[], _targetId: string): string[] => [],
+  ),
   buildMetaPublishScopeError: vi.fn(() => null),
   buildMetaGranularScopeError: vi.fn(() => null),
+  resolveMetaOAuthScopeSummary: vi.fn(() => ({
+    loginMode: "facebook",
+    scopeLevel: "standard",
+    includeAds: false,
+    scopes: ["pages_show_list", "pages_manage_posts", "instagram_basic", "instagram_content_publish"],
+    overridden: false,
+    hasDeprecatedInstagramBusinessScopes: false,
+    usesLegacyEnvOverride: false,
+  })),
   publishFacebookCarouselPost: vi.fn(),
   publishFacebookImagePost: vi.fn(),
   publishFacebookImageStory: vi.fn(),
@@ -93,6 +104,15 @@ function makeCtx(db: Record<string, unknown>, role: string = "OWNER") {
 
 describe("social router flow", () => {
   beforeEach(() => {
+    mockedMeta.missingMetaPublishScopes.mockReset();
+    mockedMeta.missingMetaPublishScopes.mockImplementation(() => []);
+    mockedMeta.missingMetaGranularTargetScopes.mockReset();
+    mockedMeta.missingMetaGranularTargetScopes.mockImplementation(() => []);
+    mockedMeta.buildMetaPublishScopeError.mockReset();
+    mockedMeta.buildMetaPublishScopeError.mockImplementation(() => null);
+    mockedMeta.buildMetaGranularScopeError.mockReset();
+    mockedMeta.buildMetaGranularScopeError.mockImplementation(() => null);
+    mockedMeta.fetchMetaTokenDebugInfo.mockReset();
     mockedMeta.fetchMetaTokenDebugInfo.mockResolvedValue({
       isValid: true,
       scopes: [
@@ -339,6 +359,15 @@ function makePublishWorkerDb(post: Record<string, unknown>, options?: { lockFail
 
 describe("social publish worker", () => {
   beforeEach(() => {
+    mockedMeta.missingMetaPublishScopes.mockReset();
+    mockedMeta.missingMetaPublishScopes.mockImplementation(() => []);
+    mockedMeta.missingMetaGranularTargetScopes.mockReset();
+    mockedMeta.missingMetaGranularTargetScopes.mockImplementation(() => []);
+    mockedMeta.buildMetaPublishScopeError.mockReset();
+    mockedMeta.buildMetaPublishScopeError.mockImplementation(() => null);
+    mockedMeta.buildMetaGranularScopeError.mockReset();
+    mockedMeta.buildMetaGranularScopeError.mockImplementation(() => null);
+    mockedMeta.fetchMetaTokenDebugInfo.mockReset();
     mockedMeta.fetchMetaTokenDebugInfo.mockResolvedValue({
       isValid: true,
       scopes: [
@@ -472,6 +501,153 @@ describe("social publish worker", () => {
     );
   });
 
+  it("fails before uploading when the selected Page token is invalid", async () => {
+    const post = {
+      id: "sp_bad_page_token",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Caption",
+      imageUrl: "https://example.com/x.jpg",
+      targetPlatforms: ["FACEBOOK"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+    };
+
+    const { db, socialPostUpdate } = makePublishWorkerDb(post);
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "stale-page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "stale-page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "",
+      instagramUsername: "",
+      pageTasks: ["CREATE_CONTENT"],
+    });
+    mockedMeta.fetchMetaTokenDebugInfo
+      .mockResolvedValueOnce({
+        isValid: true,
+        scopes: ["pages_show_list", "pages_manage_posts"],
+        granularScopes: [],
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        type: "USER",
+        userId: "meta-user",
+        appId: "1",
+        application: "Digitify",
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        isValid: false,
+        scopes: [],
+        granularScopes: [],
+        expiresAt: null,
+        type: "PAGE",
+        userId: null,
+        appId: "1",
+        application: "Digitify",
+        error: "Page token expired",
+      });
+
+    const result = await runDueSocialPostsWorker(db as any, { postId: post.id, failImmediately: true });
+
+    expect(result.failed).toBe(1);
+    expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
+    expect(socialPostUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          lastError: expect.stringContaining("Page token expired"),
+        }),
+      }),
+    );
+  });
+
+  it("fails before uploading when the selected Page token lacks pages_manage_posts", async () => {
+    const post = {
+      id: "sp_missing_page_scope",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Caption",
+      imageUrl: "https://example.com/x.jpg",
+      targetPlatforms: ["FACEBOOK"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+    };
+
+    const { db, socialPostUpdate } = makePublishWorkerDb(post);
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "",
+      instagramUsername: "",
+      pageTasks: ["CREATE_CONTENT"],
+    });
+    mockedMeta.missingMetaPublishScopes
+      .mockReturnValueOnce([] as string[])
+      .mockReturnValueOnce(["pages_manage_posts"] as string[]);
+    mockedMeta.fetchMetaTokenDebugInfo
+      .mockResolvedValueOnce({
+        isValid: true,
+        scopes: ["pages_show_list", "pages_manage_posts"],
+        granularScopes: [],
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        type: "USER",
+        userId: "meta-user",
+        appId: "1",
+        application: "Digitify",
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        isValid: true,
+        scopes: ["pages_show_list"],
+        granularScopes: [],
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        type: "PAGE",
+        userId: null,
+        appId: "1",
+        application: "Digitify",
+        error: null,
+      });
+
+    const result = await runDueSocialPostsWorker(db as any, { postId: post.id, failImmediately: true });
+
+    expect(result.failed).toBe(1);
+    expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
+    expect(socialPostUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          lastError: expect.stringContaining("Page-token mist pages_manage_posts"),
+        }),
+      }),
+    );
+  });
+
   it("publishes feed posts through feed endpoints", async () => {
     const post = {
       id: "sp_feed",
@@ -486,7 +662,7 @@ describe("social publish worker", () => {
       metadata: { placements: ["FEED"], feedFormat: "SQUARE" },
     };
 
-    const { db, socialPostUpdate } = makePublishWorkerDb(post);
+    const { db } = makePublishWorkerDb(post);
 
     mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
       appId: "1",

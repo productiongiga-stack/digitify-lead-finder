@@ -90,6 +90,9 @@ function formatGoogleAdsErrorEntry(error: {
 
 function googleAdsHintFor(message: string): string {
   const lower = message.toLowerCase();
+  if (lower.includes("version") && (lower.includes("deprecated") || lower.includes("blocked") || lower.includes("sunset"))) {
+    return "Tip: de Google Ads API client library is verouderd. Deploy de versie met google-ads-api v24+ en herstart de server.";
+  }
   if (lower.includes("developer_token") || lower.includes("developer token")) {
     return "Tip: zet GOOGLE_ADS_DEVELOPER_TOKEN in de server/Vercel env en controleer Google Ads API Center toegang.";
   }

@@ -24,6 +24,7 @@ import {
   buildMetaPublishScopeError,
   buildMetaGranularScopeError,
   type SocialPublishedRef,
+  type SocialPublishTarget,
 } from "./social-meta";
 import {
   CAROUSEL_MAX_SLIDES,
@@ -228,9 +229,17 @@ function storyItemHasPublishMedia(item: SocialStoryItem) {
   return item.mediaType === "VIDEO" ? Boolean(item.videoUrl?.trim()) : Boolean(item.imageUrl?.trim());
 }
 
+function pageTasksAllowContentPublishing(pageTasks?: string[]) {
+  const normalized = new Set((pageTasks || []).map((task) => task.trim().toUpperCase()).filter(Boolean));
+  return normalized.size === 0 || normalized.has("CREATE_CONTENT") || normalized.has("MANAGE");
+}
+
 async function ensurePostCanPublish(
   post: { imageUrl: string; targetPlatforms: string[]; metadata?: unknown },
-  publishTarget?: { pageId: string; pageAccessToken: string; instagramBusinessId: string; pageTasks?: string[] },
+  publishTarget?: Pick<
+    SocialPublishTarget,
+    "pageId" | "pageAccessToken" | "instagramBusinessId" | "pageTasks"
+  >,
   metaConfig?: { accessToken: string; appId: string; appSecret: string },
 ) {
   const metadata = normalizeSocialMetadata((post.metadata || undefined) as z.infer<typeof socialPostMetadataSchema>);
@@ -257,13 +266,7 @@ async function ensurePostCanPublish(
     });
   }
 
-  const pageTasks = new Set((publishTarget.pageTasks || []).map((task) => task.trim().toUpperCase()).filter(Boolean));
-  if (
-    post.targetPlatforms.includes("FACEBOOK") &&
-    pageTasks.size > 0 &&
-    !pageTasks.has("CREATE_CONTENT") &&
-    !pageTasks.has("MANAGE")
-  ) {
+  if (post.targetPlatforms.includes("FACEBOOK") && !pageTasksAllowContentPublishing(publishTarget.pageTasks)) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message:
@@ -310,6 +313,34 @@ async function ensurePostCanPublish(
     const instagramGranularError = buildMetaGranularScopeError(instagramGranularMissing, "het geselecteerde Instagram Business-account");
     if (instagramGranularError) {
       throw new TRPCError({ code: "BAD_REQUEST", message: instagramGranularError });
+    }
+
+    if (post.targetPlatforms.includes("FACEBOOK")) {
+      const pageDebug = await fetchMetaTokenDebugInfo({
+        inputToken: publishTarget.pageAccessToken,
+        appId: metaConfig.appId,
+        appSecret: metaConfig.appSecret,
+      });
+
+      if (!pageDebug.isValid) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            pageDebug.error ||
+            "De Facebook Page-token is ongeldig of verouderd. Koppel Meta opnieuw via Integraties en kies de juiste Page opnieuw.",
+        });
+      }
+
+      if (pageDebug.scopes.length) {
+        const missingPageScopes = missingMetaPublishScopes(pageDebug.scopes, ["pages_manage_posts"]);
+        if (missingPageScopes.length) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "De geselecteerde Facebook Page-token mist pages_manage_posts. Koppel Meta opnieuw via Integraties, vink deze Page expliciet aan en controleer dat de Meta-app Live staat met publishing-rechten.",
+          });
+        }
+      }
     }
   }
 
@@ -475,7 +506,10 @@ export async function prepareAndValidatePostForPublish(
   db: PrismaClient,
   post: { id: string; imageUrl: string; targetPlatforms: string[]; metadata?: unknown },
   scope: { workspaceId: string; memberId: string },
-  publishTarget?: { pageId: string; pageAccessToken: string; instagramBusinessId: string },
+  publishTarget?: Pick<
+    SocialPublishTarget,
+    "pageId" | "pageAccessToken" | "instagramBusinessId" | "pageTasks"
+  >,
   metaConfig?: { accessToken: string; appId: string; appSecret: string },
 ) {
   const prepared = await prepareSocialPostAssetsForPublish({

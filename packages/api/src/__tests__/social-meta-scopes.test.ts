@@ -100,6 +100,7 @@ describe("resolveMetaOAuthScopes", () => {
       type: "OAuthException",
     });
     expect(message).toContain("pages_manage_posts");
+    expect(message).toContain("Page/Instagram-account");
   });
 
   it("adds a clear hint for Instagram aspect-ratio publish errors", () => {
