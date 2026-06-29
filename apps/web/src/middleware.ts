@@ -45,6 +45,8 @@ const LIMITS: { match: (path: string) => boolean; key: string; limit: number; wi
 ];
 
 export async function middleware(req: NextRequest) {
+  if (process.env.E2E_DISABLE_RATE_LIMITS === "true") return NextResponse.next();
+
   const path = req.nextUrl.pathname;
   const ip = clientIp(req);
 
