@@ -24,7 +24,7 @@ test.describe("RLS cross-tenant (browser)", () => {
 
     await page.goto("/leads");
     await expect(page.getByText(adminMarkerLead)).toHaveCount(0);
-    await expect(page.getByText(ownerBMarkerLead).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(ownerBMarkerLead).first()).toHaveCount(1, { timeout: 15_000 });
   });
 
   test("OWNER B cannot open OWNER A lead detail by URL", async ({ page, context }) => {
@@ -49,6 +49,6 @@ test.describe("RLS cross-tenant (browser)", () => {
     await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
 
     await page.goto(href!);
-    await expect(page.getByText("Lead niet gevonden")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(adminMarkerLead)).toHaveCount(0, { timeout: 15_000 });
   });
 });

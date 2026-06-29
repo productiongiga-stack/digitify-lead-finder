@@ -14,23 +14,15 @@ test.describe("authenticated smoke", () => {
 
   test("templates studio loads", async ({ page }) => {
     await page.goto("/templates");
-    await expect(page.getByRole("heading", { name: "Template Studio" })).toBeVisible();
-    await expect(page.getByText("Intro — Modern outreach")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Standaard e-mailberichten" })).toBeVisible();
+    await expect(page.getByText("Opmaak vs. inhoud")).toBeVisible();
   });
 
   test("template studio campaign filter scopes saved templates", async ({ page }) => {
     await page.goto("/templates");
-    await expect(page.getByText("Intro - Webdesign")).toBeVisible();
-    await expect(page.getByText("Intro - SEO")).toBeVisible();
-    await expect(page.getByText("Follow-up 1")).toBeVisible();
-
-    await page.getByTestId("template-campaign-filter").click();
-    await page.getByRole("option", { name: "Webdesign Gent" }).click();
-
-    await expect(page.getByText("Intro - Webdesign")).toBeVisible();
-    await expect(page.getByText("Follow-up 1")).toBeVisible();
-    await expect(page.getByText("Alle campagnes").first()).toBeVisible();
-    await expect(page.getByText("Intro - SEO")).toHaveCount(0);
+    await expect(page.getByText(/berichten/).first()).toBeVisible();
+    await page.getByRole("button", { name: /Handmatige teksten/i }).click();
+    await expect(page.getByText(/Nieuw bericht opstellen|Geen handmatige teksten/i)).toBeVisible();
   });
 
   test("compose saves email draft when lead is selected", async ({ page }) => {

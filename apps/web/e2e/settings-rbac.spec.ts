@@ -20,7 +20,7 @@ test.describe("Settings RBAC matrix", () => {
     await page.goto("/settings");
     await expect(page.getByRole("heading", { name: "Instellingen" })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole("link", { name: /weergave/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /branding/i })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /team & rollen/i })).toHaveCount(0);
   });
 
   test("VIEWER cannot open team settings", async ({ page }) => {
