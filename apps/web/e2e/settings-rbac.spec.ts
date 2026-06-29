@@ -13,7 +13,7 @@ test.describe("Settings RBAC matrix", () => {
     await page.getByLabel("E-mail").fill(viewerEmail);
     await page.getByLabel("Wachtwoord").fill(viewerPassword);
     await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
   });
 
   test("VIEWER sees only allowed settings sections", async ({ page }) => {
@@ -38,7 +38,7 @@ test.describe("Settings RBAC — MODERATOR", () => {
     await page.getByLabel("E-mail").fill(moderatorEmail);
     await page.getByLabel("Wachtwoord").fill(viewerPassword);
     await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
   });
 
   test("MODERATOR cannot open branding settings", async ({ page }) => {
@@ -53,7 +53,7 @@ test.describe("Settings RBAC — MEMBER", () => {
     await page.getByLabel("E-mail").fill(memberEmail);
     await page.getByLabel("Wachtwoord").fill(viewerPassword);
     await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
   });
 
   test("MEMBER cannot open team settings", async ({ page }) => {

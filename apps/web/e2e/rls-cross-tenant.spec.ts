@@ -20,7 +20,7 @@ test.describe("RLS cross-tenant (browser)", () => {
     await page.getByLabel("E-mail").fill(ownerBEmail);
     await page.getByLabel("Wachtwoord").fill(ownerBPassword);
     await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
 
     await page.goto("/leads");
     await expect(page.getByText(adminMarkerLead)).toHaveCount(0);
@@ -32,7 +32,7 @@ test.describe("RLS cross-tenant (browser)", () => {
     await page.getByLabel("E-mail").fill(adminEmail);
     await page.getByLabel("Wachtwoord").fill(adminPassword);
     await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
 
     await page.goto("/leads");
     const leadLink = page.locator('a[href^="/leads/"]').first();
@@ -46,7 +46,7 @@ test.describe("RLS cross-tenant (browser)", () => {
     await page.getByLabel("E-mail").fill(ownerBEmail);
     await page.getByLabel("Wachtwoord").fill(ownerBPassword);
     await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
 
     await page.goto(href!);
     await expect(page.getByText(adminMarkerLead)).toHaveCount(0, { timeout: 15_000 });

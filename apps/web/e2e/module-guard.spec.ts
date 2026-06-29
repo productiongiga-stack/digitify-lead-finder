@@ -13,7 +13,7 @@ test.describe("Module access guard", () => {
     await page.getByLabel("E-mail").fill(restrictedEmail);
     await page.getByLabel("Wachtwoord").fill(password);
     await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
   });
 
   test("disabled module shows blocked state", async ({ page }) => {

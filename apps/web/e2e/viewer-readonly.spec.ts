@@ -15,7 +15,7 @@ test.describe("VIEWER read-only RBAC", () => {
     await page.getByLabel("E-mail").fill(viewerEmail);
     await page.getByLabel("Wachtwoord").fill(viewerPassword);
     await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
   });
 
   test("VIEWER cannot access bulk delete controls", async ({ page }) => {

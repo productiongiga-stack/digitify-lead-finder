@@ -9,7 +9,7 @@ test.describe("authenticated smoke", () => {
     await page.getByLabel("E-mail").fill(email);
     await page.getByLabel("Wachtwoord").fill(password);
     await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
   });
 
   test("templates studio loads", async ({ page }) => {
@@ -22,7 +22,7 @@ test.describe("authenticated smoke", () => {
     await page.goto("/templates");
     await expect(page.getByText(/berichten/).first()).toBeVisible();
     await page.getByRole("button", { name: /Handmatige teksten/i }).click();
-    await expect(page.getByText(/Nieuw bericht opstellen|Geen handmatige teksten/i)).toBeVisible();
+    await expect(page.getByRole("link", { name: /Nieuw bericht opstellen/i })).toBeVisible();
   });
 
   test("compose saves email draft when lead is selected", async ({ page }) => {

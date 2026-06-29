@@ -10,7 +10,7 @@ test.describe("Dashboard smoke", () => {
     await page.getByLabel("E-mail").fill(email);
     await page.getByLabel("Wachtwoord").fill(password);
     await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await expect(page).not.toHaveURL(/\/login(?:\?|$)/, { timeout: 30_000 });
   });
 
   test("dashboard loads overview widgets", async ({ page }) => {
