@@ -443,6 +443,7 @@ async function parseMetaResponse(response: Response) {
 }
 
 const META_API_TIMEOUT_MS = 45_000;
+const MAX_FACEBOOK_STORY_VIDEO_BYTES = 100 * 1024 * 1024;
 
 async function metaFetch(url: URL, init: RequestInit) {
   try {
@@ -454,6 +455,73 @@ async function metaFetch(url: URL, init: RequestInit) {
     }
     throw error;
   }
+}
+
+async function fetchFacebookStoryVideo(videoUrl: string) {
+  let url: URL;
+  try {
+    url = new URL(videoUrl);
+  } catch {
+    throw new Error("Facebook Story video URL is ongeldig.");
+  }
+
+  if (url.protocol !== "https:") {
+    throw new Error("Facebook Story video moet een publieke HTTPS-URL zijn.");
+  }
+
+  const response = await fetch(url, { method: "GET", signal: AbortSignal.timeout(META_API_TIMEOUT_MS) });
+  if (!response.ok) {
+    throw new Error(`Facebook Story video kon niet worden opgehaald (${response.status}).`);
+  }
+
+  const contentLength = Number(response.headers.get("content-length") || "0");
+  if (contentLength > MAX_FACEBOOK_STORY_VIDEO_BYTES) {
+    throw new Error("Facebook Story video is te groot. Gebruik maximaal 100 MB.");
+  }
+
+  const contentType = response.headers.get("content-type")?.split(";")[0]?.trim() || "application/octet-stream";
+  if (contentType !== "application/octet-stream" && !contentType.startsWith("video/")) {
+    throw new Error("Facebook Story video URL verwijst niet naar een videobestand.");
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.byteLength) {
+    throw new Error("Facebook Story video kon niet worden gelezen.");
+  }
+  if (bytes.byteLength > MAX_FACEBOOK_STORY_VIDEO_BYTES) {
+    throw new Error("Facebook Story video is te groot. Gebruik maximaal 100 MB.");
+  }
+
+  return { bytes, contentType };
+}
+
+async function uploadFacebookStoryVideoToUploadUrl(params: {
+  uploadUrl: string;
+  pageAccessToken: string;
+  videoUrl: string;
+}) {
+  const uploadUrl = params.uploadUrl.trim();
+  if (!uploadUrl) throw new Error("Facebook gaf geen Story video upload-URL terug.");
+
+  let url: URL;
+  try {
+    url = new URL(uploadUrl);
+  } catch {
+    throw new Error("Facebook gaf een ongeldige Story video upload-URL terug.");
+  }
+
+  const { bytes, contentType } = await fetchFacebookStoryVideo(params.videoUrl);
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `OAuth ${params.pageAccessToken}`,
+      "Content-Type": contentType,
+    },
+    body: bytes,
+    signal: AbortSignal.timeout(META_API_TIMEOUT_MS),
+  });
+
+  return parseMetaResponse(response);
 }
 
 export async function metaGet(path: string, params: Record<string, string | undefined>) {
@@ -1103,21 +1171,33 @@ export async function publishFacebookVideoStory(params: {
   pageAccessToken: string;
   videoUrl: string;
 }): Promise<SocialPublishedRef> {
-  const uploaded = (await metaPost(`${params.pageId}/videos`, {
-    access_token: params.pageAccessToken,
-    file_url: params.videoUrl,
-    published: "false",
-  })) as { id?: string };
+  const started = (await runMetaPublishStep("Facebook Story video upload start", () =>
+    metaPost(`${params.pageId}/video_stories`, {
+      access_token: params.pageAccessToken,
+      upload_phase: "start",
+    }),
+  )) as { video_id?: string; id?: string; upload_url?: string };
 
-  const videoId = uploaded.id?.trim() || "";
+  const videoId = (started.video_id || started.id || "").trim();
   if (!videoId) {
-    throw new Error("Facebook Story video kon niet worden geüpload.");
+    throw new Error("Facebook Story video upload kon niet worden gestart.");
   }
 
-  const response = (await metaPost(`${params.pageId}/video_stories`, {
-    access_token: params.pageAccessToken,
-    video_id: videoId,
-  })) as { post_id?: string; id?: string; success?: boolean };
+  await runMetaPublishStep("Facebook Story video upload", () =>
+    uploadFacebookStoryVideoToUploadUrl({
+      uploadUrl: started.upload_url || "",
+      pageAccessToken: params.pageAccessToken,
+      videoUrl: params.videoUrl,
+    }),
+  );
+
+  const response = (await runMetaPublishStep("Facebook Story video publicatie", () =>
+    metaPost(`${params.pageId}/video_stories`, {
+      access_token: params.pageAccessToken,
+      upload_phase: "finish",
+      video_id: videoId,
+    }),
+  )) as { post_id?: string; id?: string; success?: boolean };
 
   const postId = response.post_id || response.id || "";
   if (!postId && !response.success) {
