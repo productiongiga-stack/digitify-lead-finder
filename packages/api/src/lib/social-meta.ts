@@ -435,15 +435,24 @@ export function formatMetaApiError(error: MetaErrorPayload["error"], fallbackSta
 }
 
 async function parseMetaResponse(response: Response) {
-  const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & MetaErrorPayload;
+  const raw = await response.text().catch(() => "");
+  let data = {} as Record<string, unknown> & MetaErrorPayload;
+  if (raw.trim()) {
+    try {
+      data = JSON.parse(raw) as Record<string, unknown> & MetaErrorPayload;
+    } catch {
+      data = {};
+    }
+  }
   if (!response.ok || data.error) {
-    throw new Error(formatMetaApiError(data.error, response.status));
+    if (data.error) throw new Error(formatMetaApiError(data.error, response.status));
+    const detail = raw.trim().slice(0, 500);
+    throw new Error(detail ? `Meta API fout (${response.status}): ${detail}` : `Meta API fout (${response.status})`);
   }
   return data;
 }
 
 const META_API_TIMEOUT_MS = 45_000;
-const MAX_FACEBOOK_STORY_VIDEO_BYTES = 100 * 1024 * 1024;
 
 async function metaFetch(url: URL, init: RequestInit) {
   try {
@@ -457,7 +466,7 @@ async function metaFetch(url: URL, init: RequestInit) {
   }
 }
 
-async function fetchFacebookStoryVideo(videoUrl: string) {
+function assertFacebookStoryVideoUrl(videoUrl: string) {
   let url: URL;
   try {
     url = new URL(videoUrl);
@@ -468,31 +477,6 @@ async function fetchFacebookStoryVideo(videoUrl: string) {
   if (url.protocol !== "https:") {
     throw new Error("Facebook Story video moet een publieke HTTPS-URL zijn.");
   }
-
-  const response = await fetch(url, { method: "GET", signal: AbortSignal.timeout(META_API_TIMEOUT_MS) });
-  if (!response.ok) {
-    throw new Error(`Facebook Story video kon niet worden opgehaald (${response.status}).`);
-  }
-
-  const contentLength = Number(response.headers.get("content-length") || "0");
-  if (contentLength > MAX_FACEBOOK_STORY_VIDEO_BYTES) {
-    throw new Error("Facebook Story video is te groot. Gebruik maximaal 100 MB.");
-  }
-
-  const contentType = response.headers.get("content-type")?.split(";")[0]?.trim() || "application/octet-stream";
-  if (contentType !== "application/octet-stream" && !contentType.startsWith("video/")) {
-    throw new Error("Facebook Story video URL verwijst niet naar een videobestand.");
-  }
-
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (!bytes.byteLength) {
-    throw new Error("Facebook Story video kon niet worden gelezen.");
-  }
-  if (bytes.byteLength > MAX_FACEBOOK_STORY_VIDEO_BYTES) {
-    throw new Error("Facebook Story video is te groot. Gebruik maximaal 100 MB.");
-  }
-
-  return { bytes, contentType };
 }
 
 async function uploadFacebookStoryVideoToUploadUrl(params: {
@@ -510,14 +494,13 @@ async function uploadFacebookStoryVideoToUploadUrl(params: {
     throw new Error("Facebook gaf een ongeldige Story video upload-URL terug.");
   }
 
-  const { bytes, contentType } = await fetchFacebookStoryVideo(params.videoUrl);
+  assertFacebookStoryVideoUrl(params.videoUrl);
   const response = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `OAuth ${params.pageAccessToken}`,
-      "Content-Type": contentType,
+      file_url: params.videoUrl,
     },
-    body: bytes,
     signal: AbortSignal.timeout(META_API_TIMEOUT_MS),
   });
 

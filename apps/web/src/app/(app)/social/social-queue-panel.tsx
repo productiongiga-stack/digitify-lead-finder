@@ -137,18 +137,11 @@ function prettyDate(value?: string | Date | null) {
 }
 
 function explainMetaError(message: string) {
-  if (/story|stories|9:16/i.test(message)) {
+  if (/Facebook Story \d+ video|Story video|video upload/i.test(message)) {
     return {
-      title: "Story-afbeelding ongeldig",
+      title: "Facebook Story-video upload mislukt",
       description:
-        "Stories werken het veiligst met een verticale 9:16-afbeelding. Gebruik bij voorkeur 1080x1920 en een publieke JPG/PNG/WebP URL.",
-    };
-  }
-  if (/2207009|36003|aspect ratio|afbeeldingsverhouding/i.test(message)) {
-    return {
-      title: "Afbeeldingsratio ongeldig",
-      description:
-        "Instagram feed accepteert geen extreem brede of hoge beelden. Gebruik bij voorkeur 1080x1080, 1080x1440 of een ratio tussen 3:4 en 1.91:1.",
+        "De Story-video URL moet publiek bereikbaar zijn als directe MP4/MOV. Controleer of de link zonder login opent en probeer opnieuw.",
     };
   }
   if (/code\s+10\b|does not have permission for this action/i.test(message)) {
@@ -166,9 +159,25 @@ function explainMetaError(message: string) {
   }
   if (/code\s+100|nonexisting field/i.test(message)) {
     return {
-      title: "Post waarschijnlijk wel live",
+      title: "Meta parameter geweigerd",
       description:
-        "Meta gaf een leesfout terug na publicatie. Controleer je pagina op Meta — de post staat vaak al online. Gebruik niet opnieuw publiceren.",
+        "Meta accepteerde een parameter of object niet. Controleer vooral of de media-URL publiek bereikbaar is en bij de gekozen Page/Instagram Business-account hoort.",
+    };
+  }
+  if (/story-afbeelding|afbeeldingsverhouding.*stories|stories.*afbeelding|9:16/i.test(message)) {
+    return {
+      title: "Story-afbeelding ongeldig",
+      description:
+        message.length < 220
+          ? message
+          : "Stories werken het veiligst met een verticale 9:16-afbeelding. Gebruik bij voorkeur 1080x1920 en een publieke JPG/PNG/WebP URL.",
+    };
+  }
+  if (/2207009|36003|aspect ratio|afbeeldingsverhouding/i.test(message)) {
+    return {
+      title: "Afbeeldingsratio ongeldig",
+      description:
+        "Instagram feed accepteert geen extreem brede of hoge beelden. Gebruik bij voorkeur 1080x1080, 1080x1440 of een ratio tussen 3:4 en 1.91:1.",
     };
   }
   return {

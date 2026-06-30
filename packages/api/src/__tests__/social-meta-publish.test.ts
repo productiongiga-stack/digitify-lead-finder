@@ -6,6 +6,7 @@ function jsonResponse(body: unknown, ok = true) {
     ok,
     status: ok ? 200 : 400,
     json: async () => body,
+    text: async () => JSON.stringify(body),
   } as Response;
 }
 
@@ -58,25 +59,17 @@ describe("publishFacebookVideoStory", () => {
 
   it("uses the Facebook Story video upload phases before publishing", async () => {
     const graphBodies: string[] = [];
-    const uploadBodies: Uint8Array[] = [];
+    const uploadHeaders: HeadersInit[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString();
 
-      if (url === "https://cdn.example.com/story.mp4") {
-        return {
-          ok: true,
-          status: 200,
-          headers: new Headers({ "content-type": "video/mp4", "content-length": "4" }),
-          arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer,
-        } as Response;
-      }
-
       if (url === "https://upload.facebook.com/story-session") {
-        uploadBodies.push(init?.body as Uint8Array);
+        uploadHeaders.push(init?.headers || {});
         expect(init?.headers).toMatchObject({
           Authorization: "OAuth page-token",
-          "Content-Type": "video/mp4",
+          file_url: "https://cdn.example.com/story.mp4",
         });
+        expect(init?.body).toBeUndefined();
         return jsonResponse({ success: true });
       }
 
@@ -117,7 +110,40 @@ describe("publishFacebookVideoStory", () => {
       verified: true,
     });
     expect(graphBodies).toHaveLength(2);
-    expect(uploadBodies).toHaveLength(1);
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(uploadHeaders).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps non-JSON upload errors visible", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+
+      if (url === "https://upload.facebook.com/story-session") {
+        return {
+          ok: false,
+          status: 400,
+          text: async () => "Upload URL rejected the file_url header",
+        } as Response;
+      }
+
+      if (init?.method === "GET") {
+        return jsonResponse({ id: "unused" });
+      }
+
+      return jsonResponse({
+        video_id: "video_123",
+        upload_url: "https://upload.facebook.com/story-session",
+      });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      publishFacebookVideoStory({
+        pageId: "page_1",
+        pageAccessToken: "page-token",
+        videoUrl: "https://cdn.example.com/story.mp4",
+      }),
+    ).rejects.toThrow("Facebook Story video upload: Meta API fout (400): Upload URL rejected the file_url header");
   });
 });

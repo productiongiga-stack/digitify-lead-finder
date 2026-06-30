@@ -21,6 +21,37 @@ describe("social image parsing", () => {
     expect(parseImageDimensions(buffer)).toEqual({ width: 1080, height: 1350 });
   });
 
+  it("applies JPEG EXIF orientation when reading dimensions", () => {
+    const exifPayload = Buffer.alloc(6 + 8 + 2 + 12 + 4);
+    exifPayload.write("Exif\0\0", 0, "ascii");
+    exifPayload.write("II", 6, "ascii");
+    exifPayload.writeUInt16LE(42, 8);
+    exifPayload.writeUInt32LE(8, 10);
+    exifPayload.writeUInt16LE(1, 14);
+    exifPayload.writeUInt16LE(0x0112, 16);
+    exifPayload.writeUInt16LE(3, 18);
+    exifPayload.writeUInt32LE(1, 20);
+    exifPayload.writeUInt16LE(6, 24);
+
+    const app1 = Buffer.alloc(4 + exifPayload.length);
+    app1[0] = 0xff;
+    app1[1] = 0xe1;
+    app1.writeUInt16BE(exifPayload.length + 2, 2);
+    exifPayload.copy(app1, 4);
+
+    const sof0 = Buffer.alloc(19);
+    sof0[0] = 0xff;
+    sof0[1] = 0xc0;
+    sof0.writeUInt16BE(17, 2);
+    sof0[4] = 8;
+    sof0.writeUInt16BE(1080, 5);
+    sof0.writeUInt16BE(1920, 7);
+
+    const buffer = Buffer.concat([Buffer.from([0xff, 0xd8]), app1, sof0, Buffer.from([0xff, 0xd9])]);
+
+    expect(parseImageDimensions(buffer)).toEqual({ width: 1080, height: 1920 });
+  });
+
   it("reads dimensions from a base64 data URL", async () => {
     const buffer = Buffer.alloc(32);
     Buffer.from("89504e470d0a1a0a", "hex").copy(buffer, 0);

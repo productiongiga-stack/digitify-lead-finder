@@ -77,6 +77,7 @@ function parseJpegDimensions(buffer: Buffer) {
   if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
 
   let offset = 2;
+  let orientation: number | null = null;
   while (offset < buffer.length) {
     if (buffer[offset] !== 0xff) {
       offset += 1;
@@ -93,19 +94,62 @@ function parseJpegDimensions(buffer: Buffer) {
     const length = buffer.readUInt16BE(offset);
     if (length < 2 || offset + length > buffer.length) break;
 
+    if (marker === 0xe1 && orientation === null) {
+      orientation = parseJpegExifOrientation(buffer, offset + 2, length - 2);
+    }
+
     const isStartOfFrame =
       marker >= 0xc0 &&
       marker <= 0xcf &&
       ![0xc4, 0xc8, 0xcc].includes(marker);
 
     if (isStartOfFrame && offset + 7 <= buffer.length) {
+      const height = buffer.readUInt16BE(offset + 3);
+      const width = buffer.readUInt16BE(offset + 5);
+      if (orientation && orientation >= 5 && orientation <= 8) {
+        return { width: height, height: width };
+      }
       return {
-        height: buffer.readUInt16BE(offset + 3),
-        width: buffer.readUInt16BE(offset + 5),
+        height,
+        width,
       };
     }
 
     offset += length;
+  }
+
+  return null;
+}
+
+function parseJpegExifOrientation(buffer: Buffer, start: number, length: number) {
+  if (length < 14 || start + length > buffer.length) return null;
+  if (buffer.subarray(start, start + 6).toString("ascii") !== "Exif\0\0") return null;
+
+  const tiffStart = start + 6;
+  const byteOrder = buffer.subarray(tiffStart, tiffStart + 2).toString("ascii");
+  const littleEndian = byteOrder === "II";
+  if (!littleEndian && byteOrder !== "MM") return null;
+
+  const readUInt16 = (offset: number) =>
+    littleEndian ? buffer.readUInt16LE(offset) : buffer.readUInt16BE(offset);
+  const readUInt32 = (offset: number) =>
+    littleEndian ? buffer.readUInt32LE(offset) : buffer.readUInt32BE(offset);
+
+  if (readUInt16(tiffStart + 2) !== 42) return null;
+  const ifdOffset = readUInt32(tiffStart + 4);
+  const ifdStart = tiffStart + ifdOffset;
+  if (ifdStart < tiffStart || ifdStart + 2 > start + length) return null;
+
+  const entryCount = readUInt16(ifdStart);
+  for (let index = 0; index < entryCount; index += 1) {
+    const entryOffset = ifdStart + 2 + index * 12;
+    if (entryOffset + 12 > start + length) break;
+    const tag = readUInt16(entryOffset);
+    if (tag !== 0x0112) continue;
+    const type = readUInt16(entryOffset + 2);
+    const count = readUInt32(entryOffset + 4);
+    if (type !== 3 || count < 1) return null;
+    return readUInt16(entryOffset + 8);
   }
 
   return null;
