@@ -841,6 +841,71 @@ describe("social publish worker", () => {
     );
   });
 
+  it("publishes Instagram only for carousel video slides because Facebook multi-upload is photo-only", async () => {
+    const post = {
+      id: "sp_carousel_video_ig_only",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Carousel caption",
+      imageUrl: "https://example.com/cover.jpg",
+      targetPlatforms: ["FACEBOOK", "INSTAGRAM"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+      metadata: {
+        placements: ["FEED"],
+        feedFormat: "CAROUSEL",
+        carousel: {
+          enabled: true,
+          slides: [
+            { id: "slide_1", mediaType: "IMAGE", imageUrl: "https://example.com/one.jpg" },
+            { id: "slide_2", mediaType: "VIDEO", videoUrl: "https://example.com/two.mp4" },
+          ],
+        },
+      },
+    };
+
+    const { db, socialPostUpdate } = makePublishWorkerDb(post);
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "ig_123",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "ig_123",
+      instagramUsername: "digitify.be",
+      pageTasks: ["CREATE_CONTENT"],
+    });
+    mockedMeta.publishInstagramCarouselPost.mockResolvedValue({
+      id: "ig_carousel",
+      permalink: "https://instagram.com/p/ig-carousel",
+      verified: true,
+    });
+
+    const result = await runDueSocialPostsWorker(db as any, { postId: post.id, failImmediately: true });
+
+    expect(result.published).toBe(1);
+    expect(mockedMeta.publishFacebookCarouselPost).not.toHaveBeenCalled();
+    expect(mockedMeta.publishInstagramCarouselPost).toHaveBeenCalledWith(
+      expect.objectContaining({ instagramBusinessId: "ig_123", pageAccessToken: "page-token" }),
+    );
+    expect(socialPostUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ targetPlatforms: ["INSTAGRAM"] }),
+      }),
+    );
+  });
+
   it("publishes feed posts through feed endpoints", async () => {
     const post = {
       id: "sp_feed",
@@ -1034,7 +1099,7 @@ describe("social publish worker", () => {
     );
   });
 
-  it("publishes multi-upload with mixed photo and video slides", async () => {
+  it("skips Facebook for multi-upload with mixed photo and video slides", async () => {
     const post = {
       id: "sp_carousel",
       createdById: TEST_USER_ID,
@@ -1077,11 +1142,7 @@ describe("social publish worker", () => {
       pageName: "Digitify",
       instagramBusinessId: "ig_123",
       instagramUsername: "digitify.be",
-    });
-    mockedMeta.publishFacebookCarouselPost.mockResolvedValue({
-      id: "fb_carousel_1",
-      permalink: "https://facebook.com/post/carousel",
-      verified: true,
+      pageTasks: ["CREATE_CONTENT"],
     });
     mockedMeta.publishInstagramCarouselPost.mockResolvedValue({
       id: "ig_carousel_1",
@@ -1092,13 +1153,7 @@ describe("social publish worker", () => {
     const result = await runDueSocialPostsWorker(db as any);
 
     expect(result.published).toBe(1);
-    expect(mockedMeta.publishFacebookCarouselPost).toHaveBeenCalledWith(
-      expect.objectContaining({
-        pageId: "123",
-        pageAccessToken: "page-token",
-        caption: "Carousel caption",
-      }),
-    );
+    expect(mockedMeta.publishFacebookCarouselPost).not.toHaveBeenCalled();
     expect(mockedMeta.publishInstagramCarouselPost).toHaveBeenCalledWith(
       expect.objectContaining({ pageAccessToken: "page-token" }),
     );

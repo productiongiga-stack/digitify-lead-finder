@@ -1260,10 +1260,8 @@ export async function publishFacebookCarouselPost(params: {
   const body: Record<string, string | undefined> = {
     access_token: params.pageAccessToken,
     message: params.caption,
+    attached_media: JSON.stringify(mediaIds.map((mediaId) => ({ media_fbid: mediaId }))),
   };
-  mediaIds.forEach((mediaId, index) => {
-    body[`attached_media[${index}]`] = JSON.stringify({ media_fbid: mediaId });
-  });
 
   const response = (await runMetaPublishStep("Facebook carousel feed publish", () =>
     metaPost(`${params.pageId}/feed`, body),

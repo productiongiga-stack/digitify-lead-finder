@@ -1181,7 +1181,7 @@ export function SocialPlacementEditor({
                   feedFormat={feedFormat}
                   disabled={disabled}
                   onChange={onCarouselChange}
-                  description="Minstens 2 items, maximaal 10. Instagram wordt een carousel; Facebook een post met meerdere foto's of video's."
+                  description="Minstens 2 items, maximaal 10. Instagram ondersteunt foto's en video's; Facebook multi-upload ondersteunt alleen foto's."
                 />
               </>
             ) : null}

@@ -359,6 +359,17 @@ async function ensurePostCanPublish(
       const feedKind = resolveFeedPublishKind(metadata);
       if (feedKind === "CAROUSEL") {
         const carousel = normalizeCarousel(metadata);
+        const containsVideoSlides = carousel.slides.some((slide) => slide.mediaType === "VIDEO");
+        if (containsVideoSlides && targetPlatforms.includes("FACEBOOK")) {
+          targetPlatforms = targetPlatforms.filter((platform) => platform !== "FACEBOOK");
+          if (!targetPlatforms.includes("INSTAGRAM")) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message:
+                "Facebook multi-upload ondersteunt alleen foto's via Page publishing. Verwijder video uit de multi-upload of publiceer de video als gewone Facebook feed-video.",
+            });
+          }
+        }
         const carouselPlatforms = targetPlatforms.filter(
           (platform) => platform === "INSTAGRAM" || platform === "FACEBOOK",
         );
