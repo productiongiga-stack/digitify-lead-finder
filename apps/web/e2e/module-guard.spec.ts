@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { login } from "./helpers/auth";
 
 const restrictedEmail =
   process.env.PLAYWRIGHT_MODULE_RESTRICTED_EMAIL ??
@@ -9,11 +10,7 @@ const password =
 
 test.describe("Module access guard", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(restrictedEmail);
-    await page.getByLabel("Wachtwoord").fill(password);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await login(page, restrictedEmail, password);
   });
 
   test("disabled module shows blocked state", async ({ page }) => {

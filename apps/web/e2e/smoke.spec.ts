@@ -1,36 +1,25 @@
 import { test, expect } from "@playwright/test";
+import { login } from "./helpers/auth";
 
 const email = process.env.PLAYWRIGHT_LOGIN_EMAIL ?? "admin@digitify.local";
 const password = process.env.PLAYWRIGHT_LOGIN_PASSWORD ?? "DigitifyDev2026!";
 
 test.describe("authenticated smoke", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(email);
-    await page.getByLabel("Wachtwoord").fill(password);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await login(page, email, password);
   });
 
   test("templates studio loads", async ({ page }) => {
     await page.goto("/templates");
-    await expect(page.getByRole("heading", { name: "Template Studio" })).toBeVisible();
-    await expect(page.getByText("Intro — Modern outreach")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Standaard e-mailberichten" })).toBeVisible();
+    await expect(page.getByText("Opmaak vs. inhoud")).toBeVisible();
   });
 
   test("template studio campaign filter scopes saved templates", async ({ page }) => {
     await page.goto("/templates");
-    await expect(page.getByText("Intro - Webdesign")).toBeVisible();
-    await expect(page.getByText("Intro - SEO")).toBeVisible();
-    await expect(page.getByText("Follow-up 1")).toBeVisible();
-
-    await page.getByTestId("template-campaign-filter").click();
-    await page.getByRole("option", { name: "Webdesign Gent" }).click();
-
-    await expect(page.getByText("Intro - Webdesign")).toBeVisible();
-    await expect(page.getByText("Follow-up 1")).toBeVisible();
-    await expect(page.getByText("Alle campagnes").first()).toBeVisible();
-    await expect(page.getByText("Intro - SEO")).toHaveCount(0);
+    await expect(page.getByText(/berichten/).first()).toBeVisible();
+    await page.getByRole("button", { name: /Handmatige teksten/i }).click();
+    await expect(page.getByRole("link", { name: /Nieuw bericht opstellen/i })).toBeVisible();
   });
 
   test("compose saves email draft when lead is selected", async ({ page }) => {
@@ -57,7 +46,7 @@ test.describe("authenticated smoke", () => {
 
   test("outbound center shows approval flow", async ({ page }) => {
     await page.goto("/contacts");
-    await expect(page.getByRole("heading", { name: "Outbound Center" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Outbound Center", level: 1 })).toBeVisible();
     await expect(page.getByText(/Concept.*goedkeuren.*verzenden/i)).toBeVisible();
     await page.getByRole("tab", { name: /info/i }).click();
     await expect(page.getByText(/klaar om te verzenden/i)).toBeVisible();

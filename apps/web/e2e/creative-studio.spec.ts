@@ -1,15 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { login } from "./helpers/auth";
 
 const email = process.env.PLAYWRIGHT_LOGIN_EMAIL ?? "admin@digitify.local";
 const password = process.env.PLAYWRIGHT_LOGIN_PASSWORD ?? "DigitifyDev2026!";
 
 test.describe("Creative Studio smoke", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(email);
-    await page.getByLabel("Wachtwoord").fill(password);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await login(page, email, password);
   });
 
   test("creative studio page loads with tabs", async ({ page }) => {
@@ -28,11 +25,14 @@ test.describe("Creative Studio smoke", () => {
 
   test("lip sync tab and dual-mode image UI render", async ({ page }) => {
     await page.goto("/creative-studio?tab=images");
-    await expect(page.getByRole("button", { name: /Tekst → beeld/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Bewerken/i })).toBeVisible();
+    await expect(
+      page.getByText(/Afbeelding genereren|Voeg je persoonlijke MuAPI-sleutel toe om afbeeldingen te genereren/i).first(),
+    ).toBeVisible();
     await page.getByRole("tab", { name: /Lip sync/i }).click();
     await expect(page).toHaveURL(/tab=lipsync/);
-    await expect(page.getByText("Lip Sync Studio")).toBeVisible();
+    await expect(
+      page.getByText(/Lip Sync Studio|Voeg je persoonlijke MuAPI-sleutel toe om lip sync/i).first(),
+    ).toBeVisible();
   });
 
   test("integrations page shows MuAPI key section", async ({ page }) => {

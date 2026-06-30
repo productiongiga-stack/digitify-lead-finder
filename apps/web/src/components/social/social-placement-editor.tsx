@@ -46,6 +46,7 @@ export type SocialStoryItem = {
   mediaType: "IMAGE" | "VIDEO";
   imageUrl?: string;
   videoUrl?: string;
+  platforms?: SocialPlatform[];
 };
 
 const PLACEMENT_OPTIONS: Array<{
@@ -82,6 +83,60 @@ function createStoryItem(mediaType: SocialStoryItem["mediaType"] = "IMAGE"): Soc
 
 export function storyItemHasMedia(item: SocialStoryItem) {
   return item.mediaType === "VIDEO" ? Boolean(item.videoUrl?.trim()) : Boolean(item.imageUrl?.trim());
+}
+
+function normalizePlatforms(platforms: string[] = []) {
+  return (["FACEBOOK", "INSTAGRAM"] as const).filter((platform) => platforms.includes(platform));
+}
+
+function ItemPlatformToggle({
+  value,
+  availablePlatforms,
+  disabled,
+  onChange,
+}: {
+  value?: SocialPlatform[];
+  availablePlatforms: string[];
+  disabled?: boolean;
+  onChange: (platforms: SocialPlatform[] | undefined) => void;
+}) {
+  const available = normalizePlatforms(availablePlatforms);
+  if (available.length <= 1) return null;
+  const selected = value?.length ? normalizePlatforms(value) : available;
+
+  function toggle(platform: SocialPlatform) {
+    const next = selected.includes(platform)
+      ? selected.filter((item) => item !== platform)
+      : [...selected, platform];
+    if (!next.length) return;
+    const normalizedNext = normalizePlatforms(next);
+    onChange(normalizedNext.length === available.length ? undefined : normalizedNext);
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-[11px] font-medium text-muted-foreground">Kanalen</span>
+      {available.map((platform) => {
+        const active = selected.includes(platform);
+        return (
+          <button
+            key={platform}
+            type="button"
+            disabled={disabled}
+            onClick={() => toggle(platform)}
+            className={cn(
+              "rounded-md border px-2 py-1 text-[11px] font-medium transition",
+              active
+                ? "border-amber-500 bg-amber-500 text-white"
+                : "border-border bg-background text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {platform === "FACEBOOK" ? "Facebook" : "Instagram"}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function formatRatio(value: number) {
@@ -910,6 +965,11 @@ function StoryItemsEditor({
                 >
                   {index + 1}
                 </span>
+                {item.platforms?.length ? (
+                  <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[8px] font-bold text-white">
+                    {item.platforms.map((platform) => (platform === "FACEBOOK" ? "F" : "I")).join("")}
+                  </span>
+                ) : null}
               </button>
             );
           })}
@@ -950,6 +1010,13 @@ function StoryItemsEditor({
               </Button>
             </div>
           </div>
+
+          <ItemPlatformToggle
+            value={activeItem.platforms}
+            availablePlatforms={targetPlatforms}
+            disabled={disabled}
+            onChange={(platforms) => updateActive({ platforms })}
+          />
 
           <input
             ref={imageRef}
@@ -1180,8 +1247,9 @@ export function SocialPlacementEditor({
                   carousel={carousel}
                   feedFormat={feedFormat}
                   disabled={disabled}
+                  targetPlatforms={targetPlatforms}
                   onChange={onCarouselChange}
-                  description="Minstens 2 items, maximaal 10. Instagram wordt een carousel; Facebook een post met meerdere foto's of video's."
+                  description="Minstens 2 items, maximaal 10. Instagram wordt een carousel; Facebook plaatst video-items als losse feed-posts."
                 />
               </>
             ) : null}

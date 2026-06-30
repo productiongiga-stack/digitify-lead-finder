@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { login } from "./helpers/auth";
 
 const email = process.env.PLAYWRIGHT_LOGIN_EMAIL ?? process.env.SEED_ADMIN_EMAIL ?? "admin@digitify.local";
 const password =
@@ -6,11 +7,7 @@ const password =
 
 test.describe("Leads list smoke", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(email);
-    await page.getByLabel("Wachtwoord").fill(password);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await login(page, email, password);
   });
 
   test("leads list renders table shell", async ({ page }) => {
@@ -22,9 +19,9 @@ test.describe("Leads list smoke", () => {
   test("leads list opens detail page", async ({ page }) => {
     await page.goto("/leads");
     await expect(page.locator("table tbody tr, [role=row]").first()).toBeVisible({ timeout: 20_000 });
-    const detailLink = page.locator('table tbody tr a[href*="/leads/"], [role=row] a[href*="/leads/"]').first();
-    await expect(detailLink).toBeVisible({ timeout: 20_000 });
-    await detailLink.click();
+    const openButton = page.locator('button[title="Lead openen"]').first();
+    await expect(openButton).toBeVisible({ timeout: 20_000 });
+    await openButton.click();
     await page.waitForURL(/\/leads\/[^/]+$/, { timeout: 20_000 });
     await expect(page.getByRole("heading").first()).toBeVisible({ timeout: 20_000 });
   });

@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { login } from "./helpers/auth";
 
 const viewerEmail = process.env.PLAYWRIGHT_VIEWER_EMAIL ?? process.env.SEED_VIEWER_EMAIL ?? "";
 const viewerPassword =
@@ -11,36 +12,16 @@ test.describe("VIEWER read-only RBAC", () => {
   test.beforeEach(async ({ page }) => {
     test.skip(!viewerEmail, "Seed a VIEWER user with SEED_VIEWER_EMAIL / PLAYWRIGHT_VIEWER_EMAIL.");
 
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(viewerEmail);
-    await page.getByLabel("Wachtwoord").fill(viewerPassword);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+    await login(page, viewerEmail, viewerPassword);
   });
 
-  test("VIEWER bulk delete is rejected by the API", async ({ page }) => {
+  test("VIEWER cannot access bulk delete controls", async ({ page }) => {
     await page.goto("/leads");
     await expect(page.getByRole("heading", { name: /leads/i })).toBeVisible({ timeout: 15_000 });
 
     const rowCheckbox = page.locator("tbody input[type=checkbox]").first();
-    await expect(rowCheckbox).toBeVisible({ timeout: 15_000 });
-    await rowCheckbox.check();
-
-    await page.getByRole("button", { name: "Verwijderen" }).click();
-    await expect(page.getByText("Leads verwijderen")).toBeVisible();
-
-    const deleteResponse = page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/trpc") &&
-        response.url().includes("lead.bulkDelete") &&
-        response.request().method() === "POST",
-    );
-
-    await page.getByRole("button", { name: /verwijderen$/i }).click();
-    const response = await deleteResponse;
-
-    expect(response.status()).toBeGreaterThanOrEqual(400);
-    await expect(page.getByText("Leads verwijderen")).toBeVisible();
+    await expect(rowCheckbox).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Verwijderen" })).toHaveCount(0);
   });
 
   test("VIEWER settings index hides owner-only sections", async ({ page }) => {

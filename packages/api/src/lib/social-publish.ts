@@ -17,13 +17,12 @@ import {
   publishInstagramReel,
   publishInstagramVideoPost,
   resolveSocialPublishTarget,
+  fetchMetaPagePublishCapability,
   fetchMetaTokenDebugInfo,
-  resolveRequiredMetaPublishScopes,
-  missingMetaPublishScopes,
-  missingMetaGranularTargetScopes,
-  buildMetaPublishScopeError,
-  buildMetaGranularScopeError,
+  resolveMetaOAuthScopeSummary,
+  resolveMetaPublishReadiness,
   type SocialPublishedRef,
+  type SocialPublishTarget,
 } from "./social-meta";
 import {
   CAROUSEL_MAX_SLIDES,
@@ -38,18 +37,21 @@ import {
   normalizePlacements,
   normalizeStoryItems,
   normalizeStoryItemsMetadata,
+  resolveItemPlatforms,
   probeFormatForPlacement,
   resolveFeedPublishKind,
   resolvePlacementImageUrl,
   resolvePlatformFeedImageUrl,
   type SocialCarouselSlide,
   type SocialPlacement,
+  type SocialPlatform,
   type SocialStoryItem,
 } from "./social-placements";
 
 const socialPostFormatEnum = z.enum(["SQUARE", "PORTRAIT", "PORTRAIT_34", "LANDSCAPE", "STORY"]);
 const socialPlacementEnum = z.enum(["FEED", "STORY", "REEL"]);
 const socialFeedFormatEnum = z.enum(["SQUARE", "PORTRAIT", "PORTRAIT_34", "LANDSCAPE"]);
+const socialPlatformEnum = z.enum(["FACEBOOK", "INSTAGRAM"]);
 
 const socialImageUrlSchema = z
   .string()
@@ -81,6 +83,7 @@ const socialCarouselSlideSchema = z.object({
   mediaType: z.enum(["IMAGE", "VIDEO"]),
   imageUrl: z.union([socialImageUrlSchema, z.literal("")]).optional(),
   videoUrl: z.union([socialVideoUrlSchema, z.literal("")]).optional(),
+  platforms: z.array(socialPlatformEnum).min(1).max(2).optional(),
 });
 
 const socialCarouselSchema = z.object({
@@ -93,6 +96,7 @@ const socialStoryItemSchema = z.object({
   mediaType: z.enum(["IMAGE", "VIDEO"]),
   imageUrl: z.union([socialImageUrlSchema, z.literal("")]).optional(),
   videoUrl: z.union([socialVideoUrlSchema, z.literal("")]).optional(),
+  platforms: z.array(socialPlatformEnum).min(1).max(2).optional(),
 });
 
 export const socialPostMetadataSchema = z
@@ -228,14 +232,82 @@ function storyItemHasPublishMedia(item: SocialStoryItem) {
   return item.mediaType === "VIDEO" ? Boolean(item.videoUrl?.trim()) : Boolean(item.imageUrl?.trim());
 }
 
+function slideHasPublishMedia(slide: SocialCarouselSlide) {
+  return slide.mediaType === "VIDEO" ? Boolean(slide.videoUrl?.trim()) : Boolean(slide.imageUrl?.trim());
+}
+
+function filterItemsForPlatform<T extends { platforms?: SocialPlatform[] }>(
+  items: T[],
+  platform: SocialPlatform,
+  targetPlatforms: string[],
+) {
+  return items.filter((item) => resolveItemPlatforms(item, targetPlatforms).includes(platform));
+}
+
+function resolveEffectiveTargetPlatforms(
+  metadata: z.infer<typeof socialPostMetadataSchema>,
+  requestedPlatforms: string[],
+  fallbackImageUrl?: string,
+) {
+  const requested = requestedPlatforms.filter(
+    (platform): platform is SocialPlatform => platform === "FACEBOOK" || platform === "INSTAGRAM",
+  );
+  const placements = normalizePlacements(metadata);
+  const active = new Set<SocialPlatform>();
+
+  for (const placement of placements) {
+    if (placement === "FEED") {
+      const feedKind = resolveFeedPublishKind(metadata);
+      if (feedKind === "CAROUSEL") {
+        const slides = normalizeCarousel(metadata).slides.filter(slideHasPublishMedia);
+        for (const platform of requested) {
+          if (filterItemsForPlatform(slides, platform, requested).length > 0) active.add(platform);
+        }
+      } else {
+        for (const platform of requested) active.add(platform);
+      }
+      continue;
+    }
+
+    if (placement === "STORY") {
+      const explicitStoryItems = normalizeStoryItemsMetadata(metadata);
+      const storyItems = explicitStoryItems.length ? explicitStoryItems : normalizeStoryItems(metadata, fallbackImageUrl);
+      const publishableStoryItems = storyItems.filter(storyItemHasPublishMedia);
+      for (const platform of requested) {
+        if (filterItemsForPlatform(publishableStoryItems, platform, requested).length > 0) active.add(platform);
+      }
+      continue;
+    }
+
+    if (placement === "REEL" && requested.includes("INSTAGRAM")) {
+      active.add("INSTAGRAM");
+    }
+  }
+
+  return requested.filter((platform) => active.has(platform));
+}
+
+function formatPlatformBlockingMessage(platform: "Facebook" | "Instagram", reasons: string[]) {
+  const list = reasons.length ? reasons.join(" ") : "Onbekende Meta-rechtenfout.";
+  return `${platform} publicatie is geblokkeerd vóór upload: ${list} Koppel Meta opnieuw via Integraties en controleer de Meta Developer checklist.`;
+}
+
 async function ensurePostCanPublish(
   post: { imageUrl: string; targetPlatforms: string[]; metadata?: unknown },
-  publishTarget?: { pageId: string; pageAccessToken: string; instagramBusinessId: string; pageTasks?: string[] },
+  publishTarget?: Pick<
+    SocialPublishTarget,
+    "pageId" | "pageAccessToken" | "instagramBusinessId" | "pageTasks"
+  >,
   metaConfig?: { accessToken: string; appId: string; appSecret: string },
 ) {
   const metadata = normalizeSocialMetadata((post.metadata || undefined) as z.infer<typeof socialPostMetadataSchema>);
   const placements = metadata.placements || ["FEED"];
   const assets = metadata.assets || normalizePlacementAssets(metadata);
+  let targetPlatforms = resolveEffectiveTargetPlatforms(
+    metadata,
+    post.targetPlatforms,
+    post.imageUrl,
+  );
 
   if (!placements.length) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Kies minstens één publicatietype (Feed, Story of Reel)." });
@@ -249,25 +321,12 @@ async function ensurePostCanPublish(
   }
 
   const needsInstagram =
-    post.targetPlatforms.includes("INSTAGRAM") || placements.some((placement) => placement === "REEL");
-  if (needsInstagram && !publishTarget.instagramBusinessId) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Het geselecteerde account heeft geen gekoppeld Instagram Business-profiel.",
-    });
-  }
+    targetPlatforms.includes("INSTAGRAM") || placements.some((placement) => placement === "REEL");
 
-  const pageTasks = new Set((publishTarget.pageTasks || []).map((task) => task.trim().toUpperCase()).filter(Boolean));
-  if (
-    post.targetPlatforms.includes("FACEBOOK") &&
-    pageTasks.size > 0 &&
-    !pageTasks.has("CREATE_CONTENT") &&
-    !pageTasks.has("MANAGE")
-  ) {
+  if (!metaConfig?.accessToken || !metaConfig.appId || !metaConfig.appSecret) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message:
-        "Je Facebook-gebruiker heeft geen CREATE_CONTENT taak op deze Page. Geef de gekoppelde Meta-gebruiker contentrechten op de Page en koppel Meta opnieuw.",
+      message: "Meta app-credentials of user-token ontbreken. Vul App ID + Secret in en koppel Meta opnieuw via Integraties.",
     });
   }
 
@@ -285,35 +344,71 @@ async function ensurePostCanPublish(
           "Meta access token is ongeldig. Ga naar Instellingen → Integraties → Opnieuw koppelen.",
       });
     }
-    const requiredScopes = resolveRequiredMetaPublishScopes(post.targetPlatforms);
-    const missingScopes = missingMetaPublishScopes(
-      debug.scopes,
-      requiredScopes,
-    );
-    const scopeError = buildMetaPublishScopeError(missingScopes);
-    if (scopeError) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: scopeError });
+
+    const pageDebug = await fetchMetaTokenDebugInfo({
+      inputToken: publishTarget.pageAccessToken,
+      appId: metaConfig.appId,
+      appSecret: metaConfig.appSecret,
+    });
+
+    if (!pageDebug.isValid) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message:
+          pageDebug.error ||
+          "De Facebook Page-token is ongeldig of verouderd. Koppel Meta opnieuw via Integraties en kies de juiste Page opnieuw.",
+      });
     }
 
-    const facebookGranularMissing = post.targetPlatforms.includes("FACEBOOK")
-      ? missingMetaGranularTargetScopes(debug.granularScopes, ["pages_manage_posts"], publishTarget.pageId)
-      : [];
-    const facebookGranularError = buildMetaGranularScopeError(facebookGranularMissing, "de geselecteerde Facebook Page");
-    if (facebookGranularError) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: facebookGranularError });
+    const pageCapability = await fetchMetaPagePublishCapability({
+      pageId: publishTarget.pageId,
+      pageAccessToken: publishTarget.pageAccessToken,
+    });
+
+    const readiness = resolveMetaPublishReadiness({
+      pageId: publishTarget.pageId,
+      instagramBusinessId: publishTarget.instagramBusinessId,
+      userDebug: debug,
+      pageDebug,
+      pageTasks: publishTarget.pageTasks,
+      pageCapability,
+      oauthScopes: resolveMetaOAuthScopeSummary(),
+    });
+
+    if (post.targetPlatforms.includes("FACEBOOK") && !readiness.facebookPublishReady) {
+      targetPlatforms = targetPlatforms.filter((platform) => platform !== "FACEBOOK");
+      if (!post.targetPlatforms.includes("INSTAGRAM") || !readiness.instagramPublishReady) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: formatPlatformBlockingMessage("Facebook", readiness.facebookBlockingReasons),
+        });
+      }
     }
 
-    const instagramGranularMissing =
-      post.targetPlatforms.includes("INSTAGRAM") && publishTarget.instagramBusinessId
-        ? missingMetaGranularTargetScopes(debug.granularScopes, ["instagram_content_publish"], publishTarget.instagramBusinessId)
-        : [];
-    const instagramGranularError = buildMetaGranularScopeError(instagramGranularMissing, "het geselecteerde Instagram Business-account");
-    if (instagramGranularError) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: instagramGranularError });
+    if (post.targetPlatforms.includes("INSTAGRAM") && !readiness.instagramPublishReady) {
+      targetPlatforms = targetPlatforms.filter((platform) => platform !== "INSTAGRAM");
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: formatPlatformBlockingMessage("Instagram", readiness.instagramBlockingReasons),
+      });
     }
   }
 
-  if (placements.includes("REEL") && !post.targetPlatforms.includes("INSTAGRAM")) {
+  if (!targetPlatforms.length) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Geen publish-ready platform over. Controleer Meta Integraties en koppel opnieuw.",
+    });
+  }
+
+  if (needsInstagram && targetPlatforms.includes("INSTAGRAM") && !publishTarget.instagramBusinessId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Het geselecteerde account heeft geen gekoppeld Instagram Business-profiel.",
+    });
+  }
+
+  if (placements.includes("REEL") && !targetPlatforms.includes("INSTAGRAM")) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: "Reels worden alleen naar Instagram gepubliceerd. Schakel Instagram in of verwijder Reel.",
@@ -325,7 +420,7 @@ async function ensurePostCanPublish(
       const feedKind = resolveFeedPublishKind(metadata);
       if (feedKind === "CAROUSEL") {
         const carousel = normalizeCarousel(metadata);
-        const carouselPlatforms = post.targetPlatforms.filter(
+        const carouselPlatforms = targetPlatforms.filter(
           (platform) => platform === "INSTAGRAM" || platform === "FACEBOOK",
         );
         if (carouselPlatforms.length && (!carousel.enabled || carousel.slides.length < CAROUSEL_MIN_SLIDES)) {
@@ -335,10 +430,12 @@ async function ensurePostCanPublish(
           });
         }
         for (const slide of carousel.slides) {
+          const slidePlatforms = resolveItemPlatforms(slide, targetPlatforms);
+          if (!slidePlatforms.length) continue;
           if (slide.mediaType === "IMAGE" && slide.imageUrl) {
             await validateSocialImageForPublish({
               imageUrl: slide.imageUrl,
-              targetPlatforms: carouselPlatforms,
+              targetPlatforms: slidePlatforms,
               placement: "FEED",
             });
           }
@@ -396,7 +493,7 @@ async function ensurePostCanPublish(
       if (coverUrl) {
         await validateSocialImageForPublish({
           imageUrl: coverUrl,
-          targetPlatforms: post.targetPlatforms,
+          targetPlatforms,
           placement: "REEL",
         });
       }
@@ -413,6 +510,8 @@ async function ensurePostCanPublish(
         });
       }
       for (const [index, item] of storyItems.entries()) {
+        const itemPlatforms = resolveItemPlatforms(item, targetPlatforms);
+        if (!itemPlatforms.length) continue;
         if (!storyItemHasPublishMedia(item)) {
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -448,7 +547,7 @@ async function ensurePostCanPublish(
         }
         await validateSocialImageForPublish({
           imageUrl: item.imageUrl,
-          targetPlatforms: post.targetPlatforms,
+          targetPlatforms: itemPlatforms,
           placement: "STORY",
         });
       }
@@ -465,17 +564,22 @@ async function ensurePostCanPublish(
 
     await validateSocialImageForPublish({
       imageUrl,
-      targetPlatforms: post.targetPlatforms,
+      targetPlatforms,
       placement: probeFormatForPlacement(placement),
     });
   }
+
+  return targetPlatforms;
 }
 
 export async function prepareAndValidatePostForPublish(
   db: PrismaClient,
   post: { id: string; imageUrl: string; targetPlatforms: string[]; metadata?: unknown },
   scope: { workspaceId: string; memberId: string },
-  publishTarget?: { pageId: string; pageAccessToken: string; instagramBusinessId: string },
+  publishTarget?: Pick<
+    SocialPublishTarget,
+    "pageId" | "pageAccessToken" | "instagramBusinessId" | "pageTasks"
+  >,
   metaConfig?: { accessToken: string; appId: string; appSecret: string },
 ) {
   const prepared = await prepareSocialPostAssetsForPublish({
@@ -490,7 +594,7 @@ export async function prepareAndValidatePostForPublish(
     prepared.metadata as z.infer<typeof socialPostMetadataSchema>,
   );
 
-  await ensurePostCanPublish(
+  const targetPlatforms = await ensurePostCanPublish(
     {
       imageUrl: prepared.imageUrl,
       targetPlatforms: post.targetPlatforms,
@@ -513,6 +617,7 @@ export async function prepareAndValidatePostForPublish(
   return {
     imageUrl: prepared.imageUrl,
     metadata: normalizedMetadata,
+    targetPlatforms,
   };
 }
 
@@ -586,19 +691,39 @@ function expectedFacebookFeedKey(metadata: z.infer<typeof socialPostMetadataSche
   return "facebook";
 }
 
+function facebookCarouselExternalKey(index: number) {
+  return index === 0 ? "facebook" : `facebookCarousel_${index + 1}`;
+}
+
+type CarouselSlideEntry = { slide: SocialCarouselSlide; index: number };
+
+function carouselSlidesForPlatformWithIndex(
+  metadata: z.infer<typeof socialPostMetadataSchema>,
+  platform: SocialPlatform,
+  targetPlatforms: string[],
+): CarouselSlideEntry[] {
+  return normalizeCarousel(metadata).slides
+    .map((slide, index) => ({ slide, index }))
+    .filter(({ slide }) => slideHasPublishMedia(slide) && resolveItemPlatforms(slide, targetPlatforms).includes(platform));
+}
+
+function facebookCarouselExpectedKeys(metadata: z.infer<typeof socialPostMetadataSchema>, targetPlatforms: string[]) {
+  const selected = carouselSlidesForPlatformWithIndex(metadata, "FACEBOOK", targetPlatforms);
+  if (!selected.length) return [];
+  if (selected.length >= CAROUSEL_MIN_SLIDES && !selected.some(({ slide }) => slide.mediaType === "VIDEO")) return ["facebook"];
+  return selected.map(({ index }) => facebookCarouselExternalKey(index));
+}
+
 function storyExternalKey(platform: "facebook" | "instagram", index: number, total: number) {
   if (total <= 1) return `${platform}Story`;
   return `${platform}Story_${index + 1}`;
 }
 
-function expectedStoryItemCount(metadata: z.infer<typeof socialPostMetadataSchema>) {
-  const items = normalizeStoryItemsMetadata(metadata).filter((item) =>
-    item.mediaType === "VIDEO" ? Boolean(item.videoUrl?.trim()) : Boolean(item.imageUrl?.trim()),
-  );
-  return Math.max(1, items.length);
+function storyItemsForExpectedKeys(metadata: z.infer<typeof socialPostMetadataSchema>, fallbackImageUrl?: string) {
+  return normalizeStoryItems(metadata, fallbackImageUrl).filter(storyItemHasPublishMedia);
 }
 
-export function expectedSocialPublishKeys(post: { targetPlatforms: string[]; metadata?: unknown }) {
+export function expectedSocialPublishKeys(post: { targetPlatforms: string[]; metadata?: unknown; imageUrl?: string }) {
   const metadata = normalizeSocialMetadata(
     (post.metadata || undefined) as z.infer<typeof socialPostMetadataSchema>,
   );
@@ -609,18 +734,29 @@ export function expectedSocialPublishKeys(post: { targetPlatforms: string[]; met
     if (placement === "FEED") {
       const feedKind = resolveFeedPublishKind(metadata);
       if (post.targetPlatforms.includes("FACEBOOK")) {
-        keys.add(expectedFacebookFeedKey(metadata));
+        for (const key of feedKind === "CAROUSEL" ? facebookCarouselExpectedKeys(metadata, post.targetPlatforms) : [expectedFacebookFeedKey(metadata)]) {
+          keys.add(key);
+        }
       }
       if (post.targetPlatforms.includes("INSTAGRAM")) {
-        keys.add(feedKind === "CAROUSEL" ? "instagramCarousel" : "instagram");
+        if (feedKind === "CAROUSEL") {
+          const instagramSlides = carouselSlidesForPlatformWithIndex(metadata, "INSTAGRAM", post.targetPlatforms);
+          if (instagramSlides.length >= CAROUSEL_MIN_SLIDES) keys.add("instagramCarousel");
+          else if (instagramSlides.length === 1) keys.add("instagram");
+        } else {
+          keys.add("instagram");
+        }
       }
     }
 
     if (placement === "STORY") {
-      const storyCount = expectedStoryItemCount(metadata);
-      for (let index = 0; index < storyCount; index += 1) {
-        if (post.targetPlatforms.includes("FACEBOOK")) keys.add(storyExternalKey("facebook", index, storyCount));
-        if (post.targetPlatforms.includes("INSTAGRAM")) keys.add(storyExternalKey("instagram", index, storyCount));
+      const storyItems = storyItemsForExpectedKeys(metadata, post.imageUrl);
+      const storyCount = Math.max(1, storyItems.length);
+      for (let index = 0; index < storyItems.length; index += 1) {
+        const item = storyItems[index];
+        const itemPlatforms = resolveItemPlatforms(item, post.targetPlatforms);
+        if (itemPlatforms.includes("FACEBOOK")) keys.add(storyExternalKey("facebook", index, storyCount));
+        if (itemPlatforms.includes("INSTAGRAM")) keys.add(storyExternalKey("instagram", index, storyCount));
       }
     }
 
@@ -633,7 +769,7 @@ export function expectedSocialPublishKeys(post: { targetPlatforms: string[]; met
 }
 
 export function hasCompletedExternalPublish(
-  post: { targetPlatforms: string[]; metadata?: unknown },
+  post: { targetPlatforms: string[]; metadata?: unknown; imageUrl?: string },
   externalIds: Record<string, SocialPublishedRef>,
 ) {
   const expectedKeys = expectedSocialPublishKeys(post);
@@ -669,6 +805,49 @@ async function publishMetaStep<T>(label: string, action: () => Promise<T>): Prom
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`${label}: ${message}`);
+  }
+}
+
+async function publishFacebookCarouselSlidesAsFeedBatch(params: {
+  db: PrismaClient;
+  postId: string;
+  pageId: string;
+  pageAccessToken: string;
+  caption: string;
+  slides: CarouselSlideEntry[];
+  externalIds: Record<string, SocialPublishedRef>;
+}) {
+  for (const [publishIndex, { slide, index }] of params.slides.entries()) {
+    const key = facebookCarouselExternalKey(index);
+    if (params.externalIds[key]) continue;
+
+    const caption = publishIndex === 0 ? params.caption : "";
+    if (slide.mediaType === "VIDEO") {
+      const videoUrl = slide.videoUrl?.trim();
+      if (!videoUrl) throw new Error(`Facebook multi-upload item ${index + 1}: video ontbreekt.`);
+      params.externalIds[key] = await publishMetaStep(`Facebook multi-upload item ${index + 1} video`, () =>
+        publishFacebookVideoPost({
+          pageId: params.pageId,
+          pageAccessToken: params.pageAccessToken,
+          caption,
+          videoUrl,
+        }),
+      );
+      await persistPartialExternalIds(params.db, params.postId, params.externalIds);
+      continue;
+    }
+
+    const imageUrl = slide.imageUrl?.trim();
+    if (!imageUrl) throw new Error(`Facebook multi-upload item ${index + 1}: foto ontbreekt.`);
+    params.externalIds[key] = await publishMetaStep(`Facebook multi-upload item ${index + 1} foto`, () =>
+      publishFacebookImagePost({
+        pageId: params.pageId,
+        pageAccessToken: params.pageAccessToken,
+        caption,
+        imageUrl,
+      }),
+    );
+    await persistPartialExternalIds(params.db, params.postId, params.externalIds);
   }
 }
 
@@ -765,7 +944,16 @@ export async function publishSocialPostRecord(
     });
     const metadata = prepared.metadata;
     const primaryImageUrl = prepared.imageUrl;
-    const instagramAccessToken = config.accessToken || publishTarget.pageAccessToken;
+    const targetPlatforms = prepared.targetPlatforms;
+    const effectivePost = { ...post, targetPlatforms };
+    const instagramAccessToken = publishTarget.pageAccessToken;
+
+    if (JSON.stringify(targetPlatforms) !== JSON.stringify(post.targetPlatforms)) {
+      await db.socialPost.update({
+        where: { id: post.id },
+        data: { targetPlatforms },
+      });
+    }
 
     const externalIds: Record<string, SocialPublishedRef> = { ...existingExternalIds };
     const placements = metadata.placements || ["FEED"];
@@ -781,32 +969,107 @@ export async function publishSocialPostRecord(
         if (!carouselSlides.length || carouselSlides.length < CAROUSEL_MIN_SLIDES) {
           throw new Error(`Carousel vereist minstens ${CAROUSEL_MIN_SLIDES} volledige slides.`);
         }
-        if (post.targetPlatforms.includes("FACEBOOK") && !externalIds.facebook) {
-          externalIds.facebook = await publishMetaStep("Facebook multi-upload", () =>
-            publishFacebookCarouselPost({
+        if (targetPlatforms.includes("FACEBOOK")) {
+          const facebookSlideEntries = carouselSlides
+            .map((slide, index) => ({ slide, index }))
+            .filter(({ slide }) => resolveItemPlatforms(slide, targetPlatforms).includes("FACEBOOK"));
+          const facebookSlides = facebookSlideEntries.map(({ slide }) => slide);
+          const containsVideoSlides = facebookSlides.some((slide) => slide.mediaType === "VIDEO");
+          if (facebookSlideEntries.length === 1) {
+            const { slide, index } = facebookSlideEntries[0];
+            const key = facebookCarouselExternalKey(index);
+            if (!externalIds[key]) {
+              if (slide.mediaType === "VIDEO") {
+                const videoUrl = slide.videoUrl?.trim();
+                if (!videoUrl) throw new Error(`Facebook multi-upload item ${index + 1}: video ontbreekt.`);
+                externalIds[key] = await publishMetaStep(`Facebook multi-upload item ${index + 1} video`, () =>
+                  publishFacebookVideoPost({
+                    pageId: publishTarget.pageId,
+                    pageAccessToken: publishTarget.pageAccessToken,
+                    caption: publishCaption,
+                    videoUrl,
+                  }),
+                );
+              } else {
+                const imageUrl = slide.imageUrl?.trim();
+                if (!imageUrl) throw new Error(`Facebook multi-upload item ${index + 1}: foto ontbreekt.`);
+                externalIds[key] = await publishMetaStep(`Facebook multi-upload item ${index + 1} foto`, () =>
+                  publishFacebookImagePost({
+                    pageId: publishTarget.pageId,
+                    pageAccessToken: publishTarget.pageAccessToken,
+                    caption: publishCaption,
+                    imageUrl,
+                  }),
+                );
+              }
+              await persistPartialExternalIds(db, post.id, externalIds);
+            }
+          } else if (facebookSlideEntries.length >= CAROUSEL_MIN_SLIDES && containsVideoSlides) {
+            await publishFacebookCarouselSlidesAsFeedBatch({
+              db,
+              postId: post.id,
               pageId: publishTarget.pageId,
               pageAccessToken: publishTarget.pageAccessToken,
               caption: publishCaption,
-              slides: carouselSlides,
-            }),
-          );
-          await persistPartialExternalIds(db, post.id, externalIds);
-        }
-        if (post.targetPlatforms.includes("INSTAGRAM") && !externalIds.instagramCarousel) {
-          externalIds.instagramCarousel = await publishMetaStep("Instagram carousel", () =>
-            publishInstagramCarouselPost({
-              instagramBusinessId: publishTarget.instagramBusinessId,
-              pageAccessToken: instagramAccessToken,
+              slides: facebookSlideEntries,
+              externalIds,
+            });
+          } else if (facebookSlideEntries.length >= CAROUSEL_MIN_SLIDES && !externalIds.facebook) {
+            externalIds.facebook = await publishFacebookCarouselPost({
+              pageId: publishTarget.pageId,
+              pageAccessToken: publishTarget.pageAccessToken,
               caption: publishCaption,
-              slides: carouselSlides,
-            }),
+              slides: facebookSlides,
+            });
+            await persistPartialExternalIds(db, post.id, externalIds);
+          }
+        }
+        if (targetPlatforms.includes("INSTAGRAM")) {
+          const instagramSlides = carouselSlides.filter((slide) =>
+            resolveItemPlatforms(slide, targetPlatforms).includes("INSTAGRAM"),
           );
-          await persistPartialExternalIds(db, post.id, externalIds);
+          if (instagramSlides.length === 1 && !externalIds.instagram) {
+            const slide = instagramSlides[0];
+            if (slide.mediaType === "VIDEO") {
+              const videoUrl = slide.videoUrl?.trim();
+              if (!videoUrl) throw new Error("Instagram multi-upload item: video ontbreekt.");
+              externalIds.instagram = await publishMetaStep("Instagram feed video", () =>
+                publishInstagramVideoPost({
+                  instagramBusinessId: publishTarget.instagramBusinessId,
+                  pageAccessToken: instagramAccessToken,
+                  caption: publishCaption,
+                  videoUrl,
+                }),
+              );
+            } else {
+              const imageUrl = slide.imageUrl?.trim();
+              if (!imageUrl) throw new Error("Instagram multi-upload item: foto ontbreekt.");
+              externalIds.instagram = await publishMetaStep("Instagram feed afbeelding", () =>
+                publishInstagramImagePost({
+                  instagramBusinessId: publishTarget.instagramBusinessId,
+                  pageAccessToken: instagramAccessToken,
+                  caption: publishCaption,
+                  imageUrl,
+                }),
+              );
+            }
+            await persistPartialExternalIds(db, post.id, externalIds);
+          } else if (instagramSlides.length >= CAROUSEL_MIN_SLIDES && !externalIds.instagramCarousel) {
+            externalIds.instagramCarousel = await publishMetaStep("Instagram carousel", () =>
+              publishInstagramCarouselPost({
+                instagramBusinessId: publishTarget.instagramBusinessId,
+                pageAccessToken: instagramAccessToken,
+                caption: publishCaption,
+                slides: instagramSlides,
+              }),
+            );
+            await persistPartialExternalIds(db, post.id, externalIds);
+          }
         }
       } else if (feedKind === "VIDEO") {
         const videoUrl = assets.FEED?.videoUrl?.trim() || "";
         if (!videoUrl) throw new Error("Feed-video ontbreekt.");
-        if (post.targetPlatforms.includes("FACEBOOK") && !externalIds.facebook) {
+        if (targetPlatforms.includes("FACEBOOK") && !externalIds.facebook) {
           externalIds.facebook = await publishMetaStep("Facebook feed video", () =>
             publishFacebookVideoPost({
               pageId: publishTarget.pageId,
@@ -817,7 +1080,7 @@ export async function publishSocialPostRecord(
           );
           await persistPartialExternalIds(db, post.id, externalIds);
         }
-        if (post.targetPlatforms.includes("INSTAGRAM") && !externalIds.instagram) {
+        if (targetPlatforms.includes("INSTAGRAM") && !externalIds.instagram) {
           externalIds.instagram = await publishMetaStep("Instagram feed video", () =>
             publishInstagramVideoPost({
               instagramBusinessId: publishTarget.instagramBusinessId,
@@ -829,7 +1092,7 @@ export async function publishSocialPostRecord(
           await persistPartialExternalIds(db, post.id, externalIds);
         }
       } else {
-        if (post.targetPlatforms.includes("FACEBOOK") && !externalIds.facebook) {
+        if (targetPlatforms.includes("FACEBOOK") && !externalIds.facebook) {
           const imageUrl = resolvePlatformFeedImageUrl("FACEBOOK", metadata, primaryImageUrl);
           externalIds.facebook = await publishMetaStep("Facebook feed afbeelding", () =>
             publishFacebookImagePost({
@@ -841,7 +1104,7 @@ export async function publishSocialPostRecord(
           );
           await persistPartialExternalIds(db, post.id, externalIds);
         }
-        if (post.targetPlatforms.includes("INSTAGRAM") && !externalIds.instagram) {
+        if (targetPlatforms.includes("INSTAGRAM") && !externalIds.instagram) {
           const imageUrl = resolvePlatformFeedImageUrl("INSTAGRAM", metadata, primaryImageUrl);
           externalIds.instagram = await publishMetaStep("Instagram feed afbeelding", () =>
             publishInstagramImagePost({
@@ -863,12 +1126,13 @@ export async function publishSocialPostRecord(
         .map((item, index) => ({ item, index }))
         .reverse();
       for (const { item, index } of storyPublishOrder) {
+        const itemPlatforms = resolveItemPlatforms(item, targetPlatforms);
         const facebookKey = storyExternalKey("facebook", index, storyItems.length);
         const instagramKey = storyExternalKey("instagram", index, storyItems.length);
         if (item.mediaType === "VIDEO") {
           const videoUrl = item.videoUrl?.trim();
           if (!videoUrl) throw new Error(`Story ${index + 1}: video ontbreekt.`);
-          if (post.targetPlatforms.includes("FACEBOOK") && !externalIds[facebookKey]) {
+          if (itemPlatforms.includes("FACEBOOK") && !externalIds[facebookKey]) {
             externalIds[facebookKey] = await publishMetaStep(`Facebook Story ${index + 1} video`, () =>
               publishFacebookVideoStory({
                 pageId: publishTarget.pageId,
@@ -878,7 +1142,7 @@ export async function publishSocialPostRecord(
             );
             await persistPartialExternalIds(db, post.id, externalIds);
           }
-          if (post.targetPlatforms.includes("INSTAGRAM") && !externalIds[instagramKey]) {
+          if (itemPlatforms.includes("INSTAGRAM") && !externalIds[instagramKey]) {
             externalIds[instagramKey] = await publishMetaStep(`Instagram Story ${index + 1} video`, () =>
               publishInstagramVideoStory({
                 instagramBusinessId: publishTarget.instagramBusinessId,
@@ -893,7 +1157,7 @@ export async function publishSocialPostRecord(
 
         const imageUrl = item.imageUrl?.trim();
         if (!imageUrl) throw new Error(`Story ${index + 1}: afbeelding ontbreekt.`);
-        if (post.targetPlatforms.includes("FACEBOOK") && !externalIds[facebookKey]) {
+        if (itemPlatforms.includes("FACEBOOK") && !externalIds[facebookKey]) {
           externalIds[facebookKey] = await publishMetaStep(`Facebook Story ${index + 1}`, () =>
             publishFacebookImageStory({
               pageId: publishTarget.pageId,
@@ -903,7 +1167,7 @@ export async function publishSocialPostRecord(
           );
           await persistPartialExternalIds(db, post.id, externalIds);
         }
-        if (post.targetPlatforms.includes("INSTAGRAM") && !externalIds[instagramKey]) {
+        if (itemPlatforms.includes("INSTAGRAM") && !externalIds[instagramKey]) {
           externalIds[instagramKey] = await publishMetaStep(`Instagram Story ${index + 1}`, () =>
             publishInstagramImageStory({
               instagramBusinessId: publishTarget.instagramBusinessId,
@@ -919,7 +1183,7 @@ export async function publishSocialPostRecord(
     if (placement === "REEL") {
       const videoUrl = assets.REEL?.videoUrl?.trim();
       if (!videoUrl) throw new Error("Reel-video ontbreekt.");
-      if (!externalIds.instagramReel) {
+      if (targetPlatforms.includes("INSTAGRAM") && !externalIds.instagramReel) {
         const coverUrl = resolvePlacementImageUrl("REEL", metadata, primaryImageUrl);
         const publishCaption = buildPublishedCaption(post.caption, metadata, "REEL");
         externalIds.instagramReel = await publishMetaStep("Instagram Reel", () =>
@@ -939,13 +1203,13 @@ export async function publishSocialPostRecord(
     if (!hasPublishedExternally(externalIds)) {
       throw new Error("Geen Meta publicatie-ID ontvangen.");
     }
-    if (!hasCompletedExternalPublish(post, externalIds)) {
+    if (!hasCompletedExternalPublish(effectivePost, externalIds)) {
       throw new Error(
         "Niet alle geselecteerde social kanalen zijn gepubliceerd. De gelukt-gepubliceerde IDs zijn bewaard; gebruik opnieuw publiceren om de ontbrekende kanalen af te werken.",
       );
     }
 
-    return finalizePublishedPost(db, post, externalIds);
+    return finalizePublishedPost(db, effectivePost, externalIds);
   } catch (error) {
     if (!isSocialPublishInProgressError(error)) {
       await markSocialPostPublishFailure(db, post, error, options);

@@ -6,6 +6,8 @@ import {
   formatMetaApiError,
   missingMetaPublishScopes,
   normalizeMetaOAuthScopes,
+  pickDefaultMetaPage,
+  resolveMetaPublishReadiness,
   resolveMetaOAuthIncludeAds,
   resolveMetaOAuthLoginMode,
   resolveMetaOAuthScopes,
@@ -90,7 +92,139 @@ describe("resolveMetaOAuthScopes", () => {
         ["pages_show_list", "instagram_basic"],
         resolveRequiredMetaPublishScopes(["FACEBOOK", "INSTAGRAM"]),
       ),
-    ).toEqual(["pages_manage_posts", "instagram_content_publish"]);
+    ).toEqual(["pages_read_engagement", "pages_manage_posts", "instagram_content_publish"]);
+  });
+
+  it("prefers a publishable Page with Instagram as default", () => {
+    expect(
+      pickDefaultMetaPage([
+        {
+          id: "viewer_page",
+          name: "Viewer only",
+          accessToken: "viewer-token",
+          instagramBusinessId: "ig_viewer",
+          instagramUsername: "viewer",
+          tasks: ["ADVERTISE"],
+        },
+        {
+          id: "publish_page",
+          name: "Publish Page",
+          accessToken: "publish-token",
+          instagramBusinessId: "ig_publish",
+          instagramUsername: "publish",
+          tasks: ["CREATE_CONTENT"],
+        },
+      ])?.id,
+    ).toBe("publish_page");
+  });
+
+  it("reports Facebook blocked while Instagram remains publish-ready", () => {
+    const readiness = resolveMetaPublishReadiness({
+      pageId: "page_1",
+      instagramBusinessId: "ig_1",
+      pageTasks: ["CREATE_CONTENT"],
+      userDebug: {
+        isValid: true,
+        scopes: ["pages_show_list", "instagram_basic", "instagram_content_publish"],
+        granularScopes: [{ scope: "instagram_content_publish", targetIds: ["ig_1"] }],
+        expiresAt: null,
+        type: "USER",
+        userId: "u1",
+        appId: "app1",
+        application: "Digitify",
+        error: null,
+      },
+      pageDebug: {
+        isValid: true,
+        scopes: ["instagram_content_publish"],
+        granularScopes: [],
+        expiresAt: null,
+        type: "PAGE",
+        userId: null,
+        appId: "app1",
+        application: "Digitify",
+        error: null,
+      },
+      oauthScopes: {
+        loginMode: "facebook",
+        scopeLevel: "standard",
+        includeAds: false,
+        scopes: [
+          "pages_show_list",
+          "pages_read_engagement",
+          "pages_manage_posts",
+          "instagram_basic",
+          "instagram_content_publish",
+        ],
+        overridden: false,
+        hasDeprecatedInstagramBusinessScopes: false,
+        usesLegacyEnvOverride: false,
+      },
+    });
+
+    expect(readiness.facebookPublishReady).toBe(false);
+    expect(readiness.facebookBlockingReasons.join(" ")).toContain("pages_manage_posts");
+    expect(readiness.instagramPublishReady).toBe(true);
+  });
+
+  it("blocks Facebook when Page capability says the token cannot post", () => {
+    const readiness = resolveMetaPublishReadiness({
+      pageId: "page_1",
+      instagramBusinessId: "ig_1",
+      pageTasks: ["CREATE_CONTENT"],
+      pageCapability: { canPost: false, error: null },
+      userDebug: {
+        isValid: true,
+        scopes: [
+          "pages_show_list",
+          "pages_read_engagement",
+          "pages_manage_posts",
+          "instagram_basic",
+          "instagram_content_publish",
+        ],
+        granularScopes: [
+          { scope: "pages_read_engagement", targetIds: ["page_1"] },
+          { scope: "pages_manage_posts", targetIds: ["page_1"] },
+          { scope: "instagram_content_publish", targetIds: ["ig_1"] },
+        ],
+        expiresAt: null,
+        type: "USER",
+        userId: "u1",
+        appId: "app1",
+        application: "Digitify",
+        error: null,
+      },
+      pageDebug: {
+        isValid: true,
+        scopes: ["pages_read_engagement", "pages_manage_posts", "instagram_content_publish"],
+        granularScopes: [],
+        expiresAt: null,
+        type: "PAGE",
+        userId: null,
+        appId: "app1",
+        application: "Digitify",
+        error: null,
+      },
+      oauthScopes: {
+        loginMode: "facebook",
+        scopeLevel: "standard",
+        includeAds: false,
+        scopes: [
+          "pages_show_list",
+          "pages_read_engagement",
+          "pages_manage_posts",
+          "instagram_basic",
+          "instagram_content_publish",
+        ],
+        overridden: false,
+        hasDeprecatedInstagramBusinessScopes: false,
+        usesLegacyEnvOverride: false,
+      },
+    });
+
+    expect(readiness.facebookPublishReady).toBe(false);
+    expect(readiness.facebookBlockingReasons.join(" ")).toContain("can_post=false");
+    expect(readiness.instagramPublishReady).toBe(true);
   });
 
   it("adds a clear hint for OAuth permission errors", () => {
@@ -100,6 +234,7 @@ describe("resolveMetaOAuthScopes", () => {
       type: "OAuthException",
     });
     expect(message).toContain("pages_manage_posts");
+    expect(message).toContain("Page/Instagram-account");
   });
 
   it("adds a clear hint for Instagram aspect-ratio publish errors", () => {

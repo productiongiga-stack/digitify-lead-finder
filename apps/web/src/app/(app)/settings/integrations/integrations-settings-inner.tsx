@@ -1589,7 +1589,10 @@ export function IntegrationsSettingsInner() {
                 </div>
                 {metaConnection.data?.connected ? (
                   metaConnection.data.missingPublishScopes?.length ||
+                  metaConnection.data.missingPageTokenPublishScopes?.length ||
                   metaConnection.data.missingGranularPublishScopes?.length ||
+                  metaConnection.data.tokenValid === false ||
+                  metaConnection.data.pageTokenValid === false ||
                   ((metaConnection.data.selectedPageTasks?.length || 0) > 0 &&
                     !metaConnection.data.selectedPageTasks?.some((task) => ["CREATE_CONTENT", "MANAGE"].includes(task.toUpperCase()))) ? (
                     <Badge variant="warning"><AlertCircle className="mr-1 h-3 w-3" /> Rechten ontbreken</Badge>
@@ -1606,7 +1609,10 @@ export function IntegrationsSettingsInner() {
             <CardContent className="space-y-5 pt-5">
               {metaConnection.data?.connected &&
               (metaConnection.data.missingPublishScopes?.length ||
+                metaConnection.data.missingPageTokenPublishScopes?.length ||
                 metaConnection.data.missingGranularPublishScopes?.length ||
+                metaConnection.data.tokenValid === false ||
+                metaConnection.data.pageTokenValid === false ||
                 ((metaConnection.data.selectedPageTasks?.length || 0) > 0 &&
                   !metaConnection.data.selectedPageTasks?.some((task) => ["CREATE_CONTENT", "MANAGE"].includes(task.toUpperCase())))) ? (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-950 dark:text-amber-100">
@@ -1625,6 +1631,22 @@ export function IntegrationsSettingsInner() {
                     <p className="mt-2 text-xs leading-relaxed">
                       Scope staat op het token, maar niet op de gekozen Facebook Page/Instagram-account:{" "}
                       <span className="font-mono">{metaConnection.data.missingGranularPublishScopes.join(", ")}</span>.
+                    </p>
+                  ) : null}
+                  {metaConnection.data.tokenValid === false ? (
+                    <p className="mt-2 text-xs leading-relaxed">
+                      User-token is ongeldig: {metaConnection.data.tokenDebugError || "koppel Meta opnieuw"}.
+                    </p>
+                  ) : null}
+                  {metaConnection.data.pageTokenValid === false ? (
+                    <p className="mt-2 text-xs leading-relaxed">
+                      Page-token is ongeldig: {metaConnection.data.pageTokenDebugError || "koppel Meta opnieuw"}.
+                    </p>
+                  ) : null}
+                  {metaConnection.data.missingPageTokenPublishScopes?.length ? (
+                    <p className="mt-2 text-xs leading-relaxed">
+                      Gekozen Page-token mist:{" "}
+                      <span className="font-mono">{metaConnection.data.missingPageTokenPublishScopes.join(", ")}</span>.
                     </p>
                   ) : null}
                   {(metaConnection.data.selectedPageTasks?.length || 0) > 0 &&
@@ -1746,7 +1768,7 @@ export function IntegrationsSettingsInner() {
                 </div>
               </div>
 
-              <div className="rounded-xl border bg-muted/20 p-4 text-sm leading-relaxed">
+              <div id="meta-checklist" className="scroll-mt-20 rounded-xl border bg-muted/20 p-4 text-sm leading-relaxed">
                 <p className="font-semibold text-foreground">Stap-voor-stap: Meta-app instellen</p>
                 <ol className="mt-3 list-decimal space-y-2 pl-5 text-muted-foreground">
                   <li>

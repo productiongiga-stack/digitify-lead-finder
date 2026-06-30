@@ -7,11 +7,14 @@ import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import { probeSocialImage } from "../lib/social-image";
 import {
   clearMetaSettings,
+  fetchMetaPagePublishCapability,
   fetchMetaTokenDebugInfo,
   loadMetaManagedPages,
   loadMetaWorkspaceConfig,
+  metaPageTasksAllowContentPublishing,
   missingMetaGranularTargetScopes,
   missingMetaPublishScopes,
+  resolveMetaPublishReadiness,
   resolveMetaOAuthScopeSummary,
   resolveRequiredMetaPublishScopes,
   resolveSocialPublishTarget,
@@ -97,11 +100,18 @@ async function preparePostForPublishValidation(
     });
   }
 
-  await prepareAndValidatePostForPublish(db, row, scope, publishTarget, {
+  const prepared = await prepareAndValidatePostForPublish(db, row, scope, publishTarget, {
     accessToken: config.accessToken,
     appId: config.appId,
     appSecret: config.appSecret,
   });
+
+  if (JSON.stringify(prepared.targetPlatforms) !== JSON.stringify(row.targetPlatforms)) {
+    await db.socialPost.update({
+      where: { id: row.id },
+      data: { targetPlatforms: prepared.targetPlatforms },
+    });
+  }
 }
 
 async function renderCaptionSuggestion(
@@ -733,24 +743,38 @@ export const socialRouter = router({
       z.object({
         pageId: z.string().min(1),
         pageName: z.string().max(160).optional(),
-        pageAccessToken: z.string().min(1),
+        pageAccessToken: z.string().min(1).optional(),
         instagramBusinessId: z.string().optional(),
         instagramUsername: z.string().max(80).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      const config = await loadMetaWorkspaceConfig(ctx.db, scope);
+      if (!config.accessToken) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Koppel Meta eerst via Integraties." });
+      }
+
+      const pages = await loadMetaManagedPages(config.accessToken);
+      const selectedPage = pages.find((page) => page.id === input.pageId);
+      if (!selectedPage) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Deze Facebook-pagina staat niet meer tussen je gekoppelde Meta-accounts. Koppel Meta opnieuw.",
+        });
+      }
+
       await upsertMetaSettings(ctx.db, scope, [
-        { key: "social.meta_page_id", value: input.pageId },
-        { key: "social.meta_page_access_token", value: input.pageAccessToken },
-        { key: "social.meta_instagram_business_id", value: input.instagramBusinessId || "" },
+        { key: "social.meta_page_id", value: selectedPage.id },
+        { key: "social.meta_page_access_token", value: selectedPage.accessToken },
+        { key: "social.meta_instagram_business_id", value: selectedPage.instagramBusinessId || "" },
       ]);
 
       return {
-        pageId: input.pageId,
-        pageName: input.pageName || null,
-        instagramBusinessId: input.instagramBusinessId || null,
-        instagramUsername: input.instagramUsername || null,
+        pageId: selectedPage.id,
+        pageName: selectedPage.name || input.pageName || null,
+        instagramBusinessId: selectedPage.instagramBusinessId || input.instagramBusinessId || null,
+        instagramUsername: selectedPage.instagramUsername || input.instagramUsername || null,
       };
     }),
 
@@ -778,6 +802,13 @@ export const socialRouter = router({
     let tokenDebugError: string | null = null;
     let tokenAppId: string | null = null;
     let tokenApplication: string | null = null;
+    let pageTokenValid: boolean | null = null;
+    let pageTokenDebugError: string | null = null;
+    let pageTokenScopes: string[] = [];
+    let missingPageTokenPublishScopes: string[] = [];
+    let userDebug: Awaited<ReturnType<typeof fetchMetaTokenDebugInfo>> | null = null;
+    let pageDebug: Awaited<ReturnType<typeof fetchMetaTokenDebugInfo>> | null = null;
+    let pageCapability: Awaited<ReturnType<typeof fetchMetaPagePublishCapability>> | null = null;
 
     if (config.accessToken && config.appId && config.appSecret) {
       const debug = await fetchMetaTokenDebugInfo({
@@ -785,6 +816,7 @@ export const socialRouter = router({
         appId: config.appId,
         appSecret: config.appSecret,
       });
+      userDebug = debug;
       grantedTokenScopes = debug.scopes;
       tokenValid = debug.isValid;
       tokenDebugError = debug.error;
@@ -796,7 +828,11 @@ export const socialRouter = router({
       );
       missingGranularPublishScopes = [
         ...(config.pageId
-          ? missingMetaGranularTargetScopes(debug.granularScopes, ["pages_manage_posts"], config.pageId)
+          ? missingMetaGranularTargetScopes(
+              debug.granularScopes,
+              ["pages_read_engagement", "pages_manage_posts"],
+              config.pageId,
+            )
           : []),
         ...(config.instagramBusinessId
           ? missingMetaGranularTargetScopes(
@@ -808,6 +844,41 @@ export const socialRouter = router({
       ];
     }
 
+    if (config.pageAccessToken && config.appId && config.appSecret) {
+      pageDebug = await fetchMetaTokenDebugInfo({
+        inputToken: config.pageAccessToken,
+        appId: config.appId,
+        appSecret: config.appSecret,
+      });
+      pageTokenValid = pageDebug.isValid;
+      pageTokenDebugError = pageDebug.error;
+      pageTokenScopes = pageDebug.scopes;
+      missingPageTokenPublishScopes = pageDebug.scopes.length
+        ? missingMetaPublishScopes(pageDebug.scopes, [
+            "pages_read_engagement",
+            "pages_manage_posts",
+            "instagram_content_publish",
+          ])
+        : [];
+    }
+
+    if (config.pageId && config.pageAccessToken) {
+      pageCapability = await fetchMetaPagePublishCapability({
+        pageId: config.pageId,
+        pageAccessToken: config.pageAccessToken,
+      });
+    }
+
+    const publishReadiness = resolveMetaPublishReadiness({
+      pageId: config.pageId,
+      instagramBusinessId: config.instagramBusinessId,
+      userDebug,
+      pageDebug,
+      pageTasks: selectedPageTasks,
+      pageCapability,
+      oauthScopes,
+    });
+
     return {
       hasAppCredentials: Boolean(config.appId && config.appSecret),
       connected: Boolean(config.pageId && config.pageAccessToken),
@@ -816,6 +887,13 @@ export const socialRouter = router({
       pages,
       selectedPageId: config.pageId || null,
       selectedPageTasks,
+      selectedPageCanPublish: metaPageTasksAllowContentPublishing(selectedPageTasks),
+      selectedPageCapabilityCanPost: pageCapability?.canPost ?? null,
+      selectedPageCapabilityError: pageCapability?.error ?? null,
+      facebookPublishReady: publishReadiness.facebookPublishReady,
+      instagramPublishReady: publishReadiness.instagramPublishReady,
+      facebookBlockingReasons: publishReadiness.facebookBlockingReasons,
+      instagramBlockingReasons: publishReadiness.instagramBlockingReasons,
       instagramBusinessId: config.instagramBusinessId || null,
       instagramUsername,
       autopostEnabled: config.autopostEnabled,
@@ -827,6 +905,10 @@ export const socialRouter = router({
       tokenDebugError,
       tokenAppId,
       tokenApplication,
+      pageTokenValid,
+      pageTokenDebugError,
+      pageTokenScopes,
+      missingPageTokenPublishScopes,
       oauthLoginMode: oauthScopes.loginMode,
       oauthScopeLevel: oauthScopes.scopeLevel,
       oauthScopes: oauthScopes.scopes,

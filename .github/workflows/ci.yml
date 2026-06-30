@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master, "cursor/**"]
+    branches: [main, master, "cursor/**", "codex/**"]
   pull_request:
     branches: [main, master]
 
@@ -153,6 +153,9 @@ jobs:
       NEXTAUTH_SECRET: ci-nextauth-secret-min-32-chars-long
       NEXTAUTH_URL: http://localhost:3000
       NEXT_PUBLIC_APP_URL: http://localhost:3000
+      SETTINGS_ENCRYPTION_KEY: ci-settings-encryption-key-min-32-chars
+      CRON_SECRET: ci-cron-secret-min-16
+      ENABLE_WORKSPACE_RLS: "true"
       SEED_ADMIN_EMAIL: admin@digitify.ci
       SEED_ADMIN_PASSWORD: DigitifyCiSeed2026!
       SEED_RLS_OWNER_B_EMAIL: owner-b@digitify.ci
@@ -213,6 +216,27 @@ jobs:
       - name: Prepare database
         run: pnpm db:migrate && pnpm db:seed
 
+      - name: Create non-superuser role for browser RLS smoke
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          PGPASSWORD=ci psql -h localhost -U ci -d digitify_ci -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'app_rls') THEN
+              CREATE ROLE app_rls LOGIN PASSWORD 'ci' NOBYPASSRLS;
+            END IF;
+          END $$;
+          GRANT CONNECT ON DATABASE digitify_ci TO app_rls;
+          GRANT USAGE ON SCHEMA public TO app_rls;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_rls;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_rls;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_rls;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT USAGE, SELECT ON SEQUENCES TO app_rls;
+          SQL
+
       - name: Build web app
         run: pnpm --filter @digitify/web build
 
@@ -220,10 +244,20 @@ jobs:
         run: pnpm --filter @digitify/web exec playwright install chromium --with-deps
 
       - name: Playwright smoke tests
+        env:
+          DATABASE_URL: postgresql://app_rls:ci@localhost:5432/digitify_ci
+          DIRECT_URL: postgresql://app_rls:ci@localhost:5432/digitify_ci
+          E2E_DISABLE_RATE_LIMITS: "true"
         run: |
-          pnpm --filter @digitify/web start --port 3000 &
+          set -euo pipefail
+          pnpm --filter @digitify/web start --port 3000 > /tmp/digitify-next.log 2>&1 &
+          server_pid=$!
+          trap 'cat /tmp/digitify-next.log || true; kill $server_pid 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do
-            curl -sf http://localhost:3000/login >/dev/null && break
+            if curl -sf http://localhost:3000/login >/dev/null; then
+              break
+            fi
             sleep 2
           done
+          curl -sf http://localhost:3000/login >/dev/null
           PLAYWRIGHT_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm test:e2e

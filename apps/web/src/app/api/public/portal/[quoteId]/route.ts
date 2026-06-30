@@ -13,6 +13,26 @@ function parseJson(value: unknown) {
   }
 }
 
+async function parsePortalPostBody(request: Request) {
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+  if (contentType.includes("multipart/form-data") || contentType.includes("application/x-www-form-urlencoded")) {
+    const form = await request.formData();
+    return {
+      token: form.get("token"),
+      action: form.get("action"),
+      dataUrl: form.get("dataUrl"),
+      name: form.get("name"),
+      type: form.get("type"),
+    };
+  }
+
+  try {
+    return await request.json();
+  } catch {
+    return null;
+  }
+}
+
 async function loadPortalFiles(ownerId: string, quoteId: string) {
   const row = await prisma.setting.findUnique({
     where: { key: `user:${ownerId}:portal.files_json` },
@@ -115,7 +135,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ quo
   });
   if (hourlyLimiter) return hourlyLimiter;
 
-  const body = await request.json();
+  const body = await parsePortalPostBody(request);
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "Ongeldige aanvraag." }, { status: 400 });
+  }
+
   const token = String(body.token || "");
   if (!verifyQuotePdfToken(quoteId, token)) {
     return NextResponse.json({ error: "Ongeldige of verlopen portal-link." }, { status: 403 });

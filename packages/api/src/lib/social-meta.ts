@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@digitify/db";
 import { protectSettingValue } from "@digitify/db";
+import { createHash } from "node:crypto";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "./settings";
 import { sanitizeOAuthClientValue } from "./oauth-credentials";
 import { resolveOAuthAppUrl } from "./oauth-app-url";
@@ -56,6 +57,9 @@ export const META_FACEBOOK_LOGIN_PUBLISHING_SCOPES = [
   "instagram_basic",
   "instagram_content_publish",
 ] as const;
+
+const META_FACEBOOK_USER_PUBLISH_SCOPES = ["pages_show_list", "pages_read_engagement", "pages_manage_posts"] as const;
+const META_FACEBOOK_PAGE_PUBLISH_SCOPES = ["pages_read_engagement", "pages_manage_posts"] as const;
 
 /** @deprecated Instagram Login scope names — remapped to Facebook Login equivalents. */
 const LEGACY_META_SCOPE_REMAP: Record<string, string> = {
@@ -168,6 +172,7 @@ export function resolveMetaOAuthScopeSummary() {
 export function resolveRequiredMetaPublishScopes(targetPlatforms: string[]) {
   const scopes = new Set<string>(["pages_show_list"]);
   if (targetPlatforms.includes("FACEBOOK")) {
+    scopes.add("pages_read_engagement");
     scopes.add("pages_manage_posts");
   }
   if (targetPlatforms.includes("INSTAGRAM")) {
@@ -194,6 +199,28 @@ export type MetaTokenDebugInfo = {
   error: string | null;
 };
 
+const META_STATUS_CACHE_TTL_MS = 2 * 60_000;
+const metaTokenDebugCache = new Map<string, { expiresAt: number; value: MetaTokenDebugInfo }>();
+const metaManagedPagesCache = new Map<string, { expiresAt: number; value: MetaManagedPage[] }>();
+
+function hashCacheKey(...parts: string[]) {
+  return createHash("sha256").update(parts.join("\0")).digest("hex");
+}
+
+function readCache<T>(cache: Map<string, { expiresAt: number; value: T }>, key: string) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function writeCache<T>(cache: Map<string, { expiresAt: number; value: T }>, key: string, value: T) {
+  cache.set(key, { expiresAt: Date.now() + META_STATUS_CACHE_TTL_MS, value });
+}
+
 export async function fetchMetaTokenDebugInfo(params: {
   inputToken: string;
   appId: string;
@@ -214,6 +241,10 @@ export async function fetchMetaTokenDebugInfo(params: {
     };
   }
 
+  const cacheKey = hashCacheKey("debug_token", inputToken, params.appId, params.appSecret);
+  const cached = readCache(metaTokenDebugCache, cacheKey);
+  if (cached) return cached;
+
   try {
     const response = (await metaGet("debug_token", {
       input_token: inputToken,
@@ -233,7 +264,7 @@ export async function fetchMetaTokenDebugInfo(params: {
     };
 
     const data = response.data;
-    return {
+    const result = {
       isValid: Boolean(data?.is_valid),
       scopes: Array.isArray(data?.scopes) ? data.scopes.filter(Boolean) : [],
       granularScopes: Array.isArray(data?.granular_scopes)
@@ -251,6 +282,8 @@ export async function fetchMetaTokenDebugInfo(params: {
       application: data?.application?.trim() || null,
       error: data?.error?.message?.trim() || null,
     };
+    writeCache(metaTokenDebugCache, cacheKey, result);
+    return result;
   } catch (error) {
     return {
       isValid: false,
@@ -365,7 +398,7 @@ const META_API_ERROR_HINTS: Record<number, string> = {
   100:
     "Meta accepteerde een parameter of object niet. Controleer vooral of de media-URL publiek bereikbaar is en bij de gekozen Page/Instagram Business-account hoort.",
   10:
-    "De Meta-app mist publishing-rechten. Voeg pages_manage_posts en instagram_content_publish toe in Meta → Use cases → Facebook Login for Business, zet de app op Live, en koppel Meta opnieuw in Integraties.",
+    "Meta weigert deze publicatie door ontbrekende publish-rechten op de app, token of gekozen Page/Instagram-account. Controleer in Integraties of pages_manage_posts en instagram_content_publish actief zijn, zet de Meta-app op Live en koppel Meta opnieuw met de juiste accounts aangevinkt.",
   190:
     "Meta access token is ongeldig of verlopen. Koppel Meta opnieuw via Integraties zodat user- en page-token vernieuwd worden.",
   200:
@@ -402,9 +435,19 @@ export function formatMetaApiError(error: MetaErrorPayload["error"], fallbackSta
 }
 
 async function parseMetaResponse(response: Response) {
-  const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & MetaErrorPayload;
+  const raw = await response.text().catch(() => "");
+  let data = {} as Record<string, unknown> & MetaErrorPayload;
+  if (raw.trim()) {
+    try {
+      data = JSON.parse(raw) as Record<string, unknown> & MetaErrorPayload;
+    } catch {
+      data = {};
+    }
+  }
   if (!response.ok || data.error) {
-    throw new Error(formatMetaApiError(data.error, response.status));
+    if (data.error) throw new Error(formatMetaApiError(data.error, response.status));
+    const detail = raw.trim().slice(0, 500);
+    throw new Error(detail ? `Meta API fout (${response.status}): ${detail}` : `Meta API fout (${response.status})`);
   }
   return data;
 }
@@ -421,6 +464,47 @@ async function metaFetch(url: URL, init: RequestInit) {
     }
     throw error;
   }
+}
+
+function assertFacebookStoryVideoUrl(videoUrl: string) {
+  let url: URL;
+  try {
+    url = new URL(videoUrl);
+  } catch {
+    throw new Error("Facebook Story video URL is ongeldig.");
+  }
+
+  if (url.protocol !== "https:") {
+    throw new Error("Facebook Story video moet een publieke HTTPS-URL zijn.");
+  }
+}
+
+async function uploadFacebookStoryVideoToUploadUrl(params: {
+  uploadUrl: string;
+  pageAccessToken: string;
+  videoUrl: string;
+}) {
+  const uploadUrl = params.uploadUrl.trim();
+  if (!uploadUrl) throw new Error("Facebook gaf geen Story video upload-URL terug.");
+
+  let url: URL;
+  try {
+    url = new URL(uploadUrl);
+  } catch {
+    throw new Error("Facebook gaf een ongeldige Story video upload-URL terug.");
+  }
+
+  assertFacebookStoryVideoUrl(params.videoUrl);
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `OAuth ${params.pageAccessToken}`,
+      file_url: params.videoUrl,
+    },
+    signal: AbortSignal.timeout(META_API_TIMEOUT_MS),
+  });
+
+  return parseMetaResponse(response);
 }
 
 export async function metaGet(path: string, params: Record<string, string | undefined>) {
@@ -490,6 +574,186 @@ export type MetaManagedPage = {
   instagramUsername: string;
   tasks: string[];
 };
+
+export function metaPageTasksAllowContentPublishing(tasks?: string[]) {
+  const normalized = new Set((tasks || []).map((task) => task.trim().toUpperCase()).filter(Boolean));
+  return normalized.size === 0 || normalized.has("CREATE_CONTENT") || normalized.has("MANAGE");
+}
+
+export function metaPageTasksConfirmContentPublishing(tasks?: string[]) {
+  const normalized = new Set((tasks || []).map((task) => task.trim().toUpperCase()).filter(Boolean));
+  return normalized.has("CREATE_CONTENT") || normalized.has("MANAGE");
+}
+
+export type MetaPublishReadiness = {
+  facebookPublishReady: boolean;
+  instagramPublishReady: boolean;
+  facebookBlockingReasons: string[];
+  instagramBlockingReasons: string[];
+};
+
+export type MetaPagePublishCapability = {
+  canPost: boolean | null;
+  error: string | null;
+};
+
+export function resolveMetaPublishReadiness(params: {
+  pageId?: string | null;
+  instagramBusinessId?: string | null;
+  userDebug?: MetaTokenDebugInfo | null;
+  pageDebug?: MetaTokenDebugInfo | null;
+  pageTasks?: string[];
+  pageCapability?: MetaPagePublishCapability | null;
+  oauthScopes?: ReturnType<typeof resolveMetaOAuthScopeSummary>;
+}): MetaPublishReadiness {
+  const facebookBlockingReasons: string[] = [];
+  const instagramBlockingReasons: string[] = [];
+  const pageId = params.pageId?.trim() || "";
+  const instagramBusinessId = params.instagramBusinessId?.trim() || "";
+  const oauthScopes = params.oauthScopes;
+
+  if (!pageId) {
+    facebookBlockingReasons.push("Geen Facebook-pagina geselecteerd.");
+  }
+
+  if (oauthScopes) {
+    if (oauthScopes.loginMode !== "facebook") {
+      facebookBlockingReasons.push("Meta OAuth staat niet op Facebook Login for Business.");
+    }
+    if (oauthScopes.scopeLevel !== "standard") {
+      facebookBlockingReasons.push("META_OAUTH_SCOPE_LEVEL staat niet op standard.");
+    }
+    const missingOverrideScopes = missingMetaPublishScopes(oauthScopes.scopes, [...META_FACEBOOK_PAGE_PUBLISH_SCOPES]);
+    if (oauthScopes.overridden && missingOverrideScopes.length) {
+      facebookBlockingReasons.push(
+        `META_OAUTH_SCOPES overschrijft de standaard scopes zonder ${missingOverrideScopes.join(", ")}.`,
+      );
+    }
+    if (oauthScopes.usesLegacyEnvOverride || oauthScopes.hasDeprecatedInstagramBusinessScopes) {
+      instagramBlockingReasons.push("Meta OAuth gebruikt verouderde instagram_business_* scopes.");
+    }
+  }
+
+  if (!params.userDebug) {
+    facebookBlockingReasons.push("User-token kon niet gevalideerd worden.");
+    instagramBlockingReasons.push("User-token kon niet gevalideerd worden.");
+  } else if (!params.userDebug.isValid) {
+    const message = params.userDebug.error || "User-token is ongeldig.";
+    facebookBlockingReasons.push(message);
+    instagramBlockingReasons.push(message);
+  } else {
+    const missingFacebookScopes = missingMetaPublishScopes(params.userDebug.scopes, [
+      ...META_FACEBOOK_USER_PUBLISH_SCOPES,
+    ]);
+    if (missingFacebookScopes.length) {
+      facebookBlockingReasons.push(`User-token mist ${missingFacebookScopes.join(", ")}.`);
+    }
+    if (pageId) {
+      const granularMissing = missingMetaGranularTargetScopes(
+        params.userDebug.granularScopes,
+        [...META_FACEBOOK_PAGE_PUBLISH_SCOPES],
+        pageId,
+      );
+      if (granularMissing.length) {
+        facebookBlockingReasons.push(
+          `${granularMissing.join(", ")} is niet actief voor de gekozen Facebook Page.`,
+        );
+      }
+    }
+
+    const missingInstagramScopes = missingMetaPublishScopes(params.userDebug.scopes, [
+      "instagram_basic",
+      "instagram_content_publish",
+    ]);
+    if (missingInstagramScopes.length) {
+      instagramBlockingReasons.push(`User-token mist ${missingInstagramScopes.join(", ")}.`);
+    }
+    if (!instagramBusinessId) {
+      instagramBlockingReasons.push("Geen gekoppeld Instagram Business-account geselecteerd.");
+    } else {
+      const granularMissing = missingMetaGranularTargetScopes(
+        params.userDebug.granularScopes,
+        ["instagram_content_publish"],
+        instagramBusinessId,
+      );
+      if (granularMissing.length) {
+        instagramBlockingReasons.push("instagram_content_publish is niet actief voor het gekozen Instagram-account.");
+      }
+    }
+  }
+
+  if (!params.pageDebug) {
+    facebookBlockingReasons.push("Page-token kon niet gevalideerd worden.");
+    instagramBlockingReasons.push("Page-token kon niet gevalideerd worden.");
+  } else if (!params.pageDebug.isValid) {
+    const message = params.pageDebug.error || "Page-token is ongeldig.";
+    facebookBlockingReasons.push(message);
+    instagramBlockingReasons.push(message);
+  } else if (!params.pageDebug.scopes.length) {
+    facebookBlockingReasons.push("Page-token scopes konden niet bevestigd worden.");
+    instagramBlockingReasons.push("Page-token scopes konden niet bevestigd worden.");
+  } else {
+    const missingFacebookPageScopes = missingMetaPublishScopes(params.pageDebug.scopes, [
+      ...META_FACEBOOK_PAGE_PUBLISH_SCOPES,
+    ]);
+    if (missingFacebookPageScopes.length) {
+      facebookBlockingReasons.push(`Page-token mist ${missingFacebookPageScopes.join(", ")}.`);
+    }
+    const missingInstagramPageScopes = missingMetaPublishScopes(params.pageDebug.scopes, ["instagram_content_publish"]);
+    if (missingInstagramPageScopes.length) {
+      instagramBlockingReasons.push(`Page-token mist ${missingInstagramPageScopes.join(", ")}.`);
+    }
+  }
+
+  if (!params.pageTasks?.length) {
+    facebookBlockingReasons.push("Page-taken konden niet bevestigd worden.");
+  } else if (!metaPageTasksConfirmContentPublishing(params.pageTasks)) {
+    facebookBlockingReasons.push("Facebook Page mist CREATE_CONTENT of MANAGE taak.");
+  }
+
+  if (params.pageCapability) {
+    if (params.pageCapability.error) {
+      facebookBlockingReasons.push(
+        `Facebook Page publish capability kon niet bevestigd worden: ${params.pageCapability.error}`,
+      );
+    } else {
+      if (params.pageCapability.canPost === false) {
+        facebookBlockingReasons.push("Facebook Page geeft can_post=false terug voor deze token.");
+      }
+    }
+  }
+
+  return {
+    facebookPublishReady: facebookBlockingReasons.length === 0,
+    instagramPublishReady: instagramBlockingReasons.length === 0,
+    facebookBlockingReasons,
+    instagramBlockingReasons,
+  };
+}
+
+export async function fetchMetaPagePublishCapability(params: {
+  pageId: string;
+  pageAccessToken: string;
+}): Promise<MetaPagePublishCapability> {
+  try {
+    const raw = (await metaGet(params.pageId, {
+      access_token: params.pageAccessToken,
+      fields: "can_post",
+    })) as {
+      can_post?: boolean;
+    };
+
+    return {
+      canPost: typeof raw.can_post === "boolean" ? raw.can_post : null,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      canPost: null,
+      error: error instanceof Error ? error.message : "Onbekende Meta API-fout.",
+    };
+  }
+}
 
 type MetaAccountsListItem = {
   id?: string;
@@ -580,9 +844,14 @@ async function enrichManagedPagesInstagram(pages: MetaManagedPage[]) {
 }
 
 export async function loadMetaManagedPages(userAccessToken: string): Promise<MetaManagedPage[]> {
+  const token = userAccessToken.trim();
+  const cacheKey = hashCacheKey("managed_pages", token);
+  const cached = readCache(metaManagedPagesCache, cacheKey);
+  if (cached) return cached.map((page) => ({ ...page, tasks: [...page.tasks] }));
+
   const rows = await metaGetCollection<MetaAccountsListItem>("me/accounts", {
     fields: "id,name,access_token,tasks,instagram_business_account{id,username}",
-    access_token: userAccessToken,
+    access_token: token,
     limit: "100",
   });
 
@@ -590,12 +859,18 @@ export async function loadMetaManagedPages(userAccessToken: string): Promise<Met
     .map((item) => mapMetaAccountsListItem(item))
     .filter((item): item is MetaManagedPage => Boolean(item));
 
-  return enrichManagedPagesInstagram(pages);
+  const enriched = await enrichManagedPagesInstagram(pages);
+  writeCache(metaManagedPagesCache, cacheKey, enriched);
+  return enriched.map((page) => ({ ...page, tasks: [...page.tasks] }));
 }
 
 export function pickDefaultMetaPage(pages: MetaManagedPage[]) {
+  const instagramAndPublishable = pages.find(
+    (page) => Boolean(page.instagramBusinessId) && metaPageTasksAllowContentPublishing(page.tasks),
+  );
+  const publishable = pages.find((page) => metaPageTasksAllowContentPublishing(page.tasks));
   const withInstagram = pages.find((page) => Boolean(page.instagramBusinessId));
-  return withInstagram || pages[0] || null;
+  return instagramAndPublishable || publishable || withInstagram || pages[0] || null;
 }
 
 export type SocialPublishTarget = {
@@ -879,21 +1154,33 @@ export async function publishFacebookVideoStory(params: {
   pageAccessToken: string;
   videoUrl: string;
 }): Promise<SocialPublishedRef> {
-  const uploaded = (await metaPost(`${params.pageId}/videos`, {
-    access_token: params.pageAccessToken,
-    file_url: params.videoUrl,
-    published: "false",
-  })) as { id?: string };
+  const started = (await runMetaPublishStep("Facebook Story video upload start", () =>
+    metaPost(`${params.pageId}/video_stories`, {
+      access_token: params.pageAccessToken,
+      upload_phase: "start",
+    }),
+  )) as { video_id?: string; id?: string; upload_url?: string };
 
-  const videoId = uploaded.id?.trim() || "";
+  const videoId = (started.video_id || started.id || "").trim();
   if (!videoId) {
-    throw new Error("Facebook Story video kon niet worden geüpload.");
+    throw new Error("Facebook Story video upload kon niet worden gestart.");
   }
 
-  const response = (await metaPost(`${params.pageId}/video_stories`, {
-    access_token: params.pageAccessToken,
-    video_id: videoId,
-  })) as { post_id?: string; id?: string; success?: boolean };
+  await runMetaPublishStep("Facebook Story video upload", () =>
+    uploadFacebookStoryVideoToUploadUrl({
+      uploadUrl: started.upload_url || "",
+      pageAccessToken: params.pageAccessToken,
+      videoUrl: params.videoUrl,
+    }),
+  );
+
+  const response = (await runMetaPublishStep("Facebook Story video publicatie", () =>
+    metaPost(`${params.pageId}/video_stories`, {
+      access_token: params.pageAccessToken,
+      upload_phase: "finish",
+      video_id: videoId,
+    }),
+  )) as { post_id?: string; id?: string; success?: boolean };
 
   const postId = response.post_id || response.id || "";
   if (!postId && !response.success) {
@@ -912,6 +1199,15 @@ export type SocialCarouselPublishSlide = {
   imageUrl?: string;
   videoUrl?: string;
 };
+
+async function runMetaPublishStep<T>(label: string, action: () => Promise<T>) {
+  try {
+    return await action();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${label}: ${message}`);
+  }
+}
 
 export async function publishFacebookVideoPost(params: {
   pageId: string;
@@ -974,11 +1270,13 @@ async function uploadFacebookCarouselMedia(params: {
     const imageUrl = params.slide.imageUrl?.trim();
     if (!imageUrl) throw new Error("Carousel-foto ontbreekt.");
 
-    const uploaded = (await metaPost(`${params.pageId}/photos`, {
-      access_token: params.pageAccessToken,
-      url: imageUrl,
-      published: "false",
-    })) as { id?: string };
+    const uploaded = (await runMetaPublishStep("Facebook carousel foto upload", () =>
+      metaPost(`${params.pageId}/photos`, {
+        access_token: params.pageAccessToken,
+        url: imageUrl,
+        published: "false",
+      }),
+    )) as { id?: string };
 
     const mediaId = uploaded.id?.trim() || "";
     if (!mediaId) throw new Error("Facebook carousel-foto kon niet worden geüpload.");
@@ -988,11 +1286,13 @@ async function uploadFacebookCarouselMedia(params: {
   const videoUrl = params.slide.videoUrl?.trim();
   if (!videoUrl) throw new Error("Carousel-video ontbreekt.");
 
-  const uploaded = (await metaPost(`${params.pageId}/videos`, {
-    access_token: params.pageAccessToken,
-    file_url: videoUrl,
-    published: "false",
-  })) as { id?: string };
+  const uploaded = (await runMetaPublishStep("Facebook carousel video upload", () =>
+    metaPost(`${params.pageId}/videos`, {
+      access_token: params.pageAccessToken,
+      file_url: videoUrl,
+      published: "false",
+    }),
+  )) as { id?: string };
 
   const mediaId = uploaded.id?.trim() || "";
   if (!mediaId) throw new Error("Facebook carousel-video kon niet worden geüpload.");
@@ -1023,12 +1323,12 @@ export async function publishFacebookCarouselPost(params: {
   const body: Record<string, string | undefined> = {
     access_token: params.pageAccessToken,
     message: params.caption,
+    attached_media: JSON.stringify(mediaIds.map((mediaId) => ({ media_fbid: mediaId }))),
   };
-  mediaIds.forEach((mediaId, index) => {
-    body[`attached_media[${index}]`] = JSON.stringify({ media_fbid: mediaId });
-  });
 
-  const response = (await metaPost(`${params.pageId}/feed`, body)) as { id?: string };
+  const response = (await runMetaPublishStep("Facebook carousel feed publish", () =>
+    metaPost(`${params.pageId}/feed`, body),
+  )) as { id?: string };
   const postId = response.id?.trim() || "";
   if (!postId) throw new Error("Facebook carousel gaf geen post-ID terug na publicatie.");
 
