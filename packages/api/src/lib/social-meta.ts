@@ -525,6 +525,133 @@ export function metaPageTasksAllowContentPublishing(tasks?: string[]) {
   return normalized.size === 0 || normalized.has("CREATE_CONTENT") || normalized.has("MANAGE");
 }
 
+export function metaPageTasksConfirmContentPublishing(tasks?: string[]) {
+  const normalized = new Set((tasks || []).map((task) => task.trim().toUpperCase()).filter(Boolean));
+  return normalized.has("CREATE_CONTENT") || normalized.has("MANAGE");
+}
+
+export type MetaPublishReadiness = {
+  facebookPublishReady: boolean;
+  instagramPublishReady: boolean;
+  facebookBlockingReasons: string[];
+  instagramBlockingReasons: string[];
+};
+
+export function resolveMetaPublishReadiness(params: {
+  pageId?: string | null;
+  instagramBusinessId?: string | null;
+  userDebug?: MetaTokenDebugInfo | null;
+  pageDebug?: MetaTokenDebugInfo | null;
+  pageTasks?: string[];
+  oauthScopes?: ReturnType<typeof resolveMetaOAuthScopeSummary>;
+}): MetaPublishReadiness {
+  const facebookBlockingReasons: string[] = [];
+  const instagramBlockingReasons: string[] = [];
+  const pageId = params.pageId?.trim() || "";
+  const instagramBusinessId = params.instagramBusinessId?.trim() || "";
+  const oauthScopes = params.oauthScopes;
+
+  if (!pageId) {
+    facebookBlockingReasons.push("Geen Facebook-pagina geselecteerd.");
+  }
+
+  if (oauthScopes) {
+    if (oauthScopes.loginMode !== "facebook") {
+      facebookBlockingReasons.push("Meta OAuth staat niet op Facebook Login for Business.");
+    }
+    if (oauthScopes.scopeLevel !== "standard") {
+      facebookBlockingReasons.push("META_OAUTH_SCOPE_LEVEL staat niet op standard.");
+    }
+    if (oauthScopes.overridden && !oauthScopes.scopes.includes("pages_manage_posts")) {
+      facebookBlockingReasons.push("META_OAUTH_SCOPES overschrijft de standaard scopes zonder pages_manage_posts.");
+    }
+    if (oauthScopes.usesLegacyEnvOverride || oauthScopes.hasDeprecatedInstagramBusinessScopes) {
+      instagramBlockingReasons.push("Meta OAuth gebruikt verouderde instagram_business_* scopes.");
+    }
+  }
+
+  if (!params.userDebug) {
+    facebookBlockingReasons.push("User-token kon niet gevalideerd worden.");
+    instagramBlockingReasons.push("User-token kon niet gevalideerd worden.");
+  } else if (!params.userDebug.isValid) {
+    const message = params.userDebug.error || "User-token is ongeldig.";
+    facebookBlockingReasons.push(message);
+    instagramBlockingReasons.push(message);
+  } else {
+    const missingFacebookScopes = missingMetaPublishScopes(params.userDebug.scopes, [
+      "pages_show_list",
+      "pages_manage_posts",
+    ]);
+    if (missingFacebookScopes.length) {
+      facebookBlockingReasons.push(`User-token mist ${missingFacebookScopes.join(", ")}.`);
+    }
+    if (pageId) {
+      const granularMissing = missingMetaGranularTargetScopes(
+        params.userDebug.granularScopes,
+        ["pages_manage_posts"],
+        pageId,
+      );
+      if (granularMissing.length) {
+        facebookBlockingReasons.push(`pages_manage_posts is niet actief voor de gekozen Facebook Page.`);
+      }
+    }
+
+    const missingInstagramScopes = missingMetaPublishScopes(params.userDebug.scopes, [
+      "instagram_basic",
+      "instagram_content_publish",
+    ]);
+    if (missingInstagramScopes.length) {
+      instagramBlockingReasons.push(`User-token mist ${missingInstagramScopes.join(", ")}.`);
+    }
+    if (!instagramBusinessId) {
+      instagramBlockingReasons.push("Geen gekoppeld Instagram Business-account geselecteerd.");
+    } else {
+      const granularMissing = missingMetaGranularTargetScopes(
+        params.userDebug.granularScopes,
+        ["instagram_content_publish"],
+        instagramBusinessId,
+      );
+      if (granularMissing.length) {
+        instagramBlockingReasons.push("instagram_content_publish is niet actief voor het gekozen Instagram-account.");
+      }
+    }
+  }
+
+  if (!params.pageDebug) {
+    facebookBlockingReasons.push("Page-token kon niet gevalideerd worden.");
+    instagramBlockingReasons.push("Page-token kon niet gevalideerd worden.");
+  } else if (!params.pageDebug.isValid) {
+    const message = params.pageDebug.error || "Page-token is ongeldig.";
+    facebookBlockingReasons.push(message);
+    instagramBlockingReasons.push(message);
+  } else if (!params.pageDebug.scopes.length) {
+    facebookBlockingReasons.push("Page-token scopes konden niet bevestigd worden.");
+    instagramBlockingReasons.push("Page-token scopes konden niet bevestigd worden.");
+  } else {
+    const missingFacebookPageScopes = missingMetaPublishScopes(params.pageDebug.scopes, ["pages_manage_posts"]);
+    if (missingFacebookPageScopes.length) {
+      facebookBlockingReasons.push(`Page-token mist ${missingFacebookPageScopes.join(", ")}.`);
+    }
+    const missingInstagramPageScopes = missingMetaPublishScopes(params.pageDebug.scopes, ["instagram_content_publish"]);
+    if (missingInstagramPageScopes.length) {
+      instagramBlockingReasons.push(`Page-token mist ${missingInstagramPageScopes.join(", ")}.`);
+    }
+  }
+
+  if (!params.pageTasks?.length) {
+    facebookBlockingReasons.push("Page-taken konden niet bevestigd worden.");
+  } else if (!metaPageTasksConfirmContentPublishing(params.pageTasks)) {
+    facebookBlockingReasons.push("Facebook Page mist CREATE_CONTENT of MANAGE taak.");
+  }
+
+  return {
+    facebookPublishReady: facebookBlockingReasons.length === 0,
+    instagramPublishReady: instagramBlockingReasons.length === 0,
+    facebookBlockingReasons,
+    instagramBlockingReasons,
+  };
+}
+
 type MetaAccountsListItem = {
   id?: string;
   name?: string;
@@ -958,6 +1085,15 @@ export type SocialCarouselPublishSlide = {
   videoUrl?: string;
 };
 
+async function runMetaPublishStep<T>(label: string, action: () => Promise<T>) {
+  try {
+    return await action();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${label}: ${message}`);
+  }
+}
+
 export async function publishFacebookVideoPost(params: {
   pageId: string;
   pageAccessToken: string;
@@ -1019,11 +1155,13 @@ async function uploadFacebookCarouselMedia(params: {
     const imageUrl = params.slide.imageUrl?.trim();
     if (!imageUrl) throw new Error("Carousel-foto ontbreekt.");
 
-    const uploaded = (await metaPost(`${params.pageId}/photos`, {
-      access_token: params.pageAccessToken,
-      url: imageUrl,
-      published: "false",
-    })) as { id?: string };
+    const uploaded = (await runMetaPublishStep("Facebook carousel foto upload", () =>
+      metaPost(`${params.pageId}/photos`, {
+        access_token: params.pageAccessToken,
+        url: imageUrl,
+        published: "false",
+      }),
+    )) as { id?: string };
 
     const mediaId = uploaded.id?.trim() || "";
     if (!mediaId) throw new Error("Facebook carousel-foto kon niet worden geüpload.");
@@ -1033,11 +1171,13 @@ async function uploadFacebookCarouselMedia(params: {
   const videoUrl = params.slide.videoUrl?.trim();
   if (!videoUrl) throw new Error("Carousel-video ontbreekt.");
 
-  const uploaded = (await metaPost(`${params.pageId}/videos`, {
-    access_token: params.pageAccessToken,
-    file_url: videoUrl,
-    published: "false",
-  })) as { id?: string };
+  const uploaded = (await runMetaPublishStep("Facebook carousel video upload", () =>
+    metaPost(`${params.pageId}/videos`, {
+      access_token: params.pageAccessToken,
+      file_url: videoUrl,
+      published: "false",
+    }),
+  )) as { id?: string };
 
   const mediaId = uploaded.id?.trim() || "";
   if (!mediaId) throw new Error("Facebook carousel-video kon niet worden geüpload.");
@@ -1073,7 +1213,9 @@ export async function publishFacebookCarouselPost(params: {
     body[`attached_media[${index}]`] = JSON.stringify({ media_fbid: mediaId });
   });
 
-  const response = (await metaPost(`${params.pageId}/feed`, body)) as { id?: string };
+  const response = (await runMetaPublishStep("Facebook carousel feed publish", () =>
+    metaPost(`${params.pageId}/feed`, body),
+  )) as { id?: string };
   const postId = response.id?.trim() || "";
   if (!postId) throw new Error("Facebook carousel gaf geen post-ID terug na publicatie.");
 

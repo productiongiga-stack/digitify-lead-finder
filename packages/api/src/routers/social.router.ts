@@ -13,6 +13,7 @@ import {
   metaPageTasksAllowContentPublishing,
   missingMetaGranularTargetScopes,
   missingMetaPublishScopes,
+  resolveMetaPublishReadiness,
   resolveMetaOAuthScopeSummary,
   resolveRequiredMetaPublishScopes,
   resolveSocialPublishTarget,
@@ -98,11 +99,18 @@ async function preparePostForPublishValidation(
     });
   }
 
-  await prepareAndValidatePostForPublish(db, row, scope, publishTarget, {
+  const prepared = await prepareAndValidatePostForPublish(db, row, scope, publishTarget, {
     accessToken: config.accessToken,
     appId: config.appId,
     appSecret: config.appSecret,
   });
+
+  if (JSON.stringify(prepared.targetPlatforms) !== JSON.stringify(row.targetPlatforms)) {
+    await db.socialPost.update({
+      where: { id: row.id },
+      data: { targetPlatforms: prepared.targetPlatforms },
+    });
+  }
 }
 
 async function renderCaptionSuggestion(
@@ -797,6 +805,8 @@ export const socialRouter = router({
     let pageTokenDebugError: string | null = null;
     let pageTokenScopes: string[] = [];
     let missingPageTokenPublishScopes: string[] = [];
+    let userDebug: Awaited<ReturnType<typeof fetchMetaTokenDebugInfo>> | null = null;
+    let pageDebug: Awaited<ReturnType<typeof fetchMetaTokenDebugInfo>> | null = null;
 
     if (config.accessToken && config.appId && config.appSecret) {
       const debug = await fetchMetaTokenDebugInfo({
@@ -804,6 +814,7 @@ export const socialRouter = router({
         appId: config.appId,
         appSecret: config.appSecret,
       });
+      userDebug = debug;
       grantedTokenScopes = debug.scopes;
       tokenValid = debug.isValid;
       tokenDebugError = debug.error;
@@ -828,7 +839,7 @@ export const socialRouter = router({
     }
 
     if (config.pageAccessToken && config.appId && config.appSecret) {
-      const pageDebug = await fetchMetaTokenDebugInfo({
+      pageDebug = await fetchMetaTokenDebugInfo({
         inputToken: config.pageAccessToken,
         appId: config.appId,
         appSecret: config.appSecret,
@@ -841,6 +852,15 @@ export const socialRouter = router({
         : [];
     }
 
+    const publishReadiness = resolveMetaPublishReadiness({
+      pageId: config.pageId,
+      instagramBusinessId: config.instagramBusinessId,
+      userDebug,
+      pageDebug,
+      pageTasks: selectedPageTasks,
+      oauthScopes,
+    });
+
     return {
       hasAppCredentials: Boolean(config.appId && config.appSecret),
       connected: Boolean(config.pageId && config.pageAccessToken),
@@ -850,6 +870,10 @@ export const socialRouter = router({
       selectedPageId: config.pageId || null,
       selectedPageTasks,
       selectedPageCanPublish: metaPageTasksAllowContentPublishing(selectedPageTasks),
+      facebookPublishReady: publishReadiness.facebookPublishReady,
+      instagramPublishReady: publishReadiness.instagramPublishReady,
+      facebookBlockingReasons: publishReadiness.facebookBlockingReasons,
+      instagramBlockingReasons: publishReadiness.instagramBlockingReasons,
       instagramBusinessId: config.instagramBusinessId || null,
       instagramUsername,
       autopostEnabled: config.autopostEnabled,

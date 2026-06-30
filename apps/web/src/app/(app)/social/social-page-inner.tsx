@@ -783,6 +783,23 @@ export function SocialPageInner() {
         description: status.pageTokenDebugError || "Koppel Meta opnieuw via Integraties en kies de Page opnieuw.",
       };
     }
+    if (status.facebookPublishReady === false && status.instagramPublishReady === true) {
+      return {
+        title: "Facebook geblokkeerd, Instagram klaar",
+        description:
+          status.facebookBlockingReasons?.[0] ||
+          "Facebook mist publicatierechten. Instagram-publicatie blijft beschikbaar.",
+      };
+    }
+    if (status.facebookPublishReady === false || status.instagramPublishReady === false) {
+      return {
+        title: "Meta publicatie geblokkeerd",
+        description:
+          status.facebookBlockingReasons?.[0] ||
+          status.instagramBlockingReasons?.[0] ||
+          "Controleer Meta-rechten en koppel opnieuw.",
+      };
+    }
     if (status.missingPublishScopes?.length) {
       return {
         title: "Meta publishing-rechten ontbreken",
@@ -824,6 +841,10 @@ export function SocialPageInner() {
     () => managedPages.find((page) => page.id === selectedPageId) || null,
     [managedPages, selectedPageId],
   );
+  const facebookPublishReady = connectionStatus.data?.facebookPublishReady !== false;
+  const instagramPublishReady = connectionStatus.data?.instagramPublishReady !== false;
+  const facebookBlockingReason = connectionStatus.data?.facebookBlockingReasons?.[0] || "";
+  const instagramBlockingReason = connectionStatus.data?.instagramBlockingReasons?.[0] || "";
 
   const rows = useMemo(() => listQuery.data?.items ?? [], [listQuery.data?.items]);
   const selected = rows.find((row: any) => row.id === selectedId) || null;
@@ -921,6 +942,18 @@ export function SocialPageInner() {
       setTargetInstagram(false);
     }
   }, [selectedManagedPage, targetInstagram]);
+
+  useEffect(() => {
+    if (targetFacebook && connectionStatus.data?.facebookPublishReady === false) {
+      setTargetFacebook(false);
+    }
+  }, [connectionStatus.data?.facebookPublishReady, targetFacebook]);
+
+  useEffect(() => {
+    if (targetInstagram && connectionStatus.data?.instagramPublishReady === false) {
+      setTargetInstagram(false);
+    }
+  }, [connectionStatus.data?.instagramPublishReady, targetInstagram]);
 
   const previewCaption = useMemo(
     () => buildPreviewCaption({ caption, headline, cta, hashtags, linkUrl, brandSignature }),
@@ -1845,6 +1878,32 @@ export function SocialPageInner() {
           </Button>
         </div>
       ) : null}
+      {connectionStatus.data?.connected ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={facebookPublishReady ? "success" : "warning"}>
+              Facebook {facebookPublishReady ? "klaar" : "geblokkeerd"}
+            </Badge>
+            <span className="max-w-[32rem] truncate text-xs text-muted-foreground">
+              {facebookPublishReady ? "Page-token en rechten bevestigd." : facebookBlockingReason || "Controle nodig."}
+            </span>
+            <Badge variant={instagramPublishReady ? "success" : "warning"}>
+              Instagram {instagramPublishReady ? "klaar" : "geblokkeerd"}
+            </Badge>
+            <span className="max-w-[32rem] truncate text-xs text-muted-foreground">
+              {instagramPublishReady ? "Instagram publish-recht bevestigd." : instagramBlockingReason || "Controle nodig."}
+            </span>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button size="sm" variant="outline" asChild>
+              <Link href="/settings/integrations?tab=meta">Opnieuw koppelen</Link>
+            </Button>
+            <Button size="sm" variant="outline" asChild>
+              <Link href="/settings/integrations?tab=meta#meta-checklist">Meta checklist</Link>
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <div
         className={cn(
           "grid gap-4",
@@ -1896,8 +1955,12 @@ export function SocialPageInner() {
                     selectedPage={selectedManagedPage}
                     targetFacebook={targetFacebook}
                     onTargetFacebookChange={setTargetFacebook}
+                    facebookDisabled={!facebookPublishReady}
+                    facebookDisabledReason={facebookBlockingReason}
                     targetInstagram={targetInstagram}
                     onTargetInstagramChange={setTargetInstagram}
+                    instagramDisabled={!instagramPublishReady}
+                    instagramDisabledReason={instagramBlockingReason}
                     disabled={!canEditSelected}
                     isLoading={connectionStatus.isLoading}
                   />

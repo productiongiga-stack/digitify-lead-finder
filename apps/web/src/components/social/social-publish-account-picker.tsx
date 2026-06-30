@@ -38,8 +38,12 @@ type Props = {
   selectedPage: SocialManagedPage | null;
   targetFacebook: boolean;
   onTargetFacebookChange: (checked: boolean) => void;
+  facebookDisabled?: boolean;
+  facebookDisabledReason?: string;
   targetInstagram: boolean;
   onTargetInstagramChange: (checked: boolean) => void;
+  instagramDisabled?: boolean;
+  instagramDisabledReason?: string;
   disabled?: boolean;
   isLoading?: boolean;
 };
@@ -277,8 +281,12 @@ export function SocialPublishAccountPicker({
   selectedPage,
   targetFacebook,
   onTargetFacebookChange,
+  facebookDisabled = false,
+  facebookDisabledReason,
   targetInstagram,
   onTargetInstagramChange,
+  instagramDisabled = false,
+  instagramDisabledReason,
   disabled = false,
   isLoading = false,
 }: Props) {
@@ -340,20 +348,28 @@ export function SocialPublishAccountPicker({
             <div className="grid gap-2 sm:grid-cols-2">
               <ChannelToggle
                 active={targetFacebook}
-                disabled={disabled}
+                disabled={disabled || facebookDisabled}
                 label="Facebook"
-                description={targetFacebook ? "Wordt meegenomen" : "Niet geselecteerd"}
+                description={
+                  facebookDisabled
+                    ? facebookDisabledReason || "Publicatie geblokkeerd"
+                    : targetFacebook
+                      ? "Wordt meegenomen"
+                      : "Niet geselecteerd"
+                }
                 accent="facebook"
                 icon={<FacebookMark />}
                 onClick={() => onTargetFacebookChange(!targetFacebook)}
               />
               <ChannelToggle
                 active={targetInstagram}
-                disabled={disabled || !instagramLinked}
+                disabled={disabled || !instagramLinked || instagramDisabled}
                 label="Instagram"
                 description={
                   !instagramLinked
                     ? "Niet gekoppeld aan pagina"
+                    : instagramDisabled
+                      ? instagramDisabledReason || "Publicatie geblokkeerd"
                     : targetInstagram
                       ? "Wordt meegenomen"
                       : "Niet geselecteerd"

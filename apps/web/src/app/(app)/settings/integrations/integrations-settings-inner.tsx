@@ -1768,7 +1768,7 @@ export function IntegrationsSettingsInner() {
                 </div>
               </div>
 
-              <div className="rounded-xl border bg-muted/20 p-4 text-sm leading-relaxed">
+              <div id="meta-checklist" className="scroll-mt-20 rounded-xl border bg-muted/20 p-4 text-sm leading-relaxed">
                 <p className="font-semibold text-foreground">Stap-voor-stap: Meta-app instellen</p>
                 <ol className="mt-3 list-decimal space-y-2 pl-5 text-muted-foreground">
                   <li>

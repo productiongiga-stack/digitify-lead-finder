@@ -21,6 +21,12 @@ const mockedMeta = vi.hoisted(() => ({
     const normalized = new Set((tasks || []).map((task) => task.trim().toUpperCase()).filter(Boolean));
     return normalized.size === 0 || normalized.has("CREATE_CONTENT") || normalized.has("MANAGE");
   }),
+  resolveMetaPublishReadiness: vi.fn(() => ({
+    facebookPublishReady: true,
+    instagramPublishReady: true,
+    facebookBlockingReasons: [],
+    instagramBlockingReasons: [],
+  })),
   resolveMetaOAuthScopeSummary: vi.fn(() => ({
     loginMode: "facebook",
     scopeLevel: "standard",
@@ -116,6 +122,13 @@ describe("social router flow", () => {
     mockedMeta.buildMetaPublishScopeError.mockImplementation(() => null);
     mockedMeta.buildMetaGranularScopeError.mockReset();
     mockedMeta.buildMetaGranularScopeError.mockImplementation(() => null);
+    mockedMeta.resolveMetaPublishReadiness.mockReset();
+    mockedMeta.resolveMetaPublishReadiness.mockImplementation(() => ({
+      facebookPublishReady: true,
+      instagramPublishReady: true,
+      facebookBlockingReasons: [],
+      instagramBlockingReasons: [],
+    }));
     mockedMeta.fetchMetaTokenDebugInfo.mockReset();
     mockedMeta.fetchMetaTokenDebugInfo.mockResolvedValue({
       isValid: true,
@@ -371,6 +384,13 @@ describe("social publish worker", () => {
     mockedMeta.buildMetaPublishScopeError.mockImplementation(() => null);
     mockedMeta.buildMetaGranularScopeError.mockReset();
     mockedMeta.buildMetaGranularScopeError.mockImplementation(() => null);
+    mockedMeta.resolveMetaPublishReadiness.mockReset();
+    mockedMeta.resolveMetaPublishReadiness.mockImplementation(() => ({
+      facebookPublishReady: true,
+      instagramPublishReady: true,
+      facebookBlockingReasons: [],
+      instagramBlockingReasons: [],
+    }));
     mockedMeta.fetchMetaTokenDebugInfo.mockReset();
     mockedMeta.fetchMetaTokenDebugInfo.mockResolvedValue({
       isValid: true,
@@ -611,9 +631,12 @@ describe("social publish worker", () => {
       instagramUsername: "",
       pageTasks: ["CREATE_CONTENT"],
     });
-    mockedMeta.missingMetaPublishScopes
-      .mockReturnValueOnce([] as string[])
-      .mockReturnValueOnce(["pages_manage_posts"] as string[]);
+    mockedMeta.resolveMetaPublishReadiness.mockReturnValueOnce({
+      facebookPublishReady: false,
+      instagramPublishReady: false,
+      facebookBlockingReasons: ["Page-token mist pages_manage_posts."],
+      instagramBlockingReasons: ["Geen gekoppeld Instagram Business-account geselecteerd."],
+    });
     mockedMeta.fetchMetaTokenDebugInfo
       .mockResolvedValueOnce({
         isValid: true,
@@ -686,9 +709,12 @@ describe("social publish worker", () => {
       instagramUsername: "digitify.be",
       pageTasks: ["CREATE_CONTENT"],
     });
-    mockedMeta.missingMetaPublishScopes
-      .mockReturnValueOnce([] as string[])
-      .mockReturnValueOnce(["instagram_content_publish"] as string[]);
+    mockedMeta.resolveMetaPublishReadiness.mockReturnValueOnce({
+      facebookPublishReady: true,
+      instagramPublishReady: false,
+      facebookBlockingReasons: [],
+      instagramBlockingReasons: ["Page-token mist instagram_content_publish."],
+    });
     mockedMeta.fetchMetaTokenDebugInfo
       .mockResolvedValueOnce({
         isValid: true,
@@ -722,6 +748,77 @@ describe("social publish worker", () => {
         data: expect.objectContaining({
           status: "FAILED",
           lastError: expect.stringContaining("Page-token mist instagram_content_publish"),
+        }),
+      }),
+    );
+  });
+
+  it("publishes Instagram only when Facebook is blocked but Instagram is ready", async () => {
+    const post = {
+      id: "sp_fb_blocked_ig_ready",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Caption",
+      imageUrl: "https://example.com/x.jpg",
+      targetPlatforms: ["FACEBOOK", "INSTAGRAM"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+      metadata: { placements: ["FEED"], feedFormat: "SQUARE" },
+    };
+
+    const { db, socialPostUpdate } = makePublishWorkerDb(post);
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "ig_123",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "ig_123",
+      instagramUsername: "digitify.be",
+      pageTasks: ["CREATE_CONTENT"],
+    });
+    mockedMeta.resolveMetaPublishReadiness.mockReturnValueOnce({
+      facebookPublishReady: false,
+      instagramPublishReady: true,
+      facebookBlockingReasons: ["Page-token mist pages_manage_posts."],
+      instagramBlockingReasons: [],
+    });
+    mockedMeta.publishInstagramImagePost.mockResolvedValue({
+      id: "ig_only",
+      permalink: "https://instagram.com/p/ig-only",
+      verified: true,
+    });
+
+    const result = await runDueSocialPostsWorker(db as any, { postId: post.id, failImmediately: true });
+
+    expect(result.published).toBe(1);
+    expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
+    expect(mockedMeta.publishInstagramImagePost).toHaveBeenCalledWith(
+      expect.objectContaining({ instagramBusinessId: "ig_123", pageAccessToken: "page-token" }),
+    );
+    expect(socialPostUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ targetPlatforms: ["INSTAGRAM"] }),
+      }),
+    );
+    expect(socialPostUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "PUBLISHED",
+          externalPostIds: {
+            instagram: { id: "ig_only", permalink: "https://instagram.com/p/ig-only", verified: true },
+          },
         }),
       }),
     );
