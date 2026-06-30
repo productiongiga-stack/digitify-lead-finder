@@ -6,6 +6,7 @@ import {
   formatMetaApiError,
   missingMetaPublishScopes,
   normalizeMetaOAuthScopes,
+  pickDefaultMetaPage,
   resolveMetaOAuthIncludeAds,
   resolveMetaOAuthLoginMode,
   resolveMetaOAuthScopes,
@@ -91,6 +92,29 @@ describe("resolveMetaOAuthScopes", () => {
         resolveRequiredMetaPublishScopes(["FACEBOOK", "INSTAGRAM"]),
       ),
     ).toEqual(["pages_manage_posts", "instagram_content_publish"]);
+  });
+
+  it("prefers a publishable Page with Instagram as default", () => {
+    expect(
+      pickDefaultMetaPage([
+        {
+          id: "viewer_page",
+          name: "Viewer only",
+          accessToken: "viewer-token",
+          instagramBusinessId: "ig_viewer",
+          instagramUsername: "viewer",
+          tasks: ["ADVERTISE"],
+        },
+        {
+          id: "publish_page",
+          name: "Publish Page",
+          accessToken: "publish-token",
+          instagramBusinessId: "ig_publish",
+          instagramUsername: "publish",
+          tasks: ["CREATE_CONTENT"],
+        },
+      ])?.id,
+    ).toBe("publish_page");
   });
 
   it("adds a clear hint for OAuth permission errors", () => {

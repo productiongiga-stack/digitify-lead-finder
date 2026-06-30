@@ -1645,7 +1645,7 @@ export function IntegrationsSettingsInner() {
                   ) : null}
                   {metaConnection.data.missingPageTokenPublishScopes?.length ? (
                     <p className="mt-2 text-xs leading-relaxed">
-                      Gekozen Facebook Page-token mist:{" "}
+                      Gekozen Page-token mist:{" "}
                       <span className="font-mono">{metaConnection.data.missingPageTokenPublishScopes.join(", ")}</span>.
                     </p>
                   ) : null}

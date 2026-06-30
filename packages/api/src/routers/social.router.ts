@@ -10,6 +10,7 @@ import {
   fetchMetaTokenDebugInfo,
   loadMetaManagedPages,
   loadMetaWorkspaceConfig,
+  metaPageTasksAllowContentPublishing,
   missingMetaGranularTargetScopes,
   missingMetaPublishScopes,
   resolveMetaOAuthScopeSummary,
@@ -733,24 +734,38 @@ export const socialRouter = router({
       z.object({
         pageId: z.string().min(1),
         pageName: z.string().max(160).optional(),
-        pageAccessToken: z.string().min(1),
+        pageAccessToken: z.string().min(1).optional(),
         instagramBusinessId: z.string().optional(),
         instagramUsername: z.string().max(80).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+      const config = await loadMetaWorkspaceConfig(ctx.db, scope);
+      if (!config.accessToken) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Koppel Meta eerst via Integraties." });
+      }
+
+      const pages = await loadMetaManagedPages(config.accessToken);
+      const selectedPage = pages.find((page) => page.id === input.pageId);
+      if (!selectedPage) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Deze Facebook-pagina staat niet meer tussen je gekoppelde Meta-accounts. Koppel Meta opnieuw.",
+        });
+      }
+
       await upsertMetaSettings(ctx.db, scope, [
-        { key: "social.meta_page_id", value: input.pageId },
-        { key: "social.meta_page_access_token", value: input.pageAccessToken },
-        { key: "social.meta_instagram_business_id", value: input.instagramBusinessId || "" },
+        { key: "social.meta_page_id", value: selectedPage.id },
+        { key: "social.meta_page_access_token", value: selectedPage.accessToken },
+        { key: "social.meta_instagram_business_id", value: selectedPage.instagramBusinessId || "" },
       ]);
 
       return {
-        pageId: input.pageId,
-        pageName: input.pageName || null,
-        instagramBusinessId: input.instagramBusinessId || null,
-        instagramUsername: input.instagramUsername || null,
+        pageId: selectedPage.id,
+        pageName: selectedPage.name || input.pageName || null,
+        instagramBusinessId: selectedPage.instagramBusinessId || input.instagramBusinessId || null,
+        instagramUsername: selectedPage.instagramUsername || input.instagramUsername || null,
       };
     }),
 
@@ -822,7 +837,7 @@ export const socialRouter = router({
       pageTokenDebugError = pageDebug.error;
       pageTokenScopes = pageDebug.scopes;
       missingPageTokenPublishScopes = pageDebug.scopes.length
-        ? missingMetaPublishScopes(pageDebug.scopes, ["pages_manage_posts"])
+        ? missingMetaPublishScopes(pageDebug.scopes, ["pages_manage_posts", "instagram_content_publish"])
         : [];
     }
 
@@ -834,6 +849,7 @@ export const socialRouter = router({
       pages,
       selectedPageId: config.pageId || null,
       selectedPageTasks,
+      selectedPageCanPublish: metaPageTasksAllowContentPublishing(selectedPageTasks),
       instagramBusinessId: config.instagramBusinessId || null,
       instagramUsername,
       autopostEnabled: config.autopostEnabled,

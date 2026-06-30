@@ -17,6 +17,10 @@ const mockedMeta = vi.hoisted(() => ({
   ),
   buildMetaPublishScopeError: vi.fn(() => null),
   buildMetaGranularScopeError: vi.fn(() => null),
+  metaPageTasksAllowContentPublishing: vi.fn((tasks?: string[]) => {
+    const normalized = new Set((tasks || []).map((task) => task.trim().toUpperCase()).filter(Boolean));
+    return normalized.size === 0 || normalized.has("CREATE_CONTENT") || normalized.has("MANAGE");
+  }),
   resolveMetaOAuthScopeSummary: vi.fn(() => ({
     loginMode: "facebook",
     scopeLevel: "standard",
@@ -648,6 +652,81 @@ describe("social publish worker", () => {
     );
   });
 
+  it("fails before uploading when the selected Page token lacks instagram_content_publish", async () => {
+    const post = {
+      id: "sp_missing_page_ig_scope",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Caption",
+      imageUrl: "https://example.com/x.jpg",
+      targetPlatforms: ["INSTAGRAM"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+    };
+
+    const { db, socialPostUpdate } = makePublishWorkerDb(post);
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "ig_123",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "ig_123",
+      instagramUsername: "digitify.be",
+      pageTasks: ["CREATE_CONTENT"],
+    });
+    mockedMeta.missingMetaPublishScopes
+      .mockReturnValueOnce([] as string[])
+      .mockReturnValueOnce(["instagram_content_publish"] as string[]);
+    mockedMeta.fetchMetaTokenDebugInfo
+      .mockResolvedValueOnce({
+        isValid: true,
+        scopes: ["pages_show_list", "instagram_basic", "instagram_content_publish"],
+        granularScopes: [],
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        type: "USER",
+        userId: "meta-user",
+        appId: "1",
+        application: "Digitify",
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        isValid: true,
+        scopes: ["pages_show_list"],
+        granularScopes: [],
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        type: "PAGE",
+        userId: null,
+        appId: "1",
+        application: "Digitify",
+        error: null,
+      });
+
+    const result = await runDueSocialPostsWorker(db as any, { postId: post.id, failImmediately: true });
+
+    expect(result.failed).toBe(1);
+    expect(mockedMeta.publishInstagramImagePost).not.toHaveBeenCalled();
+    expect(socialPostUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          lastError: expect.stringContaining("Page-token mist instagram_content_publish"),
+        }),
+      }),
+    );
+  });
+
   it("publishes feed posts through feed endpoints", async () => {
     const post = {
       id: "sp_feed",
@@ -700,7 +779,7 @@ describe("social publish worker", () => {
       expect.objectContaining({ pageId: "123", imageUrl: post.imageUrl, caption: "Feed caption" }),
     );
     expect(mockedMeta.publishInstagramImagePost).toHaveBeenCalledWith(
-      expect.objectContaining({ instagramBusinessId: "ig_123", pageAccessToken: "user-token", imageUrl: post.imageUrl }),
+      expect.objectContaining({ instagramBusinessId: "ig_123", pageAccessToken: "page-token", imageUrl: post.imageUrl }),
     );
     expect(mockedMeta.publishFacebookImageStory).not.toHaveBeenCalled();
     expect(mockedMeta.publishInstagramReel).not.toHaveBeenCalled();
@@ -757,7 +836,7 @@ describe("social publish worker", () => {
     expect(mockedMeta.publishInstagramReel).toHaveBeenCalledWith(
       expect.objectContaining({
         instagramBusinessId: "ig_123",
-        pageAccessToken: "user-token",
+        pageAccessToken: "page-token",
         videoUrl: "https://example.com/reel.mp4",
         caption: "Reel caption",
       }),
@@ -837,7 +916,7 @@ describe("social publish worker", () => {
     expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
     expect(mockedMeta.publishFacebookVideoPost).not.toHaveBeenCalled();
     expect(mockedMeta.publishInstagramCarouselPost).toHaveBeenCalledWith(
-      expect.objectContaining({ pageAccessToken: "user-token" }),
+      expect.objectContaining({ pageAccessToken: "page-token" }),
     );
   });
 
@@ -907,7 +986,7 @@ describe("social publish worker", () => {
       }),
     );
     expect(mockedMeta.publishInstagramCarouselPost).toHaveBeenCalledWith(
-      expect.objectContaining({ pageAccessToken: "user-token" }),
+      expect.objectContaining({ pageAccessToken: "page-token" }),
     );
     expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
     expect(mockedMeta.publishFacebookVideoPost).not.toHaveBeenCalled();
@@ -1022,7 +1101,7 @@ describe("social publish worker", () => {
       expect.objectContaining({ videoUrl: "https://example.com/feed.mp4" }),
     );
     expect(mockedMeta.publishInstagramVideoPost).toHaveBeenCalledWith(
-      expect.objectContaining({ pageAccessToken: "user-token", videoUrl: "https://example.com/feed.mp4" }),
+      expect.objectContaining({ pageAccessToken: "page-token", videoUrl: "https://example.com/feed.mp4" }),
     );
   });
 
@@ -1080,7 +1159,7 @@ describe("social publish worker", () => {
       expect.objectContaining({ pageId: "123", imageUrl: post.imageUrl }),
     );
     expect(mockedMeta.publishInstagramImageStory).toHaveBeenCalledWith(
-      expect.objectContaining({ instagramBusinessId: "ig_123", pageAccessToken: "user-token", imageUrl: post.imageUrl }),
+      expect.objectContaining({ instagramBusinessId: "ig_123", pageAccessToken: "page-token", imageUrl: post.imageUrl }),
     );
     expect(socialPostUpdate).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -1316,7 +1395,7 @@ describe("social publish worker", () => {
     expect(result.published).toBe(1);
     expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
     expect(mockedMeta.publishInstagramImagePost).toHaveBeenCalledWith(
-      expect.objectContaining({ instagramBusinessId: "ig_123", pageAccessToken: "user-token", imageUrl: post.imageUrl }),
+      expect.objectContaining({ instagramBusinessId: "ig_123", pageAccessToken: "page-token", imageUrl: post.imageUrl }),
     );
     expect(socialPostUpdate).toHaveBeenLastCalledWith(
       expect.objectContaining({

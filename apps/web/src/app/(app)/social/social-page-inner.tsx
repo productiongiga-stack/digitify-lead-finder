@@ -791,8 +791,8 @@ export function SocialPageInner() {
     }
     if (status.missingPageTokenPublishScopes?.length) {
       return {
-        title: "Facebook Page-token mist publicatierecht",
-        description: `Ontbrekend op de gekozen Page-token: ${status.missingPageTokenPublishScopes.join(", ")}. Koppel Meta opnieuw en vink deze Facebook Page expliciet aan.`,
+        title: "Page-token mist publicatierecht",
+        description: `Ontbrekend op de gekozen Page-token: ${status.missingPageTokenPublishScopes.join(", ")}. Koppel Meta opnieuw en vink deze Facebook Page en het Instagram-account expliciet aan.`,
       };
     }
     if (status.missingGranularPublishScopes?.length) {

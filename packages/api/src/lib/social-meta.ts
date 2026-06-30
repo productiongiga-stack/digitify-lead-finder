@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@digitify/db";
 import { protectSettingValue } from "@digitify/db";
+import { createHash } from "node:crypto";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "./settings";
 import { sanitizeOAuthClientValue } from "./oauth-credentials";
 import { resolveOAuthAppUrl } from "./oauth-app-url";
@@ -194,6 +195,28 @@ export type MetaTokenDebugInfo = {
   error: string | null;
 };
 
+const META_STATUS_CACHE_TTL_MS = 2 * 60_000;
+const metaTokenDebugCache = new Map<string, { expiresAt: number; value: MetaTokenDebugInfo }>();
+const metaManagedPagesCache = new Map<string, { expiresAt: number; value: MetaManagedPage[] }>();
+
+function hashCacheKey(...parts: string[]) {
+  return createHash("sha256").update(parts.join("\0")).digest("hex");
+}
+
+function readCache<T>(cache: Map<string, { expiresAt: number; value: T }>, key: string) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function writeCache<T>(cache: Map<string, { expiresAt: number; value: T }>, key: string, value: T) {
+  cache.set(key, { expiresAt: Date.now() + META_STATUS_CACHE_TTL_MS, value });
+}
+
 export async function fetchMetaTokenDebugInfo(params: {
   inputToken: string;
   appId: string;
@@ -214,6 +237,10 @@ export async function fetchMetaTokenDebugInfo(params: {
     };
   }
 
+  const cacheKey = hashCacheKey("debug_token", inputToken, params.appId, params.appSecret);
+  const cached = readCache(metaTokenDebugCache, cacheKey);
+  if (cached) return cached;
+
   try {
     const response = (await metaGet("debug_token", {
       input_token: inputToken,
@@ -233,7 +260,7 @@ export async function fetchMetaTokenDebugInfo(params: {
     };
 
     const data = response.data;
-    return {
+    const result = {
       isValid: Boolean(data?.is_valid),
       scopes: Array.isArray(data?.scopes) ? data.scopes.filter(Boolean) : [],
       granularScopes: Array.isArray(data?.granular_scopes)
@@ -251,6 +278,8 @@ export async function fetchMetaTokenDebugInfo(params: {
       application: data?.application?.trim() || null,
       error: data?.error?.message?.trim() || null,
     };
+    writeCache(metaTokenDebugCache, cacheKey, result);
+    return result;
   } catch (error) {
     return {
       isValid: false,
@@ -491,6 +520,11 @@ export type MetaManagedPage = {
   tasks: string[];
 };
 
+export function metaPageTasksAllowContentPublishing(tasks?: string[]) {
+  const normalized = new Set((tasks || []).map((task) => task.trim().toUpperCase()).filter(Boolean));
+  return normalized.size === 0 || normalized.has("CREATE_CONTENT") || normalized.has("MANAGE");
+}
+
 type MetaAccountsListItem = {
   id?: string;
   name?: string;
@@ -580,9 +614,14 @@ async function enrichManagedPagesInstagram(pages: MetaManagedPage[]) {
 }
 
 export async function loadMetaManagedPages(userAccessToken: string): Promise<MetaManagedPage[]> {
+  const token = userAccessToken.trim();
+  const cacheKey = hashCacheKey("managed_pages", token);
+  const cached = readCache(metaManagedPagesCache, cacheKey);
+  if (cached) return cached.map((page) => ({ ...page, tasks: [...page.tasks] }));
+
   const rows = await metaGetCollection<MetaAccountsListItem>("me/accounts", {
     fields: "id,name,access_token,tasks,instagram_business_account{id,username}",
-    access_token: userAccessToken,
+    access_token: token,
     limit: "100",
   });
 
@@ -590,12 +629,18 @@ export async function loadMetaManagedPages(userAccessToken: string): Promise<Met
     .map((item) => mapMetaAccountsListItem(item))
     .filter((item): item is MetaManagedPage => Boolean(item));
 
-  return enrichManagedPagesInstagram(pages);
+  const enriched = await enrichManagedPagesInstagram(pages);
+  writeCache(metaManagedPagesCache, cacheKey, enriched);
+  return enriched.map((page) => ({ ...page, tasks: [...page.tasks] }));
 }
 
 export function pickDefaultMetaPage(pages: MetaManagedPage[]) {
+  const instagramAndPublishable = pages.find(
+    (page) => Boolean(page.instagramBusinessId) && metaPageTasksAllowContentPublishing(page.tasks),
+  );
+  const publishable = pages.find((page) => metaPageTasksAllowContentPublishing(page.tasks));
   const withInstagram = pages.find((page) => Boolean(page.instagramBusinessId));
-  return withInstagram || pages[0] || null;
+  return instagramAndPublishable || publishable || withInstagram || pages[0] || null;
 }
 
 export type SocialPublishTarget = {

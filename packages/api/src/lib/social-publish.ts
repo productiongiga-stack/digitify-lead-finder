@@ -23,6 +23,7 @@ import {
   missingMetaGranularTargetScopes,
   buildMetaPublishScopeError,
   buildMetaGranularScopeError,
+  metaPageTasksAllowContentPublishing,
   type SocialPublishedRef,
   type SocialPublishTarget,
 } from "./social-meta";
@@ -229,11 +230,6 @@ function storyItemHasPublishMedia(item: SocialStoryItem) {
   return item.mediaType === "VIDEO" ? Boolean(item.videoUrl?.trim()) : Boolean(item.imageUrl?.trim());
 }
 
-function pageTasksAllowContentPublishing(pageTasks?: string[]) {
-  const normalized = new Set((pageTasks || []).map((task) => task.trim().toUpperCase()).filter(Boolean));
-  return normalized.size === 0 || normalized.has("CREATE_CONTENT") || normalized.has("MANAGE");
-}
-
 async function ensurePostCanPublish(
   post: { imageUrl: string; targetPlatforms: string[]; metadata?: unknown },
   publishTarget?: Pick<
@@ -266,7 +262,7 @@ async function ensurePostCanPublish(
     });
   }
 
-  if (post.targetPlatforms.includes("FACEBOOK") && !pageTasksAllowContentPublishing(publishTarget.pageTasks)) {
+  if (post.targetPlatforms.includes("FACEBOOK") && !metaPageTasksAllowContentPublishing(publishTarget.pageTasks)) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message:
@@ -315,7 +311,12 @@ async function ensurePostCanPublish(
       throw new TRPCError({ code: "BAD_REQUEST", message: instagramGranularError });
     }
 
-    if (post.targetPlatforms.includes("FACEBOOK")) {
+    const requiredPageTokenScopes = [
+      ...(post.targetPlatforms.includes("FACEBOOK") ? ["pages_manage_posts"] : []),
+      ...(needsInstagram ? ["instagram_content_publish"] : []),
+    ];
+
+    if (requiredPageTokenScopes.length) {
       const pageDebug = await fetchMetaTokenDebugInfo({
         inputToken: publishTarget.pageAccessToken,
         appId: metaConfig.appId,
@@ -332,12 +333,12 @@ async function ensurePostCanPublish(
       }
 
       if (pageDebug.scopes.length) {
-        const missingPageScopes = missingMetaPublishScopes(pageDebug.scopes, ["pages_manage_posts"]);
+        const missingPageScopes = missingMetaPublishScopes(pageDebug.scopes, requiredPageTokenScopes);
         if (missingPageScopes.length) {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message:
-              "De geselecteerde Facebook Page-token mist pages_manage_posts. Koppel Meta opnieuw via Integraties, vink deze Page expliciet aan en controleer dat de Meta-app Live staat met publishing-rechten.",
+              `De geselecteerde Page-token mist ${missingPageScopes.join(", ")}. Koppel Meta opnieuw via Integraties, vink deze Page/Instagram-account expliciet aan en controleer dat de Meta-app Live staat met publishing-rechten.`,
           });
         }
       }
@@ -799,7 +800,7 @@ export async function publishSocialPostRecord(
     });
     const metadata = prepared.metadata;
     const primaryImageUrl = prepared.imageUrl;
-    const instagramAccessToken = config.accessToken || publishTarget.pageAccessToken;
+    const instagramAccessToken = publishTarget.pageAccessToken;
 
     const externalIds: Record<string, SocialPublishedRef> = { ...existingExternalIds };
     const placements = metadata.placements || ["FEED"];
