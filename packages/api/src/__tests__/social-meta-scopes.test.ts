@@ -172,7 +172,7 @@ describe("resolveMetaOAuthScopes", () => {
       pageId: "page_1",
       instagramBusinessId: "ig_1",
       pageTasks: ["CREATE_CONTENT"],
-      pageCapability: { canPost: false, tasks: ["CREATE_CONTENT"], error: null },
+      pageCapability: { canPost: false, error: null },
       userDebug: {
         isValid: true,
         scopes: [

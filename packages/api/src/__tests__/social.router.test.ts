@@ -157,7 +157,6 @@ describe("social router flow", () => {
     mockedMeta.fetchMetaPagePublishCapability.mockReset();
     mockedMeta.fetchMetaPagePublishCapability.mockResolvedValue({
       canPost: true,
-      tasks: ["CREATE_CONTENT", "MANAGE"],
       error: null,
     });
     mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
@@ -425,7 +424,6 @@ describe("social publish worker", () => {
     mockedMeta.fetchMetaPagePublishCapability.mockReset();
     mockedMeta.fetchMetaPagePublishCapability.mockResolvedValue({
       canPost: true,
-      tasks: ["CREATE_CONTENT", "MANAGE"],
       error: null,
     });
     mockedMeta.loadMetaWorkspaceConfig.mockReset();

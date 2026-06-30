@@ -889,7 +889,6 @@ export const socialRouter = router({
       selectedPageTasks,
       selectedPageCanPublish: metaPageTasksAllowContentPublishing(selectedPageTasks),
       selectedPageCapabilityCanPost: pageCapability?.canPost ?? null,
-      selectedPageCapabilityTasks: pageCapability?.tasks ?? [],
       selectedPageCapabilityError: pageCapability?.error ?? null,
       facebookPublishReady: publishReadiness.facebookPublishReady,
       instagramPublishReady: publishReadiness.instagramPublishReady,

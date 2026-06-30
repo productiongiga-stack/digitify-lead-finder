@@ -543,7 +543,6 @@ export type MetaPublishReadiness = {
 
 export type MetaPagePublishCapability = {
   canPost: boolean | null;
-  tasks: string[];
   error: string | null;
 };
 
@@ -670,9 +669,6 @@ export function resolveMetaPublishReadiness(params: {
       if (params.pageCapability.canPost === false) {
         facebookBlockingReasons.push("Facebook Page geeft can_post=false terug voor deze token.");
       }
-      if (params.pageCapability.tasks.length && !metaPageTasksConfirmContentPublishing(params.pageCapability.tasks)) {
-        facebookBlockingReasons.push("Facebook Page capability mist CREATE_CONTENT of MANAGE taak.");
-      }
     }
   }
 
@@ -691,21 +687,18 @@ export async function fetchMetaPagePublishCapability(params: {
   try {
     const raw = (await metaGet(params.pageId, {
       access_token: params.pageAccessToken,
-      fields: "can_post,tasks",
+      fields: "can_post",
     })) as {
       can_post?: boolean;
-      tasks?: string[];
     };
 
     return {
       canPost: typeof raw.can_post === "boolean" ? raw.can_post : null,
-      tasks: Array.isArray(raw.tasks) ? raw.tasks.map((task) => task.trim()).filter(Boolean) : [],
       error: null,
     };
   } catch (error) {
     return {
       canPost: null,
-      tasks: [],
       error: error instanceof Error ? error.message : "Onbekende Meta API-fout.",
     };
   }
