@@ -7,6 +7,7 @@ import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import { probeSocialImage } from "../lib/social-image";
 import {
   clearMetaSettings,
+  fetchMetaPagePublishCapability,
   fetchMetaTokenDebugInfo,
   loadMetaManagedPages,
   loadMetaWorkspaceConfig,
@@ -807,6 +808,7 @@ export const socialRouter = router({
     let missingPageTokenPublishScopes: string[] = [];
     let userDebug: Awaited<ReturnType<typeof fetchMetaTokenDebugInfo>> | null = null;
     let pageDebug: Awaited<ReturnType<typeof fetchMetaTokenDebugInfo>> | null = null;
+    let pageCapability: Awaited<ReturnType<typeof fetchMetaPagePublishCapability>> | null = null;
 
     if (config.accessToken && config.appId && config.appSecret) {
       const debug = await fetchMetaTokenDebugInfo({
@@ -826,7 +828,11 @@ export const socialRouter = router({
       );
       missingGranularPublishScopes = [
         ...(config.pageId
-          ? missingMetaGranularTargetScopes(debug.granularScopes, ["pages_manage_posts"], config.pageId)
+          ? missingMetaGranularTargetScopes(
+              debug.granularScopes,
+              ["pages_read_engagement", "pages_manage_posts"],
+              config.pageId,
+            )
           : []),
         ...(config.instagramBusinessId
           ? missingMetaGranularTargetScopes(
@@ -848,8 +854,19 @@ export const socialRouter = router({
       pageTokenDebugError = pageDebug.error;
       pageTokenScopes = pageDebug.scopes;
       missingPageTokenPublishScopes = pageDebug.scopes.length
-        ? missingMetaPublishScopes(pageDebug.scopes, ["pages_manage_posts", "instagram_content_publish"])
+        ? missingMetaPublishScopes(pageDebug.scopes, [
+            "pages_read_engagement",
+            "pages_manage_posts",
+            "instagram_content_publish",
+          ])
         : [];
+    }
+
+    if (config.pageId && config.pageAccessToken) {
+      pageCapability = await fetchMetaPagePublishCapability({
+        pageId: config.pageId,
+        pageAccessToken: config.pageAccessToken,
+      });
     }
 
     const publishReadiness = resolveMetaPublishReadiness({
@@ -858,6 +875,7 @@ export const socialRouter = router({
       userDebug,
       pageDebug,
       pageTasks: selectedPageTasks,
+      pageCapability,
       oauthScopes,
     });
 
@@ -870,6 +888,9 @@ export const socialRouter = router({
       selectedPageId: config.pageId || null,
       selectedPageTasks,
       selectedPageCanPublish: metaPageTasksAllowContentPublishing(selectedPageTasks),
+      selectedPageCapabilityCanPost: pageCapability?.canPost ?? null,
+      selectedPageCapabilityTasks: pageCapability?.tasks ?? [],
+      selectedPageCapabilityError: pageCapability?.error ?? null,
       facebookPublishReady: publishReadiness.facebookPublishReady,
       instagramPublishReady: publishReadiness.instagramPublishReady,
       facebookBlockingReasons: publishReadiness.facebookBlockingReasons,

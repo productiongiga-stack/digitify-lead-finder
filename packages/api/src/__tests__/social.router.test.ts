@@ -4,10 +4,11 @@ const mockedMeta = vi.hoisted(() => ({
   clearMetaSettings: vi.fn(),
   loadMetaManagedPages: vi.fn(),
   loadMetaWorkspaceConfig: vi.fn(),
+  fetchMetaPagePublishCapability: vi.fn(),
   fetchMetaTokenDebugInfo: vi.fn(),
   resolveRequiredMetaPublishScopes: vi.fn((platforms: string[]) => {
     const scopes = ["pages_show_list"];
-    if (platforms.includes("FACEBOOK")) scopes.push("pages_manage_posts");
+    if (platforms.includes("FACEBOOK")) scopes.push("pages_read_engagement", "pages_manage_posts");
     if (platforms.includes("INSTAGRAM")) scopes.push("instagram_basic", "instagram_content_publish");
     return scopes;
   }),
@@ -31,7 +32,13 @@ const mockedMeta = vi.hoisted(() => ({
     loginMode: "facebook",
     scopeLevel: "standard",
     includeAds: false,
-    scopes: ["pages_show_list", "pages_manage_posts", "instagram_basic", "instagram_content_publish"],
+    scopes: [
+      "pages_show_list",
+      "pages_read_engagement",
+      "pages_manage_posts",
+      "instagram_basic",
+      "instagram_content_publish",
+    ],
     overridden: false,
     hasDeprecatedInstagramBusinessScopes: false,
     usesLegacyEnvOverride: false,
@@ -145,6 +152,12 @@ describe("social router flow", () => {
       userId: "meta-user",
       appId: "1",
       application: "Digitify",
+      error: null,
+    });
+    mockedMeta.fetchMetaPagePublishCapability.mockReset();
+    mockedMeta.fetchMetaPagePublishCapability.mockResolvedValue({
+      canPost: true,
+      tasks: ["CREATE_CONTENT", "MANAGE"],
       error: null,
     });
     mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
@@ -407,6 +420,12 @@ describe("social publish worker", () => {
       userId: "meta-user",
       appId: "1",
       application: "Digitify",
+      error: null,
+    });
+    mockedMeta.fetchMetaPagePublishCapability.mockReset();
+    mockedMeta.fetchMetaPagePublishCapability.mockResolvedValue({
+      canPost: true,
+      tasks: ["CREATE_CONTENT", "MANAGE"],
       error: null,
     });
     mockedMeta.loadMetaWorkspaceConfig.mockReset();

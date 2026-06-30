@@ -17,6 +17,7 @@ import {
   publishInstagramReel,
   publishInstagramVideoPost,
   resolveSocialPublishTarget,
+  fetchMetaPagePublishCapability,
   fetchMetaTokenDebugInfo,
   resolveMetaOAuthScopeSummary,
   resolveMetaPublishReadiness,
@@ -298,12 +299,18 @@ async function ensurePostCanPublish(
       });
     }
 
+    const pageCapability = await fetchMetaPagePublishCapability({
+      pageId: publishTarget.pageId,
+      pageAccessToken: publishTarget.pageAccessToken,
+    });
+
     const readiness = resolveMetaPublishReadiness({
       pageId: publishTarget.pageId,
       instagramBusinessId: publishTarget.instagramBusinessId,
       userDebug: debug,
       pageDebug,
       pageTasks: publishTarget.pageTasks,
+      pageCapability,
       oauthScopes: resolveMetaOAuthScopeSummary(),
     });
 

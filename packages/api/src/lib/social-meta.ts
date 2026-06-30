@@ -58,6 +58,9 @@ export const META_FACEBOOK_LOGIN_PUBLISHING_SCOPES = [
   "instagram_content_publish",
 ] as const;
 
+const META_FACEBOOK_USER_PUBLISH_SCOPES = ["pages_show_list", "pages_read_engagement", "pages_manage_posts"] as const;
+const META_FACEBOOK_PAGE_PUBLISH_SCOPES = ["pages_read_engagement", "pages_manage_posts"] as const;
+
 /** @deprecated Instagram Login scope names — remapped to Facebook Login equivalents. */
 const LEGACY_META_SCOPE_REMAP: Record<string, string> = {
   instagram_business_basic: "instagram_basic",
@@ -169,6 +172,7 @@ export function resolveMetaOAuthScopeSummary() {
 export function resolveRequiredMetaPublishScopes(targetPlatforms: string[]) {
   const scopes = new Set<string>(["pages_show_list"]);
   if (targetPlatforms.includes("FACEBOOK")) {
+    scopes.add("pages_read_engagement");
     scopes.add("pages_manage_posts");
   }
   if (targetPlatforms.includes("INSTAGRAM")) {
@@ -537,12 +541,19 @@ export type MetaPublishReadiness = {
   instagramBlockingReasons: string[];
 };
 
+export type MetaPagePublishCapability = {
+  canPost: boolean | null;
+  tasks: string[];
+  error: string | null;
+};
+
 export function resolveMetaPublishReadiness(params: {
   pageId?: string | null;
   instagramBusinessId?: string | null;
   userDebug?: MetaTokenDebugInfo | null;
   pageDebug?: MetaTokenDebugInfo | null;
   pageTasks?: string[];
+  pageCapability?: MetaPagePublishCapability | null;
   oauthScopes?: ReturnType<typeof resolveMetaOAuthScopeSummary>;
 }): MetaPublishReadiness {
   const facebookBlockingReasons: string[] = [];
@@ -562,8 +573,11 @@ export function resolveMetaPublishReadiness(params: {
     if (oauthScopes.scopeLevel !== "standard") {
       facebookBlockingReasons.push("META_OAUTH_SCOPE_LEVEL staat niet op standard.");
     }
-    if (oauthScopes.overridden && !oauthScopes.scopes.includes("pages_manage_posts")) {
-      facebookBlockingReasons.push("META_OAUTH_SCOPES overschrijft de standaard scopes zonder pages_manage_posts.");
+    const missingOverrideScopes = missingMetaPublishScopes(oauthScopes.scopes, [...META_FACEBOOK_PAGE_PUBLISH_SCOPES]);
+    if (oauthScopes.overridden && missingOverrideScopes.length) {
+      facebookBlockingReasons.push(
+        `META_OAUTH_SCOPES overschrijft de standaard scopes zonder ${missingOverrideScopes.join(", ")}.`,
+      );
     }
     if (oauthScopes.usesLegacyEnvOverride || oauthScopes.hasDeprecatedInstagramBusinessScopes) {
       instagramBlockingReasons.push("Meta OAuth gebruikt verouderde instagram_business_* scopes.");
@@ -579,8 +593,7 @@ export function resolveMetaPublishReadiness(params: {
     instagramBlockingReasons.push(message);
   } else {
     const missingFacebookScopes = missingMetaPublishScopes(params.userDebug.scopes, [
-      "pages_show_list",
-      "pages_manage_posts",
+      ...META_FACEBOOK_USER_PUBLISH_SCOPES,
     ]);
     if (missingFacebookScopes.length) {
       facebookBlockingReasons.push(`User-token mist ${missingFacebookScopes.join(", ")}.`);
@@ -588,11 +601,13 @@ export function resolveMetaPublishReadiness(params: {
     if (pageId) {
       const granularMissing = missingMetaGranularTargetScopes(
         params.userDebug.granularScopes,
-        ["pages_manage_posts"],
+        [...META_FACEBOOK_PAGE_PUBLISH_SCOPES],
         pageId,
       );
       if (granularMissing.length) {
-        facebookBlockingReasons.push(`pages_manage_posts is niet actief voor de gekozen Facebook Page.`);
+        facebookBlockingReasons.push(
+          `${granularMissing.join(", ")} is niet actief voor de gekozen Facebook Page.`,
+        );
       }
     }
 
@@ -628,7 +643,9 @@ export function resolveMetaPublishReadiness(params: {
     facebookBlockingReasons.push("Page-token scopes konden niet bevestigd worden.");
     instagramBlockingReasons.push("Page-token scopes konden niet bevestigd worden.");
   } else {
-    const missingFacebookPageScopes = missingMetaPublishScopes(params.pageDebug.scopes, ["pages_manage_posts"]);
+    const missingFacebookPageScopes = missingMetaPublishScopes(params.pageDebug.scopes, [
+      ...META_FACEBOOK_PAGE_PUBLISH_SCOPES,
+    ]);
     if (missingFacebookPageScopes.length) {
       facebookBlockingReasons.push(`Page-token mist ${missingFacebookPageScopes.join(", ")}.`);
     }
@@ -644,12 +661,54 @@ export function resolveMetaPublishReadiness(params: {
     facebookBlockingReasons.push("Facebook Page mist CREATE_CONTENT of MANAGE taak.");
   }
 
+  if (params.pageCapability) {
+    if (params.pageCapability.error) {
+      facebookBlockingReasons.push(
+        `Facebook Page publish capability kon niet bevestigd worden: ${params.pageCapability.error}`,
+      );
+    } else {
+      if (params.pageCapability.canPost === false) {
+        facebookBlockingReasons.push("Facebook Page geeft can_post=false terug voor deze token.");
+      }
+      if (params.pageCapability.tasks.length && !metaPageTasksConfirmContentPublishing(params.pageCapability.tasks)) {
+        facebookBlockingReasons.push("Facebook Page capability mist CREATE_CONTENT of MANAGE taak.");
+      }
+    }
+  }
+
   return {
     facebookPublishReady: facebookBlockingReasons.length === 0,
     instagramPublishReady: instagramBlockingReasons.length === 0,
     facebookBlockingReasons,
     instagramBlockingReasons,
   };
+}
+
+export async function fetchMetaPagePublishCapability(params: {
+  pageId: string;
+  pageAccessToken: string;
+}): Promise<MetaPagePublishCapability> {
+  try {
+    const raw = (await metaGet(params.pageId, {
+      access_token: params.pageAccessToken,
+      fields: "can_post,tasks",
+    })) as {
+      can_post?: boolean;
+      tasks?: string[];
+    };
+
+    return {
+      canPost: typeof raw.can_post === "boolean" ? raw.can_post : null,
+      tasks: Array.isArray(raw.tasks) ? raw.tasks.map((task) => task.trim()).filter(Boolean) : [],
+      error: null,
+    };
+  } catch (error) {
+    return {
+      canPost: null,
+      tasks: [],
+      error: error instanceof Error ? error.message : "Onbekende Meta API-fout.",
+    };
+  }
 }
 
 type MetaAccountsListItem = {
