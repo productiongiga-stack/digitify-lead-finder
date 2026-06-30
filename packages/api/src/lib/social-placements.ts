@@ -16,6 +16,7 @@ export type SocialStoryItem = {
   mediaType: "IMAGE" | "VIDEO";
   imageUrl?: string;
   videoUrl?: string;
+  platforms?: SocialPlatform[];
 };
 
 export type SocialCarouselSlide = {
@@ -23,6 +24,7 @@ export type SocialCarouselSlide = {
   mediaType: SocialCarouselSlideMediaType;
   imageUrl?: string;
   videoUrl?: string;
+  platforms?: SocialPlatform[];
 };
 
 export type SocialCarouselSpec = {
@@ -54,6 +56,32 @@ export const CAROUSEL_MAX_SLIDES = 10;
 export const STORY_MAX_ITEMS = 10;
 
 const PLACEMENT_ORDER: SocialPlacement[] = ["FEED", "STORY", "REEL"];
+const SOCIAL_PLATFORM_ORDER: SocialPlatform[] = ["FACEBOOK", "INSTAGRAM"];
+
+export function normalizeItemPlatforms(platforms?: unknown): SocialPlatform[] | undefined {
+  if (!Array.isArray(platforms)) return undefined;
+  const unique = SOCIAL_PLATFORM_ORDER.filter((platform) => platforms.includes(platform));
+  return unique.length ? unique : undefined;
+}
+
+export function resolveItemPlatforms(
+  item: { platforms?: SocialPlatform[] },
+  targetPlatforms: string[],
+): SocialPlatform[] {
+  const allowed = SOCIAL_PLATFORM_ORDER.filter((platform) => targetPlatforms.includes(platform));
+  const explicit = normalizeItemPlatforms(item.platforms);
+  if (!explicit?.length) return allowed;
+  const selected = allowed.filter((platform) => explicit.includes(platform));
+  return selected.length ? selected : allowed;
+}
+
+export function itemTargetsPlatform(
+  item: { platforms?: SocialPlatform[] },
+  platform: SocialPlatform,
+  targetPlatforms: string[],
+) {
+  return resolveItemPlatforms(item, targetPlatforms).includes(platform);
+}
 
 export function normalizePlacements(metadata?: SocialPlacementsMetadata | null): SocialPlacement[] {
   const requested = metadata?.placements?.filter((item): item is SocialPlacement =>
@@ -192,6 +220,7 @@ export function normalizeStoryItemsMetadata(metadata?: SocialPlacementsMetadata 
     mediaType: item.mediaType === "VIDEO" ? "VIDEO" : "IMAGE",
     imageUrl: item.imageUrl?.trim() || undefined,
     videoUrl: item.videoUrl?.trim() || undefined,
+    platforms: normalizeItemPlatforms(item.platforms),
   }));
 }
 
@@ -230,6 +259,7 @@ export function normalizeCarouselMetadata(metadata?: SocialPlacementsMetadata | 
       mediaType: slide.mediaType,
       imageUrl: slide.imageUrl?.trim() || undefined,
       videoUrl: slide.videoUrl?.trim() || undefined,
+      platforms: normalizeItemPlatforms(slide.platforms),
     })),
   };
 }

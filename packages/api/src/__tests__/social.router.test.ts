@@ -1198,6 +1198,91 @@ describe("social publish worker", () => {
     );
   });
 
+  it("honors per-slide platform selection for multi-upload posts", async () => {
+    const post = {
+      id: "sp_carousel_platforms",
+      createdById: TEST_USER_ID,
+      approvedById: TEST_USER_ID,
+      caption: "Selective carousel caption",
+      imageUrl: "https://example.com/slide1.jpg",
+      targetPlatforms: ["FACEBOOK", "INSTAGRAM"],
+      status: "SCHEDULED",
+      scheduledFor: new Date(Date.now() - 1_000),
+      retryCount: 0,
+      metadata: {
+        placements: ["FEED"],
+        feedFormat: "SQUARE",
+        carousel: {
+          enabled: true,
+          slides: [
+            { id: "s1", mediaType: "IMAGE", imageUrl: "https://example.com/slide1.jpg", platforms: ["INSTAGRAM"] },
+            {
+              id: "s2",
+              mediaType: "VIDEO",
+              videoUrl: "https://example.com/slide2.mp4",
+              platforms: ["FACEBOOK", "INSTAGRAM"],
+            },
+            { id: "s3", mediaType: "IMAGE", imageUrl: "https://example.com/slide3.jpg", platforms: ["INSTAGRAM"] },
+          ],
+        },
+      },
+    };
+
+    const { db } = makePublishWorkerDb(post);
+
+    mockedMeta.loadMetaWorkspaceConfig.mockResolvedValue({
+      appId: "1",
+      appSecret: "2",
+      pageId: "123",
+      instagramBusinessId: "ig_123",
+      accessToken: "user-token",
+      refreshMeta: "",
+      pageAccessToken: "page-token",
+      tokenExpiresAt: "",
+      autopostEnabled: true,
+    });
+    mockedMeta.resolveSocialPublishTarget.mockResolvedValue({
+      pageId: "123",
+      pageAccessToken: "page-token",
+      pageName: "Digitify",
+      instagramBusinessId: "ig_123",
+      instagramUsername: "digitify.be",
+      pageTasks: ["CREATE_CONTENT"],
+    });
+    mockedMeta.publishInstagramCarouselPost.mockResolvedValue({
+      id: "ig_carousel_1",
+      permalink: "https://instagram.com/p/carousel",
+      verified: true,
+    });
+    mockedMeta.publishFacebookVideoPost.mockResolvedValue({
+      id: "fb_video_2",
+      permalink: "https://facebook.com/video/2",
+      verified: true,
+    });
+
+    const result = await runDueSocialPostsWorker(db as any);
+
+    expect(result.published).toBe(1);
+    expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
+    expect(mockedMeta.publishFacebookCarouselPost).not.toHaveBeenCalled();
+    expect(mockedMeta.publishFacebookVideoPost).toHaveBeenCalledTimes(1);
+    expect(mockedMeta.publishFacebookVideoPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        caption: "Selective carousel caption",
+        videoUrl: "https://example.com/slide2.mp4",
+      }),
+    );
+    expect(mockedMeta.publishInstagramCarouselPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slides: [
+          expect.objectContaining({ imageUrl: "https://example.com/slide1.jpg" }),
+          expect.objectContaining({ videoUrl: "https://example.com/slide2.mp4" }),
+          expect.objectContaining({ imageUrl: "https://example.com/slide3.jpg" }),
+        ],
+      }),
+    );
+  });
+
   it("fails clearly when multi-upload has fewer than 2 items", async () => {
     const post = {
       id: "sp_carousel_missing_fb",

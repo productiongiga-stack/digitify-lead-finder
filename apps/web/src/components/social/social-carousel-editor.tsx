@@ -22,11 +22,14 @@ import {
 import { useToast } from "@/components/feedback/toast-provider";
 import type { FeedAspectFormat } from "./social-placement-editor";
 
+export type SocialPlatform = "FACEBOOK" | "INSTAGRAM";
+
 export type SocialCarouselSlide = {
   id: string;
   mediaType: "IMAGE" | "VIDEO";
   imageUrl?: string;
   videoUrl?: string;
+  platforms?: SocialPlatform[];
 };
 
 export type SocialCarouselState = {
@@ -259,6 +262,61 @@ function MediaTypeToggle({
   );
 }
 
+function normalizeSlidePlatforms(platforms: string[] = []) {
+  return (["FACEBOOK", "INSTAGRAM"] as const).filter((platform) => platforms.includes(platform));
+}
+
+function PlatformTargetToggle({
+  value,
+  availablePlatforms,
+  disabled,
+  onChange,
+}: {
+  value?: SocialPlatform[];
+  availablePlatforms: string[];
+  disabled?: boolean;
+  onChange: (platforms: SocialPlatform[] | undefined) => void;
+}) {
+  const available = normalizeSlidePlatforms(availablePlatforms);
+  if (available.length <= 1) return null;
+
+  const selected = value?.length ? normalizeSlidePlatforms(value) : available;
+
+  function toggle(platform: SocialPlatform) {
+    const next = selected.includes(platform)
+      ? selected.filter((item) => item !== platform)
+      : [...selected, platform];
+    if (!next.length) return;
+    const normalizedNext = normalizeSlidePlatforms(next);
+    onChange(normalizedNext.length === available.length ? undefined : normalizedNext);
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-[11px] font-medium text-muted-foreground">Kanalen</span>
+      {available.map((platform) => {
+        const active = selected.includes(platform);
+        return (
+          <button
+            key={platform}
+            type="button"
+            disabled={disabled}
+            onClick={() => toggle(platform)}
+            className={cn(
+              "rounded-md border px-2 py-1 text-[11px] font-medium transition",
+              active
+                ? "border-amber-500 bg-amber-500 text-white"
+                : "border-border bg-background text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {platform === "FACEBOOK" ? "Facebook" : "Instagram"}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function CarouselSlideField({
   slide,
   index,
@@ -266,6 +324,7 @@ function CarouselSlideField({
   feedFormat,
   disabled,
   preserveOriginal,
+  targetPlatforms,
   onChange,
   onRemove,
   onMove,
@@ -276,6 +335,7 @@ function CarouselSlideField({
   feedFormat: FeedAspectFormat;
   disabled?: boolean;
   preserveOriginal?: boolean;
+  targetPlatforms: string[];
   onChange: (slide: SocialCarouselSlide) => void;
   onRemove: () => void;
   onMove: (direction: -1 | 1) => void;
@@ -366,6 +426,13 @@ function CarouselSlideField({
           </Button>
         </div>
       </div>
+
+      <PlatformTargetToggle
+        value={slide.platforms}
+        availablePlatforms={targetPlatforms}
+        disabled={disabled}
+        onChange={(platforms) => onChange({ ...slide, platforms })}
+      />
 
       <input
         ref={fileRef}
@@ -520,6 +587,11 @@ function CarouselFilmstrip({
             >
               {index + 1}
             </span>
+            {slide.platforms?.length ? (
+              <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[8px] font-bold text-white">
+                {slide.platforms.map((platform) => (platform === "FACEBOOK" ? "F" : "I")).join("")}
+              </span>
+            ) : null}
           </button>
         );
       })}
@@ -574,6 +646,7 @@ export function SocialCarouselEditor({
   feedFormat,
   disabled,
   onChange,
+  targetPlatforms = [],
   title = "Multi-upload",
   description = "Minstens 2 items, maximaal 10. Dezelfde items voor Facebook en Instagram; originele beeldverhoudingen blijven behouden.",
   showHeaderToggle = false,
@@ -583,6 +656,7 @@ export function SocialCarouselEditor({
   feedFormat: FeedAspectFormat;
   disabled?: boolean;
   onChange: (carousel: SocialCarouselState) => void;
+  targetPlatforms?: string[];
   title?: string;
   description?: string;
   showHeaderToggle?: boolean;
@@ -692,6 +766,7 @@ export function SocialCarouselEditor({
             feedFormat={feedFormat}
             disabled={disabled}
             preserveOriginal={preserveOriginalFormats}
+            targetPlatforms={targetPlatforms}
             onChange={(next) => updateSlide(activeIndex, next)}
             onRemove={() => removeSlide(activeIndex)}
             onMove={(direction) => moveSlide(activeIndex, direction)}
@@ -710,12 +785,16 @@ export function isCarouselReady(carousel: SocialCarouselState) {
 
 export function normalizeCarouselState(carousel?: SocialCarouselState | null): SocialCarouselState {
   if (!carousel?.enabled) return { enabled: false, slides: [] };
-  const slides = (carousel.slides || []).map((slide, index) => ({
-    id: slide.id || `slide_${index + 1}`,
-    mediaType: slide.mediaType,
-    imageUrl: slide.imageUrl?.trim() || undefined,
-    videoUrl: slide.videoUrl?.trim() || undefined,
-  }));
+  const slides = (carousel.slides || []).map((slide, index) => {
+    const platforms = normalizeSlidePlatforms(slide.platforms || []);
+    return {
+      id: slide.id || `slide_${index + 1}`,
+      mediaType: slide.mediaType,
+      imageUrl: slide.imageUrl?.trim() || undefined,
+      videoUrl: slide.videoUrl?.trim() || undefined,
+      platforms: platforms.length ? platforms : undefined,
+    };
+  });
   return {
     enabled: carousel.enabled,
     slides: slides.slice(0, CAROUSEL_MAX_SLIDES),

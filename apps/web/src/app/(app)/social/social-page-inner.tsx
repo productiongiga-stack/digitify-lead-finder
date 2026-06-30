@@ -348,12 +348,16 @@ function isPublicOrLocalVideoUrl(url?: string) {
 
 function normalizeStoryItemsForEditor(metadata: SocialMetadata): SocialStoryItem[] {
   if (metadata.storyItems?.length) {
-    return metadata.storyItems.map((item, index) => ({
-      id: item.id || `story_${index + 1}`,
-      mediaType: item.mediaType === "VIDEO" ? "VIDEO" : "IMAGE",
-      imageUrl: item.imageUrl?.trim() || undefined,
-      videoUrl: item.videoUrl?.trim() || undefined,
-    }));
+    return metadata.storyItems.map((item, index) => {
+      const platforms = item.platforms?.filter((platform) => platform === "FACEBOOK" || platform === "INSTAGRAM");
+      return {
+        id: item.id || `story_${index + 1}`,
+        mediaType: item.mediaType === "VIDEO" ? "VIDEO" : "IMAGE",
+        imageUrl: item.imageUrl?.trim() || undefined,
+        videoUrl: item.videoUrl?.trim() || undefined,
+        platforms: platforms?.length ? platforms : undefined,
+      };
+    });
   }
 
   const storyAsset = metadata.assets?.STORY;
@@ -366,6 +370,12 @@ function normalizeStoryItemsForEditor(metadata: SocialMetadata): SocialStoryItem
     return [{ id: "story_1", mediaType: "IMAGE", imageUrl }];
   }
   return [];
+}
+
+function itemPlatformSubtitle(platforms?: Platform[]) {
+  if (!platforms?.length) return "FB + IG";
+  const labels = platforms.map((platform) => (platform === "FACEBOOK" ? "FB" : "IG"));
+  return labels.join(" + ");
 }
 
 function buildPreviewSlides(
@@ -386,7 +396,7 @@ function buildPreviewSlides(
         slides.push({
           id: `carousel_${slide.id}`,
           label: `Item ${index + 1}`,
-          subtitle: slide.mediaType === "VIDEO" ? "Video" : "Foto",
+          subtitle: `${slide.mediaType === "VIDEO" ? "Video" : "Foto"} · ${itemPlatformSubtitle(slide.platforms)}`,
           format: feedFormat,
           imageUrl,
           videoUrl: videoUrl || undefined,
@@ -429,7 +439,7 @@ function buildPreviewSlides(
       slides.push({
         id: `story_${item.id}`,
         label: `Story ${index + 1}`,
-        subtitle: videoUrl ? "9:16 video · FB + IG Stories" : "9:16 · FB + IG Stories",
+        subtitle: `${videoUrl ? "9:16 video" : "9:16"} · ${itemPlatformSubtitle(item.platforms)} Stories`,
         format: "STORY",
         imageUrl,
         videoUrl: videoUrl || undefined,
