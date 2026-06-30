@@ -841,7 +841,7 @@ describe("social publish worker", () => {
     );
   });
 
-  it("publishes Instagram only for carousel video slides because Facebook multi-upload is photo-only", async () => {
+  it("publishes carousel video slides to Facebook as separate feed items", async () => {
     const post = {
       id: "sp_carousel_video_ig_only",
       createdById: TEST_USER_ID,
@@ -891,17 +891,40 @@ describe("social publish worker", () => {
       permalink: "https://instagram.com/p/ig-carousel",
       verified: true,
     });
+    mockedMeta.publishFacebookImagePost.mockResolvedValue({
+      id: "fb_photo_1",
+      permalink: "https://facebook.com/photo/1",
+      verified: true,
+    });
+    mockedMeta.publishFacebookVideoPost.mockResolvedValue({
+      id: "fb_video_2",
+      permalink: "https://facebook.com/video/2",
+      verified: true,
+    });
 
     const result = await runDueSocialPostsWorker(db as any, { postId: post.id, failImmediately: true });
 
     expect(result.published).toBe(1);
     expect(mockedMeta.publishFacebookCarouselPost).not.toHaveBeenCalled();
+    expect(mockedMeta.publishFacebookImagePost).toHaveBeenCalledWith(
+      expect.objectContaining({ caption: "Carousel caption", imageUrl: "https://example.com/one.jpg" }),
+    );
+    expect(mockedMeta.publishFacebookVideoPost).toHaveBeenCalledWith(
+      expect.objectContaining({ caption: "", videoUrl: "https://example.com/two.mp4" }),
+    );
     expect(mockedMeta.publishInstagramCarouselPost).toHaveBeenCalledWith(
       expect.objectContaining({ instagramBusinessId: "ig_123", pageAccessToken: "page-token" }),
     );
-    expect(socialPostUpdate).toHaveBeenCalledWith(
+    expect(socialPostUpdate).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ targetPlatforms: ["INSTAGRAM"] }),
+        data: expect.objectContaining({
+          status: "PUBLISHED",
+          externalPostIds: expect.objectContaining({
+            facebook: { id: "fb_photo_1", permalink: "https://facebook.com/photo/1", verified: true },
+            facebookCarousel_2: { id: "fb_video_2", permalink: "https://facebook.com/video/2", verified: true },
+            instagramCarousel: { id: "ig_carousel", permalink: "https://instagram.com/p/ig-carousel", verified: true },
+          }),
+        }),
       }),
     );
   });
@@ -1099,7 +1122,7 @@ describe("social publish worker", () => {
     );
   });
 
-  it("skips Facebook for multi-upload with mixed photo and video slides", async () => {
+  it("publishes mixed photo and video slides to Facebook as feed items", async () => {
     const post = {
       id: "sp_carousel",
       createdById: TEST_USER_ID,
@@ -1149,16 +1172,30 @@ describe("social publish worker", () => {
       permalink: "https://instagram.com/p/carousel",
       verified: true,
     });
+    mockedMeta.publishFacebookImagePost.mockResolvedValue({
+      id: "fb_photo_1",
+      permalink: "https://facebook.com/photo/1",
+      verified: true,
+    });
+    mockedMeta.publishFacebookVideoPost.mockResolvedValue({
+      id: "fb_video_2",
+      permalink: "https://facebook.com/video/2",
+      verified: true,
+    });
 
     const result = await runDueSocialPostsWorker(db as any);
 
     expect(result.published).toBe(1);
     expect(mockedMeta.publishFacebookCarouselPost).not.toHaveBeenCalled();
+    expect(mockedMeta.publishFacebookImagePost).toHaveBeenCalledWith(
+      expect.objectContaining({ caption: "Carousel caption", imageUrl: "https://example.com/slide1.jpg" }),
+    );
+    expect(mockedMeta.publishFacebookVideoPost).toHaveBeenCalledWith(
+      expect.objectContaining({ caption: "", videoUrl: "https://example.com/slide2.mp4" }),
+    );
     expect(mockedMeta.publishInstagramCarouselPost).toHaveBeenCalledWith(
       expect.objectContaining({ pageAccessToken: "page-token" }),
     );
-    expect(mockedMeta.publishFacebookImagePost).not.toHaveBeenCalled();
-    expect(mockedMeta.publishFacebookVideoPost).not.toHaveBeenCalled();
   });
 
   it("fails clearly when multi-upload has fewer than 2 items", async () => {
