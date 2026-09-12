@@ -1218,3 +1218,13 @@ Tests: `pnpm typecheck`, `git diff --check`.
 - Bestaande editor-, preview-, opslaan- en navigatiefuncties blijven behouden; de editor toont een skeleton tijdens laden.
 
 **Verificatie:** production build geslaagd met 4 GB Node-heap, webtests `42 passed`, typecheck, gerichte ESLint en `git diff --check` geslaagd. Geen databasewijziging, deployment of externe integratie uitgevoerd.
+
+## Fase 54 — Outbound browser-regressiecontrole (2026-09-12)
+
+- De lokale outbound-smoke-suite is uitgevoerd tegen een geïsoleerde server op poort 3001.
+- De lokale testaccounts zijn vooraf opnieuw gegenereerd met het localhost-only resetscript; wachtwoorden zijn niet in logs of documentatie opgenomen.
+- De bestaande template-, compose- en Outbound Center-flows slagen.
+- Een nieuwe Playwright-regressietest controleert dat template-preview en editor bij interactie laden, de juiste dialoog tonen en weer sluiten.
+- De test controleert daarmee ook de nieuwe lazy-loaded componentgrenzen zonder echte e-mails te verzenden.
+
+**Verificatie:** Playwright outbound smoke `6 passed`, webtests `42 passed`, typecheck en `git diff --check` geslaagd. De tijdelijke lokale testserver is gestopt. Geen databasewijziging, deployment of externe integratie uitgevoerd.

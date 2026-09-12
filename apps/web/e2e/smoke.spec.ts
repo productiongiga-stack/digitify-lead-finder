@@ -15,6 +15,24 @@ test.describe("authenticated smoke", () => {
     await expect(page.getByText("Opmaak vs. inhoud")).toBeVisible();
   });
 
+  test("template preview and editor load on demand", async ({ page }) => {
+    await page.goto("/templates");
+    const firstTemplate = page.getByRole("article").first();
+    await expect(firstTemplate).toBeVisible();
+
+    await firstTemplate.getByRole("button", { name: "Preview" }).click();
+    const previewDialog = page.getByRole("dialog");
+    await expect(previewDialog).toBeVisible();
+    await expect(previewDialog.getByText("Onderwerp:")).toBeVisible();
+
+    await previewDialog.getByRole("button", { name: "Bewerken" }).click();
+    const editorDialog = page.getByRole("dialog");
+    await expect(editorDialog.getByLabel("Onderwerp")).toBeVisible();
+    await expect(editorDialog.getByRole("button", { name: "Opslaan" })).toBeVisible();
+    await editorDialog.getByRole("button", { name: "Annuleren" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  });
+
   test("template studio module filter updates the URL", async ({ page }) => {
     await page.goto("/templates");
     await expect(page.getByRole("button", { name: "Alle modules" })).toBeVisible();
