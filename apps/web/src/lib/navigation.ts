@@ -8,6 +8,7 @@ import {
   Inbox,
   Settings,
   Calendar,
+  CalendarDays,
   Globe2,
   Star,
   MessageSquare,
@@ -31,6 +32,9 @@ import {
   Megaphone,
   BarChart3,
   Layers,
+  FileText,
+  SearchCheck,
+  HelpCircle,
 } from "lucide-react";
 import { canAccessSettingsPath } from "@/lib/permissions";
 
@@ -99,15 +103,21 @@ export const SIDEBAR_NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/crm", label: "CRM", icon: Building2, moduleId: "crm" },
       { href: "/tasks", label: "Taken", icon: CheckSquare, moduleId: "tasks" },
+      { href: "/agenda", label: "Agenda", icon: CalendarDays, moduleId: "agenda" },
       { href: "/quotes", label: "Offertes", icon: Receipt, moduleId: "quotes" },
       { href: "/invoices", label: "Facturen", icon: Banknote, moduleId: "invoices" },
+      { href: "/payments", label: "Betalingen", icon: Banknote, moduleId: "payments" },
     ],
   },
   {
     id: "analyse",
     label: "Analyse",
     icon: ScanSearch,
-    items: [{ href: "/reports", label: "Website auditor", icon: ScanSearch, moduleId: "reports" }],
+    items: [
+      { href: "/reports/overview", label: "Rapportage", icon: BarChart3, moduleId: "reports" },
+      { href: "/reports", label: "Website auditor", icon: ScanSearch, moduleId: "reports" },
+      { href: "/seo", label: "SEO", icon: SearchCheck, moduleId: "seo" },
+    ],
   },
   {
     id: "advertenties",
@@ -124,8 +134,22 @@ export const SIDEBAR_NAV_GROUPS: NavGroup[] = [
       { href: "/creative-studio", label: "Creative Studio", icon: Sparkles, moduleId: "creativeStudio" },
       { href: "/bookings", label: "Boekingen", icon: Calendar, moduleId: "bookings" },
       { href: "/domains", label: "Domeinen", icon: Globe2, moduleId: "domains" },
+      { href: "/files", label: "Bestanden", icon: FileText, moduleId: "files" },
       { href: "/reviews", label: "Reviews", icon: Star, moduleId: "reviews" },
       { href: "/chatbot", label: "Chatbot", icon: MessageSquare, moduleId: "chatbot" },
+      { href: "/forms", label: "Formulieren", icon: Library, moduleId: "forms" },
+      { href: "/knowledge", label: "Kennisbank", icon: Library, moduleId: "knowledge" },
+      { href: "/projects", label: "Projecten", icon: Layers, moduleId: "projects" },
+      { href: "/contracts", label: "Contracten", icon: FileText, moduleId: "contracts" },
+    ],
+  },
+  {
+    id: "automatisering",
+    label: "Automatisering",
+    icon: GitBranch,
+    items: [
+      { href: "/automations", label: "Workflows", icon: GitBranch, moduleId: "automations" },
+      { href: "/activity", label: "Activiteitenlog", icon: Activity, moduleId: "activityLog" },
     ],
   },
 ];
@@ -157,13 +181,24 @@ export const ALL_MODULES = [
   { id: "reports", label: "Website auditor" },
   { id: "crm", label: "CRM" },
   { id: "tasks", label: "Taken" },
+  { id: "agenda", label: "Agenda" },
   { id: "templates", label: "Standaard berichten" },
   { id: "domains", label: "Domeinen" },
   { id: "reviews", label: "Reviews" },
   { id: "chatbot", label: "Chatbot" },
+  { id: "forms", label: "Formulieren" },
+  { id: "automations", label: "Automatiseringen" },
+  { id: "files", label: "Bestanden" },
+  { id: "activityLog", label: "Activiteitenlog" },
+  { id: "knowledge", label: "Kennisbank" },
+  { id: "seo", label: "SEO" },
+  { id: "projects", label: "Projecten" },
+  { id: "contracts", label: "Contracten" },
+  { id: "payments", label: "Betalingen" },
 ] as const;
 
 export const BOTTOM_NAV_ITEMS: NavItem[] = [
+  { href: "/help", label: "Help", icon: HelpCircle },
   { href: "/settings", label: "Instellingen", icon: Settings },
 ];
 
@@ -192,6 +227,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/quotes", title: "Offerte-configurator", description: "Sjabloon, teksten en flow", icon: Receipt },
   { href: "/settings/display", title: "Weergave", description: "UI dichtheid en mail/PDF typografie", icon: SlidersHorizontal },
   { href: "/settings/performance", title: "Prestaties & cache", description: "API-metrics, cache-TTL en flush (owner)", icon: Activity },
+  { href: "/settings/audit", title: "Security auditlog", description: "Rechten, view-as en gevoelige acties", icon: Activity },
   { href: "/settings/chatbot", title: "Chatbotwidget", description: "Widgetgedrag en trainingsinstellingen", icon: MessageSquare },
   { href: "/settings/feedback", title: "Feedback", description: "Bekijk en behandel feedback uit de app", icon: MessageSquareWarning },
 ];
@@ -203,6 +239,7 @@ export function filterSettingsSections(role: string | null | undefined) {
 type PageTitleRoute = { path: string; title: string };
 
 const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
+  { path: "/help", title: "Help" },
   { path: "/dashboard", title: "Dashboard" },
   { path: "/leads/search", title: "Leads Zoeken" },
   { path: "/leads/new", title: "Nieuwe Lead" },
@@ -224,6 +261,7 @@ const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
   { path: "/quotes", title: "Offertes" },
   { path: "/invoices", title: "Facturen" },
   { path: "/reports", title: "Rapporten" },
+  { path: "/reports/overview", title: "Rapportage" },
   { path: "/crm", title: "CRM" },
   { path: "/tasks", title: "Taken" },
   { path: "/templates", title: "Standaard berichten" },
@@ -233,6 +271,11 @@ const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
   { path: "/reviews", title: "Reviews" },
   { path: "/chatbot/settings", title: "Chatbot Instellingen" },
   { path: "/chatbot", title: "Chatbot" },
+  { path: "/forms", title: "Formulieren" },
+  { path: "/automations", title: "Automatiseringen" },
+  { path: "/files", title: "Bestanden" },
+  { path: "/activity", title: "Activiteitenlog" },
+  { path: "/knowledge", title: "Kennisbank" },
   { path: "/settings/integrations", title: "Integraties & API-sleutels" },
   { path: "/settings/account", title: "Account & Profiel" },
   { path: "/settings/workspaces", title: "Werkruimtes" },
@@ -251,6 +294,7 @@ const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
   { path: "/settings/feedback", title: "Feedback" },
   { path: "/settings/display", title: "Weergave" },
   { path: "/settings/performance", title: "Prestaties" },
+  { path: "/settings/audit", title: "Security auditlog" },
   { path: "/settings", title: "Instellingen" },
 ];
 

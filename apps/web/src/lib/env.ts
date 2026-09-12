@@ -1,5 +1,4 @@
 export {
-  assertServerEnv,
   formatZodEnvError,
   resetServerEnvCache,
   validateServerEnv,

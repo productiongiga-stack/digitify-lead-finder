@@ -36,8 +36,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <TRPCProvider>
             <SessionProvider>
             <ToastProvider>
-              <AnalyticsScripts />
               <ShellProvider>
+                <AnalyticsScripts />
                 <BrandingCssVariables />
                 <UiDensityProvider />
                 {children}

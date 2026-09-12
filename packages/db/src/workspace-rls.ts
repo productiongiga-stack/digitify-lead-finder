@@ -19,6 +19,7 @@ function resolveRlsTransactionOptions(overrides?: RlsTransactionOptions): RlsTra
   const maxWaitFromEnv = Number(process.env.WORKSPACE_RLS_TX_MAX_WAIT_MS);
 
   return {
+    isolationLevel: overrides?.isolationLevel,
     timeout:
       overrides?.timeout ??
       (Number.isFinite(timeoutFromEnv) && timeoutFromEnv > 0 ? timeoutFromEnv : DEFAULT_RLS_TX_TIMEOUT_MS),
@@ -28,38 +29,49 @@ function resolveRlsTransactionOptions(overrides?: RlsTransactionOptions): RlsTra
   };
 }
 
-const rlsTxStorage = new AsyncLocalStorage<Prisma.TransactionClient>();
+const rlsTxStorage = new AsyncLocalStorage<{
+  tx: Prisma.TransactionClient;
+  workspaceId: string;
+  userId?: string;
+  prisma: PrismaClient;
+}>();
 
 export async function setWorkspaceRlsContext(
   db: Prisma.TransactionClient,
   workspaceId: string,
+  userId?: string,
 ) {
   await db.$executeRaw`SELECT set_config('app.workspace_id', ${workspaceId}, true)`;
+  if (userId) await db.$executeRaw`SELECT set_config('app.user_id', ${userId}, true)`;
 }
 
 async function runInWorkspaceRlsTransaction<T>(
   prisma: PrismaClient,
   workspaceId: string,
+  userId: string | undefined,
   run: (tx: Prisma.TransactionClient) => Promise<T>,
   options?: RlsTransactionOptions,
 ): Promise<T> {
   const activeTx = rlsTxStorage.getStore();
   if (activeTx) {
-    return run(activeTx);
+    if (activeTx.workspaceId !== workspaceId || activeTx.userId !== userId || activeTx.prisma !== prisma) {
+      throw new Error("RLS transaction cannot switch workspace or database");
+    }
+    return run(activeTx.tx);
   }
 
   return prisma.$transaction(async (tx) => {
-    await setWorkspaceRlsContext(tx, workspaceId);
-    return rlsTxStorage.run(tx, () => run(tx));
+    await setWorkspaceRlsContext(tx, workspaceId, userId);
+    return rlsTxStorage.run({ tx, workspaceId, userId, prisma }, () => run(tx));
   }, resolveRlsTransactionOptions(options));
 }
 
-export function createWorkspaceRlsClient(prisma: PrismaClient, workspaceId: string): PrismaClient {
+export function createWorkspaceRlsClient(prisma: PrismaClient, workspaceId: string, userId?: string): PrismaClient {
   return prisma.$extends({
     query: {
       $allModels: {
         async $allOperations({ model, operation, args }) {
-          return runInWorkspaceRlsTransaction(prisma, workspaceId, async (tx) => {
+          return runInWorkspaceRlsTransaction(prisma, workspaceId, userId, async (tx) => {
             const delegate = (tx as Prisma.TransactionClient & Record<string, Record<string, unknown>>)[model];
             const method = delegate?.[operation];
             if (typeof method !== "function") {
@@ -76,6 +88,7 @@ export function createWorkspaceRlsClient(prisma: PrismaClient, workspaceId: stri
           return runInWorkspaceRlsTransaction(
             prisma,
             workspaceId,
+            userId,
             input as (tx: Prisma.TransactionClient) => Promise<unknown>,
             options,
           );
@@ -84,6 +97,7 @@ export function createWorkspaceRlsClient(prisma: PrismaClient, workspaceId: stri
           return runInWorkspaceRlsTransaction(
             prisma,
             workspaceId,
+            userId,
             async () => {
               const results: unknown[] = [];
               for (const promise of input as Prisma.PrismaPromise<unknown>[]) {
@@ -97,10 +111,10 @@ export function createWorkspaceRlsClient(prisma: PrismaClient, workspaceId: stri
         throw new TypeError("RLS client: unsupported $transaction argument");
       },
       $executeRaw(...args: Parameters<PrismaClient["$executeRaw"]>) {
-        return runInWorkspaceRlsTransaction(prisma, workspaceId, async (tx) => tx.$executeRaw(...args));
+        return runInWorkspaceRlsTransaction(prisma, workspaceId, userId, async (tx) => tx.$executeRaw(...args));
       },
       $queryRaw(...args: Parameters<PrismaClient["$queryRaw"]>) {
-        return runInWorkspaceRlsTransaction(prisma, workspaceId, async (tx) => tx.$queryRaw(...args));
+        return runInWorkspaceRlsTransaction(prisma, workspaceId, userId, async (tx) => tx.$queryRaw(...args));
       },
     },
   }) as unknown as PrismaClient;
@@ -115,11 +129,12 @@ export async function withWorkspaceRls<T>(
   prisma: PrismaClient,
   workspaceId: string | undefined,
   handler: (db: PrismaClient | Prisma.TransactionClient) => Promise<T>,
+  userId?: string,
 ): Promise<T> {
   if (!workspaceId || !isWorkspaceRlsEnabled()) {
     return handler(prisma);
   }
 
-  const rlsDb = createWorkspaceRlsClient(prisma, workspaceId);
+  const rlsDb = createWorkspaceRlsClient(prisma, workspaceId, userId);
   return handler(rlsDb);
 }

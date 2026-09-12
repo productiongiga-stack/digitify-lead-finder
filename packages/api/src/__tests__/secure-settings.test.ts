@@ -18,6 +18,8 @@ describe("isSecretSettingKey", () => {
     expect(isSecretSettingKey("API.OPENAI_KEY")).toBe(true);
     expect(isSecretSettingKey("email.smtp_pass")).toBe(true);
     expect(isSecretSettingKey("bookings.google_oauth_refresh_token")).toBe(true);
+    expect(isSecretSettingKey("integrations.stripe_secret_key")).toBe(true);
+    expect(isSecretSettingKey("integrations.wordpress_application_password")).toBe(true);
   });
 
   it("matches the api.*_key pattern", () => {

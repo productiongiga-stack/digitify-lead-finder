@@ -73,12 +73,19 @@ export function publicTenantLookupKey(token: string) {
 }
 
 async function writePublicTenantLookup(db: PrismaClient, token: string, ownerId: string) {
-  await db.setting.upsert({
-    where: { key: publicTenantLookupKey(token) },
-    create: { key: publicTenantLookupKey(token), value: ownerId },
-    update: { value: ownerId },
-  });
-  resolveCache.set(token, { ownerId, cachedAt: Date.now() });
+  try {
+    await db.setting.upsert({
+      where: { key: publicTenantLookupKey(token) },
+      create: { key: publicTenantLookupKey(token), value: ownerId },
+      update: { value: ownerId },
+    });
+    resolveCache.set(token, { ownerId, cachedAt: Date.now() });
+  } catch (error) {
+    // The lookup index is global by design and is therefore not writable from
+    // a workspace-scoped RLS transaction. The scoped token rows remain the
+    // source of truth; public resolution can fall back to the legacy scan.
+    if (!String(error).toLowerCase().includes("row-level security")) throw error;
+  }
 }
 
 async function syncTenantTokenKeys(db: PrismaClient, workspaceOwnerId: string, token: string) {

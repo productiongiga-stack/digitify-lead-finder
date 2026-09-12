@@ -37,7 +37,7 @@
 	--digitify-ambient-glow: rgba(255, 196, 130, 0.1);
 	--digitify-blend-h: clamp(120px, 18vw, 260px);
 }
-:root { --digitify-red: #ffaf51; --digitify-red-dark: #c8781f; --digitify-red-light: rgba(255,175,81,0.12); --digitify-white: #fff; --digitify-black: #0a0a0a; --digitify-gray-200: rgba(0,0,0,0.08); --digitify-gray-600: #4b5563; --digitify-gray-800: #1a1510; --digitify-max-w: 1360px; --digitify-transition: 0.35s cubic-bezier(0.22,1,0.36,1); }
+:root { --digitify-red: #ffaf51; --digitify-red-dark: #c8781f; --digitify-red-light: rgba(255,175,81,0.12); --digitify-white: #fff; --digitify-black: #0a0a0a; --digitify-gray-200: rgba(0,0,0,0.08); --digitify-gray-600: #4b5563; --digitify-gray-800: #1a1510; --digitify-max-w: 1440px; --digitify-transition: 0.35s cubic-bezier(0.22,1,0.36,1); }
 .digitify-header.digitify-header--deck {
 	height: auto;
 	min-height: calc(var(--digitify-header-rail-h) + var(--digitify-header-bar-h));
@@ -322,6 +322,7 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
+	font-family: var(--font-poppins), system-ui, sans-serif;
 	height: auto;
 	min-height: 34px;
 	padding: 8px clamp(11px, 1.5vw, 16px);
@@ -398,6 +399,7 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
+	font-family: var(--font-poppins), system-ui, sans-serif;
 	gap: 8px;
 	align-self: center;
 	min-height: 36px;

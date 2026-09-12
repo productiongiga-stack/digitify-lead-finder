@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
 import { getAppUrl } from "@/lib/config";
 import { trpc } from "@/lib/trpc/client";
 import {
@@ -33,8 +33,6 @@ import {
   AlertCircle,
   Settings2,
   CalendarDays,
-  Copy,
-  Check,
   Shield,
   ShieldCheck,
   KeyRound,
@@ -64,12 +62,28 @@ import {
   IntegrationPanel,
   IntegrationTestResult,
   SecretKeyField,
-  SetupSteps,
   type IntegrationNavItem,
 } from "@/components/settings/integrations/integration-ui";
 import { MuapiIntegrationPanel } from "@/components/settings/integrations/muapi-integration-panel";
 
 const SECRET_MASK = "••••••••";
+
+function formatConnectorCheckedAt(value: string | Date) {
+  return new Intl.DateTimeFormat("nl-BE", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+}
+
+function connectorAuditLabel(action: string) {
+  if (action === "CONNECTOR_LIVE_TESTED") return "Live test";
+  if (action === "CONNECTOR_TESTED") return "Lokale test";
+  return action;
+}
+
+function connectorAuditReason(reason: string | null) {
+  if (reason === "MISSING_CONFIGURATION") return "Vul de ontbrekende connectorinstellingen in en probeer opnieuw.";
+  if (reason === "CONNECTION_FAILED") return "De provider accepteerde de verbinding niet of was tijdelijk niet bereikbaar.";
+  if (reason === "CONNECTION_VERIFIED") return "De read-only verbindingstest is geslaagd.";
+  return "De test is mislukt. Controleer de configuratie en probeer opnieuw.";
+}
 
 type IntegrationTabId =
   | "overview"
@@ -82,6 +96,8 @@ type IntegrationTabId =
   | "meta"
   | "smtp"
   | "imap";
+type ConnectorId = "google" | "meta" | "smtp" | "imap" | "muapi" | "webhook" | "stripe" | "wordpress";
+const LIVE_CONNECTOR_IDS = ["google", "meta", "smtp", "imap", "stripe", "wordpress"] as const;
 
 const INTEGRATION_TAB_IDS: IntegrationTabId[] = [
   "overview",
@@ -522,12 +538,66 @@ export function IntegrationsSettingsInner() {
     retry: 1,
     ...SETTINGS_PAGE_QUERY_OPTS,
   });
+  const connectorOverview = trpc.settings.getConnectorOverview.useQuery(undefined, {
+    enabled: sessionStatus === "authenticated",
+    staleTime: 15_000,
+  });
+  const canViewConnectorAudit = hasRole(role, ["OWNER", "ADMIN"]);
+  const [connectorAuditFilter, setConnectorAuditFilter] = useState<"all" | "failed" | "success">("all");
+  const [expandedConnectorAuditId, setExpandedConnectorAuditId] = useState<string | null>(null);
+  const [selectedConnectorId, setSelectedConnectorId] = useState<ConnectorId | null>(null);
+  const connectorAudit = trpc.securityAudit.list.useQuery(
+    { limit: 20, resource: "connector" },
+    { enabled: sessionStatus === "authenticated" && canViewConnectorAudit, staleTime: 15_000 },
+  );
+  const visibleConnectorAudit = useMemo(
+    () => (connectorAudit.data ?? []).filter((event) => connectorAuditFilter === "all" || (connectorAuditFilter === "success" ? event.result === "SUCCESS" : event.result !== "SUCCESS")),
+    [connectorAudit.data, connectorAuditFilter],
+  );
+  const selectedConnector = connectorOverview.data?.connectors.find((connector) => connector.id === selectedConnectorId) ?? null;
+  const selectedConnectorEvents = useMemo(
+    () => (connectorAudit.data ?? []).filter((event) => event.resourceId === selectedConnectorId).slice(0, 10),
+    [connectorAudit.data, selectedConnectorId],
+  );
+  const testConnector = trpc.settings.testConnector.useMutation({
+    onSuccess: (result) => {
+      utils.settings.getConnectorOverview.invalidate();
+      showToast({ title: result.status === "READY" ? "Lokale test geslaagd" : "Configuratie ontbreekt", description: result.message, variant: result.status === "READY" ? "success" : "error" });
+    },
+    onError: (mutationError) => showToast({ title: "Connector-test mislukt", description: mutationError.message, variant: "error" }),
+  });
+  const testConnectorLive = trpc.settings.testConnectorLive.useMutation({
+    onSuccess: (result) => {
+      utils.settings.getConnectorOverview.invalidate();
+      showToast({ title: result.status === "READY" ? "Verbinding geslaagd" : "Verbinding mislukt", description: result.message, variant: result.status === "READY" ? "success" : "error" });
+    },
+    onError: (mutationError) => showToast({ title: "Verbindingstest mislukt", description: mutationError.message, variant: "error" }),
+  });
+  const disconnectConnector = trpc.settings.disconnectConnector.useMutation({
+    onSuccess: () => {
+      utils.settings.getConnectorOverview.invalidate();
+      utils.settings.getIntegrationsSettings.invalidate();
+      showToast({ title: "Connector losgekoppeld", description: "Opgeslagen connectorgegevens zijn verwijderd.", variant: "success" });
+    },
+    onError: (mutationError) => showToast({ title: "Loskoppelen mislukt", description: mutationError.message, variant: "error" }),
+  });
   const utils = trpc.useUtils();
   const { showToast } = useToast();
+
+  // Stripe / WordPress
+  const [stripeSecretKey, setStripeSecretKey] = useState("");
+  const [stripeSecretConfigured, setStripeSecretConfigured] = useState(false);
+  const [showStripeSecret, setShowStripeSecret] = useState(false);
+  const [wordpressUrl, setWordpressUrl] = useState("");
+  const [wordpressUsername, setWordpressUsername] = useState("");
+  const [wordpressApplicationPassword, setWordpressApplicationPassword] = useState("");
+  const [wordpressPasswordConfigured, setWordpressPasswordConfigured] = useState(false);
+  const [showWordpressPassword, setShowWordpressPassword] = useState(false);
 
   const batchUpdate = trpc.settings.batchUpdate.useMutation({
     onSuccess: () => {
       utils.settings.getIntegrationsSettings.invalidate();
+      utils.settings.getConnectorOverview.invalidate();
       showToast({
         title: "Integraties opgeslagen",
         description: "De API- en mailinstellingen zijn bijgewerkt.",
@@ -572,7 +642,7 @@ export function IntegrationsSettingsInner() {
     refetchOnWindowFocus: false,
   });
 
-  function selectIntegrationsTab(tab: IntegrationTabId) {
+  const selectIntegrationsTab = useCallback((tab: IntegrationTabId) => {
     setIntegrationsTab(tab);
     const params = new URLSearchParams(searchParams.toString());
     if (tab === "overview") {
@@ -582,7 +652,7 @@ export function IntegrationsSettingsInner() {
     }
     const query = params.toString();
     router.replace(query ? `/settings/integrations?${query}` : "/settings/integrations", { scroll: false });
-  }
+  }, [router, searchParams]);
 
   useEffect(() => {
     const tab = searchParams.get("tab");
@@ -596,7 +666,7 @@ export function IntegrationsSettingsInner() {
     if (!canManageWorkspaceIntegrations && integrationsTab !== "overview" && integrationsTab !== "muapi") {
       selectIntegrationsTab("muapi");
     }
-  }, [sessionStatus, canManageWorkspaceIntegrations, integrationsTab]);
+  }, [sessionStatus, canManageWorkspaceIntegrations, integrationsTab, selectIntegrationsTab]);
 
   useEffect(() => {
     const googleStatus = searchParams.get("google");
@@ -621,7 +691,7 @@ export function IntegrationsSettingsInner() {
         scroll: false,
       });
     }
-  }, [searchParams]);
+  }, [router, searchParams, showToast]);
 
   const pollProviderConnections = integrationsTab === "google-oauth" || integrationsTab === "meta";
   const metaOAuthCallback = searchParams.get("meta");
@@ -973,6 +1043,8 @@ export function IntegrationsSettingsInner() {
       const deepseekKeyRaw = readSettingString(settings, "api.deepseek_key");
       const smtpPassRaw = readSettingString(settings, "email.smtp_pass");
       const imapPassRaw = readSettingString(settings, "email.imap_pass");
+      const stripeSecretRaw = readSettingString(settings, "integrations.stripe_secret_key");
+      const wordpressPasswordRaw = readSettingString(settings, "integrations.wordpress_application_password");
 
       setGooglePlacesConfigured(Boolean(googleKeyRaw));
       setGoogleOAuthSecretConfigured(Boolean(googleOAuthSecretRaw));
@@ -980,6 +1052,12 @@ export function IntegrationsSettingsInner() {
       setAnthropicConfigured(Boolean(anthropicKeyRaw));
       setOpenaiConfigured(Boolean(openaiKeyRaw));
       setDeepseekConfigured(Boolean(deepseekKeyRaw));
+      setStripeSecretConfigured(Boolean(stripeSecretRaw));
+      setStripeSecretKey(stripeSecretRaw === SECRET_MASK ? "" : stripeSecretRaw);
+      setWordpressUrl(readSettingString(settings, "integrations.wordpress_url"));
+      setWordpressUsername(readSettingString(settings, "integrations.wordpress_username"));
+      setWordpressPasswordConfigured(Boolean(wordpressPasswordRaw));
+      setWordpressApplicationPassword(wordpressPasswordRaw === SECRET_MASK ? "" : wordpressPasswordRaw);
 
       setGooglePlacesKey(googleKeyRaw === SECRET_MASK ? "" : googleKeyRaw);
       const googleServicePrivateKeyRaw = readSettingString(settings, "bookings.google_service_account_private_key");
@@ -1075,6 +1153,15 @@ export function IntegrationsSettingsInner() {
       { key: "email.imap_user", value: imapUser.trim() },
       { key: "email.imap_pass", value: imapPass },
       { key: "email.imap_tls", value: String(imapTls) },
+    ]);
+  }
+
+  function handleSaveStripeWordPress() {
+    batchUpdate.mutate([
+      { key: "integrations.stripe_secret_key", value: stripeSecretKey },
+      { key: "integrations.wordpress_url", value: wordpressUrl.trim() },
+      { key: "integrations.wordpress_username", value: wordpressUsername.trim() },
+      { key: "integrations.wordpress_application_password", value: wordpressApplicationPassword },
     ]);
   }
 
@@ -1206,6 +1293,219 @@ export function IntegrationsSettingsInner() {
                 </div>
               </CardContent>
             </Card>
+            <Card className="border-border/60 bg-card">
+              <CardHeader>
+                <CardTitle className="text-base">Connectorstatus</CardTitle>
+                <CardDescription>Veilige statusinformatie zonder sleutels of tokens te tonen.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {connectorOverview.isLoading ? (
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    {Array.from({ length: 8 }).map((_, index) => <Skeleton key={index} className="h-16 rounded-xl" />)}
+                  </div>
+                ) : connectorOverview.error ? (
+                  <TestResult result={connectorOverview.error.message} isError />
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    {connectorOverview.data?.connectors.map((connector) => {
+                      const connected = connector.status === "CONNECTED";
+                      const configured = connector.status === "CONFIGURED";
+                      return (
+                        <div
+                          key={connector.id}
+                          className="rounded-xl border border-border/60 p-3 text-left transition-colors hover:border-primary/50"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-semibold">{connector.label}</span>
+                            <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : configured ? "bg-amber-500" : "bg-muted-foreground/40"}`} aria-label={connector.status} />
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">{connected ? "Verbonden" : configured ? "Test vereist" : "Niet ingesteld"}</p>
+                          {connector.lastTest ? (
+                            <p className={`mt-1 text-[11px] ${connector.lastTest.result === "SUCCESS" ? "text-emerald-600" : "text-destructive"}`}>
+                              Laatste {connector.lastTest.mode} test: {connector.lastTest.result === "SUCCESS"
+                                ? "geslaagd"
+                                : connector.lastTest.reason === "MISSING_CONFIGURATION"
+                                  ? "configuratie ontbreekt"
+                                  : connector.lastTest.reason === "CONNECTION_FAILED"
+                                    ? "verbinding mislukt"
+                                    : "mislukt"} · {formatConnectorCheckedAt(connector.lastTest.checkedAt)}
+                            </p>
+                          ) : null}
+                          {canManageWorkspaceIntegrations ? (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <Button type="button" size="sm" variant="outline" onClick={() => testConnector.mutate({ connectorId: connector.id as ConnectorId })} disabled={testConnector.isPending || testConnectorLive.isPending}>{testConnector.isPending ? "Testen…" : connector.lastTest?.mode === "lokaal" ? "Opnieuw lokaal" : "Test lokaal"}</Button>
+                              {LIVE_CONNECTOR_IDS.includes(connector.id as (typeof LIVE_CONNECTOR_IDS)[number]) ? <Button type="button" size="sm" variant="outline" onClick={() => testConnectorLive.mutate({ connectorId: connector.id as (typeof LIVE_CONNECTOR_IDS)[number] })} disabled={testConnectorLive.isPending || testConnector.isPending}>{testConnectorLive.isPending ? "Testen…" : connector.lastTest?.mode === "live" ? "Opnieuw testen" : "Test verbinding"}</Button> : null}
+                              {canViewConnectorAudit ? <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedConnectorId(connector.id as ConnectorId)} aria-label={`Geschiedenis van ${connector.label}`}>Geschiedenis</Button> : null}
+                              {configured || connected ? <Button type="button" size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => { if (window.confirm(`Connector ${connector.label} loskoppelen? Opgeslagen connectorgegevens worden verwijderd.`)) disconnectConnector.mutate({ connectorId: connector.id as ConnectorId }); }} disabled={disconnectConnector.isPending}>Loskoppelen</Button> : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            {canViewConnectorAudit && selectedConnector ? (
+              <Card className="border-border/60 bg-card">
+                <CardHeader>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-base">Connector detail: {selectedConnector.label}</CardTitle>
+                      <CardDescription>{selectedConnector.note}</CardDescription>
+                    </div>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedConnectorId(null)}>Sluiten</Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <Badge variant={selectedConnector.status === "CONNECTED" ? "secondary" : "outline"}>
+                      {selectedConnector.status === "CONNECTED" ? "Verbonden" : selectedConnector.status === "CONFIGURED" ? "Test vereist" : "Niet ingesteld"}
+                    </Badge>
+                    {selectedConnector.lastTest ? <span className="text-xs text-muted-foreground">Laatste {selectedConnector.lastTest.mode} test: {formatConnectorCheckedAt(selectedConnector.lastTest.checkedAt)}</span> : null}
+                    {canManageWorkspaceIntegrations ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={testConnector.isPending || testConnectorLive.isPending}
+                        onClick={() => LIVE_CONNECTOR_IDS.includes(selectedConnector.id as (typeof LIVE_CONNECTOR_IDS)[number])
+                          ? testConnectorLive.mutate({ connectorId: selectedConnector.id as (typeof LIVE_CONNECTOR_IDS)[number] })
+                          : testConnector.mutate({ connectorId: selectedConnector.id as ConnectorId })}
+                      >
+                        {testConnector.isPending || testConnectorLive.isPending ? "Testen…" : "Opnieuw testen"}
+                      </Button>
+                    ) : null}
+                  </div>
+                  {selectedConnectorEvents.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Nog geen checks beschikbaar in de recente geschiedenis.</p>
+                  ) : (
+                    <div className="divide-y divide-border/60 rounded-lg border border-border/60 px-3">
+                      {selectedConnectorEvents.map((event) => (
+                        <div key={event.id} className="flex flex-wrap items-center justify-between gap-3 py-2 text-sm">
+                          <span>{connectorAuditLabel(event.action)} · {formatConnectorCheckedAt(event.createdAt)}</span>
+                          <Badge variant={event.result === "SUCCESS" ? "secondary" : "destructive"}>{event.result === "SUCCESS" ? "Geslaagd" : "Mislukt"}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ) : null}
+            {canViewConnectorAudit ? (
+              <Card className="border-border/60 bg-card">
+                <CardHeader>
+                  <CardTitle className="text-base">Integratiegeschiedenis</CardTitle>
+                  <CardDescription>Recente connectorchecks voor deze werkruimte. Geheime waarden worden nooit getoond.</CardDescription>
+                  <div className="flex flex-wrap gap-2 pt-2" role="group" aria-label="Filter integratiegeschiedenis">
+                    {(["all", "failed", "success"] as const).map((filter) => (
+                      <Button
+                        key={filter}
+                        type="button"
+                        size="sm"
+                        variant={connectorAuditFilter === filter ? "secondary" : "outline"}
+                        aria-pressed={connectorAuditFilter === filter}
+                        onClick={() => setConnectorAuditFilter(filter)}
+                      >
+                        {filter === "all" ? "Alles" : filter === "failed" ? "Mislukt" : "Geslaagd"}
+                      </Button>
+                    ))}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {connectorAudit.isLoading ? (
+                    <div className="space-y-2">
+                      {Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} className="h-10 rounded-lg" />)}
+                    </div>
+                  ) : connectorAudit.error ? (
+                    <TestResult result={connectorAudit.error.message} isError />
+                  ) : visibleConnectorAudit.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Geen connectorchecks voor dit filter.</p>
+                  ) : (
+                    <div className="divide-y divide-border/60">
+                      {visibleConnectorAudit.map((event) => {
+                        const expanded = expandedConnectorAuditId === event.id;
+                        return (
+                        <div key={event.id} className="py-2.5 text-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="font-medium">{event.resourceId ?? "Connector"} · {connectorAuditLabel(event.action)}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {event.actorUserId ? "Door workspacegebruiker" : "Systeemactie"} · {formatConnectorCheckedAt(event.createdAt)}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant={event.result === "SUCCESS" ? "secondary" : "destructive"}>
+                                {event.result === "SUCCESS" ? "Geslaagd" : event.reason === "MISSING_CONFIGURATION" ? "Configuratie ontbreekt" : "Mislukt"}
+                              </Badge>
+                              {event.result !== "SUCCESS" ? (
+                                <Button type="button" size="sm" variant="ghost" aria-expanded={expanded} onClick={() => setExpandedConnectorAuditId(expanded ? null : event.id)}>
+                                  {expanded ? "Sluiten" : "Details"}
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                          {expanded ? <p className="mt-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">{connectorAuditReason(event.reason)}</p> : null}
+                        </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ) : null}
+            {canManageWorkspaceIntegrations ? (
+              <Card className="border-border/60 bg-card">
+                <CardHeader>
+                  <CardTitle className="text-base">Stripe en WordPress</CardTitle>
+                  <CardDescription>Read-only verbindingstests. Er worden geen betalingen of publicaties uitgevoerd.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-5 md:grid-cols-2">
+                  <div className="space-y-3 rounded-lg border border-border/60 p-4">
+                    <div>
+                      <p className="text-sm font-semibold">Stripe</p>
+                      <p className="text-xs text-muted-foreground">Accountstatus controleren via de Stripe API.</p>
+                    </div>
+                    <SecretKeyField
+                      label="Secret key"
+                      value={stripeSecretKey}
+                      onChange={setStripeSecretKey}
+                      placeholder={stripeSecretConfigured ? "Nieuwe key om te vervangen" : "sk_live_… of sk_test_…"}
+                      show={showStripeSecret}
+                      onToggleShow={() => setShowStripeSecret(!showStripeSecret)}
+                    />
+                  </div>
+                  <div className="space-y-3 rounded-lg border border-border/60 p-4">
+                    <div>
+                      <p className="text-sm font-semibold">WordPress</p>
+                      <p className="text-xs text-muted-foreground">REST API-status controleren zonder content te wijzigen.</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="wordpress-url">Website-URL</Label>
+                      <Input id="wordpress-url" value={wordpressUrl} onChange={(event) => setWordpressUrl(event.target.value)} placeholder="https://example.com" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="wordpress-user">Gebruikersnaam (optioneel)</Label>
+                      <Input id="wordpress-user" value={wordpressUsername} onChange={(event) => setWordpressUsername(event.target.value)} autoComplete="username" />
+                    </div>
+                    <SecretKeyField
+                      label="Application Password (optioneel)"
+                      value={wordpressApplicationPassword}
+                      onChange={setWordpressApplicationPassword}
+                      placeholder={wordpressPasswordConfigured ? "Nieuwe password om te vervangen" : "xxxx xxxx xxxx xxxx"}
+                      show={showWordpressPassword}
+                      onToggleShow={() => setShowWordpressPassword(!showWordpressPassword)}
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2 md:col-span-2">
+                    <Button type="button" size="sm" onClick={handleSaveStripeWordPress} disabled={batchUpdate.isPending}>
+                      {batchUpdate.isPending ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <Save className="mr-2 h-3 w-3" />}
+                      Opslaan
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
           </div>
         ) : null}
 

@@ -24,6 +24,11 @@ export type Context = {
     /** Effective role in the active workspace (membership-based). */
     workspaceRole?: string;
     isPersonalWorkspace?: boolean;
+    disabledModules?: string[];
+    isViewingAs?: boolean;
+    actorUserId?: string;
+    viewAsSessionId?: string;
+    viewAsTargetName?: string | null;
   } | null;
   requestId: string;
   /** Client IP from reverse proxy headers (public endpoints). */
@@ -45,6 +50,12 @@ const t = initTRPC.context<Context>().create({
         },
       };
     }
+    if (error.code === "INTERNAL_SERVER_ERROR") {
+      return {
+        ...shape,
+        message: "Er ging iets mis. Probeer het opnieuw of neem contact op met je beheerder.",
+      };
+    }
     return shape;
   },
 });
@@ -61,6 +72,12 @@ const DASHBOARD_INVALIDATION_PREFIXES = [
   "contact.",
   "review.",
   "crm.",
+  "task.",
+  "invoice.",
+  "activity.",
+  "inbox.",
+  "scoring.",
+  "workflow.",
   "domain.",
   "chatbot.",
 ];
@@ -122,7 +139,12 @@ export const publicRateLimitedProcedure = t.procedure.use(withLogging).use(withP
 // --- General rate limit middleware (100 req/min per user; Redis when REDIS_URL is set) ---
 const withRateLimit = t.middleware(async ({ ctx, next }) => {
   const key = ctx.user?.id ?? "anonymous";
-  await enforceRateLimit({ key: `general:${key}`, limit: 100, windowMs: 60_000 });
+  // Local development and browser automation use the in-memory fallback and
+  // should not be blocked by a normal multi-page smoke run. Production keeps
+  // the stricter per-user limit.
+  const localBrowserTest = process.env.DIGITIFY_LOCAL_TEST_MODE === "1";
+  const limit = process.env.NODE_ENV === "development" || localBrowserTest ? 1_000 : 100;
+  await enforceRateLimit({ key: `general:${key}`, limit, windowMs: 60_000 });
   return next();
 });
 
@@ -165,6 +187,7 @@ const withWorkspaceRlsContext = t.middleware(async ({ ctx, next }) => {
   }
   return withWorkspaceRls(ctx.db, ctx.user.workspaceId, async (db) =>
     next({ ctx: { ...ctx, db: db as PrismaClient } }),
+    ctx.user.id,
   );
 });
 
@@ -195,18 +218,36 @@ const enforceTrialAccess = t.middleware(async ({ ctx, next }) => {
   return next();
 });
 
-export const protectedProcedure = t.procedure
+const ROUTER_MODULES: Record<string, string> = {
+  campaign: "campaigns", contact: "contacts", inbox: "contacts", template: "templates", seo: "seo", project: "projects", contract: "contracts",
+  crm: "crm", task: "tasks", quote: "quotes", invoice: "invoices", report: "reports",
+  audit: "reports", social: "social", metaAds: "metaAds", googleAds: "googleAds",
+  media: "creativeStudio", booking: "bookings", domain: "domains", review: "reviews", chatbot: "chatbot", form: "forms", workflow: "automations", file: "files", activity: "activityLog", knowledge: "knowledge", payment: "payments",
+};
+
+const enforceModuleAccess = t.middleware(({ ctx, path, next }) => {
+  const moduleId = ROUTER_MODULES[path.split(".")[0]!];
+  if (moduleId && ctx.user?.disabledModules?.includes(moduleId)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Je hebt geen toegang tot deze module." });
+  }
+  return next();
+});
+
+const authenticatedWorkspaceProcedure = t.procedure
   .use(withLogging)
   .use(withRateLimit)
   .use(isAuthenticated)
   .use(withWorkspace)
+  .use(enforceModuleAccess);
+
+export const protectedProcedure = authenticatedWorkspaceProcedure
   .use(withWorkspaceRlsContext)
   .use(enforceTrialAccess);
 
 /** VIEWER and TESTER are read-only; TRIAL users keep mutation access during their trial window. */
 const READ_ONLY_ROLES = new Set<AppRole>(["VIEWER", "TESTER"]);
 
-const enforceMutationRole = t.middleware(({ ctx, next }) => {
+const enforceMutationRole = t.middleware(({ ctx, path, next }) => {
   if (!ctx.user) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "Niet ingelogd." });
   }
@@ -216,10 +257,19 @@ const enforceMutationRole = t.middleware(({ ctx, next }) => {
       message: "Je rol heeft geen rechten om wijzigingen door te voeren.",
     });
   }
+  if (ctx.user.isViewingAs && /(^|\.)(send|approve|export|delete|remove|disconnect|publish|payment|billing|invite|updateRole|setUserModule)/i.test(path)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Deze gevoelige actie is niet beschikbaar tijdens het bekijken van een account.",
+    });
+  }
   return next();
 });
 
-export const mutationProcedure = protectedProcedure.use(enforceMutationRole);
+export const mutationProcedure = authenticatedWorkspaceProcedure
+  .use(enforceMutationRole)
+  .use(withWorkspaceRlsContext)
+  .use(enforceTrialAccess);
 
 // Stricter rate limit for AI/email endpoints (20 req/min)
 export const aiRateLimitedProcedure = t.procedure
@@ -233,6 +283,7 @@ export const aiRateLimitedProcedure = t.procedure
   )
   .use(isAuthenticated)
   .use(withWorkspace)
+  .use(enforceModuleAccess)
   .use(withWorkspaceRlsContext)
   .use(enforceTrialAccess)
   .use(enforceMutationRole);
@@ -254,6 +305,7 @@ export const adminProcedure = t.procedure
   .use(withRateLimit)
   .use(isAuthenticated)
   .use(withWorkspace)
+  .use(enforceModuleAccess)
   .use(withWorkspaceRlsContext)
   .use(enforceTrialAccess)
   .use(hasRole("OWNER", "ADMIN"));
@@ -284,6 +336,20 @@ export const ownerProcedure = t.procedure
   .use(withRateLimit)
   .use(isAuthenticated)
   .use(withWorkspace)
+  .use(enforceModuleAccess)
   .use(withWorkspaceRlsContext)
   .use(enforceTrialAccess)
   .use(enforceWorkspaceOwnerAccess);
+
+/** Owner-level settings that must never be changed while viewing another account. */
+export const sensitiveOwnerProcedure = ownerProcedure.use(
+  t.middleware(({ ctx, next }) => {
+    if (ctx.user?.isViewingAs) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Deze gevoelige instelling is niet beschikbaar tijdens het bekijken van een account.",
+      });
+    }
+    return next();
+  }),
+);

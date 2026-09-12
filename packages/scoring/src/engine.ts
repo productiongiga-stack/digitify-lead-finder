@@ -65,9 +65,14 @@ function determineBestNextAction(priority: string, factors: ScoringFactorResult[
 
 export function computeScore(input: ScoringInput): ScoringResult {
   const { lead, enrichment, weights } = input;
-  const enabledWeights = weights.filter((w) => w.enabled);
+  const seen = new Set<string>();
+  const enabledWeights = weights.filter((w) => {
+    if (!w.enabled || seen.has(w.factorKey) || !Number.isFinite(w.weight) || w.weight <= 0 || !Number.isFinite(w.maxPoints) || w.maxPoints <= 0) return false;
+    seen.add(w.factorKey);
+    return true;
+  });
 
-  const maxPossible = enabledWeights.reduce((sum, w) => sum + w.maxPoints * w.weight, 0);
+  const maxPossible = enabledWeights.reduce((sum, w) => sum + (factorRegistry[w.factorKey] ? w.maxPoints * w.weight : 0), 0);
 
   const factors: ScoringFactorResult[] = enabledWeights.map((w) => {
     const factorFn = factorRegistry[w.factorKey];

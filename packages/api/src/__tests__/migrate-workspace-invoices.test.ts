@@ -69,3 +69,7 @@ describe("migrateLegacyWorkspaceInvoices", () => {
     expect(db.workspaceInvoice.create).toHaveBeenCalled();
   });
 });
+// Parsing tests; durable completion and concurrency are covered by audit-concurrency.integration.test.ts.
+vi.mock("../lib/legacy-import-once", () => ({
+  runLegacyImportOnce: (db: unknown, _workspace: string, _source: string, run: (db: unknown) => Promise<unknown>) => run(db),
+}));

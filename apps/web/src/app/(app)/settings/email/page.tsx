@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { trpc } from "@/lib/trpc/client";
 import {
   Button, Card, CardContent, Input, Label, Textarea, Skeleton,
@@ -10,11 +11,19 @@ import { ArrowLeft, Save, Loader2, User, Send, Palette, Braces } from "lucide-re
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
 import { readSettingString } from "@/lib/settings";
-import { MailVariablesHelp } from "@/components/email/mail-variables-help";
-import { EmailDesignPanel } from "@/components/email/email-design-panel";
 import { DEFAULT_MASTER_SHELL_HTML } from "@/lib/email-design-examples";
 import type { EmailShellChecklistAction } from "@/lib/email-shell-branding";
 import { SETTINGS_PAGE_QUERY_OPTS } from "@/lib/settings-query-options";
+
+const EmailDesignPanel = dynamic(
+  () => import("@/components/email/email-design-panel").then((module) => module.EmailDesignPanel),
+  { ssr: false, loading: () => <Skeleton className="h-96 w-full rounded-xl" /> },
+);
+
+const MailVariablesHelp = dynamic(
+  () => import("@/components/email/mail-variables-help").then((module) => module.MailVariablesHelp),
+  { ssr: false, loading: () => <Skeleton className="h-32 w-full rounded-xl" /> },
+);
 
 export default function EmailSettingsPage() {
   const { data: settings, isLoading, error, refetch } = trpc.settings.getEmailSettings.useQuery(undefined, {

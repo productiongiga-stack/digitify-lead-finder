@@ -80,6 +80,7 @@ export const SEO_SETTINGS_KEYS = [
 ] as const;
 
 export const REVIEWS_SETTINGS_KEYS = [
+  "chatbot.public_tenant_token",
   "reviews.embed_company",
   "reviews.embed_title",
   "reviews.embed_description",
@@ -190,6 +191,10 @@ export const INTEGRATIONS_SETTINGS_KEYS = [
   "integrations.google_oauth_client_secret",
   "integrations.meta_app_id",
   "integrations.meta_app_secret",
+  "integrations.stripe_secret_key",
+  "integrations.wordpress_url",
+  "integrations.wordpress_username",
+  "integrations.wordpress_application_password",
   "social.autopost_enabled",
   "ads.autoads_enabled",
   "ads.default_currency",

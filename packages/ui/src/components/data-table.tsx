@@ -191,6 +191,17 @@ export function DataTable<T>({
                 key={id}
                 className={cn(onRowClick && "cursor-pointer hover:bg-muted/50")}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onKeyDown={
+                  onRowClick
+                    ? (event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onRowClick(row);
+                        }
+                      }
+                    : undefined
+                }
+                tabIndex={onRowClick ? 0 : undefined}
               >
                 {selection ? (
                   <TableCell onClick={(e) => e.stopPropagation()}>

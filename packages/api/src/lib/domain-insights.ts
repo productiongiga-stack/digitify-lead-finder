@@ -1,6 +1,8 @@
 import type { PrismaClient } from "@digitify/db";
 import type { WebsiteAnalysis } from "@digitify/connectors";
 
+type DomainInsightDb = Pick<PrismaClient, "domain" | "enrichmentData">;
+
 export type DomainTrackerStore = {
   domainId: string;
   domainName: string;
@@ -26,11 +28,167 @@ export type DomainTrackerStore = {
   }>;
 };
 
+export type DomainTrackerHit = {
+  visitorId: string;
+  sessionId?: string;
+  pageUrl: string;
+  title: string;
+  referrerSource: string;
+  language: string;
+  timezone: string;
+  deviceType: string;
+  browser: string;
+  utmSource: string;
+  utmMedium: string;
+  utmCampaign: string;
+  occurredAt: string;
+};
+
+const TRACKER_LIMITS = {
+  devices: 10,
+  browsers: 10,
+  campaigns: 10,
+  pages: 20,
+  referrers: 10,
+  visitors: 50,
+} as const;
+
+function positiveInteger(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+export function createDomainTrackerStore(domainId: string, domainName: string): DomainTrackerStore {
+  return {
+    domainId,
+    domainName,
+    summary: { pageviews: 0, uniqueVisitors: 0, lastSeen: null },
+    devices: [],
+    browsers: [],
+    campaigns: [],
+    pages: [],
+    referrers: [],
+    visitors: [],
+  };
+}
+
+/**
+ * Applies one public tracker hit to the bounded, JSON-backed analytics snapshot.
+ * The summary remains cumulative even when detailed lists are trimmed for storage.
+ */
+export function applyDomainTrackerHit(
+  current: DomainTrackerStore | null | undefined,
+  hit: DomainTrackerHit,
+  domain: { id: string; domainName: string },
+): DomainTrackerStore {
+  const fallback = createDomainTrackerStore(domain.id, domain.domainName);
+  const tracker = current ?? fallback;
+  const pages = Array.isArray(tracker.pages) ? [...tracker.pages] : [];
+  const referrers = Array.isArray(tracker.referrers) ? [...tracker.referrers] : [];
+  const visitors = Array.isArray(tracker.visitors) ? [...tracker.visitors] : [];
+  const devices = Array.isArray(tracker.devices) ? [...tracker.devices] : [];
+  const browsers = Array.isArray(tracker.browsers) ? [...tracker.browsers] : [];
+  const campaigns = Array.isArray(tracker.campaigns) ? [...tracker.campaigns] : [];
+  const visitorKey = hit.sessionId || hit.visitorId;
+
+  const pageIndex = pages.findIndex((item) => item.url === hit.pageUrl);
+  if (pageIndex >= 0) {
+    const page = pages[pageIndex]!;
+    pages[pageIndex] = { ...page, count: positiveInteger(page.count) + 1, lastSeen: hit.occurredAt, title: hit.title || page.title };
+  } else {
+    pages.unshift({ url: hit.pageUrl, title: hit.title, count: 1, lastSeen: hit.occurredAt });
+  }
+
+  const referrerIndex = referrers.findIndex((item) => item.source === hit.referrerSource);
+  if (referrerIndex >= 0) {
+    const referrer = referrers[referrerIndex]!;
+    referrers[referrerIndex] = { ...referrer, count: positiveInteger(referrer.count) + 1 };
+  } else {
+    referrers.push({ source: hit.referrerSource, count: 1 });
+  }
+
+  const visitorIndex = visitors.findIndex((item) => item.id === visitorKey);
+  if (visitorIndex >= 0) {
+    const visitor = visitors[visitorIndex]!;
+    visitors[visitorIndex] = {
+      ...visitor,
+      count: positiveInteger(visitor.count) + 1,
+      lastSeen: hit.occurredAt,
+      pageUrl: hit.pageUrl,
+      language: hit.language || visitor.language,
+      timezone: hit.timezone || visitor.timezone,
+      deviceType: hit.deviceType,
+      browser: hit.browser,
+    };
+  } else {
+    visitors.push({
+      id: visitorKey,
+      count: 1,
+      lastSeen: hit.occurredAt,
+      pageUrl: hit.pageUrl,
+      language: hit.language,
+      timezone: hit.timezone,
+      deviceType: hit.deviceType,
+      browser: hit.browser,
+    });
+  }
+
+  const deviceIndex = devices.findIndex((item) => item.type === hit.deviceType);
+  if (deviceIndex >= 0) {
+    const device = devices[deviceIndex]!;
+    devices[deviceIndex] = { ...device, count: positiveInteger(device.count) + 1 };
+  } else {
+    devices.push({ type: hit.deviceType, count: 1 });
+  }
+
+  const browserIndex = browsers.findIndex((item) => item.name === hit.browser);
+  if (browserIndex >= 0) {
+    const browser = browsers[browserIndex]!;
+    browsers[browserIndex] = { ...browser, count: positiveInteger(browser.count) + 1 };
+  } else {
+    browsers.push({ name: hit.browser, count: 1 });
+  }
+
+  if (hit.utmSource || hit.utmMedium || hit.utmCampaign) {
+    const source = hit.utmSource || "direct";
+    const medium = hit.utmMedium || "unknown";
+    const campaign = hit.utmCampaign || "default";
+    const campaignIndex = campaigns.findIndex(
+      (item) => item.source === source && item.medium === medium && item.campaign === campaign,
+    );
+    if (campaignIndex >= 0) {
+      const existingCampaign = campaigns[campaignIndex]!;
+      campaigns[campaignIndex] = { ...existingCampaign, count: positiveInteger(existingCampaign.count) + 1 };
+    } else {
+      campaigns.push({ source, medium, campaign, count: 1 });
+    }
+  }
+
+  const priorSummary = tracker.summary ?? fallback.summary;
+  const knownVisitors = Math.max(positiveInteger(priorSummary.uniqueVisitors), visitors.length - (visitorIndex < 0 ? 1 : 0));
+  return {
+    domainId: domain.id,
+    domainName: domain.domainName,
+    summary: {
+      pageviews: positiveInteger(priorSummary.pageviews) + 1,
+      uniqueVisitors: knownVisitors + (visitorIndex < 0 ? 1 : 0),
+      lastSeen: hit.occurredAt,
+    },
+    devices: devices.sort((a, b) => b.count - a.count).slice(0, TRACKER_LIMITS.devices),
+    browsers: browsers.sort((a, b) => b.count - a.count).slice(0, TRACKER_LIMITS.browsers),
+    campaigns: campaigns.sort((a, b) => b.count - a.count).slice(0, TRACKER_LIMITS.campaigns),
+    pages: pages.sort((a, b) => b.count - a.count).slice(0, TRACKER_LIMITS.pages),
+    referrers: referrers.sort((a, b) => b.count - a.count).slice(0, TRACKER_LIMITS.referrers),
+    visitors: visitors.sort((a, b) => b.lastSeen.localeCompare(a.lastSeen)).slice(0, TRACKER_LIMITS.visitors),
+  };
+}
+
 type EnrichmentRow = { source: string; data: unknown; fetchedAt?: Date | string | null };
 
 type DomainInsightSource = {
   id: string;
   domainName: string;
+  leadId?: string | null;
+  sslStatus?: string | null;
   analysisData?: unknown;
   trackerData?: unknown;
   lastAnalyzedAt?: Date | string | null;
@@ -133,7 +291,7 @@ export async function syncWorkspaceDomainExpiry(db: PrismaClient, workspaceId: s
 }
 
 export async function persistDomainAnalysis(
-  db: PrismaClient,
+  db: DomainInsightDb,
   params: {
     domainId: string;
     leadId?: string | null;
@@ -178,7 +336,7 @@ export async function persistDomainAnalysis(
 }
 
 export async function persistDomainTracker(
-  db: PrismaClient,
+  db: DomainInsightDb,
   params: {
     domainId: string;
     leadId?: string | null;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
@@ -22,14 +23,23 @@ import {
   X,
 } from "lucide-react";
 import { useOutboundEmailPreviewSettings } from "@/lib/outbound-email-settings";
-import {
-  SystemMessageEditor,
-  type SystemMessageItem,
-} from "@/components/templates/system-message-editor";
 import { SystemMessageCard, type SystemMessageListItem } from "@/components/templates/system-message-card";
-import { SystemMessagePreviewDialog } from "@/components/templates/system-message-preview-dialog";
+import type { SystemMessageItem } from "@/components/templates/system-message-editor";
 
 const MODULE_ORDER = ["AUTH", "BOOKINGS", "CAMPAIGNS", "INVOICES", "REVIEWS", "SYSTEM"] as const;
+
+const SystemMessageEditor = dynamic(
+  () => import("@/components/templates/system-message-editor").then((module) => module.SystemMessageEditor),
+  { ssr: false, loading: () => <Skeleton className="h-96 w-full rounded-xl" /> },
+);
+
+const SystemMessagePreviewDialog = dynamic(
+  () =>
+    import("@/components/templates/system-message-preview-dialog").then(
+      (module) => module.SystemMessagePreviewDialog,
+    ),
+  { ssr: false },
+);
 
 function normalizeSearch(value: string) {
   return value.trim().toLowerCase();

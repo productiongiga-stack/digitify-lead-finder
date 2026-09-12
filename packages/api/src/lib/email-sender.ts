@@ -185,7 +185,7 @@ export async function loadEmailSettings(db: PrismaClient, scope?: EmailSettingsS
 export async function sendBrandedEmail(
   db: PrismaClient,
   params: SendBrandedEmailParams
-): Promise<{ success: boolean; messageId?: string; error?: string; html?: string }> {
+): Promise<{ success: boolean; delivery?: "not_sent" | "unknown"; messageId?: string; error?: string; html?: string }> {
   const cfg = await loadEmailSettings(db, params.userId);
   const effectiveFromEmail = cfg.fromEmail || cfg.smtpUser;
   const effectiveFromName = cfg.fromName || cfg.companyName || cfg.smtpUser;
@@ -197,6 +197,7 @@ export async function sendBrandedEmail(
     return {
       success: false,
       error: "E-mail afzender ontbreekt. Configureer eerst SMTP en e-mailinstellingen.",
+      delivery: "not_sent",
     };
   }
   const normalizedSubject = normalizeAiPlaceholderSyntax(
@@ -285,6 +286,7 @@ export async function sendBrandedEmail(
   if (cfg.providerName === "smtp" && (!cfg.smtpHost || !cfg.smtpUser || !cfg.smtpPass)) {
     return {
       success: false,
+      delivery: "not_sent" as const,
       error: "SMTP is onvolledig geconfigureerd. Vul host, gebruikersnaam en wachtwoord in bij Integraties.",
     };
   }
@@ -341,6 +343,7 @@ export async function sendBrandedEmail(
 
   return {
     success: result.success,
+    delivery: result.delivery,
     messageId: result.messageId,
     error: result.error ? formatSmtpErrorMessage(result.error) : undefined,
     html: htmlWithTrackingPixel,

@@ -1,0 +1,277 @@
+/* ── Offerte Wizard v2 — Wizard Builder CSS ─────────────────────────────── */
+
+/* ── Builder layout ──────────────────────────────────────────────────────── */
+.owmc-page--builder { max-width: 1400px; }
+
+.owmc-builder-layout {
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  gap: 20px;
+  align-items: start;
+}
+
+/* ── Builder left column ─────────────────────────────────────────────────── */
+.owmc-builder-left { display: flex; flex-direction: column; gap: 16px; }
+
+/* ── Step tabs ───────────────────────────────────────────────────────────── */
+.owmc-builder-steps {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.owmc-builder-step {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1.5px solid rgba(17,19,24,.1);
+  background: #fff;
+  color: #5b6472;
+  transition: all .15s;
+  font-family: inherit;
+}
+.owmc-builder-step:hover { border-color: #f7c600; color: #111318; }
+.owmc-builder-step--active {
+  background: #f7c600;
+  border-color: #f7c600;
+  color: #111318;
+}
+
+/* ── Panels ──────────────────────────────────────────────────────────────── */
+.owmc-builder-panel { display: none; }
+.owmc-builder-panel--active { display: block; }
+
+/* ── Sortable list ───────────────────────────────────────────────────────── */
+.owmc-sortable-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 40px;
+}
+.owmc-sortable-list:empty::after {
+  content: 'Geen items. Klik + om toe te voegen.';
+  display: block;
+  text-align: center;
+  padding: 20px 0;
+  font-size: 13px;
+  color: #9aa0aa;
+}
+
+/* ── Service row ─────────────────────────────────────────────────────────── */
+.owmc-service-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #fff;
+  border-radius: 8px;
+  border: 1.5px solid rgba(17,19,24,.08);
+  transition: all .15s;
+  cursor: default;
+}
+.owmc-service-row:hover {
+  border-color: rgba(247,198,0,.4);
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+}
+.owmc-service-row--dragging {
+  opacity: .5;
+  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+}
+.owmc-service-row--over {
+  border-color: #f7c600;
+  background: rgba(247,198,0,.04);
+}
+
+.owmc-drag-handle {
+  cursor: grab;
+  color: #9aa0aa;
+  font-size: 16px;
+  flex-shrink: 0;
+  padding: 2px;
+  user-select: none;
+}
+.owmc-drag-handle:active { cursor: grabbing; }
+
+.owmc-service-row-icon  { font-size: 22px; flex-shrink: 0; }
+.owmc-service-row-info  { flex: 1; min-width: 0; }
+.owmc-service-row-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111318;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.owmc-service-row-desc {
+  font-size: 12px;
+  color: #5b6472;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.owmc-service-row-price {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111318;
+  flex-shrink: 0;
+}
+.owmc-service-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+/* ── Question row ────────────────────────────────────────────────────────── */
+.owmc-question-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(17,19,24,.02);
+  border-radius: 8px;
+  border: 1.5px solid rgba(17,19,24,.06);
+  transition: all .15s;
+}
+.owmc-question-row:hover { border-color: rgba(247,198,0,.3); }
+.owmc-question-row-label {
+  flex: 1;
+  font-size: 13px;
+  color: #111318;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.owmc-question-row-type {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(17,19,24,.06);
+  color: #5b6472;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.owmc-question-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+/* ── Service editor ──────────────────────────────────────────────────────── */
+.owmc-builder-service-editor {
+  animation: owmcSlideIn .2s ease;
+}
+@keyframes owmcSlideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Question type inline editor */
+.owmc-question-editor {
+  padding: 12px;
+  background: rgba(247,198,0,.04);
+  border: 1.5px solid rgba(247,198,0,.25);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  animation: owmcSlideIn .15s ease;
+}
+.owmc-question-editor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.owmc-question-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.owmc-question-option-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.owmc-question-option-row .owmc-input {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+/* ── JSON editor ─────────────────────────────────────────────────────────── */
+.owmc-textarea--code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  tab-size: 2;
+  resize: vertical;
+  min-height: 400px;
+  background: #1a1d23;
+  color: #e2e8f0;
+  border-color: rgba(255,255,255,.08);
+  border-radius: 8px;
+}
+.owmc-textarea--code:focus {
+  border-color: #f7c600;
+  box-shadow: 0 0 0 3px rgba(247,198,0,.15);
+}
+
+/* ── Right: Live preview ─────────────────────────────────────────────────── */
+.owmc-builder-right { position: sticky; top: 32px; }
+.owmc-builder-preview-card { overflow: visible; }
+.owmc-builder-preview {
+  padding: 0;
+  background: #f0f2f5;
+  border-radius: 0 0 12px 12px;
+  min-height: 400px;
+  max-height: 700px;
+  overflow-y: auto;
+}
+
+/* Scale down the wizard preview */
+.owmc-builder-preview .owmc-wrap {
+  zoom: .85;
+  transform-origin: top left;
+  pointer-events: none;
+  user-select: none;
+}
+.owmc-builder-preview .owmc-layout {
+  max-width: none;
+  grid-template-columns: 1fr;
+  gap: 0;
+  padding: 0;
+}
+.owmc-builder-preview .owmc-cart-column { display: none; }
+.owmc-builder-preview .owmc-card { border-radius: 0; box-shadow: none; }
+
+/* ── Save bar ────────────────────────────────────────────────────────────── */
+.owmc-builder-save-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 12px 24px 12px 240px; /* 240px = wp admin menu width */
+  background: #fff;
+  border-top: 1px solid rgba(17,19,24,.08);
+  box-shadow: 0 -4px 16px rgba(0,0,0,.06);
+}
+.owmc-builder-status {
+  font-size: 13px;
+  color: #5b6472;
+}
+.owmc-builder-status--saved   { color: #10b981; font-weight: 600; }
+.owmc-builder-status--error   { color: #ef4444; font-weight: 600; }
+.owmc-builder-status--saving  { color: #f59e0b; font-weight: 600; }
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 1200px) {
+  .owmc-builder-layout { grid-template-columns: 1fr 340px; }
+}
+@media (max-width: 960px) {
+  .owmc-builder-layout { grid-template-columns: 1fr; }
+  .owmc-builder-right { position: static; }
+  .owmc-builder-save-bar { padding-left: 24px; }
+}
+@media (max-width: 640px) {
+  .owmc-question-editor-grid { grid-template-columns: 1fr; }
+  .owmc-builder-steps { gap: 4px; }
+  .owmc-builder-step { padding: 7px 12px; font-size: 12px; }
+}

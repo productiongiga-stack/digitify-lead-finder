@@ -85,7 +85,7 @@ html.digitify-page-leaving .digitify-page-overlay {
   --digitify-ink: #0a0a0a;
   --digitify-muted: #4b5563;
   --digitify-header-h: calc(var(--digitify-header-rail-h, 3px) + var(--digitify-header-bar-h, 62px));
-  --digitify-max-w: 1360px;
+  --digitify-max-w: 1440px;
 }
 
 body.digitify-shop-body {
@@ -324,6 +324,33 @@ body.digitify-shop-body .digitify-header__actions {
 .digitify-header__auth-link--solid {
   border-color: rgba(240, 160, 74, 0.34);
   background: linear-gradient(135deg, rgba(255, 175, 81, 0.24) 0%, rgba(255, 175, 81, 0.1) 100%);
+}
+
+.digitify-header__auth-link--logout {
+  gap: 7px;
+  border-color: rgba(214, 111, 34, 0.22);
+  background: rgba(255, 248, 239, 0.72);
+  color: #9a4f1c;
+  box-shadow: 0 4px 12px rgba(154, 79, 28, 0.06);
+}
+
+.digitify-header__auth-link--logout:hover {
+  border-color: rgba(214, 111, 34, 0.5);
+  background: #fff4e7;
+  color: #7e3c14;
+  box-shadow: 0 6px 16px rgba(154, 79, 28, 0.12);
+  transform: translateY(-1px);
+}
+
+.digitify-header__auth-link--logout:focus-visible {
+  outline: 2px solid #e99a49;
+  outline-offset: 3px;
+}
+
+.digitify-header__auth-icon {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2.2;
 }
 
 .digitify-header__shop-tools .nav-cart {

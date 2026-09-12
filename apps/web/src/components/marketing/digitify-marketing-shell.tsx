@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
+import { LogOut } from "lucide-react";
 import {
   DIGITIFY_BRAND_SLOGAN,
   getDigitifySiteUrls,
@@ -320,10 +321,11 @@ export function DigitifyMarketingHeader({ activePage }: { activePage: MarketingP
                         </Link>
                         <button
                           type="button"
-                          className="digitify-header__auth-link digitify-header__auth-link--solid"
+                          className="digitify-header__auth-link digitify-header__auth-link--solid digitify-header__auth-link--logout"
                           onClick={() => signOut({ callbackUrl: "/" })}
                         >
-                          Uitloggen
+                          <LogOut className="digitify-header__auth-icon" aria-hidden="true" />
+                          <span>Uitloggen</span>
                         </button>
                       </>
                     ) : (

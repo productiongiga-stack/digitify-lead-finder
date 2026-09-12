@@ -631,7 +631,7 @@ export const inboxRouter = router({
                 ? `${envelope.to[0].name || ""} <${envelope.to[0].address || ""}>`.trim()
                 : "",
               subject: envelope.subject || "(geen onderwerp)",
-              date: envelope.date?.toISOString() ?? new Date().toISOString(),
+              date: envelope.date ? new Date(envelope.date).toISOString() : new Date().toISOString(),
               seen: msg.flags?.has("\\Seen") ?? false,
               messageId: envelope.messageId || "",
               inReplyTo: envelope.inReplyTo || "",
@@ -718,7 +718,7 @@ export const inboxRouter = router({
               ? `${envelope.to[0].name || ""} <${envelope.to[0].address || ""}>`.trim()
               : "",
             subject,
-            date: envelope.date?.toISOString() ?? new Date().toISOString(),
+            date: envelope.date ? new Date(envelope.date).toISOString() : new Date().toISOString(),
             seen: msg.flags?.has("\\Seen") ?? true,
             messageId: envelope.messageId || "",
             inReplyTo: envelope.inReplyTo || "",

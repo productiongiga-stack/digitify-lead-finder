@@ -9,6 +9,8 @@ const SECRET_SETTING_KEYS = new Set([
   "api.google_places_key",
   "integrations.google_oauth_client_secret",
   "integrations.meta_app_secret",
+  "integrations.stripe_secret_key",
+  "integrations.wordpress_application_password",
   "email.smtp_pass",
   "email.imap_pass",
   "bookings.google_oauth_access_token",
@@ -73,6 +75,7 @@ export function isSecretSettingKey(key: string) {
   if (SECRET_SETTING_KEYS.has(normalized)) return true;
   if (normalized.startsWith("api.") && normalized.endsWith("_key")) return true;
   if (normalized.startsWith("integrations.") && normalized.endsWith("_secret")) return true;
+  if (normalized === "integrations.stripe_secret_key" || normalized === "integrations.wordpress_application_password") return true;
   if (normalized.startsWith("email.") && (normalized.endsWith("_pass") || normalized.endsWith("_password"))) return true;
   if (normalized.startsWith("bookings.google_oauth_") && normalized.endsWith("_token")) return true;
   if (normalized.startsWith("ads.google_oauth_") && normalized.endsWith("_token")) return true;

@@ -1,0 +1,1368 @@
+// ============================================================================
+// Digitify Suite v2 — Prisma Schema
+// Multi-tenant SaaS data model for agencies & service businesses
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTH & IDENTITY
+// ============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?   // null for OAuth-only users
+
+  accounts Account[]
+  sessions Session[]
+
+  // Workspace memberships (a user can belong to multiple workspaces)
+  memberships WorkspaceMember[]
+
+  // Authored content
+  createdActivities Activity[]
+  createdAuditLogs  AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@id([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================================
+// WORKSPACE / MULTI-TENANCY
+// ============================================================================
+
+/// A workspace is the top-level tenant boundary. All business data is scoped
+/// to a workspace. Users can belong to multiple workspaces (agencies managing
+/// multiple brands). Each workspace has its own billing subscription.
+model Workspace {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique // URL-safe: /app/[slug]/...
+  logo        String? // URL to logo
+  description String?
+
+  // Branding
+  brandColor   String @default("#6366f1") // Primary brand color
+  brandProfile BrandProfile?
+
+  // Billing
+  stripeCustomerId     String? @unique
+  stripeSubscriptionId String?
+  plan                 Plan    @default(FREE)
+  planExpiresAt        DateTime?
+
+  // Settings stored as JSON for flexibility
+  settings Json @default("{}")
+
+  // Relations
+  members       WorkspaceMember[]
+  contacts      Contact[]
+  organizations Organization[]
+  leads         Lead[]
+  deals         Deal[]
+  quotes        Quote[]
+  invoices      Invoice[]
+  bookingTypes  BookingType[]
+  bookings      Booking[]
+  availability  AvailabilityRule[]
+  calendarEvents CalendarEvent[]
+  tasks         Task[]
+  templates     Template[]
+  forms         Form[]
+  automations   AutomationRule[]
+  activities    Activity[]
+  auditLogs     AuditLog[]
+  files         FileAsset[]
+  tags          Tag[]
+  pipelines     Pipeline[]
+  integrations  IntegrationConnection[]
+  notifications Notification[]
+  configurators Configurator[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        Role   @default(MEMBER)
+
+  // Permissions override (bitfield for fine-grained RBAC)
+  // null = inherit from role. Non-null = explicit overrides.
+  permissions Int?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  joinedAt DateTime @default(now())
+
+  @@unique([workspaceId, userId])
+  @@map("workspace_members")
+}
+
+/// Brand profile for white-label/multi-brand. One per workspace.
+model BrandProfile {
+  id          String @id @default(cuid())
+  workspaceId String @unique
+
+  companyName    String?
+  legalName      String?
+  vatNumber      String? // BTW nummer
+  address        String?
+  city           String?
+  postalCode     String?
+  country        String  @default("BE")
+  phone          String?
+  email          String?
+  website        String?
+  iban           String?
+
+  // Visual branding
+  primaryColor   String @default("#6366f1")
+  secondaryColor String @default("#f59e0b")
+  logoUrl        String?
+  faviconUrl     String?
+  emailHeaderHtml String?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("brand_profiles")
+}
+
+// ============================================================================
+// CRM: CONTACTS & ORGANIZATIONS
+// ============================================================================
+
+/// A contact is an individual person. The core entity that connects all modules.
+/// Contacts are deduped by email within a workspace.
+model Contact {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  email     String
+  firstName String?
+  lastName  String?
+  phone     String?
+  jobTitle  String?
+  avatarUrl String?
+  source    String?   // "manual", "form", "booking", "import", "api"
+  notes     String?   // Rich text notes
+
+  // Status tracks the contact lifecycle
+  status ContactStatus @default(ACTIVE)
+
+  // Link to organization
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  // Reverse relations
+  leads         Lead[]
+  deals         Deal[]
+  quotes        Quote[]
+  invoices      Invoice[]
+  bookings      Booking[]
+  tasks         Task[]
+  activities    Activity[]
+  formSubmissions FormSubmission[]
+  contactTags   ContactTag[]
+
+  lastActivityAt DateTime?
+  lastContactedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  archivedAt      DateTime? // Soft delete
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, email]) // Dedup by email per workspace
+  @@index([workspaceId, status])
+  @@index([workspaceId, organizationId])
+  @@index([workspaceId, createdAt])
+  @@map("contacts")
+}
+
+/// An organization (company/account) that contacts belong to.
+model Organization {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  name      String
+  domain    String?  // e.g. "acme.com" for auto-association
+  phone     String?
+  email     String?
+  website   String?
+  address   String?
+  city      String?
+  postalCode String?
+  country   String?
+  vatNumber String?
+  logoUrl   String?
+  notes     String?
+
+  industry  String?
+  size      String?  // "1-10", "11-50", etc.
+
+  contacts Contact[]
+  deals    Deal[]
+  quotes   Quote[]
+  invoices Invoice[]
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  archivedAt DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@map("organizations")
+}
+
+/// Tags for contacts, leads, deals. Workspace-scoped.
+model Tag {
+  id          String @id @default(cuid())
+  workspaceId String
+  name        String
+  color       String @default("#6366f1")
+
+  contactTags ContactTag[]
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, name])
+  @@map("tags")
+}
+
+model ContactTag {
+  contactId String
+  tagId     String
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  @@map("contact_tags")
+}
+
+// ============================================================================
+// PIPELINE: LEADS & DEALS
+// ============================================================================
+
+/// A pipeline defines the stages for a deal workflow. Each workspace can have
+/// multiple pipelines (e.g. "Sales", "Partnerships", "Upsell").
+model Pipeline {
+  id          String @id @default(cuid())
+  workspaceId String
+  name        String
+  isDefault   Boolean @default(false)
+
+  stages PipelineStage[]
+  deals  Deal[]
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, name])
+  @@map("pipelines")
+}
+
+model PipelineStage {
+  id         String @id @default(cuid())
+  pipelineId String
+  name       String
+  color      String @default("#6366f1")
+  position   Int    @default(0) // Sort order
+  isWon      Boolean @default(false)
+  isLost     Boolean @default(false)
+
+  deals Deal[]
+
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  @@unique([pipelineId, name])
+  @@map("pipeline_stages")
+}
+
+/// A lead is an inbound, unqualified prospect. When qualified, it converts
+/// to a Deal (and optionally creates a Contact if one doesn't exist).
+model Lead {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  // Source data (may not have a Contact yet)
+  email    String
+  name     String?
+  phone    String?
+  company  String?
+  source   String?  // "website", "form", "import", "manual", "referral"
+  sourceId String?  // Form submission ID, etc.
+
+  // Qualification
+  status    LeadStatus @default(NEW)
+  score     Int        @default(0) // 0-100 lead score
+  services  String?    // Requested services (comma-sep or JSON)
+  budget    Decimal?   @db.Decimal(12, 2)
+  notes     String?
+
+  // Metadata
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  pageUrl     String?
+
+  // Links
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  // Conversion: when qualified, creates a Deal
+  convertedDealId String?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, email])
+  @@index([workspaceId, createdAt])
+  @@map("leads")
+}
+
+/// A deal is a qualified sales opportunity moving through a pipeline.
+/// Deals have a monetary value and track the journey to close.
+model Deal {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  title       String
+  value       Decimal?  @db.Decimal(12, 2)
+  currency    String    @default("EUR")
+  probability Int       @default(0) // 0-100%
+  notes       String?
+
+  // Pipeline position
+  pipelineId String
+  stageId    String
+  pipeline   Pipeline      @relation(fields: [pipelineId], references: [id])
+  stage      PipelineStage @relation(fields: [stageId], references: [id])
+
+  // Relations
+  contactId      String?
+  contact        Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  quotes   Quote[]
+  invoices Invoice[]
+
+  expectedCloseAt DateTime?
+  closedAt        DateTime?
+  lostReason      String?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  archivedAt DateTime?
+
+  @@index([workspaceId, stageId])
+  @@index([workspaceId, contactId])
+  @@index([workspaceId, createdAt])
+  @@map("deals")
+}
+
+// ============================================================================
+// REVENUE: QUOTES & INVOICES
+// ============================================================================
+
+/// A quote (offerte/proposal) sent to a contact. Has a full lifecycle:
+/// draft → sent → viewed → accepted/declined → invoiced
+model Quote {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  reference   String    // Human-readable: OFF-2025-001
+  title       String?   // "Website redesign proposal"
+  status      QuoteStatus @default(DRAFT)
+
+  // Linked entities
+  contactId      String?
+  contact        Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  dealId         String?
+  deal           Deal?         @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  // Financials
+  subtotal    Decimal @default(0) @db.Decimal(12, 2)
+  taxRate     Decimal @default(21) @db.Decimal(5, 2)
+  taxAmount   Decimal @default(0) @db.Decimal(12, 2)
+  discount    Decimal @default(0) @db.Decimal(12, 2)
+  total       Decimal @default(0) @db.Decimal(12, 2)
+  currency    String  @default("EUR")
+
+  // Content
+  introText   String? // Rich text above line items
+  footerText  String? // Rich text below line items / terms
+  notes       String? // Internal notes (not shown to client)
+
+  // Sections with line items
+  sections QuoteSection[]
+
+  // Public access
+  publicToken String  @unique @default(cuid()) // For /proposal/[token]
+  publicUrl   String? // Full generated URL
+
+  // Dates
+  issuedAt    DateTime?
+  validUntil  DateTime?
+  viewedAt    DateTime?
+  acceptedAt  DateTime?
+  declinedAt  DateTime?
+
+  // Signature
+  signatureName String?
+  signatureData String? // Base64 or URL
+
+  // PDF
+  pdfUrl String?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, contactId])
+  @@index([workspaceId, createdAt])
+  @@map("quotes")
+}
+
+/// A section groups line items in a quote (e.g. "Webdesign", "SEO", "Extra's")
+model QuoteSection {
+  id      String @id @default(cuid())
+  quoteId String
+  title   String
+  position Int @default(0)
+
+  items QuoteItem[]
+
+  quote Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@map("quote_sections")
+}
+
+/// A single line item in a quote section.
+model QuoteItem {
+  id        String @id @default(cuid())
+  sectionId String
+  description String
+  quantity    Decimal @default(1) @db.Decimal(10, 2)
+  unitPrice   Decimal @default(0) @db.Decimal(12, 2)
+  total       Decimal @default(0) @db.Decimal(12, 2)
+  position    Int @default(0)
+
+  section QuoteSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@map("quote_items")
+}
+
+/// An invoice generated from a quote or standalone.
+/// Lifecycle: draft → sent → viewed → paid / overdue / void
+model Invoice {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  reference    String // FACT-2025-001
+  status       InvoiceStatus @default(DRAFT)
+
+  contactId      String?
+  contact        Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  dealId         String?
+  deal           Deal?         @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  subtotal    Decimal @default(0) @db.Decimal(12, 2)
+  taxRate     Decimal @default(21) @db.Decimal(5, 2)
+  taxAmount   Decimal @default(0) @db.Decimal(12, 2)
+  total       Decimal @default(0) @db.Decimal(12, 2)
+  currency    String  @default("EUR")
+
+  items InvoiceItem[]
+
+  issuedAt  DateTime?
+  dueAt     DateTime?
+  paidAt    DateTime?
+  voidedAt  DateTime?
+
+  pdfUrl    String?
+  stripeInvoiceId String?
+
+  notes     String?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, contactId])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String @id @default(cuid())
+  invoiceId   String
+  description String
+  quantity    Decimal @default(1) @db.Decimal(10, 2)
+  unitPrice   Decimal @default(0) @db.Decimal(12, 2)
+  total       Decimal @default(0) @db.Decimal(12, 2)
+  position    Int @default(0)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_items")
+}
+
+// ============================================================================
+// SCHEDULING: BOOKINGS & AVAILABILITY
+// ============================================================================
+
+/// A booking type defines a bookable appointment (like Calendly event types).
+/// Has its own public booking page: /book/[slug]
+model BookingType {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  title       String
+  slug        String  // Unique per workspace for public URL
+  description String?
+  duration    Int     @default(30) // minutes
+  bufferBefore Int    @default(0)
+  bufferAfter  Int    @default(0)
+  color       String  @default("#6366f1")
+  location    String? // "Google Meet", "Kantoor", "Op locatie"
+  isActive    Boolean @default(true)
+
+  bookings Booking[]
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, slug])
+  @@map("booking_types")
+}
+
+/// An actual booked appointment.
+model Booking {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  bookingTypeId String
+  bookingType   BookingType @relation(fields: [bookingTypeId], references: [id])
+
+  // Attendee (may or may not be an existing contact)
+  contactId     String?
+  contact       Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  attendeeName  String
+  attendeeEmail String
+  attendeePhone String?
+  attendeeNotes String?
+
+  // Time
+  startAt DateTime
+  endAt   DateTime
+
+  // Status
+  status  BookingStatus @default(PENDING)
+
+  // External calendar
+  googleEventId String?
+  meetLink      String?
+
+  // Unique ID for iCal
+  uid String @unique @default(cuid())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workspaceId, startAt])
+  @@index([workspaceId, status])
+  @@map("bookings")
+}
+
+/// Defines weekly availability windows for scheduling.
+model AvailabilityRule {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  dayOfWeek Int       // 0=Sunday, 1=Monday, ... 6=Saturday
+  startTime String    // "09:00"
+  endTime   String    // "17:00"
+  isActive  Boolean   @default(true)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("availability_rules")
+}
+
+// ============================================================================
+// PLANNER: CALENDAR EVENTS & TASKS
+// ============================================================================
+
+/// A calendar event (meeting, call, internal event). Different from Booking
+/// which is client-facing. CalendarEvents are internal planning items.
+model CalendarEvent {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  title       String
+  description String?
+  startAt     DateTime
+  endAt       DateTime?
+  allDay      Boolean @default(false)
+  color       String?
+  typeKey     String  @default("meeting") // meeting, call, internal, followup
+
+  // Optional link to contact
+  contactId String?
+
+  status String @default("scheduled") // scheduled, completed, cancelled
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workspaceId, startAt])
+  @@map("calendar_events")
+}
+
+/// A task / to-do item. Can be standalone or linked to a contact/deal.
+model Task {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  title          String
+  description    String?
+  status         TaskStatus @default(TODO)
+  priority       TaskPriority @default(NORMAL)
+  estimatedMinutes Int?
+  dueAt          DateTime?
+  completedAt    DateTime?
+
+  // Optional links
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  dealId    String?
+
+  // Assignee
+  assigneeId String? // WorkspaceMember.userId
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, dueAt])
+  @@index([workspaceId, assigneeId])
+  @@map("tasks")
+}
+
+// ============================================================================
+// ENGAGE: TEMPLATES, FORMS, AUTOMATIONS
+// ============================================================================
+
+/// Reusable templates for emails, quotes, proposals.
+model Template {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  name     String
+  type     TemplateType // EMAIL, QUOTE, PROPOSAL
+  subject  String?      // For email templates
+  bodyHtml String       // HTML content with {{variables}}
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("templates")
+}
+
+/// A form for intake, onboarding, or lead capture. Has a public URL.
+model Form {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  title       String
+  slug        String    // For public URL
+  description String?
+  schema      Json      // JSON schema defining fields
+  settings    Json      @default("{}") // Redirect URL, notification email, etc.
+  isActive    Boolean   @default(true)
+
+  submissions FormSubmission[]
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, slug])
+  @@map("forms")
+}
+
+model FormSubmission {
+  id     String @id @default(cuid())
+  formId String
+  data   Json   // Submitted form data
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@map("form_submissions")
+}
+
+/// Automation rules: when [trigger] then [actions].
+model AutomationRule {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  name      String
+  isActive  Boolean @default(true)
+  trigger   Json    // { event: "deal.stage_changed", conditions: {...} }
+  actions   Json    // [{ type: "send_email", config: {...} }, ...]
+
+  runs AutomationRun[]
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("automation_rules")
+}
+
+model AutomationRun {
+  id     String @id @default(cuid())
+  ruleId String
+
+  status    String   @default("pending") // pending, running, completed, failed
+  input     Json?    // Trigger event data
+  output    Json?    // Result / error info
+  startedAt DateTime @default(now())
+  completedAt DateTime?
+
+  rule AutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@map("automation_runs")
+}
+
+// ============================================================================
+// FILES & INTEGRATIONS
+// ============================================================================
+
+/// Uploaded files: logos, attachments, PDF exports.
+model FileAsset {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  name     String
+  key      String  // Storage key (UploadThing / S3)
+  url      String  // Public URL
+  size     Int     // Bytes
+  mimeType String
+  category String? // "avatar", "attachment", "pdf", "logo"
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@map("file_assets")
+}
+
+/// External integrations (Google Calendar, Stripe, etc.)
+model IntegrationConnection {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  provider     String // "google_calendar", "stripe", "slack", etc.
+  accessToken  String? // Encrypted
+  refreshToken String? // Encrypted
+  expiresAt    DateTime?
+  metadata     Json?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, provider])
+  @@map("integration_connections")
+}
+
+// ============================================================================
+// OBSERVABILITY: ACTIVITY, AUDIT, NOTIFICATIONS
+// ============================================================================
+
+/// Activity feed / timeline. Records every meaningful business event.
+/// Shows on contact detail, deal detail, dashboard, etc.
+model Activity {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  type      String  // "contact.created", "deal.stage_changed", "quote.sent", ...
+  summary   String  // Human-readable: "Quote OFF-2025-003 sent to Emma Claes"
+  metadata  Json?   // Structured event data
+
+  // Actor
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Subject (polymorphic via type + entityId)
+  entityType String? // "contact", "deal", "quote", ...
+  entityId   String?
+
+  // Optional contact link for timeline
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, contactId, createdAt])
+  @@index([workspaceId, entityType, entityId])
+  @@map("activities")
+}
+
+/// Audit log for compliance and security. Immutable append-only.
+model AuditLog {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  action   String // "create", "update", "delete", "login", "export"
+  entity   String // "contact", "quote", "settings", ...
+  entityId String?
+  changes  Json?  // { field: { old: x, new: y } }
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  ipAddress String?
+  userAgent String?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, entity, entityId])
+  @@map("audit_logs")
+}
+
+/// In-app notifications for team members.
+model Notification {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  recipientId String // User ID
+  type        String // "task.assigned", "quote.accepted", "deal.won"
+  title       String
+  body        String?
+  link        String? // Deep link: /app/[slug]/quotes/[id]
+  isRead      Boolean @default(false)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([workspaceId, recipientId, isRead])
+  @@map("notifications")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum Plan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum Role {
+  OWNER     // Full access, billing, can delete workspace
+  ADMIN     // Full access except billing/workspace deletion
+  MEMBER    // Standard access, cannot manage team
+  VIEWER    // Read-only access
+}
+
+enum ContactStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  UNQUALIFIED
+  CONVERTED
+  LOST
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  VIEWED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  INVOICED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  VIEWED
+  PAID
+  OVERDUE
+  VOID
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NOSHOW
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TemplateType {
+  EMAIL
+  QUOTE
+  PROPOSAL
+}
+
+// ============================================================================
+// CONFIGURATOR / OFFERTE BUILDER (Builder Layer)
+// ============================================================================
+
+/// A configurator is a multi-step wizard that lets end-users configure a service
+/// or product, get a live price calculation, and submit as a lead/quote request.
+/// Think: offerte-builder, product configurator, price calculator.
+model Configurator {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  name        String              // Internal name: "Website Offerte Wizard"
+  slug        String              // Public URL: /configure/[slug]
+  description String?
+  status      ConfiguratorStatus  @default(DRAFT)
+
+  // Versioning — only one version is "live" at a time
+  activeVersionId String?         // Currently published version
+  versions        ConfiguratorVersion[]
+
+  // Branding overrides (null = inherit workspace brand)
+  brandColor       String?
+  brandLogoUrl     String?
+  backgroundColor  String?
+  accentColor      String?
+  fontFamily       String?
+
+  // Settings
+  settings Json @default("{}") // submitAction, redirectUrl, emailNotify, etc.
+
+  // Public access
+  isPublic    Boolean @default(false)
+  publicToken String  @unique @default(cuid())
+
+  // Embed settings
+  embedSettings EmbedSettings?
+
+  // Submissions
+  submissions ConfiguratorSubmission[]
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, slug])
+  @@index([workspaceId, status])
+  @@map("configurators")
+}
+
+/// A version snapshot of a configurator. Allows editing without breaking live version.
+model ConfiguratorVersion {
+  id              String @id @default(cuid())
+  configuratorId  String
+  versionNumber   Int    @default(1)
+  label           String? // "v1.0", "Zomer campagne"
+
+  // The full step/block schema for this version
+  steps ConfiguratorStep[]
+
+  // Pricing rules for this version
+  pricingRules PricingRule[]
+
+  // Metadata
+  publishedAt DateTime?
+  isArchived  Boolean   @default(false)
+
+  configurator Configurator @relation(fields: [configuratorId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([configuratorId, versionNumber])
+  @@map("configurator_versions")
+}
+
+/// A step (page/screen) in the configurator wizard.
+/// Steps are ordered and can have conditional visibility.
+model ConfiguratorStep {
+  id        String @id @default(cuid())
+  versionId String
+
+  title       String
+  description String?
+  position    Int     @default(0)
+  icon        String? // Lucide icon name
+
+  // Conditional visibility: JSON logic expression
+  // e.g. { "==": [{ "var": "projectType" }, "website"] }
+  condition Json?
+
+  blocks ConfiguratorBlock[]
+
+  version ConfiguratorVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([versionId, position])
+  @@map("configurator_steps")
+}
+
+/// A block is a single form element within a step.
+/// Schema-driven: the blockType + config determine rendering.
+model ConfiguratorBlock {
+  id     String @id @default(cuid())
+  stepId String
+
+  // Block type determines the renderer
+  blockType ConfiguratorBlockType
+  fieldKey  String  // Unique key for this field: "projectType", "pageCount", etc.
+  label     String
+  helpText  String?
+  position  Int     @default(0)
+
+  // Type-specific configuration as JSON
+  // For SELECT: { options: [{ label: "Website", value: "website", icon: "Globe" }] }
+  // For SLIDER: { min: 1, max: 50, step: 1, unit: "pagina's" }
+  // For CHECKBOX_GROUP: { options: [...], minSelect: 1, maxSelect: 5 }
+  config Json @default("{}")
+
+  // Validation rules
+  isRequired  Boolean @default(false)
+  validation  Json?   // { min: 1, max: 100, pattern: "..." }
+
+  // Conditional visibility
+  condition Json?
+
+  // Pricing impact reference (which PricingRule keys this affects)
+  pricingKeys String[] // ["basePrice", "pageMultiplier"]
+
+  step ConfiguratorStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  @@index([stepId, position])
+  @@map("configurator_blocks")
+}
+
+/// A pricing rule defines how selections affect the total price.
+/// Rules are evaluated in order; supports fixed, multiplier, conditional, tiered.
+model PricingRule {
+  id        String @id @default(cuid())
+  versionId String
+
+  key         String         // Unique identifier: "basePrice", "seoAddon"
+  label       String         // Display label in breakdown
+  ruleType    PricingRuleType
+  position    Int            @default(0)
+
+  // Rule configuration (depends on ruleType)
+  // FIXED:        { amount: 500 }
+  // PER_UNIT:     { amountPerUnit: 150, fieldKey: "pageCount" }
+  // MULTIPLIER:   { factor: 1.5, condition: { "==": [{"var":"urgency"}, "express"] } }
+  // TIERED:       { tiers: [{ min: 1, max: 5, price: 100 }, { min: 6, max: 20, price: 80 }], fieldKey: "pageCount" }
+  // CONDITIONAL:  { amount: 300, condition: { "in": ["seo", {"var":"addons"}] } }
+  // PERCENTAGE:   { percentage: 21, of: "subtotal", label: "BTW 21%" }
+  config Json
+
+  // Whether this rule is always active or conditional
+  isOptional Boolean @default(false)
+
+  version ConfiguratorVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([versionId, position])
+  @@map("pricing_rules")
+}
+
+/// A submission from a public configurator page.
+/// Contains all selected values, calculated price, and contact info.
+model ConfiguratorSubmission {
+  id              String @id @default(cuid())
+  configuratorId  String
+
+  // Snapshot of all user selections
+  selections Json  // { projectType: "website", pageCount: 12, addons: ["seo","analytics"] }
+
+  // Calculated pricing breakdown
+  pricingBreakdown Json  // [{ key: "basePrice", label: "Basis", amount: 500 }, ...]
+  subtotal         Decimal @db.Decimal(12, 2)
+  taxAmount        Decimal @db.Decimal(12, 2)
+  total            Decimal @db.Decimal(12, 2)
+
+  // Contact info from final step
+  contactName    String
+  contactEmail   String
+  contactPhone   String?
+  contactCompany String?
+  contactNotes   String?
+
+  // CRM integration: auto-created entities
+  contactId String?
+  leadId    String?
+  quoteId   String?
+
+  // Status
+  status ConfiguratorSubmissionStatus @default(NEW)
+
+  // Source tracking
+  source    String? // "hosted", "embed-iframe", "embed-js"
+  referrer  String?
+  utmSource String?
+
+  configurator Configurator @relation(fields: [configuratorId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([configuratorId, createdAt])
+  @@index([configuratorId, status])
+  @@map("configurator_submissions")
+}
+
+// ============================================================================
+// EMBED SETTINGS (Distribution Layer)
+// ============================================================================
+
+/// Embed configuration for a configurator or booking page.
+/// Controls how the widget appears when embedded on external sites.
+model EmbedSettings {
+  id              String @id @default(cuid())
+  configuratorId  String? @unique
+  bookingTypeId   String?
+
+  // Embed mode
+  embedType  EmbedType @default(IFRAME)
+
+  // Appearance
+  width      String  @default("100%")
+  height     String  @default("700px")
+  borderRadius String @default("12px")
+  shadow     Boolean @default(true)
+
+  // Behavior
+  autoResize  Boolean @default(true)
+  hideHeader  Boolean @default(false)
+  hideFooter  Boolean @default(false)
+
+  // Domain restrictions (empty = allow all)
+  allowedDomains String[] // ["example.com", "*.example.com"]
+
+  // Custom CSS injection
+  customCss String?
+
+  // Generated embed codes (read-only, computed)
+  iframeCode  String?
+  jsSnippet   String?
+  hostedUrl   String?
+
+  configurator Configurator? @relation(fields: [configuratorId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("embed_settings")
+}
+
+// ============================================================================
+// BOOKING PAGE (Builder Layer extension)
+// ============================================================================
+
+/// Extended booking page settings for the builder layer.
+/// Adds branding, embed, and customization on top of BookingType.
+model BookingPage {
+  id            String @id @default(cuid())
+  bookingTypeId String @unique
+  workspaceId   String
+
+  // Custom branding (null = inherit workspace)
+  brandColor      String?
+  brandLogoUrl    String?
+  backgroundColor String?
+  headerText      String?
+  confirmationText String?
+
+  // Embed settings
+  embedType       EmbedType @default(IFRAME)
+  allowedDomains  String[]
+  autoResize      Boolean   @default(true)
+  customCss       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("booking_pages")
+}
+
+// ============================================================================
+// NEW ENUMS
+// ============================================================================
+
+enum ConfiguratorStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ConfiguratorBlockType {
+  // Selection types
+  SELECT_CARDS    // Visual card selection (single)
+  SELECT_DROPDOWN // Standard dropdown
+  RADIO_GROUP     // Radio buttons
+  CHECKBOX_GROUP  // Multi-select checkboxes
+  TOGGLE          // On/off toggle
+
+  // Input types
+  TEXT_INPUT      // Single line text
+  TEXTAREA        // Multi-line text
+  NUMBER_INPUT    // Numeric input
+  SLIDER          // Range slider with live value
+  DATE_PICKER     // Date selection
+
+  // Layout types
+  HEADING         // Section heading / info text
+  DIVIDER         // Visual separator
+  IMAGE           // Decorative / info image
+  PRICE_PREVIEW   // Live price breakdown display
+
+  // Contact (final step)
+  CONTACT_FORM    // Name, email, phone, company, notes
+}
+
+enum PricingRuleType {
+  FIXED         // Fixed amount added when condition met
+  PER_UNIT      // Amount × quantity from a field
+  MULTIPLIER    // Multiply subtotal by factor
+  TIERED        // Tiered pricing based on quantity
+  CONDITIONAL   // Add amount when condition matches
+  PERCENTAGE    // Percentage of subtotal (e.g., tax)
+  DISCOUNT      // Subtract amount or percentage
+}
+
+enum ConfiguratorSubmissionStatus {
+  NEW
+  CONTACTED
+  CONVERTED
+  ARCHIVED
+}
+
+enum EmbedType {
+  IFRAME    // Standard iframe embed
+  JS_WIDGET // JavaScript snippet (shadow DOM)
+  POPUP     // Click-to-open modal
+}

@@ -50,6 +50,7 @@ export default function AnalyticsSettingsPage() {
     onSuccess: () => {
       utils.settings.getAnalyticsSettings.invalidate();
       utils.analytics.getSummary.invalidate();
+      utils.user.getShellContext.invalidate();
       showToast({ title: "Analytics opgeslagen", description: "Trackers en privacy-instellingen zijn bijgewerkt." });
     },
     onError: (error) =>

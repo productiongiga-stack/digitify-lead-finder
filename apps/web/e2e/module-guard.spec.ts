@@ -1,19 +1,13 @@
 import { test, expect } from "@playwright/test";
+import { authStatePath } from "./auth-state";
 
-const restrictedEmail =
-  process.env.PLAYWRIGHT_MODULE_RESTRICTED_EMAIL ??
-  process.env.SEED_MODULE_RESTRICTED_EMAIL ??
-  "module-restricted@digitify.local";
 const password =
-  process.env.PLAYWRIGHT_LOGIN_PASSWORD ?? process.env.SEED_ADMIN_PASSWORD ?? "DigitifyLocal1!";
+  process.env.PLAYWRIGHT_LOGIN_PASSWORD ?? process.env.SEED_ADMIN_PASSWORD ?? "";
 
 test.describe("Module access guard", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(restrictedEmail);
-    await page.getByLabel("Wachtwoord").fill(password);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+  test.use({ storageState: authStatePath("module-restricted") });
+  test.beforeEach(() => {
+    test.skip(!password, "Set PLAYWRIGHT_LOGIN_PASSWORD or SEED_ADMIN_PASSWORD for authenticated E2E tests.");
   });
 
   test("disabled module shows blocked state", async ({ page }) => {

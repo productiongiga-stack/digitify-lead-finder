@@ -2,7 +2,7 @@ import { randomBytes, scryptSync } from "crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { Prisma } from "@digitify/db";
-import { router, ownerProcedure, protectedProcedure, publicRateLimitedProcedure, mutationProcedure } from "../trpc";
+import { router, sensitiveOwnerProcedure, protectedProcedure, publicRateLimitedProcedure, mutationProcedure } from "../trpc";
 import { effectiveWorkspaceRole } from "../lib/effective-role";
 import { sendTemplatedEmail } from "../lib/send-templated-email";
 import { ensureUserWorkspace } from "../lib/user-workspace";
@@ -268,7 +268,7 @@ export const registrationRouter = router({
       return { success: true, status: updated.status };
     }),
 
-  listRequests: ownerProcedure.query(({ ctx }) => {
+  listRequests: sensitiveOwnerProcedure.query(({ ctx }) => {
     const workspaceId = ctx.user.workspaceId ?? ctx.user.id;
     const includeGlobal = canReviewGlobalRegistrations(workspaceId);
     return ctx.db.registrationRequest.findMany({
@@ -296,7 +296,7 @@ export const registrationRouter = router({
     });
   }),
 
-  approve: ownerProcedure
+  approve: sensitiveOwnerProcedure
     .input(z.object({ requestId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const request = await ctx.db.registrationRequest.findUnique({ where: { id: input.requestId } });
@@ -357,7 +357,7 @@ export const registrationRouter = router({
       return user;
     }),
 
-  reject: ownerProcedure
+  reject: sensitiveOwnerProcedure
     .input(z.object({ requestId: z.string(), reason: z.string().max(800).optional() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.registrationRequest.findUnique({ where: { id: input.requestId } });

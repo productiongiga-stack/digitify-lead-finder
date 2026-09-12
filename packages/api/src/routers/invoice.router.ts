@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router, mutationProcedure } from "../trpc";
-import { migrateLegacyWorkspaceInvoices } from "../lib/migrate-workspace-invoices";
 import { nextInvoiceNumber, serializeInvoice } from "../lib/invoice-serializer";
 import { buildInvoiceOutboundBody } from "../lib/invoice-outbound";
 import { sendTemplatedEmail } from "../lib/send-templated-email";
@@ -9,9 +8,7 @@ import { workspaceScopeFromUser, type WorkspaceScope } from "../lib/workspace-se
 
 /** Quotes may use workspace id or legacy owner user id as createdById. */
 function workspaceQuoteWhere(scope: WorkspaceScope) {
-  return {
-    OR: [{ createdById: scope.workspaceId }, { createdById: scope.memberId }],
-  };
+  return { createdById: scope.workspaceId };
 }
 
 const invoiceInclude = { items: { orderBy: { sortOrder: "asc" as const } } };
@@ -26,9 +23,9 @@ const invoiceItemInput = z.object({
 const MANUAL_INVOICE_STATUSES = ["DRAFT", "PARTIALLY_PAID", "PAID", "CANCELLED"] as const;
 
 function recalcInvoiceTotals(items: Array<{ quantity: number; unitPrice: number }>, vatRate: number) {
-  const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  const subtotal = Math.round(items.reduce((sum, item) => sum + Math.round(item.quantity * item.unitPrice * 100), 0)) / 100;
   const vatAmount = Math.round(subtotal * (vatRate / 100) * 100) / 100;
-  return { subtotal, vatAmount, total: subtotal + vatAmount };
+  return { subtotal, vatAmount, total: Math.round((subtotal + vatAmount) * 100) / 100 };
 }
 
 function assertInvoiceEditable(status: string) {
@@ -55,7 +52,6 @@ export const invoiceRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
-      await migrateLegacyWorkspaceInvoices(ctx.db, scope);
 
       const workspaceWhere = { createdById: scope.workspaceId };
       const listWhere = {
@@ -119,7 +115,6 @@ export const invoiceRouter = router({
 
   listBillableQuotes: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);
-    await migrateLegacyWorkspaceInvoices(ctx.db, scope);
 
     const invoicedRows = await ctx.db.workspaceInvoice.findMany({
       where: { createdById: scope.workspaceId, quoteId: { not: null } },
@@ -153,7 +148,6 @@ export const invoiceRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
-      await migrateLegacyWorkspaceInvoices(ctx.db, scope);
 
       const row = await ctx.db.workspaceInvoice.findFirst({
         where: { id: input.id, createdById: scope.workspaceId },
@@ -172,9 +166,10 @@ export const invoiceRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
-      await migrateLegacyWorkspaceInvoices(ctx.db, scope);
 
-      const quote = await ctx.db.quote.findFirst({
+      return ctx.db.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`invoice:${scope.workspaceId}`}, 0))`;
+      const quote = await tx.quote.findFirst({
         where: { id: input.quoteId, ...workspaceQuoteWhere(scope) },
         include: { items: { orderBy: { sortOrder: "asc" } } },
       });
@@ -192,7 +187,7 @@ export const invoiceRouter = router({
         });
       }
 
-      const existing = await ctx.db.workspaceInvoice.findFirst({
+      const existing = await tx.workspaceInvoice.findFirst({
         where: { createdById: scope.workspaceId, quoteId: quote.id },
         include: invoiceInclude,
       });
@@ -203,10 +198,10 @@ export const invoiceRouter = router({
         ? new Date(input.dueDate)
         : new Date(issueDate.getTime() + 14 * 24 * 60 * 60 * 1000);
 
-      const row = await ctx.db.workspaceInvoice.create({
+      const row = await tx.workspaceInvoice.create({
         data: {
           createdById: scope.workspaceId,
-          invoiceNumber: await nextInvoiceNumber(ctx.db, scope.workspaceId),
+          invoiceNumber: await nextInvoiceNumber(tx, scope.workspaceId),
           quoteId: quote.id,
           leadId: quote.leadId,
           clientName: quote.clientName,
@@ -238,7 +233,7 @@ export const invoiceRouter = router({
         include: invoiceInclude,
       });
 
-      await ctx.db.activity.create({
+      await tx.activity.create({
         data: {
           userId: ctx.user.id,
           leadId: quote.leadId,
@@ -249,6 +244,8 @@ export const invoiceRouter = router({
       });
 
       return serializeInvoice(row);
+      });
+
     }),
 
   update: mutationProcedure
@@ -303,8 +300,8 @@ export const invoiceRouter = router({
           });
         }
 
-        return tx.workspaceInvoice.update({
-          where: { id: row.id },
+        const changed = await tx.workspaceInvoice.updateMany({
+          where: { id: row.id, createdById: scope.workspaceId, updatedAt: row.updatedAt, status: row.status },
           data: {
             clientName: input.clientName ?? row.clientName,
             clientEmail:
@@ -321,10 +318,19 @@ export const invoiceRouter = router({
             vatAmount: totals.vatAmount,
             total: totals.total,
           },
+        });
+        if (changed.count !== 1) {
+          throw new TRPCError({ code: "CONFLICT", message: "De factuur is intussen gewijzigd. Herlaad de factuur en probeer opnieuw." });
+        }
+        return tx.workspaceInvoice.findFirst({
+          where: { id: row.id, createdById: scope.workspaceId },
           include: invoiceInclude,
         });
       });
 
+      if (!updated) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Factuur is bijgewerkt, maar kon niet opnieuw worden geladen." });
+      }
       return serializeInvoice(updated);
     }),
 
@@ -346,7 +352,7 @@ export const invoiceRouter = router({
         where: { id: input.id },
         data: {
           status: input.status,
-          paidAt: input.status === "PAID" ? new Date() : row.paidAt,
+          paidAt: input.status === "PAID" ? new Date() : null,
         },
         include: invoiceInclude,
       });
@@ -432,6 +438,9 @@ export const invoiceRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
 
       const current = serializeInvoice(row);
+      if (["PAID", "CANCELLED"].includes(current.status)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Voor deze factuur is geen betalingsherinnering nodig." });
+      }
       if (current.status === "DRAFT") {
         throw new TRPCError({
           code: "BAD_REQUEST",

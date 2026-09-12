@@ -10,15 +10,16 @@ Belangrijke bestanden en entry points. Paden relatief aan repo-root.
 |-----|------|
 | `AGENTS.md` | LLM startpunt |
 | `README.md` | Quick start, stack, scripts |
+| `docs/MVP_CORE.md` | Afgebakende verkoopflow en MVP-statusregels |
 | `DEPLOYMENT.md` | CI, RLS rollout, rate limits, env |
+| `docs/CLOUDFLARE.md` | Cloudflare DNS/proxy-runbook en Workers-migratiecheck |
 | `package.json` | Root scripts (turbo orchestration) |
 | `pnpm-workspace.yaml` | Monorepo packages |
 | `turbo.json` | Turbo task pipeline |
 | `docker-compose.yml` | Local Postgres + Redis |
 | `vercel.json` | Vercel deploy config |
 | `.github/workflows/ci.yml` | GitHub CI |
-
-**Ontbreekt:** `.env.example` — TODO: bevestigen of aanmaken gewenst is.
+| `.env.example` | Veilige lokale en productie-env placeholders |
 
 ---
 
@@ -30,8 +31,9 @@ Belangrijke bestanden en entry points. Paden relatief aan repo-root.
 | `prisma-migrate-deploy.sh` | `pnpm db:migrate` |
 | `setup-production-db.sh` | `pnpm setup:db` |
 | `check-release.sh` | `pnpm check:release` |
+| `RELEASE_CHECKLIST.md` | Handmatige merge-, staging- en deploycheck |
 | `resolve-init-migration.sh` | Fix P3009 init migration |
-| `local-run.sh` | Local run helper |
+| `local-run.sh` | Safe local run helper; migrations and seed are explicit opt-ins |
 
 ---
 
@@ -60,6 +62,8 @@ Belangrijke bestanden en entry points. Paden relatief aan repo-root.
 | Pad | Feature |
 |-----|---------|
 | `dashboard/page.tsx` | Dashboard |
+| `help/page.tsx` | Nederlandse hulp per module |
+| `components/dashboard/onboarding-checklist.tsx` | Eerste-login checklist voor de MVP-verkoopflow |
 | `leads/page.tsx`, `leads/search/page.tsx`, `leads/[id]/page.tsx` | Leads |
 | `campaigns/page.tsx`, `campaigns/[id]/page.tsx` | Campagnes |
 | `contacts/page.tsx`, `contacts/compose/page.tsx`, `contacts/inbox/page.tsx` | Outbound |

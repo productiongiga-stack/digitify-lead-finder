@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { createHash } from "node:crypto";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { resolvePublicTenantUserId } from "@digitify/api/src/lib/public-tenant";
+import { enforceRateLimit, getClientIp } from "@/lib/http-security";
 
 const seenSubmissions = new Map<string, number>();
 
@@ -17,25 +18,32 @@ function getCookieValue(request: Request, name: string) {
 
 export async function POST(request: Request) {
   try {
-    const forwarded = request.headers.get("x-forwarded-for") || "";
-    const ip = forwarded.split(",")[0]?.trim() || "unknown";
-    const limiter = await checkRateLimit({
-      key: `public-review-embed:${ip}`,
-      limit: 15,
-      windowMs: 60 * 60 * 1000,
-    });
-    if (!limiter.allowed) {
-      return NextResponse.json({ error: "Te veel aanvragen. Probeer later opnieuw." }, { status: 429 });
+    const ip = getClientIp(request);
+    const body = await request.json() as Record<string, unknown>;
+    const tenant = String(body.tenant || "");
+    const workspaceId = await resolvePublicTenantUserId(prisma, tenant);
+    if (!workspaceId) {
+      return NextResponse.json(
+        { error: "Deze reviewwidget is niet veilig gekoppeld aan een werkruimte." },
+        { status: 400 },
+      );
     }
 
-    const body = await request.json();
+    const limiter = await enforceRateLimit(request, {
+      key: `public-review-embed:${workspaceId}`,
+      limit: 15,
+      windowMs: 60 * 60 * 1000,
+      message: "Te veel aanvragen. Probeer later opnieuw.",
+    });
+    if (limiter) return limiter;
+
     const rating = Number(body.rating);
     const feedback = String(body.feedback || "").trim().slice(0, 2000);
     const platform = String(body.platform || "").trim();
     const company = String(body.company || "").trim();
     const pageUrl = String(body.pageUrl || request.headers.get("referer") || "").trim();
     const honeypot = String(body.website || "").trim();
-    const sessionScope = `${company}|${pageUrl}`.trim() || ip;
+    const sessionScope = `${workspaceId}|${company}|${pageUrl}`.trim() || ip;
     const sessionKey = createHash("sha256").update(sessionScope).digest("hex").slice(0, 16);
     const lockCookieName = `review_embed_once_${sessionKey}`;
     const secureCookie = request.url.startsWith("https://");
@@ -63,7 +71,7 @@ export async function POST(request: Request) {
     }
 
     const fingerprint = createHash("sha256")
-      .update(`${ip}|${rating}|${feedback}|${platform}|${company}|${pageUrl}`)
+      .update(`${workspaceId}|${ip}|${rating}|${feedback}|${platform}|${company}|${pageUrl}`)
       .digest("hex");
     const now = Date.now();
     for (const [key, ts] of seenSubmissions.entries()) {
@@ -79,6 +87,7 @@ export async function POST(request: Request) {
 
     await prisma.activity.create({
       data: {
+        userId: workspaceId,
         type: "NOTE_ADDED",
         title:
           rating >= 4

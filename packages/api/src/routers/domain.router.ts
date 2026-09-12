@@ -37,6 +37,155 @@ const domainInclude: Prisma.DomainInclude = {
   },
 };
 
+const domainOverviewSelect = {
+  id: true,
+  domainName: true,
+  registrar: true,
+  expiresAt: true,
+  status: true,
+  sslStatus: true,
+  analysisData: true,
+  trackerData: true,
+  lastAnalyzedAt: true,
+  lastTrackerAt: true,
+  healthScore: true,
+  leadId: true,
+  updatedAt: true,
+  lead: {
+    select: {
+      id: true,
+      companyName: true,
+      enrichmentData: {
+        where: {
+          OR: [{ source: "domain_analysis" }, { source: { startsWith: "website_tracker:" } }],
+        },
+        orderBy: { fetchedAt: "desc" as const },
+        select: { source: true, data: true, fetchedAt: true },
+      },
+    },
+  },
+} satisfies Prisma.DomainSelect;
+
+async function loadPortfolioDomains(db: Parameters<typeof assertLeadAccess>[0], workspaceId: string) {
+  await syncWorkspaceDomainExpiry(db, workspaceId);
+  return db.domain.findMany({
+    where: { createdById: workspaceId },
+    orderBy: { updatedAt: "desc" },
+    select: domainOverviewSelect,
+  });
+}
+
+function buildPortfolioStats(domains: ReturnType<typeof enrichDomainRecord>[]) {
+  return {
+    total: domains.length,
+    active: domains.filter((item) => item.status === "ACTIVE").length,
+    expiring: domains.filter((item) => item.status === "EXPIRING").length,
+    expired: domains.filter((item) => item.status === "EXPIRED").length,
+    online: domains.filter((item) => item.websiteStatus === "online").length,
+    slow: domains.filter((item) => item.websiteStatus === "slow").length,
+    offline: domains.filter((item) => item.websiteStatus === "offline").length,
+    unknown: domains.filter((item) => item.websiteStatus === "unknown").length,
+    totalVisitors: domains.reduce((sum, item) => sum + item.uniqueVisitors, 0),
+    totalPageviews: domains.reduce((sum, item) => sum + item.pageviews, 0),
+    avgHealthScore:
+      domains.length > 0
+        ? Math.round(domains.reduce((sum, item) => sum + item.healthScore, 0) / domains.length)
+        : 0,
+    needsAnalysis: domains.filter((item) => !item.lastAnalyzedAt).length,
+    withoutLead: domains.filter((item) => !item.leadId).length,
+    expiringSoon: domains
+      .filter((item) => item.status === "EXPIRING" && item.expiresAt)
+      .sort((a, b) => new Date(a.expiresAt!).getTime() - new Date(b.expiresAt!).getTime())
+      .slice(0, 5)
+      .map((item) => ({
+        id: item.id,
+        domainName: item.domainName,
+        expiresAt: item.expiresAt,
+        leadName: item.lead?.companyName ?? null,
+      })),
+  };
+}
+
+function buildPortfolioMonitor(domains: ReturnType<typeof enrichDomainRecord>[]) {
+  return domains.slice(0, 8).map((domain) => ({
+    id: domain.id,
+    domainName: domain.domainName,
+    sslStatus: domain.sslStatus,
+    websiteStatus: domain.websiteStatus,
+    statusCode: domain.analysis?.statusCode ?? null,
+    loadTimeMs: domain.analysis?.loadTimeMs ?? null,
+    healthScore: domain.healthScore,
+    uniqueVisitors: domain.uniqueVisitors,
+    pageviews: domain.pageviews,
+    lastSeen: domain.lastTrackerSeen,
+    lastAnalyzedAt: domain.lastAnalyzedAt,
+    leadName: domain.lead?.companyName ?? null,
+  }));
+}
+
+function buildPortfolioAttention(domains: ReturnType<typeof enrichDomainRecord>[]) {
+  const items: Array<{
+    id: string;
+    domainId: string;
+    domainName: string;
+    kind: "expiry" | "availability" | "analysis" | "lead";
+    priority: "high" | "medium";
+    title: string;
+    description: string;
+  }> = [];
+
+  for (const domain of domains) {
+    if (domain.status === "EXPIRED" || domain.status === "EXPIRING") {
+      items.push({
+        id: `${domain.id}:expiry`,
+        domainId: domain.id,
+        domainName: domain.domainName,
+        kind: "expiry",
+        priority: domain.status === "EXPIRED" ? "high" : "medium",
+        title: domain.status === "EXPIRED" ? "Domein is verlopen" : "Domein verloopt binnenkort",
+        description: domain.expiresAt ? new Date(domain.expiresAt).toLocaleDateString("nl-BE") : "Vervaldatum nakijken",
+      });
+    }
+    if (domain.websiteStatus === "offline" || domain.websiteStatus === "slow") {
+      items.push({
+        id: `${domain.id}:availability`,
+        domainId: domain.id,
+        domainName: domain.domainName,
+        kind: "availability",
+        priority: domain.websiteStatus === "offline" ? "high" : "medium",
+        title: domain.websiteStatus === "offline" ? "Website offline" : "Website reageert traag",
+        description: domain.analysis?.loadTimeMs ? `${Math.round(domain.analysis.loadTimeMs)} ms gemeten` : "Analyse vernieuwen",
+      });
+    }
+    if (!domain.lastAnalyzedAt) {
+      items.push({
+        id: `${domain.id}:analysis`,
+        domainId: domain.id,
+        domainName: domain.domainName,
+        kind: "analysis",
+        priority: "medium",
+        title: "Eerste analyse ontbreekt",
+        description: "Start een website-analyse",
+      });
+    }
+    if (!domain.leadId) {
+      items.push({
+        id: `${domain.id}:lead`,
+        domainId: domain.id,
+        domainName: domain.domainName,
+        kind: "lead",
+        priority: "medium",
+        title: "Geen lead gekoppeld",
+        description: "Koppel een lead aan dit domein",
+      });
+    }
+  }
+
+  return items
+    .sort((a, b) => (a.priority === b.priority ? a.domainName.localeCompare(b.domainName) : a.priority === "high" ? -1 : 1))
+    .slice(0, 8);
+}
+
 async function assertDomainNameAvailable(
   db: Parameters<typeof assertLeadAccess>[0],
   workspaceId: string,
@@ -165,41 +314,24 @@ export const domainRouter = router({
 
   getPortfolioStats: protectedProcedure.query(async ({ ctx }) => {
     const workspaceId = ctx.user.workspaceId!;
-    await syncWorkspaceDomainExpiry(ctx.db, workspaceId);
+    const domains = await loadPortfolioDomains(ctx.db, workspaceId);
+    return buildPortfolioStats(domains.map((domain) => enrichDomainRecord(domain)));
+  }),
 
-    const domains = await ctx.db.domain.findMany({
-      where: { createdById: workspaceId },
-      include: domainInclude,
-    });
+  getPortfolioOverview: protectedProcedure.query(async ({ ctx }) => {
+    const workspaceId = ctx.user.workspaceId!;
+    const domains = await loadPortfolioDomains(ctx.db, workspaceId);
     const enriched = domains.map((domain) => enrichDomainRecord(domain));
+    const latest = domains.reduce<Date | null>((current, domain) => {
+      const candidate = domain.updatedAt;
+      return !current || candidate > current ? candidate : current;
+    }, null);
 
     return {
-      total: enriched.length,
-      active: enriched.filter((item) => item.status === "ACTIVE").length,
-      expiring: enriched.filter((item) => item.status === "EXPIRING").length,
-      expired: enriched.filter((item) => item.status === "EXPIRED").length,
-      online: enriched.filter((item) => item.websiteStatus === "online").length,
-      slow: enriched.filter((item) => item.websiteStatus === "slow").length,
-      offline: enriched.filter((item) => item.websiteStatus === "offline").length,
-      unknown: enriched.filter((item) => item.websiteStatus === "unknown").length,
-      totalVisitors: enriched.reduce((sum, item) => sum + item.uniqueVisitors, 0),
-      totalPageviews: enriched.reduce((sum, item) => sum + item.pageviews, 0),
-      avgHealthScore:
-        enriched.length > 0
-          ? Math.round(enriched.reduce((sum, item) => sum + item.healthScore, 0) / enriched.length)
-          : 0,
-      needsAnalysis: enriched.filter((item) => !item.lastAnalyzedAt).length,
-      withoutLead: enriched.filter((item) => !item.leadId).length,
-      expiringSoon: enriched
-        .filter((item) => item.status === "EXPIRING" && item.expiresAt)
-        .sort((a, b) => new Date(a.expiresAt!).getTime() - new Date(b.expiresAt!).getTime())
-        .slice(0, 5)
-        .map((item) => ({
-          id: item.id,
-          domainName: item.domainName,
-          expiresAt: item.expiresAt,
-          leadName: item.lead?.companyName ?? null,
-        })),
+      stats: buildPortfolioStats(enriched),
+      monitor: buildPortfolioMonitor(enriched),
+      attentionItems: buildPortfolioAttention(enriched),
+      lastUpdated: latest,
     };
   }),
 

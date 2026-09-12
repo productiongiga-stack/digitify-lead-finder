@@ -2,6 +2,7 @@ node_modules/
 .pnpm-store/
 dist/
 .next/
+apps/web/.next-dev/
 .turbo/
 *.tsbuildinfo
 .vercel/
@@ -18,6 +19,7 @@ apps/web/.vercel/
 
 coverage/
 test-results/
+apps/web/test-results/
 playwright-report/
 .claude/
 .vercel
@@ -25,3 +27,4 @@ playwright-report/
 # User-uploaded files (use object storage in production)
 apps/web/public/uploads/
 .env*
+!.env.example

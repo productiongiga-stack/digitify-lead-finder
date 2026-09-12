@@ -4,6 +4,7 @@ import { Suspense, useEffect } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { isAppShellPath } from "@/lib/shell-paths";
+import { useShellContext } from "@/components/layout/shell-provider";
 
 const SCRIPT_MARKER = "data-digitify-analytics";
 
@@ -82,9 +83,10 @@ function AnalyticsScriptsContent() {
   const searchParams = useSearchParams();
   const tenant = searchParams.get("tenant");
   const isAppRoute = isAppShellPath(pathname);
+  const { data: shell } = useShellContext();
 
   const workspaceScriptsQuery = trpc.analytics.getWorkspaceScripts.useQuery(undefined, {
-    enabled: isAppRoute,
+    enabled: isAppRoute && shell?.tracking.analyticsEnabled === true,
     retry: false,
     staleTime: 10 * 60_000,
     refetchOnWindowFocus: false,

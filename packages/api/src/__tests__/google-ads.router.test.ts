@@ -49,6 +49,29 @@ function makeCtx(db: Record<string, unknown>, role = "OWNER") {
   };
 }
 
+function sensitiveSettingsCtx(options: { role: "OWNER" | "ADMIN"; isViewingAs?: boolean }) {
+  const setting = { findMany: vi.fn().mockResolvedValue([]), upsert: vi.fn().mockResolvedValue({}) };
+  const database = {
+    user: { findUnique: vi.fn().mockResolvedValue({ id: "user_1", role: options.role, workspaceOwnerId: "owner_1" }) },
+    workspace: { findUnique: vi.fn().mockResolvedValue({ ownerUserId: "owner_1" }) },
+    setting,
+  } as any;
+  database.$transaction = vi.fn(async (operations: Array<Promise<unknown>>) => Promise.all(operations));
+  return {
+    db: database,
+    user: {
+      id: options.role === "OWNER" ? "owner_1" : "admin_1",
+      email: "user@example.com",
+      name: options.role,
+      role: options.role,
+      workspaceRole: options.role,
+      workspaceId: "ws_1",
+      isViewingAs: options.isViewingAs,
+    },
+    requestId: "req_google_ads_sensitive_settings",
+  };
+}
+
 const baseConfig = {
   clientId: "client",
   clientSecret: "secret",
@@ -123,6 +146,27 @@ describe("googleAds router flow", () => {
     const pushed = await caller.pushPausedToGoogle({ id: "plan_1" });
     expect(pushed.status).toBe("PUSHED_PAUSED");
     expect(googleAdsLib.pushPausedGoogleAdPlan).toHaveBeenCalled();
+  });
+
+  it("allows only an owner to change the Google Ads MCC setting", async () => {
+    const ownerContext = sensitiveSettingsCtx({ role: "OWNER" });
+    const owner = googleAdsRouter.createCaller(ownerContext);
+
+    await expect(owner.setLoginCustomerId({ loginCustomerId: "123-456-7890" })).resolves.toEqual({ loginCustomerId: "1234567890" });
+    expect(ownerContext.db.setting.upsert).toHaveBeenCalled();
+
+    const adminContext = sensitiveSettingsCtx({ role: "ADMIN" });
+    const admin = googleAdsRouter.createCaller(adminContext);
+    await expect(admin.setLoginCustomerId({ loginCustomerId: "1234567890" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(admin.setAutoadsEnabled({ enabled: true })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(admin.selectCustomer({ customerId: "1234567890" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(adminContext.db.setting.upsert).not.toHaveBeenCalled();
+  });
+
+  it("blocks Google Ads integration settings while viewing another account", async () => {
+    const caller = googleAdsRouter.createCaller(sensitiveSettingsCtx({ role: "OWNER", isViewingAs: true }));
+
+    await expect(caller.setAutoadsEnabled({ enabled: true })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("reports missing operational requirements in connection status", async () => {

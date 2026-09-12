@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { type PrismaClient, Prisma } from "@digitify/db";
 import { OpenClawClient } from "@digitify/openclaw";
 import { z } from "zod";
-import { adminProcedure, protectedProcedure, aiRateLimitedProcedure, router, mutationProcedure, type Context } from "../trpc";
+import { adminProcedure, protectedProcedure, aiRateLimitedProcedure, router, mutationProcedure, sensitiveOwnerProcedure, type Context } from "../trpc";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
 import {
   defaultSearchTargeting,
@@ -410,7 +410,7 @@ export const googleAdsRouter = router({
     }
   }),
 
-  selectCustomer: mutationProcedure
+  selectCustomer: sensitiveOwnerProcedure
     .input(
       z.object({
         customerId: z.string().min(3),
@@ -458,7 +458,7 @@ export const googleAdsRouter = router({
       });
     }),
 
-  setAutoadsEnabled: adminProcedure
+  setAutoadsEnabled: sensitiveOwnerProcedure
     .input(z.object({ enabled: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
@@ -468,7 +468,7 @@ export const googleAdsRouter = router({
       return { enabled: input.enabled };
     }),
 
-  setLoginCustomerId: mutationProcedure
+  setLoginCustomerId: sensitiveOwnerProcedure
     .input(z.object({ loginCustomerId: z.string().max(32) }))
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });

@@ -50,4 +50,63 @@ describe("settings RBAC matrix", () => {
       code: "FORBIDDEN",
     });
   });
+
+  it("blocks sensitive settings and connector actions while viewing an owner account", async () => {
+    const upsert = async () => {
+      throw new Error("should not reach db");
+    };
+    const db = {
+      setting: { findUnique: async () => null, upsert, deleteMany: async () => ({ count: 0 }) },
+      activity: { create: async () => ({}) },
+      workspace: { findUnique: async () => ({ ownerUserId: "owner-1" }) },
+      $transaction: async () => [],
+    } as any;
+    db.$extends = () => db;
+    const caller = settingsRouter.createCaller({
+      db,
+      user: {
+        id: "target-owner-1",
+        email: "owner@test.local",
+        name: "Viewed owner",
+        role: "OWNER",
+        workspaceRole: "OWNER",
+        workspaceId: "owner-1",
+        isPersonalWorkspace: false,
+        isViewingAs: true,
+      },
+      requestId: "settings-view-as-test",
+      clientIp: "127.0.0.1",
+    });
+
+    await expect(caller.update({ key: "integrations.stripe_secret_key", value: "secret" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.batchUpdate([{ key: "api.openai_key", value: "secret" }])).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.removeSettings({ keys: ["bookings.webhook_secret"] })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.testConnector({ connectorId: "smtp" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("keeps ordinary company settings editable while viewing an account", async () => {
+    const upsert = async ({ create }: { create: { key: string; value: unknown } }) => create;
+    const db = {
+      setting: { upsert },
+      activity: { create: async () => ({}) },
+    } as any;
+    db.$extends = () => db;
+    const caller = settingsRouter.createCaller({
+      db,
+      user: {
+        id: "target-owner-1",
+        email: "owner@test.local",
+        name: "Viewed owner",
+        role: "OWNER",
+        workspaceRole: "OWNER",
+        workspaceId: "owner-1",
+        isPersonalWorkspace: false,
+        isViewingAs: true,
+      },
+      requestId: "settings-view-as-normal-setting-test",
+      clientIp: "127.0.0.1",
+    });
+
+    await expect(caller.update({ key: "company.name", value: "Digitify" })).resolves.toMatchObject({ value: "Digitify" });
+  });
 });

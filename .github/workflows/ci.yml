@@ -153,6 +153,9 @@ jobs:
       NEXTAUTH_SECRET: ci-nextauth-secret-min-32-chars-long
       NEXTAUTH_URL: http://localhost:3000
       NEXT_PUBLIC_APP_URL: http://localhost:3000
+      SETTINGS_ENCRYPTION_KEY: ci-settings-encryption-key-min-32-chars
+      CRON_SECRET: ci-cron-secret-min-16
+      ENABLE_WORKSPACE_RLS: "true"
       SEED_ADMIN_EMAIL: admin@digitify.ci
       SEED_ADMIN_PASSWORD: DigitifyCiSeed2026!
       SEED_RLS_OWNER_B_EMAIL: owner-b@digitify.ci
@@ -221,9 +224,16 @@ jobs:
 
       - name: Playwright smoke tests
         run: |
-          pnpm --filter @digitify/web start --port 3000 &
+          pnpm --filter @digitify/web start --port 3000 > /tmp/digitify-web.log 2>&1 &
           for i in $(seq 1 60); do
-            curl -sf http://localhost:3000/login >/dev/null && break
+            if curl -sf http://localhost:3000/login >/dev/null; then
+              ready=1
+              break
+            fi
             sleep 2
           done
+          if [[ "${ready:-}" != "1" ]]; then
+            cat /tmp/digitify-web.log
+            exit 1
+          fi
           PLAYWRIGHT_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=http://localhost:3000 pnpm test:e2e

@@ -42,6 +42,7 @@ flowchart TB
 - **Single deployable:** `apps/web` bundelt UI + tRPC + cron + public API routes.
 - **Business logic:** grotendeels `packages/api/src/lib/` (niet in page components dupliceren).
 - **Shared UI:** `@digitify/ui` (Radix + Tailwind primitives).
+- **MVP-kern:** `docs/MVP_CORE.md` beschrijft de leidende verkoopflow en de statusgrenzen.
 
 ---
 
@@ -152,7 +153,7 @@ Cron auth: `packages/api/src/lib/cron-auth.ts` (`CRON_SECRET`).
 **Tools:** `Booking*`, `Domain`, `ReviewRequest`, `ChatSession`, `Report`, `OpenClawLog`  
 **Analytics:** `WorkspaceAnalyticsEvent`, `BookingAnalyticsEvent`
 
-**Dode/legacy:** `SavedView` (TODO: opruimen — docs/PHASES.md 9.1)
+**Dode/legacy:** `SavedView`-tabel blijft behouden voor data/rollback, maar het Prisma-model is genegeerd; actieve opgeslagen zoekopdrachten gebruiken `WorkspaceSavedSearch`.
 
 ### Tenant model (kritiek)
 
@@ -242,8 +243,7 @@ Leads + dashboard zijn **altijd** beschikbaar (geen moduleId).
 Bron: `docs/PHASES.md`
 
 - Productie live + RLS op staging/productie: **open** (handmatig)
-- Geen `.env.example` in repo
-                        → TODO: bevestigen
+- `.env.example` bevat veilige lokale placeholders; productievariabelen staan in `docs/VERCEL.md`
 - `settings/quotes/page.tsx` ~5000 regels               → refactor gepland (fase 10)
 - Runtime JSON migraties op list endpoints               → fase 9.2
 - `SavedView` model unused                             → fase 9.1

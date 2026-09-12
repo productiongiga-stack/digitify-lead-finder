@@ -1,3 +1,4 @@
+import { runLegacyImportOnce } from "./legacy-import-once";
 import type { PrismaClient } from "@digitify/db";
 import { readWorkspaceJsonSetting } from "./user-json-setting";
 import type { WorkspaceScope } from "./workspace-settings";
@@ -20,7 +21,7 @@ type LegacyTask = {
 /**
  * One-time import from workspace JSON into workspace_tasks (idempotent per workspace).
  */
-export async function migrateLegacyWorkspaceTasks(
+async function importRows(
   db: PrismaClient,
   scope: WorkspaceScope,
 ): Promise<{ imported: number }> {
@@ -57,4 +58,8 @@ export async function migrateLegacyWorkspaceTasks(
 
   await db.workspaceTask.createMany({ data: rows, skipDuplicates: true });
   return { imported: rows.length };
+}
+
+export async function migrateLegacyWorkspaceTasks(db: PrismaClient, scope: WorkspaceScope) {
+  return runLegacyImportOnce(db, scope.workspaceId, "tasks", (tx) => importRows(tx, scope));
 }

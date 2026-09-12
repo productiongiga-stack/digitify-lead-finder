@@ -3,7 +3,7 @@
  *
  *   ENABLE_WORKSPACE_RLS=true pnpm db:rls-smoke
  *
- * Uses SEED_ADMIN_EMAIL + SEED_RLS_OWNER_B_EMAIL (default owner-b@digitify.local).
+ * Uses the seed identities from env, or the documented local defaults.
  */
 import { PrismaClient } from "@prisma/client";
 import { setWorkspaceRlsContext, withWorkspaceRls } from "../src/workspace-rls";
@@ -24,14 +24,10 @@ async function main() {
     fail('Set ENABLE_WORKSPACE_RLS=true before running (e.g. ENABLE_WORKSPACE_RLS=true pnpm db:rls-smoke)');
   }
 
-  const ownerAEmail = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase();
+  const ownerAEmail = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase() || "admin@digitify.local";
   const ownerBEmail = (
     process.env.SEED_RLS_OWNER_B_EMAIL?.trim().toLowerCase() || "owner-b@digitify.local"
   );
-
-  if (!ownerAEmail) {
-    fail("SEED_ADMIN_EMAIL is required (same as db:seed).");
-  }
 
   const prisma = new PrismaClient();
 

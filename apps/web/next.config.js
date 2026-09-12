@@ -2,6 +2,17 @@ const path = require("path");
 
 const workspaceRoot = path.join(__dirname, "../../");
 
+const optimizePackageImports = [
+  "@digitify/ui",
+  "lucide-react",
+  "recharts",
+  "@tanstack/react-table",
+  "date-fns",
+  "@tanstack/react-query",
+  "zustand",
+  "@digitify/media-studio",
+];
+
 function resolveAppUrl() {
   if (process.env.NEXTAUTH_URL) return process.env.NEXTAUTH_URL;
   if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
@@ -12,6 +23,8 @@ function resolveAppUrl() {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Keep Turbopack development output separate from production artifacts.
+  distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "**.public.blob.vercel-storage.com" },
@@ -20,16 +33,9 @@ const nextConfig = {
     ],
   },
   experimental: {
-    optimizePackageImports: [
-      "@digitify/ui",
-      "lucide-react",
-      "recharts",
-      "@tanstack/react-table",
-      "date-fns",
-      "@tanstack/react-query",
-      "zustand",
-      "@digitify/media-studio",
-    ],
+    // Keep the development compiler responsive in the monorepo. Production
+    // builds retain the package import optimization for smaller bundles.
+    optimizePackageImports: process.env.NODE_ENV === "development" ? [] : optimizePackageImports,
     serverActions: {
       bodySizeLimit: "10mb",
     },

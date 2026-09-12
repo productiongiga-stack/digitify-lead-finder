@@ -45,7 +45,22 @@ export async function GET(request: Request, { params }: { params: Promise<{ quot
   });
   if (!quote) return NextResponse.json({ error: "Offerte niet gevonden." }, { status: 404 });
 
-  const files = await loadPortalFiles(quote.createdById, quote.id);
+  const [project, invoices] = await Promise.all([
+    prisma.project.findFirst({ where: { createdById: quote.createdById, quoteId: quote.id, status: { not: "ARCHIVED" } }, select: { id: true, name: true, clientName: true, description: true, status: true, startAt: true, dueAt: true } }),
+    prisma.workspaceInvoice.findMany({ where: { createdById: quote.createdById, quoteId: quote.id }, orderBy: { issueDate: "desc" }, take: 20, select: { id: true, invoiceNumber: true, status: true, issueDate: true, dueDate: true, total: true, currency: true, paidAt: true } }),
+  ]);
+  const contracts = await prisma.contract.findMany({
+    where: { createdById: quote.createdById, OR: [{ quoteId: quote.id }, ...(project ? [{ projectId: project.id }] : [])] },
+    orderBy: { updatedAt: "desc" },
+    take: 20,
+    select: { id: true, name: true, clientName: true, version: true, status: true, sentAt: true, viewedAt: true, signedAt: true, updatedAt: true },
+  });
+
+  const files = (await loadPortalFiles(quote.createdById, quote.id)).map((file) => {
+    if (!file || typeof file !== "object" || typeof file.id !== "string") return file;
+    const downloadUrl = `/api/public/portal/${encodeURIComponent(quote.id)}/file/${encodeURIComponent(file.id)}?token=${encodeURIComponent(token || "")}`;
+    return { ...file, url: downloadUrl, downloadUrl };
+  });
   const bookings = await prisma.booking.findMany({
     where: {
       createdById: quote.createdById,
@@ -92,6 +107,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ quot
       items: quote.items,
     },
     files,
+    project,
+    contracts,
+    invoices,
     bookings,
     bookingEmbedUrl,
     companyName,
@@ -115,7 +133,26 @@ export async function POST(request: Request, { params }: { params: Promise<{ quo
   });
   if (hourlyLimiter) return hourlyLimiter;
 
-  const body = await request.json();
+  const contentType = request.headers.get("content-type") ?? "";
+  let body: Record<string, unknown>;
+  if (contentType.includes("multipart/form-data")) {
+    const form = await request.formData();
+    const file = form.get("file");
+    let dataUrl = "";
+    if (file instanceof File) {
+      const bytes = Buffer.from(await file.arrayBuffer()).toString("base64");
+      dataUrl = `data:${file.type || "application/octet-stream"};base64,${bytes}`;
+    }
+    body = {
+      token: form.get("token"),
+      action: "upload",
+      dataUrl,
+      name: file instanceof File ? file.name : "bestand",
+      type: file instanceof File ? file.type : "application/octet-stream",
+    };
+  } else {
+    body = (await request.json()) as Record<string, unknown>;
+  }
   const token = String(body.token || "");
   if (!verifyQuotePdfToken(quoteId, token)) {
     return NextResponse.json({ error: "Ongeldige of verlopen portal-link." }, { status: 403 });

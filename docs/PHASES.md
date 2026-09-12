@@ -81,12 +81,12 @@ In de app is `workspaceId` / `createdById` op tenant-rijen de **owner user id** 
 
 | # | Item | Waarom | Bestanden / actie | Status |
 |---|------|--------|-------------------|--------|
-| 8.1 | **Dev env laden** — `pnpm dev` laadt root `.env` of `apps/web/.env.local` symlink | Server crasht zonder env → Internal Server Error | root `package.json` of `apps/web/package.json` | ⬜ |
-| 8.2 | **Next config opschonen** — `experimental.instrumentationHook` verwijderen (Next 15 default) | Build-warnings | `apps/web/next.config.js` | ⬜ |
-| 8.3 | **`pnpm check:release`** in CI of pre-merge doc | Eén commando vóór PR | `scripts/check-release.sh`, CI | ⬜ |
+| 8.1 | **Dev env laden** — `pnpm dev` laadt root `.env` of `apps/web/.env.local` als fallback | Server crasht zonder env → Internal Server Error | `scripts/dev-with-env.sh` | ✅ |
+| 8.2 | **Next config opschonen** — deprecated `experimental.instrumentationHook` controleren/verwijderen | Build-warnings | `apps/web/next.config.js` | ✅ |
+| 8.3 | **`pnpm check:release`** in CI of pre-merge doc | Eén commando vóór PR | `scripts/check-release.sh`, CI | ✅ |
 | 8.4 | **👤 Vercel** — één project, alle env vars (`docs/VERCEL.md`) | Preview/deploy | 👤 | ⬜ |
-| 8.5 | **👤 Productie-DB** — `pnpm setup:db` op Neon | Schema + seed | 👤 | ⬜ |
-| 8.6 | **👤 PR #1 mergen** na groene CI + fase 6 op staging | `main` = productie-basis | 👤 | ⬜ |
+| 8.5 | **👤 Productie-DB** — `pnpm setup:db` op Neon; lokaal vooraf `pnpm setup:db:preflight` | Schema + seed | 👤 | 🔄 |
+| 8.6 | **👤 Releasecheck en PR merge naar `main`** na groene CI + fase 6 op staging | `docs/RELEASE_CHECKLIST.md` | 👤 | 🔄 |
 
 ---
 
@@ -96,11 +96,11 @@ In de app is `workspaceId` / `createdById` op tenant-rijen de **owner user id** 
 
 | # | Item | Waarom | Bestanden / actie | Status |
 |---|------|--------|-------------------|--------|
-| 9.1 | **`SavedView` opruimen** — tabel droppen of feature bouwen (nu alleen `WorkspaceSavedSearch`) | Dode code / verwarring | `schema.prisma`, migratie | ⬜ |
-| 9.2 | **Stop per-list JSON-migratie** — na eenmalige `setup:db`/script: geen `count`+import op elke `list` | Noise onder load | `migrate-workspace-*.ts`, routers | ⬜ |
-| 9.3 | **Settings-tenant model** — documenteer of migreer kritieke keys naar workspace-kolommen | Prefix-bugs = cross-tenant | `WORKSPACE.md`, lange termijn | ⬜ |
-| 9.4 | **Template library** — één bron (DB), `library_json` alleen migratie | Dubbel pad | `template.router.ts`, seed | ⬜ |
-| 9.5 | **Deprecated aliases verwijderen** — `validateEnv`, `tenant.ts` legacy | Schuld | `server-env.ts`, `tenant.ts` | ⬜ |
+| 9.1 | **`SavedView` opruimen** — legacy-model negeren; actieve feature blijft `WorkspaceSavedSearch` | Dode code / verwarring zonder dat data wordt verwijderd | `schema.prisma` | ✅ |
+| 9.2 | **Stop per-list JSON-migratie** — na eenmalige `setup:db`/script: geen `count`+import op elke `list` | Noise onder load | `migrate-workspace-*.ts`, routers | ✅ |
+| 9.3 | **Settings-tenant model** — documenteer of migreer kritieke keys naar workspace-kolommen | Prefix-bugs = cross-tenant | `WORKSPACE.md`, lange termijn | ✅ |
+| 9.4 | **Template library** — één bron (DB), `library_json` alleen migratie | Dubbel pad | `template.router.ts`, seed | ✅ |
+| 9.5 | **Deprecated aliases verwijderen** — `assertServerEnv`, ongebruikte lead-scope alias | Schuld | `server-env.ts`, `tenant.ts` | ✅ |
 
 ---
 
@@ -110,12 +110,12 @@ In de app is `workspaceId` / `createdById` op tenant-rijen de **owner user id** 
 
 | # | Item | Waarom | Bestanden / actie | Status |
 |---|------|--------|-------------------|--------|
-| 10.1 | **`settings/quotes/page.tsx` splitsen** (~5000 regels) — subcomponents + hooks | Onderhoud + bundle | `settings/quotes/` | ⬜ |
-| 10.2 | **`dashboard/page.tsx` splitsen** (~1100 regels) — widgets als losse bestanden | Idem | `components/dashboard/` | ⬜ |
-| 10.3 | **Dashboard queries** — dubbele `getUpcomingBookings` weg; overweeg 1 `getDashboardBundle` | 10+ parallelle queries | `dashboard.router.ts`, page | ⬜ |
-| 10.4 | **`user.list` N+1** — Google-status batch i.p.v. per user | Trage team-pagina | `user.router.ts` | ⬜ |
-| 10.5 | **Tracker JSON blob** — normaliseer pageviews of partition per domain | RMW op groot JSON | `tracker/route.ts`, schema | ⬜ |
-| 10.6 | **Playwright in CI** — optioneel smoke na grote UI-wijzigingen | Regressie UI | `e2e/` | ⬜ |
+| 10.1 | **`settings/quotes/page.tsx` splitsen** — service-startcatalogus uit de editor gehaald | Onderhoud + bundle | `settings/quotes/` | ✅ |
+| 10.2 | **`dashboard/page.tsx` splitsen** — vervalwidget uit de pagina gehaald | Onderhoud + bundel | `dashboard/expiring-domains-widget.tsx` | ✅ |
+| 10.3 | **Dashboard queries** — dashboard gebruikt één gecachte `getOverview`-bundle; losse route blijft voor backwards compatibility | 10+ parallelle queries | `dashboard.router.ts`, page | ✅ |
+| 10.4 | **`user.list` N+1** — Google-status batch i.p.v. per user | Trage team-pagina | `user.router.ts` | ✅ |
+| 10.5 | **Tracker JSON blob** — dubbele domeinlookup verwijderd; bounded JSON blijft voorlopig | RMW op groot JSON | `tracker/route.ts`, schema | 🔄 |
+| 10.6 | **Playwright in CI** — volledige E2E-job plus expliciet smoke-script | Regressie UI | `e2e/`, `.github/workflows/ci.yml` | ✅ |
 
 ---
 
@@ -125,10 +125,10 @@ In de app is `workspaceId` / `createdById` op tenant-rijen de **owner user id** 
 
 | # | Item | Waarom | Actie | Status |
 |---|------|--------|-------|--------|
-| 11.1 | **MVP-kern definiëren** | Te veel modules voor “simpele lead tool” | Leads → zoeken → score → outbound → offerte | ⬜ |
-| 11.2 | **Module flags per klant** | Al deels via `ALL_MODULES` | Default uit: audit, OpenClaw, chatbot tot nodig | ⬜ |
-| 11.3 | **Onboarding-flow** | Nieuwe user weet niet waar te beginnen | Eerste login: 3 stappen (zoek → lead → mail) | ⬜ |
-| 11.4 | **Documentatie voor eindgebruiker** | Veel power, weinig uitleg | Korte NL-help per module | ⬜ |
+| 11.1 | **MVP-kern definiëren** | Te veel modules voor “simpele lead tool” | `docs/MVP_CORE.md` | ✅ |
+| 11.2 | **Module flags per klant** | Al deels via `ALL_MODULES` | `Team & Rollen` + server-side catalogusvalidatie; overige modules blijven bewust aan tot klantkeuze | ✅ |
+| 11.3 | **Onboarding-flow** | Nieuwe user weet niet waar te beginnen | Dashboard-checklist: zoek → lead → contact | ✅ |
+| 11.4 | **Documentatie voor eindgebruiker** | Veel power, weinig uitleg | `/help` met korte NL-help per module | ✅ |
 
 ---
 

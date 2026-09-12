@@ -10,6 +10,7 @@ function formatCurrency(value: number) {
 }
 
 function safeDownloadUrl(url: string): string | null {
+  if (url.startsWith("/")) return url;
   if (url.startsWith("blob:") || url.startsWith("data:")) return url;
   return safeExternalUrl(url);
 }
@@ -209,7 +210,7 @@ export default function ClientPortalPage() {
         {(payload.files || []).length > 0 ? (
           <div className="mt-3 space-y-2">
             {payload.files.map((file: any) => {
-              const downloadUrl = safeDownloadUrl(file.dataUrl);
+              const downloadUrl = safeDownloadUrl(file.downloadUrl || file.url || file.dataUrl || "");
               return (
               <div key={file.id} className="rounded-lg border p-2 text-xs">
                 <p className="font-medium">{file.name}</p>
@@ -224,6 +225,16 @@ export default function ClientPortalPage() {
             })}
           </div>
         ) : null}
+      </div>
+
+      <div className="rounded-xl border bg-card p-4">
+        <h2 className="text-sm font-semibold">Project</h2>
+        {payload.project ? <div className="mt-2 space-y-1 text-sm"><p className="font-medium">{payload.project.name}</p><p className="text-muted-foreground">Status: {payload.project.status}</p>{payload.project.description ? <p className="whitespace-pre-wrap text-muted-foreground">{payload.project.description}</p> : null}{payload.project.dueAt ? <p className="text-xs text-muted-foreground">Gepland tot {new Date(payload.project.dueAt).toLocaleDateString("nl-BE")}</p> : null}</div> : <p className="mt-2 text-xs text-muted-foreground">Er is nog geen project aan deze offerte gekoppeld.</p>}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-xl border bg-card p-4"><h2 className="text-sm font-semibold">Contracten</h2>{(payload.contracts || []).length > 0 ? <div className="mt-2 space-y-2">{payload.contracts.map((contract: any) => <div key={contract.id} className="rounded-lg border p-2 text-sm"><div className="flex items-center justify-between gap-2"><span className="font-medium">{contract.name}</span><span className="text-xs text-muted-foreground">{contract.status}</span></div><p className="mt-1 text-xs text-muted-foreground">Versie {contract.version} · bijgewerkt {new Date(contract.updatedAt).toLocaleDateString("nl-BE")}</p></div>)}</div> : <p className="mt-2 text-xs text-muted-foreground">Er zijn nog geen contracten beschikbaar.</p>}</div>
+        <div className="rounded-xl border bg-card p-4"><h2 className="text-sm font-semibold">Facturen</h2>{(payload.invoices || []).length > 0 ? <div className="mt-2 space-y-2">{payload.invoices.map((invoice: any) => <div key={invoice.id} className="flex items-center justify-between gap-2 rounded-lg border p-2 text-sm"><div><p className="font-medium">{invoice.invoiceNumber}</p><p className="text-xs text-muted-foreground">{invoice.status} · vervaldatum {new Date(invoice.dueDate).toLocaleDateString("nl-BE")}</p></div><span className="font-medium">{formatCurrency(invoice.total)}</span></div>)}</div> : <p className="mt-2 text-xs text-muted-foreground">Er zijn nog geen facturen beschikbaar.</p>}</div>
       </div>
     </div>
   );

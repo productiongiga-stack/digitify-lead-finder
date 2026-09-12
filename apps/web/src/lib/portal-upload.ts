@@ -40,7 +40,7 @@ export type StoredPortalFile = {
   name: string;
   type: string;
   url: string;
-  storage: "blob" | "local";
+  storage: "blob" | "blob-private" | "local";
   uploadedAt: string;
 };
 
@@ -67,7 +67,7 @@ export async function storePortalUpload(params: {
 
   if (token) {
     const blob = await put(blobPath, parsed.bytes, {
-      access: "public",
+      access: "private",
       contentType: mime,
       token,
     });
@@ -77,7 +77,7 @@ export async function storePortalUpload(params: {
       name: params.name,
       type: mime,
       url: blob.url,
-      storage: "blob",
+      storage: "blob-private",
       uploadedAt: new Date().toISOString(),
     };
   }

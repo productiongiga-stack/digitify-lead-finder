@@ -131,7 +131,7 @@ function HomePage() {
           <div className="absolute -right-20 top-10 h-[500px] w-[500px] rounded-full bg-[#f9ae5a]/6 blur-[100px]" />
         </div>
 
-        <div className="relative mx-auto grid max-w-7xl items-center gap-14 px-5 py-20 sm:px-8 lg:grid-cols-[1fr_1.05fr] lg:py-28">
+        <div className="relative mx-auto grid w-full max-w-[1440px] items-center gap-14 px-5 py-16 sm:px-8 lg:grid-cols-[0.94fr_1.06fr] lg:gap-16 lg:py-28">
           <div>
             <div className="animate-fade-in mb-6 inline-flex items-center gap-2 rounded-full border border-[#f9ae5a]/30 bg-[#f9ae5a]/10 px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-widest text-[#b66d1e]">
               <Image src="/favicon.ico" alt="" width={14} height={14} className="rounded-sm" />
@@ -179,7 +179,7 @@ function HomePage() {
             </div>
           </div>
 
-          <div className="animate-slide-right delay-200">
+          <div className="animate-slide-right delay-200 mt-8 lg:mt-0">
             <div className="animate-pulse-glow rounded-2xl">
               <HomeHeroModuleTabs />
             </div>
@@ -187,7 +187,7 @@ function HomePage() {
         </div>
 
         <div className="relative border-t border-[#e2e8e3]/60 bg-white/40 py-3.5 backdrop-blur-sm">
-          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-5 px-5 sm:justify-between sm:px-8">
+        <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-center gap-5 px-5 sm:justify-between sm:px-8">
             {[
               "Lead Search",
               "Outreach met AI",
@@ -230,7 +230,7 @@ function HomePage() {
 
       {/* FEATURES */}
       <section className="bg-[#f7f8f6] py-24">
-        <div className="mx-auto max-w-7xl px-5 sm:px-8">
+        <div className="mx-auto max-w-[1440px] px-5 sm:px-8">
           <div className="reveal mx-auto max-w-xl text-center">
             <p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">Alles in één app</p>
             <h2 className="mt-3 text-3xl font-extrabold leading-tight text-[#0d1520] sm:text-4xl">
@@ -1702,11 +1702,11 @@ function HomeHeroModuleTabs() {
                 key={module.slug}
                 type="button"
                 onClick={() => setActiveTab(module.slug)}
-                className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-2 text-[10px] font-bold transition ${
+                className={`inline-flex h-10 items-center justify-center gap-1.5 rounded-lg px-2 text-[10px] font-bold transition sm:h-10 sm:px-2.5 lg:h-11 lg:gap-2 lg:px-3 ${
                   isActive ? "bg-[#f9ae5a] text-[#14100b]" : "bg-white text-[#5a6878] hover:bg-[#fff8ee] hover:text-[#b66d1e]"
                 }`}
               >
-                <Icon className="h-3.5 w-3.5" />
+                <Icon className="!h-3.5 !w-3.5 shrink-0 sm:!h-4 sm:!w-4 lg:!h-5 lg:!w-5" />
                 <span className="truncate">{module.label}</span>
               </button>
             );

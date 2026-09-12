@@ -1,15 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { authStatePath } from "./auth-state";
 
-const email = process.env.PLAYWRIGHT_LOGIN_EMAIL ?? "admin@digitify.local";
-const password = process.env.PLAYWRIGHT_LOGIN_PASSWORD ?? "DigitifyDev2026!";
+const password = process.env.PLAYWRIGHT_LOGIN_PASSWORD ?? process.env.SEED_ADMIN_PASSWORD ?? "";
 
 test.describe("Creative Studio smoke", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(email);
-    await page.getByLabel("Wachtwoord").fill(password);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+  test.use({ storageState: authStatePath("admin") });
+  test.beforeEach(() => {
+    test.skip(!password, "Set PLAYWRIGHT_LOGIN_PASSWORD or SEED_ADMIN_PASSWORD for authenticated E2E tests.");
   });
 
   test("creative studio page loads with tabs", async ({ page }) => {
@@ -26,13 +23,13 @@ test.describe("Creative Studio smoke", () => {
     await expect(page).toHaveURL(/tab=history/);
   });
 
-  test("lip sync tab and dual-mode image UI render", async ({ page }) => {
+  test("generatoren tonen een veilige MuAPI-key status zonder configuratie", async ({ page }) => {
     await page.goto("/creative-studio?tab=images");
-    await expect(page.getByRole("button", { name: /Tekst → beeld/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Bewerken/i })).toBeVisible();
+    await expect(page.getByText("MuAPI-key vereist")).toBeVisible();
+    await expect(page.getByRole("link", { name: "MuAPI-key instellen" })).toBeVisible();
     await page.getByRole("tab", { name: /Lip sync/i }).click();
     await expect(page).toHaveURL(/tab=lipsync/);
-    await expect(page.getByText("Lip Sync Studio")).toBeVisible();
+    await expect(page.getByText("MuAPI-key vereist")).toBeVisible();
   });
 
   test("integrations page shows MuAPI key section", async ({ page }) => {

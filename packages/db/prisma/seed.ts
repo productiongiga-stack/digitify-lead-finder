@@ -57,7 +57,11 @@ async function main() {
   }
   const ownerB = await prisma.user.upsert({
     where: { email: rlsOwnerBEmail },
-    update: {},
+    update: {
+      role: UserRole.OWNER,
+      passwordHash: hashPassword(rlsOwnerBPassword),
+      emailVerified: new Date(),
+    },
     create: {
       email: rlsOwnerBEmail,
       name: "Owner B (RLS staging)",
@@ -72,12 +76,13 @@ async function main() {
   if (viewerPassword.length < 12) {
     throw new Error("SEED_VIEWER_PASSWORD must be at least 12 characters.");
   }
-  await prisma.user.upsert({
+  const viewer = await prisma.user.upsert({
     where: { email: viewerEmail },
     update: {
       role: UserRole.VIEWER,
       workspaceOwnerId: admin.id,
       passwordHash: hashPassword(viewerPassword),
+      emailVerified: new Date(),
     },
     create: {
       email: viewerEmail,
@@ -104,6 +109,7 @@ async function main() {
       role: UserRole.MODERATOR,
       workspaceOwnerId: admin.id,
       passwordHash: hashPassword(teamPassword),
+      emailVerified: new Date(),
     },
     create: {
       email: moderatorEmail,
@@ -115,12 +121,13 @@ async function main() {
     },
   });
 
-  await prisma.user.upsert({
+  const member = await prisma.user.upsert({
     where: { email: memberEmail },
     update: {
       role: UserRole.MEMBER,
       workspaceOwnerId: admin.id,
       passwordHash: hashPassword(teamPassword),
+      emailVerified: new Date(),
     },
     create: {
       email: memberEmail,
@@ -138,6 +145,7 @@ async function main() {
       role: UserRole.MEMBER,
       workspaceOwnerId: admin.id,
       passwordHash: hashPassword(teamPassword),
+      emailVerified: new Date(),
     },
     create: {
       email: moduleRestrictedEmail,
@@ -158,7 +166,37 @@ async function main() {
     },
   });
 
-  void moderator;
+  // Session validation requires an active membership, even for locally seeded users.
+  for (const owner of [admin, ownerB]) {
+    await prisma.workspace.upsert({
+      where: { id: owner.id },
+      create: {
+        id: owner.id,
+        name: `${owner.name || owner.email} — persoonlijk`,
+        type: "PERSONAL",
+        ownerUserId: owner.id,
+      },
+      update: { ownerUserId: owner.id },
+    });
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId: owner.id, userId: owner.id } },
+      create: { workspaceId: owner.id, userId: owner.id, role: UserRole.OWNER, status: "ACTIVE" },
+      update: { role: UserRole.OWNER, status: "ACTIVE" },
+    });
+  }
+
+  for (const user of [
+    { id: viewer.id, role: UserRole.VIEWER },
+    { id: moderator.id, role: UserRole.MODERATOR },
+    { id: member.id, role: UserRole.MEMBER },
+    { id: moduleRestricted.id, role: UserRole.MEMBER },
+  ]) {
+    await prisma.workspaceMembership.upsert({
+      where: { workspaceId_userId: { workspaceId: admin.id, userId: user.id } },
+      create: { workspaceId: admin.id, userId: user.id, role: user.role, status: "ACTIVE" },
+      update: { role: user.role, status: "ACTIVE", respondedAt: new Date() },
+    });
+  }
 
   // Create pipeline stages
   const stages = [

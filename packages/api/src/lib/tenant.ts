@@ -8,11 +8,6 @@ export function workspaceDataWhere(workspaceId: string) {
   };
 }
 
-/** @deprecated Use workspaceDataWhere — kept as alias for leads. */
-export function leadAccessWhere(workspaceId: string) {
-  return workspaceDataWhere(workspaceId);
-}
-
 export function ownedLeadWhere(workspaceId: string, extra: Record<string, unknown> = {}) {
   return { ...extra, ...workspaceDataWhere(workspaceId) };
 }

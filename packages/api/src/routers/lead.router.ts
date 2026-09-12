@@ -3,6 +3,9 @@ import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { assertLeadAccess, ownedLeadWhere } from "../lib/tenant";
 import { buildLeadEmailTimeline } from "../lib/lead-email-timeline";
+import { importLeadRecords } from "../lib/lead-import";
+import type { Prisma } from "@digitify/db";
+import { assertWorkspaceMember } from "../lib/workspace-members";
 
 const DEMO_LEAD_NAMES = [
   "Bakkerij Van Damme",
@@ -388,6 +391,83 @@ export const leadRouter = router({
       return lead;
     }),
 
+  getWorkflowSummary: protectedProcedure
+    .input(z.object({ leadId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      const lead = await ctx.db.lead.findFirst({
+        where: ownedLeadWhere(workspaceId, { id: input.leadId }),
+        select: {
+          id: true,
+          status: true,
+          pipelineStage: { select: { id: true, name: true, color: true } },
+          overallScore: true,
+          scorePriority: true,
+          email: true,
+          doNotContact: true,
+          contacts: {
+            orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
+            select: { id: true, name: true, title: true, email: true, phone: true, isPrimary: true },
+          },
+          emailDrafts: {
+            orderBy: { updatedAt: "desc" },
+            take: 5,
+            select: { id: true, subject: true, status: true, toEmail: true, updatedAt: true, sentAt: true, repliedAt: true },
+          },
+        },
+      });
+
+      if (!lead) throw new TRPCError({ code: "NOT_FOUND", message: "Lead niet gevonden" });
+
+      const [activities, quotes, invoices, tasks] = await Promise.all([
+        ctx.db.activity.findMany({
+          where: { leadId: lead.id },
+          orderBy: { createdAt: "desc" },
+          take: 8,
+          select: { id: true, type: true, title: true, createdAt: true },
+        }),
+        ctx.db.quote.findMany({
+          where: { createdById: workspaceId, leadId: lead.id },
+          orderBy: { updatedAt: "desc" },
+          take: 5,
+          select: { id: true, quoteNumber: true, status: true, total: true, updatedAt: true },
+        }),
+        ctx.db.workspaceInvoice.findMany({
+          where: { createdById: workspaceId, leadId: lead.id },
+          orderBy: { updatedAt: "desc" },
+          take: 5,
+          select: { id: true, invoiceNumber: true, status: true, total: true, currency: true, dueDate: true, updatedAt: true },
+        }),
+        ctx.db.workspaceTask.findMany({
+          where: { createdById: workspaceId, relatedType: "LEAD", relatedId: lead.id, status: { not: "DONE" } },
+          orderBy: [{ dueAt: "asc" }, { updatedAt: "desc" }],
+          take: 8,
+          select: { id: true, title: true, status: true, priority: true, dueAt: true, updatedAt: true },
+        }),
+      ]);
+
+      const hasSentDraft = lead.emailDrafts.some((draft) => Boolean(draft.sentAt));
+      const approvedDraft = lead.emailDrafts.find((draft) => draft.status === "APPROVED");
+      const hasPendingDraft = lead.emailDrafts.some((draft) => ["DRAFT", "REJECTED"].includes(draft.status));
+      const nextAction = lead.doNotContact
+        ? { key: "review_suppression", label: "Controleer de contactvoorkeur voordat je opvolgt.", href: null }
+        : lead.status === "WON"
+          ? { key: "create_invoice", label: "Controleer de factuur voor deze gewonnen lead.", href: "/invoices" }
+          : quotes.some((quote) => quote.status === "ACCEPTED")
+            ? { key: "create_invoice", label: "Maak een factuur vanuit de geaccepteerde offerte.", href: "/invoices" }
+            : approvedDraft
+              ? { key: "send_approved_draft", label: "Verstuur de goedgekeurde e-maildraft.", href: `/contacts/drafts/${approvedDraft.id}` }
+            : hasPendingDraft
+              ? { key: "approve_draft", label: "Controleer en keur de e-maildraft goed.", href: "/contacts/approval" }
+              : hasSentDraft
+                ? { key: "follow_up", label: "Plan de volgende opvolgactie.", href: "/tasks" }
+                : lead.email || lead.contacts.some((contact) => contact.email)
+                  ? { key: "draft_email", label: "Maak een eerste contactdraft.", href: `/contacts/compose?leadId=${lead.id}` }
+                  : { key: "add_contact", label: "Voeg een contactpersoon of e-mailadres toe.", href: `/leads/${lead.id}/edit` };
+
+      return { lead, activities, quotes, invoices, tasks, nextAction };
+    }),
+
   getEmailTimeline: protectedProcedure
     .input(z.object({ leadId: z.string() }))
     .query(async ({ ctx, input }) => {
@@ -438,7 +518,8 @@ export const leadRouter = router({
   create: mutationProcedure
     .input(
       z.object({
-        companyName: z.string().min(1),
+        companyName: z.string().trim().min(1).max(300),
+        address: z.string().trim().max(500).optional(),
         website: z.string().optional(),
         phone: z.string().optional(),
         email: z.string().email().optional(),
@@ -451,14 +532,14 @@ export const leadRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const lead = await ctx.db.lead.create({
-        data: {
+      const imported = await importLeadRecords(ctx.db, ctx.user.workspaceId!, [{
           ...input,
           createdById: ctx.user.workspaceId!,
           savedById: ctx.user.id,
           lastEditedById: ctx.user.id,
-        },
-      });
+      }]);
+      const lead = imported.created[0];
+      if (!lead) throw new TRPCError({ code: "CONFLICT", message: "Dit bedrijf op dit adres bestaat al als lead." });
 
       await ctx.db.activity.create({
         data: {
@@ -518,11 +599,18 @@ export const leadRouter = router({
           : { disconnect: true };
       }
       if (assignedToId !== undefined) {
+        if (assignedToId) await assertWorkspaceMember(ctx.db, ctx.user.workspaceId!, assignedToId);
         data.assignedTo = assignedToId
           ? { connect: { id: assignedToId } }
           : { disconnect: true };
       }
       data.lastEditedBy = { connect: { id: ctx.user.id } };
+      if (rest.website !== undefined) {
+        data.lastEnrichedAt = null;
+        data.overallScore = null;
+        data.scoreComputedAt = null;
+        data.scorePriority = null;
+      }
       const lead = await ctx.db.lead.update({
         where: { id, createdById: ctx.user.workspaceId! },
         data: data as any,
@@ -755,13 +843,14 @@ export const leadRouter = router({
     }),
 
   importCsv: mutationProcedure
-    .input(z.object({ csv: z.string().min(1), source: z.string().optional() }))
+    .input(z.object({ csv: z.string().min(1).max(2_000_000), source: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const rows = parseCsv(input.csv);
       if (rows.length < 2) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "CSV bevat geen data." });
       }
       const [headerRow, ...dataRows] = rows;
+      if (dataRows.length > 500) throw new TRPCError({ code: "BAD_REQUEST", message: "Importeer maximaal 500 rijen per keer." });
       const headers = (headerRow || []).map((item) => item.trim().toLowerCase());
       const index = (aliases: string[]) => {
         for (const alias of aliases) {
@@ -785,28 +874,17 @@ export const leadRouter = router({
       const countryIndex = index(["country", "land"]);
       const addressIndex = index(["address", "adres"]);
 
-      const existing = await ctx.db.lead.findMany({
-        where: { createdById: ctx.user.workspaceId! },
-        select: { companyName: true, email: true },
-      });
-      const existingNames = new Set(existing.map((item) => normalizeCompanyName(item.companyName)));
-      const existingEmails = new Set(existing.map((item) => item.email?.toLowerCase()).filter(Boolean));
-
-      const toCreate: Array<Record<string, unknown>> = [];
+      const placeIdIndex = index(["gmbplaceid", "placeid", "google_place_id"]);
+      const toCreate: Prisma.LeadCreateManyInput[] = [];
       let skipped = 0;
       for (const row of dataRows) {
         const companyName = (row[companyIndex] || "").trim();
         if (!companyName) continue;
         const email = emailIndex >= 0 ? (row[emailIndex] || "").trim().toLowerCase() : "";
-        const normalizedCompany = normalizeCompanyName(companyName);
-        if (
-          (normalizedCompany && existingNames.has(normalizedCompany)) ||
-          (email && existingEmails.has(email))
-        ) {
-          skipped += 1;
-          continue;
+        if (email && !z.string().email().safeParse(email).success) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: `Ongeldig e-mailadres bij ${companyName}. Er is niets geïmporteerd.` });
         }
-        const payload: Record<string, unknown> = {
+        const payload: Prisma.LeadCreateManyInput = {
           companyName,
           createdById: ctx.user.workspaceId!,
           savedById: ctx.user.id,
@@ -820,23 +898,23 @@ export const leadRouter = router({
         if (cityIndex >= 0 && row[cityIndex]) payload.city = row[cityIndex]!.trim();
         if (countryIndex >= 0 && row[countryIndex]) payload.country = row[countryIndex]!.trim();
         if (addressIndex >= 0 && row[addressIndex]) payload.address = row[addressIndex]!.trim();
+        if (placeIdIndex >= 0 && row[placeIdIndex]) payload.gmbPlaceId = row[placeIdIndex]!.trim();
         toCreate.push(payload);
-        if (normalizedCompany) existingNames.add(normalizedCompany);
-        if (email) existingEmails.add(email);
       }
 
       if (toCreate.length === 0) return { created: 0, skipped };
 
-      await ctx.db.lead.createMany({ data: toCreate as any });
+      const imported = await importLeadRecords(ctx.db, ctx.user.workspaceId!, toCreate);
+      skipped += imported.duplicates.length;
       await ctx.db.activity.create({
         data: {
           userId: ctx.user.id,
           type: "LEAD_CREATED",
-          title: `${toCreate.length} leads geïmporteerd via CSV`,
-          metadata: { source: "lead.importCsv", created: toCreate.length, skipped },
+          title: `${imported.created.length} leads geïmporteerd via CSV`,
+          metadata: { source: "lead.importCsv", created: imported.created.length, skipped },
         },
       });
-      return { created: toCreate.length, skipped };
+      return { created: imported.created.length, skipped };
     }),
 
   exportCsv: protectedProcedure

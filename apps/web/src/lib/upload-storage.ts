@@ -21,7 +21,7 @@ function resolvePublicBaseUrl() {
 
 export type StoredUpload = {
   url: string;
-  storage: "blob" | "data-url" | "local";
+  storage: "blob" | "blob-private" | "data-url" | "local";
   name: string;
   size: number;
   type: string;
@@ -56,19 +56,20 @@ export async function storeUploadedImage(params: {
   userId: string;
   file: File;
   bytes: Buffer;
+  access?: "public" | "private";
 }): Promise<StoredUpload> {
   const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
   const pathname = `workspaces/${params.userId}/${Date.now()}-${sanitizeFilename(params.file.name)}`;
 
   if (token) {
     const blob = await put(pathname, params.bytes, {
-      access: "public",
+      access: params.access ?? "public",
       contentType: params.file.type,
       token,
     });
     return {
       url: blob.url,
-      storage: "blob",
+      storage: params.access === "private" ? "blob-private" : "blob",
       name: params.file.name,
       size: params.file.size,
       type: params.file.type,

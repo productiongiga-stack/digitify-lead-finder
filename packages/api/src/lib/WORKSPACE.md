@@ -19,6 +19,24 @@ Stored as `user:{memberId}:{key}` only.
 - `modules.disabled` (per-user module access from Team & Rollen)
 - `ui.*`, `display.*` (personal display preferences)
 
+## Intentional user-scoped exceptions
+
+The following settings remain under `user:{memberId}:*` by design and are not
+workspace-shared:
+
+- `api.muapi_key`: the Creative Studio/MuAPI credential belongs to the member
+  that owns the generation job.
+- `bookings.google_oauth_refresh_token`: the connected calendar account belongs
+  to the member that connected it.
+- `bookings.webhook_*`: public booking webhooks resolve through the workspace
+  owner id; authenticated booking actions pass the current owner/member id.
+
+Public routes that need tenant configuration first resolve the workspace owner
+from a validated public tenant token. They must not accept an arbitrary user id
+from the request. New shared settings must use `loadWorkspaceSettingRows` and
+`resolveSettingDbKey`; direct `user:` key construction is only allowed for the
+exceptions above and member preferences.
+
 ## Database rows
 
 Resources use `createdById = workspaceId` (leads, quotes, bookings, templates, …).
@@ -44,7 +62,7 @@ Idempotent: existing `workspace:*` rows are not overwritten. Legacy `user:{owner
 
 ## Legacy template library (`templates.library_json`)
 
-Old JSON templates in workspace settings are migrated into `email_templates` rows (prefixed `[Legacy]`).
+Old JSON templates in workspace settings are migrated into `email_templates` rows (prefixed `[Legacy]`). The normal template list, picker, editor and outbound flow read only `email_templates`; `library_json` is not a runtime fallback.
 
 ```bash
 pnpm db:migrate-legacy-templates -- --dry-run

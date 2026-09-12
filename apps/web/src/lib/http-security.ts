@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 
 export function getClientIp(request: Request) {
+  // Trust Cloudflare's visitor IP only on requests marked by Cloudflare.
+  const cloudflareIp = request.headers.get("cf-connecting-ip")?.trim();
+  if (cloudflareIp && request.headers.get("cf-ray")?.trim()) return cloudflareIp;
+
   const forwarded = request.headers.get("x-forwarded-for");
   if (forwarded) {
     const first = forwarded.split(",")[0]?.trim();

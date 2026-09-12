@@ -16,6 +16,7 @@ export const OUTBOUND_STATUS_LABELS: Record<string, string> = {
   REJECTED: "Afgekeurd",
   SCHEDULED: "Ingepland",
   SENDING: "Wordt verzonden",
+  DELIVERY_UNKNOWN: "Aflevering onzeker",
   SENT: "Verzonden",
   FAILED: "Mislukt",
   BOUNCED: "Gebounced",
@@ -28,6 +29,7 @@ export const OUTBOUND_STATUS_VARIANTS: Record<string, BadgeVariant> = {
   REJECTED: "destructive",
   SCHEDULED: "outline",
   SENDING: "info",
+  DELIVERY_UNKNOWN: "warning",
   SENT: "success",
   FAILED: "destructive",
   BOUNCED: "destructive",
@@ -40,6 +42,7 @@ export const OUTBOUND_STATUS_OPTIONS = [
   { value: "REJECTED", label: OUTBOUND_STATUS_LABELS.REJECTED },
   { value: "SCHEDULED", label: OUTBOUND_STATUS_LABELS.SCHEDULED },
   { value: "SENDING", label: OUTBOUND_STATUS_LABELS.SENDING },
+  { value: "DELIVERY_UNKNOWN", label: OUTBOUND_STATUS_LABELS.DELIVERY_UNKNOWN },
   { value: "SENT", label: OUTBOUND_STATUS_LABELS.SENT },
   { value: "FAILED", label: OUTBOUND_STATUS_LABELS.FAILED },
   { value: "BOUNCED", label: OUTBOUND_STATUS_LABELS.BOUNCED },
@@ -107,6 +110,8 @@ export function getOutboundNextActionHint(status: string): string {
     case "FAILED":
     case "BOUNCED":
       return "Controleer foutmelding en probeer opnieuw te verzenden.";
+    case "DELIVERY_UNKNOWN":
+      return "Controleer de verzonden berichten bij je mailprovider. Opnieuw verzenden is geblokkeerd om dubbele e-mails te voorkomen.";
     case "REJECTED":
       return `${OUTBOUND_STATUS_LABELS.REJECTED}. Pas de inhoud aan en dien opnieuw in.`;
     default:
@@ -147,6 +152,7 @@ export function getOutboundTimelineStatus(draftStatus: string): { activeIndex: n
     case "SCHEDULED":
       return { activeIndex: 2, rejected: false };
     case "SENDING":
+    case "DELIVERY_UNKNOWN":
     case "SENT":
     case "FAILED":
     case "BOUNCED":

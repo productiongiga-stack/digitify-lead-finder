@@ -4,6 +4,65 @@ import { TRPCError } from "@trpc/server";
 import { assertLeadAccess } from "../lib/tenant";
 
 export const reportRouter = router({
+  overview: protectedProcedure
+    .input(
+      z
+        .object({
+          from: z.coerce.date().optional(),
+          to: z.coerce.date().optional(),
+        })
+        .default({}),
+    )
+    .query(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      const now = new Date();
+      const from = input.from ?? new Date(now.getFullYear(), now.getMonth(), 1);
+      const to = input.to ?? now;
+      const range = { gte: from, lte: to };
+
+      const [leadCount, wonLeadCount, averageScore, quoteSummary, invoiceSummary, campaignCount, activeCampaignCount] =
+        await Promise.all([
+          ctx.db.lead.count({ where: { createdById: workspaceId, createdAt: range } }),
+          ctx.db.lead.count({ where: { createdById: workspaceId, status: "WON", createdAt: range } }),
+          ctx.db.lead.aggregate({
+            where: { createdById: workspaceId, createdAt: range, overallScore: { not: null } },
+            _avg: { overallScore: true },
+          }),
+          ctx.db.quote.aggregate({
+            where: { createdById: workspaceId, createdAt: range },
+            _count: { _all: true },
+            _sum: { total: true },
+          }),
+          ctx.db.workspaceInvoice.aggregate({
+            where: { createdById: workspaceId, issueDate: range },
+            _count: { _all: true },
+            _sum: { total: true },
+          }),
+          ctx.db.campaign.count({ where: { createdById: workspaceId, createdAt: range } }),
+          ctx.db.campaign.count({ where: { createdById: workspaceId, createdAt: range, status: "ACTIVE" } }),
+        ]);
+
+      return {
+        period: { from, to },
+        leads: {
+          total: leadCount,
+          won: wonLeadCount,
+          conversionRate: leadCount > 0 ? Math.round((wonLeadCount / leadCount) * 1000) / 10 : 0,
+          averageScore: Math.round((averageScore._avg.overallScore ?? 0) * 10) / 10,
+        },
+        quotes: {
+          total: quoteSummary._count._all,
+          value: quoteSummary._sum.total ?? 0,
+        },
+        invoices: {
+          total: invoiceSummary._count._all,
+          value: invoiceSummary._sum.total ?? 0,
+        },
+        campaigns: { total: campaignCount, active: activeCampaignCount },
+        generatedAt: new Date(),
+      };
+    }),
+
   list: protectedProcedure
     .input(
       z

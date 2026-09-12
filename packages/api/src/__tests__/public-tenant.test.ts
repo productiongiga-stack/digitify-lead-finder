@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   extractTenantOwnerIdFromSettingKey,
   extractUserIdFromScopedSettingKey,
+  ensurePublicTenantToken,
   normalizePublicTenantToken,
   publicTenantLookupKey,
 } from "../lib/public-tenant";
@@ -36,5 +37,24 @@ describe("public-tenant", () => {
   it("builds stable lookup keys for tenant tokens", () => {
     const token = "a".repeat(24);
     expect(publicTenantLookupKey(token)).toBe(`public_tenant_lookup:${token}`);
+  });
+
+  it("keeps workspace initialization working when RLS blocks the global lookup index", async () => {
+    const token = "b".repeat(24);
+    const upsert = vi.fn(async ({ where }: { where: { key: string } }) => {
+      if (where.key.startsWith("public_tenant_lookup:")) {
+        throw new Error("new row violates row-level security policy for table settings");
+      }
+      return { key: where.key, value: token };
+    });
+    const db = {
+      setting: {
+        findMany: vi.fn().mockResolvedValue([]),
+        upsert,
+      },
+    } as never;
+
+    await expect(ensurePublicTenantToken(db, "workspace-rls-test")).resolves.toMatch(/^[A-Za-z0-9_-]{32}$/);
+    expect(upsert).toHaveBeenCalled();
   });
 });

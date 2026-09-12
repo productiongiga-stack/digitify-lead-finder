@@ -16,9 +16,12 @@ import {
 import {
   Activity,
   AlertTriangle,
+  ArrowUpRight,
   BarChart3,
+  CircleAlert,
   ChevronLeft,
   ChevronRight,
+  CheckCircle2,
   Clock,
   ExternalLink,
   Gauge,
@@ -27,7 +30,6 @@ import {
   Plus,
   RefreshCcw,
   Search,
-  ShieldAlert,
   Trash2,
   Users,
 } from "lucide-react";
@@ -41,6 +43,7 @@ import {
   formatDomainDate,
 } from "@/lib/domains/domain-view";
 import { cn } from "@/lib/utils";
+import { HealthScoreRing } from "@/components/domains/domain-stats-cards";
 
 export function DomainsPageInner() {
   const [open, setOpen] = useState(false);
@@ -63,16 +66,12 @@ export function DomainsPageInner() {
     { status: statusFilter, search: search || undefined, sort, page, pageSize: 12 },
     { staleTime: 60_000, refetchInterval: pollWhenVisible },
   );
-  const statsQuery = trpc.domain.getPortfolioStats.useQuery(undefined, {
-    staleTime: 60_000,
-    refetchInterval: pollWhenVisible,
-  });
-  const monitorQuery = trpc.dashboard.getDomainMonitor.useQuery(undefined, {
+  const overviewQuery = trpc.domain.getPortfolioOverview.useQuery(undefined, {
     staleTime: 60_000,
     refetchInterval: pollWhenVisible,
   });
   const { data: leadOptions } = trpc.lead.options.useQuery(
-    { limit: 100 },
+    { limit: 50 },
     { enabled: open || Boolean(editDomain) },
   );
 
@@ -80,6 +79,7 @@ export function DomainsPageInner() {
     onSuccess: () => {
       void utils.domain.list.invalidate();
       void utils.domain.getPortfolioStats.invalidate();
+      void utils.domain.getPortfolioOverview.invalidate();
       setOpen(false);
       showToast({ title: "Domein opgeslagen" });
     },
@@ -89,6 +89,7 @@ export function DomainsPageInner() {
     onSuccess: () => {
       void utils.domain.list.invalidate();
       void utils.domain.getPortfolioStats.invalidate();
+      void utils.domain.getPortfolioOverview.invalidate();
       setEditDomain(null);
       showToast({ title: "Domein bijgewerkt" });
     },
@@ -98,6 +99,7 @@ export function DomainsPageInner() {
     onSuccess: () => {
       void utils.domain.list.invalidate();
       void utils.domain.getPortfolioStats.invalidate();
+      void utils.domain.getPortfolioOverview.invalidate();
       setDeleteId(null);
       showToast({ title: "Domein verwijderd" });
     },
@@ -107,7 +109,7 @@ export function DomainsPageInner() {
     onSuccess: () => {
       void utils.domain.list.invalidate();
       void utils.domain.getPortfolioStats.invalidate();
-      void utils.dashboard.getDomainMonitor.invalidate();
+      void utils.domain.getPortfolioOverview.invalidate();
       showToast({ title: "Analyse voltooid" });
     },
     onError: (error) => showToast({ title: "Analyse mislukt", description: error.message, variant: "error" }),
@@ -116,6 +118,7 @@ export function DomainsPageInner() {
     onSuccess: (result) => {
       void utils.domain.list.invalidate();
       void utils.domain.getPortfolioStats.invalidate();
+      void utils.domain.getPortfolioOverview.invalidate();
       showToast({
         title: "Bulk-analyse klaar",
         description: `${result.analyzed} geslaagd, ${result.failed} mislukt.`,
@@ -125,7 +128,9 @@ export function DomainsPageInner() {
   });
 
   const domains = listQuery.data?.domains ?? [];
-  const stats = statsQuery.data;
+  const stats = overviewQuery.data?.stats;
+  const monitor = overviewQuery.data?.monitor ?? [];
+  const attentionItems = overviewQuery.data?.attentionItems ?? [];
   const domainToDelete = domains.find((domain) => domain.id === deleteId);
 
   const statCards = useMemo(
@@ -142,20 +147,18 @@ export function DomainsPageInner() {
 
   return (
     <div className="app-page space-y-5">
-      <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-sky-500/10 via-background to-primary/5 p-5 sm:p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 rounded-full border border-sky-500/20 bg-sky-500/10 px-3 py-1 text-xs font-medium text-sky-700 dark:text-sky-300">
-              <Globe2 className="h-3.5 w-3.5" />
-              Domeinportfolio
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Domeinen</h1>
-            <p className="max-w-2xl text-sm text-muted-foreground">
-              Beheer klantdomeinen, monitor uptime &amp; SEO, volg bezoekers via de embed-tracker en krijg vroegtijdig
-              verval-alerts.
-            </p>
+      <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+            <Globe2 className="h-5 w-5 text-primary" />
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-primary">Domeinportfolio</p>
+            <h1 className="text-2xl font-semibold tracking-tight">Domeinen</h1>
+            <p className="text-sm text-muted-foreground">Monitoring, analyses en opvolging in één overzicht.</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -173,7 +176,6 @@ export function DomainsPageInner() {
               <Plus className="mr-2 h-4 w-4" />
               Nieuw domein
             </Button>
-          </div>
         </div>
       </div>
 
@@ -183,7 +185,7 @@ export function DomainsPageInner() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="crm-stat-card-label">{stat.label}</p>
-                <p className="crm-stat-card-value">{statsQuery.isLoading ? "—" : stat.value}</p>
+                <p className="crm-stat-card-value">{overviewQuery.isLoading ? "—" : stat.value}</p>
                 <p className="crm-stat-card-hint">{stat.hint}</p>
               </div>
               <stat.icon className={cn("h-5 w-5 shrink-0", stat.tone)} />
@@ -191,6 +193,40 @@ export function DomainsPageInner() {
           </div>
         ))}
       </div>
+
+      <Card className="border-primary/15 bg-primary/[0.025]">
+        <CardContent className="p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary">Vandaag aandacht</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {attentionItems.length
+                  ? "De belangrijkste domeinacties staan hier bovenaan."
+                  : "Alles ziet er rustig uit in je domeinportfolio."}
+              </p>
+            </div>
+            {attentionItems.length ? <Badge variant="warning">{attentionItems.length} actie{attentionItems.length === 1 ? "" : "s"}</Badge> : <CheckCircle2 className="h-5 w-5 text-emerald-600" />}
+          </div>
+          {attentionItems.length ? (
+            <div className="mt-4 grid gap-2 md:grid-cols-2">
+              {attentionItems.map((item) => (
+                <Link
+                  key={item.id}
+                  href={`/domains/${item.domainId}`}
+                  className="group flex items-center gap-3 rounded-xl border bg-background/75 px-3 py-2.5 transition-colors hover:border-primary/40 hover:bg-primary/5"
+                >
+                  <CircleAlert className={cn("h-4 w-4 shrink-0", item.priority === "high" ? "text-red-600" : "text-amber-600")} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{item.domainName}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{item.title} · {item.description}</span>
+                  </span>
+                  <ArrowUpRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                </Link>
+              ))}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
 
       {stats?.expiringSoon?.length ? (
         <Card className="border-amber-200/60 bg-amber-500/[0.04]">
@@ -207,12 +243,12 @@ export function DomainsPageInner() {
         </Card>
       ) : null}
 
-      {monitorQuery.data?.length ? (
+      {monitor.length ? (
         <Card>
           <CardContent className="p-4">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Live monitor</p>
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              {monitorQuery.data.map((item) => (
+            {monitor.map((item) => (
                 <Link
                   key={item.id}
                   href={`/domains/${item.id}`}
@@ -225,7 +261,11 @@ export function DomainsPageInner() {
                     </Badge>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Score {item.healthScore ?? 0} · {item.uniqueVisitors} bezoekers
+                    Score {item.healthScore ?? 0} · {item.uniqueVisitors} bezoekers · {item.pageviews} pageviews
+                  </p>
+                  <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                    {item.lastSeen ? `Laatste hit ${formatDomainDate(item.lastSeen)}` : "Nog geen tracker-hit"}
+                    {item.lastAnalyzedAt ? ` · Analyse ${formatDomainDate(item.lastAnalyzedAt)}` : " · Nog niet geanalyseerd"}
                   </p>
                 </Link>
               ))}
@@ -306,6 +346,13 @@ export function DomainsPageInner() {
             const SslIcon = sslInfo.icon;
             const expiryDays = daysUntilExpiry(domain.expiresAt);
             const isAnalyzing = analyzeMutation.isPending && analyzeMutation.variables?.id === domain.id;
+            const healthTone: "positive" | "warning" | "negative" | "neutral" = (domain.healthScore ?? 0) >= 80
+              ? "positive"
+              : (domain.healthScore ?? 0) >= 60
+                ? "warning"
+                : (domain.healthScore ?? 0) > 0
+                  ? "negative"
+                  : "neutral";
 
             return (
               <Card key={domain.id} className="domain-card overflow-hidden">
@@ -329,10 +376,12 @@ export function DomainsPageInner() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
                       <div className="rounded-lg border bg-muted/20 p-2">
                         <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Health</p>
-                        <p className="text-lg font-semibold tabular-nums">{domain.healthScore ?? 0}</p>
+                        <div className="mt-1 flex justify-center">
+                          <HealthScoreRing score={domain.healthScore ?? 0} tone={healthTone} />
+                        </div>
                       </div>
                       <div className="rounded-lg border bg-muted/20 p-2">
                         <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Status</p>
@@ -341,6 +390,10 @@ export function DomainsPageInner() {
                       <div className="rounded-lg border bg-muted/20 p-2">
                         <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Bezoekers</p>
                         <p className="text-lg font-semibold tabular-nums">{domain.uniqueVisitors}</p>
+                      </div>
+                      <div className="rounded-lg border bg-muted/20 p-2">
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Pageviews</p>
+                        <p className="text-lg font-semibold tabular-nums">{domain.pageviews}</p>
                       </div>
                     </div>
 
@@ -368,13 +421,21 @@ export function DomainsPageInner() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8"
+                          aria-label={`Analyseer ${domain.domainName}`}
+                          title={`Analyseer ${domain.domainName}`}
                           disabled={isAnalyzing}
                           onClick={() => analyzeMutation.mutate({ id: domain.id })}
                         >
                           {isAnalyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                         </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-                          <a href={`https://${domain.domainName}`} target="_blank" rel="noopener noreferrer">
+                          <a
+                            href={`https://${domain.domainName}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`Open ${domain.domainName}`}
+                            title={`Open ${domain.domainName}`}
+                          >
                             <ExternalLink className="h-4 w-4" />
                           </a>
                         </Button>
@@ -382,6 +443,8 @@ export function DomainsPageInner() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-destructive"
+                          aria-label={`Verwijder ${domain.domainName}`}
+                          title={`Verwijder ${domain.domainName}`}
                           onClick={() => setDeleteId(domain.id)}
                         >
                           <Trash2 className="h-4 w-4" />

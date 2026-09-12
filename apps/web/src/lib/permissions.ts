@@ -73,6 +73,7 @@ export function canAccessSettingsPath(roleValue: string | null | undefined, path
     "/settings/team",
     "/settings/feedback",
     "/settings/display",
+    "/settings/audit",
   ]);
 
   if (role === "ADMIN") return adminPaths.has(path);

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { router, protectedProcedure, ownerProcedure, mutationProcedure } from "../trpc";
+import { router, protectedProcedure, sensitiveOwnerProcedure, mutationProcedure } from "../trpc";
 import { type PrismaClient } from "@digitify/db";
 import { loadEmailSettings } from "../lib/email-sender";
 import { sendTemplatedEmail } from "../lib/send-templated-email";
@@ -932,7 +932,7 @@ export const bookingRouter = router({
     return items.length ? items : [defaults];
   }),
 
-  syncHostTimezone: ownerProcedure
+  syncHostTimezone: sensitiveOwnerProcedure
     .input(z.object({ timezone: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       return syncHostTimezoneForWorkspace(ctx.db, ctx.user.workspaceId!, input.timezone);

@@ -46,6 +46,8 @@ pnpm db:seed
 
 RLS-staging smoke: `ENABLE_WORKSPACE_RLS=true pnpm rls:smoke`
 
+Geauthenticeerde Playwright-tests vereisen `PLAYWRIGHT_LOGIN_PASSWORD` of `SEED_ADMIN_PASSWORD`. Zonder die expliciete variabele worden alleen de geauthenticeerde specs overgeslagen; publieke healthchecks blijven draaien.
+
 Integration tests (RLS + cross-tenant IDOR):
 
 ```bash

@@ -3,13 +3,13 @@ import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { enforceRateLimit } from "../lib/rate-limit";
+import { searchGooglePlaces } from "../lib/google-places-search";
 import { log } from "../lib/logger";
-import { migrateLegacyWorkspaceSavedSearches } from "../lib/migrate-workspace-saved-searches";
+import { importLeadRecords } from "../lib/lead-import";
 import { isMissingSchemaError } from "../lib/prisma-schema";
 import { serializeSavedSearch } from "../lib/saved-search-serializer";
 import { ensureTenantSchemaCompatibility } from "../lib/tenant-schema-compat";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
-import { formatGooglePlacesErrorMessage } from "../lib/google-places";
 
 const searchStringSchema = z
   .string()
@@ -17,14 +17,14 @@ const searchStringSchema = z
   .transform((value) => value?.trim() ?? "");
 
 const searchResultSchema = z.object({
-  placeId: z.string(),
-  displayName: z.string(),
+  placeId: z.string().trim().min(1).max(300),
+  displayName: z.string().trim().min(1).max(300),
   formattedAddress: z.string().optional(),
-  websiteUri: z.string().optional(),
+  websiteUri: z.string().url().refine((value) => /^https?:\/\//i.test(value), "Gebruik een http(s)-URL.").optional(),
   nationalPhoneNumber: z.string().optional(),
   googleMapsUri: z.string().optional(),
-  rating: z.number().optional(),
-  userRatingCount: z.number().optional(),
+  rating: z.number().min(0).max(5).optional(),
+  userRatingCount: z.number().int().min(0).optional(),
   types: z.array(z.string()).optional(),
   primaryType: z.string().optional(),
 });
@@ -42,76 +42,6 @@ function extractCity(formattedAddress: string | undefined): string | undefined {
   if (parts.length >= 3) return parts[parts.length - 2]?.replace(/^\d+\s*/, "");
   if (parts.length >= 2) return parts[1];
   return undefined;
-}
-
-function shuffleArray<T>(items: T[]): T[] {
-  const next = [...items];
-  for (let index = next.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [next[index], next[swapIndex]] = [next[swapIndex]!, next[index]!];
-  }
-  return next;
-}
-
-function buildSearchQueries(input: {
-  query: string;
-  niche?: string;
-  city: string;
-  country: string;
-}) {
-  const location = [input.city, input.country].filter(Boolean).join(", ").trim();
-  const mainKeyword = input.query || input.niche || "bedrijf";
-  const combinedKeyword = [input.query, input.niche].filter(Boolean).join(" ").trim();
-  const fallbackKeyword = combinedKeyword || mainKeyword;
-
-  const queries = [
-    [fallbackKeyword, location ? `in ${location}` : ""].filter(Boolean).join(" "),
-    [mainKeyword, "bedrijf", location ? `in ${location}` : ""].filter(Boolean).join(" "),
-    [mainKeyword, "zaak", location ? `in ${location}` : ""].filter(Boolean).join(" "),
-    [mainKeyword, "kmo", location ? `in ${location}` : ""].filter(Boolean).join(" "),
-  ]
-    .map((value) => value.trim())
-    .filter(Boolean);
-
-  return Array.from(new Set(queries)).slice(0, 4);
-}
-
-async function fetchPlacesForQuery(
-  textQuery: string,
-  apiKey: string,
-  fieldMask: string,
-  maxResultCount: number,
-  userId: string,
-): Promise<Record<string, unknown>[]> {
-  const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask": fieldMask,
-    },
-    body: JSON.stringify({
-      textQuery,
-      maxResultCount,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    log.integration.error("Google Places API error", {
-      userId,
-      status: response.status,
-      bodyPreview: errorBody.slice(0, 200),
-      textQuery,
-    });
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: formatGooglePlacesErrorMessage(`HTTP ${response.status}: ${errorBody}`),
-    });
-  }
-
-  const data = await response.json();
-  return Array.isArray(data.places) ? (data.places as Record<string, unknown>[]) : [];
 }
 
 export const searchRouter = router({
@@ -137,7 +67,7 @@ export const searchRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await enforceRateLimit({
-        key: `lead-search:${ctx.user.id}`,
+        key: `lead-search:${ctx.user.workspaceId}`,
         limit: 20,
         windowMs: 60_000,
         message: "Te veel zoekopdrachten op korte tijd. Wacht even en probeer opnieuw.",
@@ -153,42 +83,10 @@ export const searchRouter = router({
         });
       }
 
-      const fieldMask = [
-        "places.id",
-        "places.displayName",
-        "places.formattedAddress",
-        "places.websiteUri",
-        "places.nationalPhoneNumber",
-        "places.googleMapsUri",
-        "places.rating",
-        "places.userRatingCount",
-        "places.types",
-        "places.primaryType",
-      ].join(",");
-
-      const searchQueries = buildSearchQueries(input);
-      const perRequestResultCount = Math.min(
-        20,
-        Math.max(5, Math.ceil(input.pageSize / searchQueries.length) + 3)
-      );
-      const dedupedPlaces = new Map<string, Record<string, unknown>>();
-
-      const placeBatches = await Promise.all(
-        searchQueries.map((textQuery) =>
-          fetchPlacesForQuery(textQuery, apiKey, fieldMask, perRequestResultCount, ctx.user.id),
-        ),
-      );
-
-      for (const places of placeBatches) {
-        for (const place of places) {
-          const placeId = place.id as string | undefined;
-          if (!placeId || dedupedPlaces.has(placeId)) continue;
-          dedupedPlaces.set(placeId, place);
-        }
-      }
-
-      const places = shuffleArray(Array.from(dedupedPlaces.values())).slice(0, input.pageSize);
-      const searchLabel = searchQueries[0] ?? [input.query, input.niche, input.city].filter(Boolean).join(" ");
+      const searchLabel = [[input.query, input.niche].filter(Boolean).join(" ") || "bedrijf",
+        [input.city, input.country].filter(Boolean).join(", ")].filter(Boolean).join(" in ");
+      const places = await searchGooglePlaces(searchLabel, apiKey, input.pageSize);
+      const searchQueries = [searchLabel];
 
       // Log the search as an activity
       await ctx.db.activity.create({
@@ -301,7 +199,6 @@ export const searchRouter = router({
     const scope = workspaceScopeFromUser(ctx.user);
     await ensureTenantSchemaCompatibility(ctx.db).catch(() => null);
     try {
-      await migrateLegacyWorkspaceSavedSearches(ctx.db, scope);
       const rows = await ctx.db.workspaceSavedSearch.findMany({
         where: { createdById: scope.workspaceId },
         orderBy: { updatedAt: "desc" },
@@ -333,7 +230,6 @@ export const searchRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
-      await migrateLegacyWorkspaceSavedSearches(ctx.db, scope);
 
       const data = {
         name: input.name.trim(),
@@ -413,32 +309,6 @@ export const searchRouter = router({
   saveSearchResult: mutationProcedure
     .input(searchResultSchema)
     .mutation(async ({ ctx, input }) => {
-      // Check by placeId (exact) or company name (fuzzy duplicate prevention)
-      const existing = await ctx.db.lead.findFirst({
-        where: {
-          createdById: ctx.user.workspaceId!,
-          OR: [
-            { gmbPlaceId: input.placeId },
-            {
-              companyName: {
-                equals: input.displayName.trim(),
-                mode: "insensitive",
-              },
-            },
-          ],
-        },
-        select: { id: true, companyName: true, gmbPlaceId: true },
-      });
-
-      if (existing) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: existing.gmbPlaceId === input.placeId
-            ? `"${existing.companyName}" bestaat al als lead (zelfde Google-locatie).`
-            : `"${existing.companyName}" bestaat al als lead (zelfde bedrijfsnaam).`,
-        });
-      }
-
       // Extract city from formatted address
       const city = extractCity(input.formattedAddress);
 
@@ -447,8 +317,7 @@ export const searchRouter = router({
         ? input.primaryType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
         : undefined;
 
-      const lead = await ctx.db.lead.create({
-        data: {
+      const imported = await importLeadRecords(ctx.db, ctx.user.workspaceId!, [{
           companyName: input.displayName,
           address: input.formattedAddress,
           city,
@@ -464,8 +333,10 @@ export const searchRouter = router({
           createdById: ctx.user.workspaceId!,
           savedById: ctx.user.id,
           lastEditedById: ctx.user.id,
-        },
-      });
+      }]);
+      const lead = imported.created[0];
+      if (!lead) throw new TRPCError({ code: "CONFLICT", message: "Dit bedrijf op deze locatie bestaat al als lead." });
+
 
       await ctx.db.activity.create({
         data: {

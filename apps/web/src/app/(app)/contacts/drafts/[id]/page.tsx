@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffectiveAppRole } from "@/lib/use-effective-app-role";
@@ -52,7 +53,6 @@ import {
   getQuoteConfiguratorUrl,
 } from "@/lib/quote-outbound";
 import { useShellEmailPreviewProps } from "@/lib/outbound-email-settings";
-import { EmailPreview } from "@/components/email/preview";
 import { OutboundDraftTimeline } from "@/components/outbound/outbound-draft-timeline";
 import {
   OutboundDraftStatusBanner,
@@ -71,6 +71,11 @@ import {
   getOutboundStatusLabel,
   getSendButtonLabel,
 } from "@/lib/contact-status";
+
+const EmailPreview = dynamic(
+  () => import("@/components/email/preview").then((module) => module.EmailPreview),
+  { ssr: false, loading: () => <Skeleton className="h-96 w-full rounded-xl" /> },
+);
 
 export default function DraftDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);

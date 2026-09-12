@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, aiRateLimitedProcedure, mutationProcedure } from "../trpc";
-import { computeScore, type ScoringWeightConfig, type LeadData, type EnrichmentPayload } from "@digitify/scoring";
 import { analyzeWebsite } from "@digitify/connectors";
 import { assertLeadAccess } from "../lib/tenant";
 import { loadMergedScoringWeights } from "../lib/scoring-weights";
@@ -96,51 +95,8 @@ export const scoringRouter = router({
       const merged = await loadMergedScoringWeights(ctx.db, ctx.user.workspaceId!);
       const weights = merged.filter((w) => w.enabled);
 
-      const enrichmentRaw = lead.enrichmentData?.[0]?.data as Record<string, unknown> | null;
-
-      const leadData: LeadData = {
-        companyName: lead.companyName,
-        website: lead.website,
-        email: lead.email,
-        phone: lead.phone,
-        gmbRating: lead.gmbRating ? Number(lead.gmbRating) : null,
-        gmbReviewCount: lead.gmbReviewCount,
-        gmbCategories: (lead.gmbCategories as string[]) || [],
-        facebookUrl: lead.facebookUrl,
-        instagramUrl: lead.instagramUrl,
-        linkedinUrl: lead.linkedinUrl,
-        twitterUrl: lead.twitterUrl,
-        tiktokUrl: lead.tiktokUrl,
-        youtubeUrl: lead.youtubeUrl,
-      };
-
-      const enrichment: EnrichmentPayload = {
-        website_analysis: enrichmentRaw?.website_analysis as EnrichmentPayload["website_analysis"],
-        social_analysis: enrichmentRaw?.social_analysis as EnrichmentPayload["social_analysis"],
-      };
-
-      const weightConfigs: ScoringWeightConfig[] = weights.map((w) => ({
-        factorKey: w.factorKey,
-        label: w.label,
-        weight: w.weight,
-        maxPoints: w.maxPoints,
-        enabled: w.enabled,
-        category: w.category,
-      }));
-
-      const result = computeScore({ lead: leadData, enrichment, weights: weightConfigs });
-
-      // Persist scores to the lead
-      await ctx.db.lead.update({
-        where: { id: input.leadId },
-        data: {
-          overallScore: result.overallScore,
-          scorePriority: result.priority,
-          scoreComputedAt: new Date(),
-        },
-      });
-
-      await upsertLeadScoringFactors(ctx.db, input.leadId, result.factors, weights);
+      const result = await scoreLeadRecord(ctx.db, lead, weights);
+      await persistLeadScore(ctx.db, lead.id, result, result.factors, weights, upsertLeadScoringFactors);
 
       await ctx.db.activity.create({
         data: {
@@ -202,92 +158,15 @@ export const scoringRouter = router({
         take: params.leadIds?.length ? params.leadIds.length : params.limit,
       });
 
-      const weightConfigs: ScoringWeightConfig[] = weights.map((w) => ({
-        factorKey: w.factorKey,
-        label: w.label,
-        weight: w.weight,
-        maxPoints: w.maxPoints,
-        enabled: w.enabled,
-        category: w.category,
-      }));
-
       let updated = 0;
       const errors: Array<{ leadId: string; companyName: string; message: string }> = [];
-      const CHUNK_SIZE = 50;
-
-      for (let offset = 0; offset < leads.length; offset += CHUNK_SIZE) {
-        const chunk = leads.slice(offset, offset + CHUNK_SIZE);
-        const computed: Array<{
-          lead: (typeof leads)[number];
-          result: ReturnType<typeof computeScore>;
-        }> = [];
-
-        for (const lead of chunk) {
-          try {
-            const enrichmentRows = lead.enrichmentData as Array<{
-              source: string;
-              data: unknown;
-            }>;
-            const bestEnrichmentRow =
-              enrichmentRows.find((row) => row.source === "website_analyzer") ??
-              enrichmentRows[0];
-            const enrichmentRaw = (bestEnrichmentRow?.data as Record<string, unknown> | undefined) ?? {};
-
-            const leadData: LeadData = {
-              companyName: lead.companyName,
-              website: lead.website,
-              email: lead.email,
-              phone: lead.phone,
-              gmbRating: lead.gmbRating ? Number(lead.gmbRating) : null,
-              gmbReviewCount: lead.gmbReviewCount,
-              gmbCategories: (lead.gmbCategories as string[]) || [],
-              facebookUrl: lead.facebookUrl,
-              instagramUrl: lead.instagramUrl,
-              linkedinUrl: lead.linkedinUrl,
-              twitterUrl: lead.twitterUrl,
-              tiktokUrl: lead.tiktokUrl,
-              youtubeUrl: lead.youtubeUrl,
-            };
-
-            const enrichment: EnrichmentPayload = {
-              website_analysis: enrichmentRaw.website_analysis as EnrichmentPayload["website_analysis"],
-              social_analysis: enrichmentRaw.social_analysis as EnrichmentPayload["social_analysis"],
-            };
-
-            computed.push({
-              lead,
-              result: computeScore({ lead: leadData, enrichment, weights: weightConfigs }),
-            });
-          } catch (error: any) {
-            errors.push({
-              leadId: lead.id,
-              companyName: lead.companyName,
-              message: error?.message || "Onbekende fout",
-            });
-          }
-        }
-
-        if (computed.length > 0) {
-          await ctx.db.$transaction(
-            computed.map(({ lead, result }) =>
-              ctx.db.lead.update({
-                where: { id: lead.id },
-                data: {
-                  overallScore: result.overallScore,
-                  scorePriority: result.priority,
-                  scoreComputedAt: new Date(),
-                },
-              }),
-            ),
-          );
-
-          await Promise.all(
-            computed.map(({ lead, result }) =>
-              upsertLeadScoringFactors(ctx.db, lead.id, result.factors, weights),
-            ),
-          );
-
-          updated += computed.length;
+      for (const lead of leads) {
+        try {
+          const result = await scoreLeadRecord(ctx.db, lead, weights);
+          await persistLeadScore(ctx.db, lead.id, result, result.factors, weights, upsertLeadScoringFactors);
+          updated++;
+        } catch {
+          errors.push({ leadId: lead.id, companyName: lead.companyName, message: "Score kon niet worden opgeslagen." });
         }
       }
 
@@ -360,9 +239,10 @@ export const scoringRouter = router({
         updates.tiktokUrl = analysis.socialLinks.tiktok;
       }
 
-      if (Object.keys(updates).length > 0) {
-        await ctx.db.lead.update({ where: { id: input.leadId }, data: updates as any });
-      }
+      await ctx.db.lead.update({
+        where: { id: input.leadId, createdById: ctx.user.workspaceId!, updatedAt: lead.updatedAt },
+        data: { ...updates, lastEnrichedAt: new Date() },
+      });
 
       await ctx.db.enrichmentData.upsert({
         where: { leadId_source: { leadId: input.leadId, source: "website_analyzer" } },
@@ -532,16 +412,7 @@ export const scoringRouter = router({
           const weights = await loadEnabledScoringWeights(ctx.db, ctx.user.workspaceId!);
           const scoreResult = await scoreLeadRecord(ctx.db, enrichedLead, weights);
 
-          await ctx.db.lead.update({
-            where: { id: leadId },
-            data: {
-              overallScore: scoreResult.overallScore,
-              scorePriority: scoreResult.priority,
-              scoreComputedAt: new Date(),
-            },
-          });
-
-          await upsertLeadScoringFactors(ctx.db, leadId, scoreResult.factors, weights);
+          await persistLeadScore(ctx.db, leadId, scoreResult, scoreResult.factors, weights, upsertLeadScoringFactors);
 
           results.push({ leadId, score: scoreResult.overallScore, priority: scoreResult.priority });
         } catch (error: any) {

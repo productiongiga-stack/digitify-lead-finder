@@ -61,7 +61,7 @@ Open `http://localhost:3000` (poort kan afwijken — check terminal).
 
 **Na productie-build:** gebruik `pnpm --filter @digitify/web dev:clean` i.p.v. `dev` om corrupte `.next` te vermijden.
 
-**Env:** Er is **geen** `.env.example` in de repo. Zie `docs/VERCEL.md` en `DEPLOYMENT.md` voor verplichte variabelen. Lokaal: root `.env` of `apps/web/.env.local` (geladen via `scripts/dev-with-env.sh`).
+**Env:** Kopieer `.env.example` naar `.env` en vervang de placeholdersecrets. Zie `docs/VERCEL.md` en `DEPLOYMENT.md` voor productievariabelen. Lokaal: root `.env` of `apps/web/.env.local` (geladen via `scripts/dev-with-env.sh`).
 
 ---
 
@@ -196,7 +196,7 @@ Documentatie: `packages/api/src/lib/WORKSPACE.md`
 
 ### RLS (Row Level Security)
 
-- Opt-in: `ENABLE_WORKSPACE_RLS=true`
+- Verplicht in productie: `ENABLE_WORKSPACE_RLS=true`
 - App zet `app.workspace_id` per transaction
 - Smoke: `pnpm rls:smoke`
 - Integration tests: `pnpm test:integration`

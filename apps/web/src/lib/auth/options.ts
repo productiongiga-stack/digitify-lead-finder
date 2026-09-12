@@ -4,6 +4,7 @@ import { prisma } from "@digitify/db";
 import { scryptSync, timingSafeEqual } from "crypto";
 import { log } from "@digitify/api/src/lib/logger";
 import { resolveWorkspaceContext } from "@digitify/api/src/lib/workspace-registry";
+import { resolveSessionIdentity } from "@digitify/api/src/lib/session-identity";
 
 function normalizeAbsoluteUrl(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
@@ -37,6 +38,7 @@ Object.assign(process.env, { NEXTAUTH_URL: resolveAuthBaseUrl() });
 function verifyPassword(password: string, storedHash: string): boolean {
   if (storedHash.includes(":")) {
     const [salt, hash] = storedHash.split(":");
+    if (!salt || !hash || !/^[a-f0-9]{128}$/i.test(hash)) return false;
     const derivedHash = scryptSync(password, salt!, 64);
     return timingSafeEqual(derivedHash, Buffer.from(hash!, "hex"));
   }
@@ -93,6 +95,7 @@ export const authOptions: NextAuthOptions = {
             passwordHash: true,
             emailVerified: true,
             workspaceOwnerId: true,
+            sessionVersion: true,
           },
         });
 
@@ -139,12 +142,13 @@ export const authOptions: NextAuthOptions = {
           workspaceId: workspace.workspaceId,
           workspaceRole: workspace.workspaceRole,
           isPersonalWorkspace: workspace.isPersonalWorkspace,
+          sessionVersion: user.sessionVersion,
         };
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, user, trigger }) {
+    async jwt({ token, user }) {
       if (user) {
         token.sub = user.id;
         token.role = (user as { role?: string }).role;
@@ -153,26 +157,18 @@ export const authOptions: NextAuthOptions = {
         token.workspaceId = (user as { workspaceId?: string }).workspaceId;
         token.workspaceRole = (user as { workspaceRole?: string }).workspaceRole;
         token.isPersonalWorkspace = (user as { isPersonalWorkspace?: boolean }).isPersonalWorkspace;
+        token.sessionVersion = (user as { sessionVersion?: number }).sessionVersion;
         return token;
       }
 
-      const hasWorkspaceContext =
-        typeof token.workspaceId === "string"
-        && typeof token.workspaceRole === "string"
-        && typeof token.isPersonalWorkspace === "boolean";
-
-      if (trigger === "update" || !hasWorkspaceContext) {
-        if (token.sub) {
-          const workspace = await resolveWorkspaceContext(prisma, token.sub);
-          token.workspaceId = workspace.workspaceId;
-          token.workspaceRole = workspace.workspaceRole;
-          token.isPersonalWorkspace = workspace.isPersonalWorkspace;
-        }
-      }
-
-      return token;
+      const identity = token.sub
+        ? await resolveSessionIdentity(prisma, token.sub, token.sessionVersion)
+        : null;
+      if (!identity) return {};
+      return { ...token, ...identity, sub: identity.id };
     },
     async session({ session, token }) {
+      if (!token.sub) return { ...session, user: undefined };
       if (session.user) {
         const sessionUser = session.user as {
           id?: string;
@@ -180,8 +176,10 @@ export const authOptions: NextAuthOptions = {
           workspaceId?: string;
           workspaceRole?: string;
           isPersonalWorkspace?: boolean;
+          disabledModules?: string[];
         };
         sessionUser.id = token.sub;
+        sessionUser.disabledModules = Array.isArray(token.disabledModules) ? token.disabledModules as string[] : [];
         sessionUser.role = token.role as string | undefined;
         sessionUser.workspaceId =
           typeof token.workspaceId === "string" ? token.workspaceId : undefined;

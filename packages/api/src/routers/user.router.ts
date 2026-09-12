@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
 import { TRPCError } from "@trpc/server";
-import { router, protectedProcedure, adminProcedure, ownerProcedure } from "../trpc";
+import { router, protectedProcedure, adminProcedure, sensitiveOwnerProcedure } from "../trpc";
 import { effectiveWorkspaceRole } from "../lib/effective-role";
 import { ensureUserWorkspace } from "../lib/user-workspace";
 import { sendTemplatedEmail } from "../lib/send-templated-email";
@@ -14,11 +14,43 @@ import {
 import { workspaceMemberUserIds } from "../lib/workspace-members";
 import { invalidateWorkspaceOwnerIdCache } from "../lib/workspace";
 import { passwordPolicySchema } from "../lib/password-policy";
-import { getSettingString, settingsRowsToMap } from "../lib/settings";
+import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
 import { invalidateUserSettingsCache, loadUserSettingRows, stripUserSettingRows, userSettingKey } from "../lib/user-settings";
 import { filterReadableSettingsForRole } from "../lib/permissions";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
+import { listWorkspacesForUser } from "../lib/workspace-registry";
 import { redactSecretSettingValue } from "@digitify/db";
+import { recordSecurityAuditEvent } from "../lib/security-audit";
+import { isPlatformOwner } from "../lib/platform-admin";
+
+const MANAGEABLE_MODULE_IDS = [
+  "bookings",
+  "campaigns",
+  "social",
+  "creativeStudio",
+  "metaAds",
+  "googleAds",
+  "contacts",
+  "quotes",
+  "invoices",
+  "reports",
+  "crm",
+  "tasks",
+  "agenda",
+  "templates",
+  "domains",
+  "reviews",
+  "chatbot",
+  "forms",
+  "automations",
+  "files",
+  "activityLog",
+  "knowledge",
+  "seo",
+  "projects",
+  "contracts",
+  "payments",
+] as const;
 
 const SHELL_BRANDING_KEYS = [
   "branding.company_name",
@@ -43,6 +75,12 @@ const SHELL_BRANDING_KEYS = [
   "email.from_name",
   "email.from_email",
   "ui.density",
+] as const;
+
+const SHELL_ANALYTICS_KEYS = [
+  "analytics.enabled",
+  "analytics.track_app_usage",
+  "analytics.respect_dnt",
 ] as const;
 
 function sanitizeShellSettings(settings: Record<string, unknown>) {
@@ -78,6 +116,10 @@ export function verifyPassword(password: string, storedHash: string): boolean {
 }
 
 export const userRouter = router({
+  getPlatformAccess: protectedProcedure.query(({ ctx }) => ({
+    isPlatformOwner: isPlatformOwner(ctx.user),
+  })),
+
   getProfile: protectedProcedure.query(async ({ ctx }) => {
     const workspaceId = ctx.user.workspaceId!;
     if (isWorkspaceOwner(ctx.user, workspaceId)) {
@@ -192,12 +234,43 @@ export const userRouter = router({
       }
       await ctx.db.user.update({
         where: { id: ctx.user.id },
-        data: { passwordHash: hashPassword(input.newPassword) },
+        data: { passwordHash: hashPassword(input.newPassword), sessionVersion: { increment: 1 } },
       });
       return { success: true };
     }),
 
   list: adminProcedure.query(async ({ ctx }) => {
+    if (isPlatformOwner(ctx.user)) {
+      const users = await ctx.db.user.findMany({
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          createdAt: true,
+          _count: { select: { leads: true, campaigns: true } },
+          workspaceMemberships: {
+            select: {
+              role: true,
+              status: true,
+              workspace: { select: { id: true, name: true, type: true } },
+            },
+            orderBy: { createdAt: "asc" },
+          },
+        },
+        orderBy: { createdAt: "asc" },
+      });
+      return users.map((user) => ({
+        ...user,
+        googleCalendar: {
+          connected: false,
+          syncEnabled: false,
+          accountEmail: "",
+          calendarId: "",
+          timezone: "Europe/Brussels",
+        },
+      }));
+    }
     const workspaceId = ctx.user.workspaceId!;
     const userIds = await workspaceMemberUserIds(ctx.db, workspaceId);
     const memberships = await ctx.db.workspaceMembership.findMany({
@@ -272,9 +345,29 @@ export const userRouter = router({
     }));
   }),
 
-  updateRole: ownerProcedure
+  updateRole: sensitiveOwnerProcedure
     .input(z.object({ userId: z.string(), role: z.enum(["OWNER", "ADMIN", "MODERATOR", "MEMBER", "TRIAL", "TESTER", "VIEWER"]) }))
     .mutation(async ({ ctx, input }) => {
+      if (isPlatformOwner(ctx.user)) {
+        if (input.userId === ctx.user.id && input.role !== "OWNER") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Je kunt je eigen platform-ownerrol niet verwijderen." });
+        }
+        const target = await ctx.db.user.findUnique({ where: { id: input.userId }, select: { id: true, role: true } });
+        if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Account niet gevonden." });
+        await ctx.db.user.update({ where: { id: input.userId }, data: { role: input.role, sessionVersion: { increment: 1 } } });
+        await ctx.db.workspaceMembership.updateMany({ where: { userId: input.userId, status: "ACTIVE" }, data: { role: input.role } });
+        await recordSecurityAuditEvent(ctx.db, {
+          actorUserId: ctx.user.id,
+          targetUserId: input.userId,
+          action: "PLATFORM_ROLE_CHANGED",
+          resource: "user",
+          resourceId: input.userId,
+          result: "SUCCESS",
+          requestId: ctx.requestId,
+          metadata: { role: input.role },
+        });
+        return { success: true, role: input.role };
+      }
       const workspaceId = ctx.user.workspaceId!;
       const workspace = await ctx.db.workspace.findUnique({
         where: { id: workspaceId },
@@ -312,10 +405,22 @@ export const userRouter = router({
         });
       }
 
+      await recordSecurityAuditEvent(ctx.db, {
+        workspaceId,
+        actorUserId: ctx.user.id,
+        targetUserId: input.userId,
+        action: "ROLE_CHANGED",
+        resource: "workspace_membership",
+        resourceId: membership?.id,
+        result: "SUCCESS",
+        requestId: ctx.requestId,
+        metadata: { role: input.role },
+      });
+
       return { success: true, role: input.role };
     }),
 
-  updateUserDetails: ownerProcedure
+  updateUserDetails: sensitiveOwnerProcedure
     .input(
       z.object({
         userId: z.string(),
@@ -324,6 +429,26 @@ export const userRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      if (isPlatformOwner(ctx.user)) {
+        const existing = await ctx.db.user.findUnique({ where: { email: input.email.trim().toLowerCase() }, select: { id: true } });
+        if (existing && existing.id !== input.userId) throw new TRPCError({ code: "CONFLICT", message: "Er bestaat al een gebruiker met dit e-mailadres." });
+        const updated = await ctx.db.user.update({
+          where: { id: input.userId },
+          data: { name: input.name.trim(), email: input.email.trim().toLowerCase() },
+          select: { id: true, email: true, name: true, role: true, createdAt: true },
+        });
+        await recordSecurityAuditEvent(ctx.db, {
+          actorUserId: ctx.user.id,
+          targetUserId: input.userId,
+          action: "PLATFORM_USER_UPDATED",
+          resource: "user",
+          resourceId: input.userId,
+          result: "SUCCESS",
+          requestId: ctx.requestId,
+          metadata: { fields: ["name", "email"] },
+        });
+        return updated;
+      }
       const workspaceId = ctx.user.workspaceId!;
       const normalizedEmail = input.email.trim().toLowerCase();
       await assertWorkspaceMember(ctx.db, workspaceId, input.userId);
@@ -348,7 +473,7 @@ export const userRouter = router({
       });
     }),
 
-  createUser: ownerProcedure
+  createUser: sensitiveOwnerProcedure
     .input(
       z.object({
         name: z.string().min(1),
@@ -427,7 +552,7 @@ export const userRouter = router({
       return { success: true };
     }),
 
-  deleteUser: ownerProcedure
+  deleteUser: sensitiveOwnerProcedure
     .input(z.object({ userId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const workspaceId = ctx.user.workspaceId!;
@@ -472,12 +597,25 @@ export const userRouter = router({
       return { success: true };
     }),
 
-  // ─── Module access (owner-only) ──────────────────────────────────────────────
+  // ─── Module access (owner + admin for non-owner accounts) ───────────────────
 
-  getUserModules: ownerProcedure
+  getUserModules: adminProcedure
     .input(z.object({ userId: z.string() }))
     .query(async ({ ctx, input }) => {
-      await assertWorkspaceMember(ctx.db, ctx.user.workspaceId!, input.userId);
+      if (isPlatformOwner(ctx.user)) {
+        const rows = await loadUserSettingRows(ctx.db as any, input.userId, ["modules.disabled"]);
+        const map = settingsRowsToMap(rows);
+        const raw = getSettingString(map, "modules.disabled", "");
+        return { disabled: raw ? raw.split(",").map((s: string) => s.trim()).filter(Boolean) : [] };
+      }
+      const workspaceId = ctx.user.workspaceId!;
+      const target = await assertWorkspaceMember(ctx.db, workspaceId, input.userId);
+      if (ctx.user.workspaceRole === "ADMIN" && target.role === "OWNER") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Admins kunnen de modules van een workspace-eigenaar niet beheren.",
+        });
+      }
       const rows = await loadUserSettingRows(ctx.db as any, input.userId, ["modules.disabled"]);
       const map = settingsRowsToMap(rows);
       const raw = getSettingString(map, "modules.disabled", "");
@@ -485,14 +623,49 @@ export const userRouter = router({
       return { disabled };
     }),
 
-  setUserModule: ownerProcedure
+  setUserModule: adminProcedure
     .input(z.object({
       userId: z.string(),
-      module: z.string().min(1),
+      module: z.enum(MANAGEABLE_MODULE_IDS),
       enabled: z.boolean(),
     }))
     .mutation(async ({ ctx, input }) => {
-      await assertWorkspaceMember(ctx.db, ctx.user.workspaceId!, input.userId);
+      if (isPlatformOwner(ctx.user)) {
+        if (ctx.user.id === input.userId) throw new TRPCError({ code: "FORBIDDEN", message: "Je kunt je eigen moduletoegang niet wijzigen." });
+        const target = await ctx.db.user.findUnique({ where: { id: input.userId }, select: { id: true } });
+        if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Account niet gevonden." });
+        const key = userSettingKey(input.userId, "modules.disabled");
+        const rows = await loadUserSettingRows(ctx.db as any, input.userId, ["modules.disabled"]);
+        const map = settingsRowsToMap(rows);
+        const current = new Set((getSettingString(map, "modules.disabled", "") || "").split(",").map((s: string) => s.trim()).filter(Boolean));
+        if (input.enabled) current.delete(input.module); else current.add(input.module);
+        await ctx.db.setting.upsert({ where: { key }, create: { key, value: Array.from(current).join(",") }, update: { value: Array.from(current).join(",") } });
+        await recordSecurityAuditEvent(ctx.db, {
+          actorUserId: ctx.user.id,
+          targetUserId: input.userId,
+          action: "PLATFORM_MODULE_CHANGED",
+          resource: "user_module",
+          resourceId: input.userId,
+          result: "SUCCESS",
+          requestId: ctx.requestId,
+          metadata: { module: input.module, enabled: input.enabled },
+        });
+        return { success: true };
+      }
+      const workspaceId = ctx.user.workspaceId!;
+      const target = await assertWorkspaceMember(ctx.db, workspaceId, input.userId);
+      if (ctx.user.id === input.userId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Je kunt je eigen moduletoegang niet wijzigen.",
+        });
+      }
+      if (ctx.user.workspaceRole === "ADMIN" && target.role === "OWNER") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Admins kunnen de modules van een workspace-eigenaar niet beheren.",
+        });
+      }
       const rows = await loadUserSettingRows(ctx.db as any, input.userId, ["modules.disabled"]);
       const map = settingsRowsToMap(rows);
       const raw = getSettingString(map, "modules.disabled", "");
@@ -510,6 +683,17 @@ export const userRouter = router({
         create: { key, value },
       });
       invalidateUserSettingsCache(input.userId);
+      await recordSecurityAuditEvent(ctx.db, {
+        workspaceId,
+        actorUserId: ctx.user.id,
+        targetUserId: input.userId,
+        action: "MODULE_CHANGED",
+        resource: "user_module_access",
+        resourceId: input.module,
+        result: "SUCCESS",
+        requestId: ctx.requestId,
+        metadata: { enabled: input.enabled },
+      });
       return { success: true, disabled: next };
     }),
 
@@ -527,9 +711,10 @@ export const userRouter = router({
     const scope = workspaceScopeFromUser(ctx.user);
     await ensureUserWorkspace(ctx.db, scope.workspaceId, ctx.user.name);
 
-    const [moduleRows, workspaceRows] = await Promise.all([
+    const [moduleRows, workspaceRows, workspaces] = await Promise.all([
       loadUserSettingRows(ctx.db as any, ctx.user.id, ["modules.disabled"]),
-      loadWorkspaceSettingRows(ctx.db, scope, [...SHELL_BRANDING_KEYS]),
+      loadWorkspaceSettingRows(ctx.db, scope, [...SHELL_BRANDING_KEYS, ...SHELL_ANALYTICS_KEYS]),
+      listWorkspacesForUser(ctx.db, ctx.user.id, scope.workspaceId),
     ]);
 
     const moduleMap = settingsRowsToMap(moduleRows);
@@ -543,6 +728,20 @@ export const userRouter = router({
     const densityRaw = getSettingString(settings, "ui.density", "comfortable");
     const density = densityRaw === "compact" ? "compact" : "comfortable";
 
-    return { disabled, settings, density };
+    const analyticsMap = settingsRowsToMap(workspaceRows);
+
+    return {
+      disabled,
+      settings,
+      density,
+      workspaces,
+      tracking: {
+        analyticsEnabled: getSettingBoolean(analyticsMap, "analytics.enabled", false),
+        trackAppUsage:
+          getSettingBoolean(analyticsMap, "analytics.enabled", false)
+          && getSettingBoolean(analyticsMap, "analytics.track_app_usage", true),
+        respectDnt: getSettingBoolean(analyticsMap, "analytics.respect_dnt", true),
+      },
+    };
   }),
 });

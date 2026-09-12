@@ -12,6 +12,7 @@ import { FeedbackButton } from "@/components/feedback/feedback-button";
 import { ModuleAccessGuard } from "@/components/layout/module-access-guard";
 import { ModulesProvider } from "@/components/layout/modules-provider";
 import { AppAnalytics } from "@/components/analytics/app-analytics";
+import { AccountViewBanner } from "@/components/layout/account-view-banner";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
@@ -22,6 +23,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <ModulesProvider>
+      {user.isViewingAs ? <AccountViewBanner targetName={user.viewAsTargetName} /> : null}
       <AppAnalytics />
       <div className="flex min-h-screen bg-background/95">
         <Sidebar />

@@ -53,7 +53,7 @@ function isEmptyValue(value: string | number) {
   return value === "—" || value === "-";
 }
 
-function HealthScoreRing({ score, tone }: { score: number; tone: DomainStatTone }) {
+export function HealthScoreRing({ score, tone }: { score: number; tone: DomainStatTone }) {
   const radius = 22;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (Math.min(100, Math.max(0, score)) / 100) * circumference;

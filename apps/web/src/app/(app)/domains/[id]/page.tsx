@@ -355,6 +355,31 @@ export default function DomainDetailPage() {
 
       <DomainStatsCards items={domainStatItems} />
 
+      <Card className="border-primary/15 bg-primary/[0.025]">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+              <Lightbulb className="h-4 w-4 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary">Volgende beste actie</p>
+              <p className="mt-1 truncate text-sm font-medium">
+                {opportunities[0] || "Vernieuw de analyse om nieuwe acties te ontdekken."}
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            className="shrink-0"
+            onClick={() => analyzeMutation.mutate({ id: data.id })}
+            disabled={analyzeMutation.isPending}
+          >
+            <RefreshCcw className={`mr-2 h-4 w-4 ${analyzeMutation.isPending ? "animate-spin" : ""}`} />
+            Analyse vernieuwen
+          </Button>
+        </CardContent>
+      </Card>
+
       <Tabs defaultValue="analysis" className="space-y-4">
         <TabsList className="settings-domain-tabs settings-domain-tabs-cols-4 w-full max-w-3xl">
           <TabsTrigger value="analysis" className="settings-domain-tab">

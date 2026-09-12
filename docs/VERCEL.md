@@ -30,6 +30,17 @@ Set these in **Vercel → Project → Settings → Environment Variables**:
 | `SENTRY_DSN` | Sentry project DSN (server errors + tRPC 500s) |
 | `NEXT_PUBLIC_SENTRY_DSN` | Same DSN for client `global-error` boundary |
 
+**Huidige controle:** de Lead Finder-healthcheck meldt `redis: skipped`; zonder Redis/Upstash is rate limiting per instance en niet geschikt als enige productiebeveiliging. Configureer Upstash vóór intensieve publieke formulieren, loginverkeer of campagnes. De productieomgeving is in deze fase niet aangepast.
+
+## Vercel-controle 2026-09-12
+
+- De allowlist bevat de twee behouden projecten: `project-ubm6y` voor `leads.digitify.be` en `digitify-3d-webshop` voor `shop.digitify.be`.
+- Beide laatste productie-deployments staan op `READY` en de primaire domeinalias is actief.
+- De runtime-audit toont voor Lead Finder nog een registratie-request-fout uit een deployment die een ontbrekende databasekolom gebruikte. Controleer na de databaseherstelactie opnieuw de route en deploy alleen een gecontroleerde build.
+- Lead Finder registreert daarnaast incidenteel trage `dashboard.getOverview`-requests van ongeveer 2,2 seconden. Dit is een meetpunt voor de performancefase, geen reden om tenantcaching te verruimen.
+- De shop rapporteert alleen een Node `url.parse()`-deprecationwarning. Dit is onderhoudswerk; er is geen bewijs van een exploit en er is in deze ronde geen dependency-upgrade uitgevoerd.
+- Environment values, firewallregels, preview protection, usage alerts en secrets zijn niet uitgelezen of gewijzigd. Secretrotatie blijft een afzonderlijke, gecontroleerde beheeractie.
+
 Optional staging:
 
 | Variable | Notes |
@@ -57,9 +68,17 @@ pnpm db:migrate
 pnpm --filter @digitify/web dev --port 3001
 ```
 
+Controleer een databaseverbinding eerst zonder wijzigingen:
+
+```bash
+pnpm setup:db:preflight
+```
+
+Deze preflight voert alleen `prisma migrate status` uit. `pnpm setup:db` blijft de expliciete stap die migraties, optionele legacy-migraties en eventueel seed uitvoert.
+
 If the app shows a CSS build error, delete `apps/web/.next` and restart the dev server.
 
-Login (seed): `admin@digitify.local` / `DigitifyDev2026!` (after `pnpm db:seed` if needed).
+Lokale seed-login gebruikt de expliciet ingestelde `SEED_ADMIN_EMAIL` en `SEED_ADMIN_PASSWORD`; documenteer of deel het wachtwoord niet.
 
 ## Database on deploy
 

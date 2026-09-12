@@ -9,19 +9,19 @@ import {
   Button, Badge, Card, CardContent, CardHeader, CardTitle,
   Textarea, Skeleton, Progress, Separator, ScrollArea,
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
+  TooltipProvider,
 } from "@digitify/ui";
 import {
   ArrowLeft, Globe, Phone, Mail, MapPin, Star, ExternalLink,
   Clock, Plus, Pin, Loader2, Zap, Bot, Search, RefreshCw,
   CheckCircle, XCircle, AlertTriangle, Edit, Send, Shield,
-  Smartphone, FileText, BarChart3, Lightbulb, Target, TrendingUp,
-  Calendar, User, Tag, Megaphone, X, Hash, Activity,
+  FileText, BarChart3, Lightbulb, Target, TrendingUp,
+  User, Tag, Megaphone, X, Hash, Activity,
   Facebook, Instagram, Linkedin, Twitter, ChevronRight,
-  Lock, Unlock, Eye, CircleDot, Receipt, type LucideIcon,
+  Eye, CircleDot, Receipt, CheckSquare, type LucideIcon,
 } from "lucide-react";
 import {
-  cn, formatScore, getStatusBadgeVariant, formatDate, formatRelativeTime, getScoreColor, safeExternalUrl,
+  cn, formatScore, getStatusBadgeVariant, formatDate, formatRelativeTime, safeExternalUrl,
 } from "@/lib/utils";
 import {
   LEAD_STATUS_LABELS,
@@ -135,6 +135,10 @@ export function LeadDetailInner() {
     { leadId },
     { enabled: Boolean(leadId) }
   );
+  const workflowQuery = trpc.lead.getWorkflowSummary.useQuery(
+    { leadId },
+    { enabled: Boolean(leadId), staleTime: 30_000 },
+  );
   const explainValueQuery = trpc.lead.explainValue.useQuery(
     { leadId },
     { enabled: false, staleTime: 120_000 },
@@ -149,12 +153,17 @@ export function LeadDetailInner() {
 
   /* mutations */
   const addNote = trpc.lead.addNote.useMutation({
-    onSuccess: () => { setNoteText(""); utils.lead.getById.invalidate({ id: leadId }); },
+    onSuccess: () => {
+      setNoteText("");
+      void utils.lead.getById.invalidate({ id: leadId });
+      void utils.lead.getWorkflowSummary.invalidate({ leadId });
+    },
   });
   const enrichLead = trpc.scoring.enrichLead.useMutation({
     onSuccess: async (data) => {
       if (data.reportId) setLastAuditReportId(data.reportId);
       await utils.lead.getById.invalidate({ id: leadId });
+      await utils.lead.getWorkflowSummary.invalidate({ leadId });
       showToast({
         title: "Website geanalyseerd",
         description: `Opportunity score: ${data.scoring.overallScore}/100 (${data.scoring.priority})`,
@@ -170,21 +179,31 @@ export function LeadDetailInner() {
     },
   });
   const computeScore = trpc.scoring.computeForLead.useMutation({
-    onSuccess: () => utils.lead.getById.invalidate({ id: leadId }),
+    onSuccess: async () => {
+      await utils.lead.getById.invalidate({ id: leadId });
+      await utils.lead.getWorkflowSummary.invalidate({ leadId });
+    },
   });
   const analyzeLead = trpc.openclaw.analyzeLead.useMutation({
-    onSuccess: () => utils.lead.getById.invalidate({ id: leadId }),
+    onSuccess: async () => {
+      await utils.lead.getById.invalidate({ id: leadId });
+      await utils.lead.getWorkflowSummary.invalidate({ leadId });
+    },
   });
   const draftEmail = trpc.openclaw.draftEmail.useMutation({
     onSuccess: (data) => {
-      utils.lead.getById.invalidate({ id: leadId });
+      void utils.lead.getById.invalidate({ id: leadId });
+      void utils.lead.getWorkflowSummary.invalidate({ leadId });
       if (data?.draft?.id) {
         router.push(`/contacts/drafts/${data.draft.id}`);
       }
     },
   });
   const updateLead = trpc.lead.update.useMutation({
-    onSuccess: () => utils.lead.getById.invalidate({ id: leadId }),
+    onSuccess: () => {
+      void utils.lead.getById.invalidate({ id: leadId });
+      void utils.lead.getWorkflowSummary.invalidate({ leadId });
+    },
   });
   const addTag = trpc.tag.addToLead.useMutation({
     onSuccess: () => utils.lead.getById.invalidate({ id: leadId }),
@@ -240,6 +259,7 @@ export function LeadDetailInner() {
 
   /* derived data */
   const lead = leadData!;
+  const workflow = workflowQuery.data;
   const scoreFactors = lead.scoringFactors ?? [];
   type ScoreFactor = (typeof scoreFactors)[number];
   type LeadActivity = (typeof lead.activities)[number];
@@ -313,6 +333,18 @@ export function LeadDetailInner() {
     if (lead.gmbReviewCount != null && lead.gmbReviewCount < 10) risk += 10;
     return Math.max(0, Math.min(100, Math.round(risk)));
   })();
+
+  const workflowStatusIndex = lead.status === "WON" ? 4 :
+    lead.status === "PROPOSAL_SENT" ? 3 :
+      ["RESPONDED", "QUALIFIED"].includes(lead.status) ? 2 :
+        ["CONTACTED"].includes(lead.status) ? 1 : 0;
+  const workflowSteps = [
+    { label: "Lead & score", done: workflowStatusIndex >= 0 },
+    { label: "Contact", done: workflowStatusIndex >= 1 },
+    { label: "Opvolging", done: workflowStatusIndex >= 2 },
+    { label: "Offerte", done: workflowStatusIndex >= 3 },
+    { label: "Klant & factuur", done: workflowStatusIndex >= 4 },
+  ];
 
   const address = [lead.address, lead.zipCode, lead.city, lead.country].filter(Boolean).join(", ");
   const gmapsUrl = address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}` : null;
@@ -437,6 +469,87 @@ export function LeadDetailInner() {
             <ScoreRing score={lead.overallScore} size={100} />
           </div>
         </div>
+
+        <Card className="mb-4 border-primary/15 bg-primary/[0.025]">
+          <CardContent className="space-y-4 p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-primary">Verkoopflow</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Werk vanuit deze lead door naar contact, opvolging, offerte en factuur.
+                </p>
+              </div>
+              {workflowQuery.isError ? (
+                <Button variant="ghost" size="sm" onClick={() => void workflowQuery.refetch()}>
+                  Opnieuw proberen
+                </Button>
+              ) : null}
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-5">
+              {workflowSteps.map((step, index) => (
+                <div key={step.label} className="flex items-center gap-2 sm:block">
+                  <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold", step.done ? "border-primary bg-primary text-primary-foreground" : "bg-background text-muted-foreground")}>
+                    {step.done ? <CheckCircle className="h-4 w-4" /> : index + 1}
+                  </div>
+                  <p className="text-xs font-medium sm:mt-2">{step.label}</p>
+                  {index < workflowSteps.length - 1 ? <div className="hidden h-px bg-border sm:mt-2 sm:block" /> : null}
+                </div>
+              ))}
+            </div>
+
+            {workflow ? (
+              <div className="grid gap-3 border-t pt-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">Contacten</p>
+                  <p className="text-sm font-semibold">{workflow.lead.contacts.length}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Open taken</p>
+                  <p className="text-sm font-semibold">{workflow.tasks.length}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Offertes</p>
+                  <p className="text-sm font-semibold">{workflow.quotes.length}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Facturen</p>
+                  <p className="text-sm font-semibold">{workflow.invoices.length}</p>
+                </div>
+              </div>
+            ) : workflowQuery.isLoading ? (
+              <Skeleton className="h-10 w-full" />
+            ) : null}
+
+            <div className="flex flex-wrap gap-2 border-t pt-3">
+              <Button asChild size="sm" disabled={lead.doNotContact}>
+                <Link href={`/contacts/compose?leadId=${id}`}>
+                  <Send className="mr-1.5 h-3.5 w-3.5" /> Contactdraft
+                </Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/contacts/approval"><CheckCircle className="mr-1.5 h-3.5 w-3.5" /> Goedkeuring</Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/quotes/new?leadId=${id}`}><Receipt className="mr-1.5 h-3.5 w-3.5" /> Offerte</Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/tasks?relatedType=LEAD&relatedId=${id}`}><CheckSquare className="mr-1.5 h-3.5 w-3.5" /> Taak toevoegen</Link>
+              </Button>
+              {lead.status === "WON" ? (
+                <Button asChild variant="outline" size="sm">
+                  <Link href="/crm"><User className="mr-1.5 h-3.5 w-3.5" /> CRM openen</Link>
+                </Button>
+              ) : null}
+            </div>
+            {lead.doNotContact ? <p className="text-xs text-destructive">Contactdrafts zijn geblokkeerd omdat deze lead op niet contacteren staat.</p> : null}
+            {workflow?.nextAction ? (
+              <div className="rounded-lg border bg-background/70 px-3 py-2 text-sm">
+                <span className="font-medium">Volgende actie:</span> {workflow.nextAction.label}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
 
         {/* ===== 2-COLUMN LAYOUT ===== */}
         <div className="grid gap-4 lg:grid-cols-[1fr_380px]">

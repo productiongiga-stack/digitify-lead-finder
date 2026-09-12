@@ -37,7 +37,7 @@ pnpm build
 
 ## Workspace RLS rollout (staging → production)
 
-Postgres RLS is **opt-in** via `ENABLE_WORKSPACE_RLS=true`. The app sets `app.workspace_id` per tRPC transaction (see `packages/db/src/workspace-rls.ts`).
+Postgres RLS is verplicht in productie via `ENABLE_WORKSPACE_RLS=true`. The app sets `app.workspace_id` per tRPC transaction (see `packages/db/src/workspace-rls.ts`).
 
 **Before enabling in production:**
 
@@ -56,7 +56,7 @@ Postgres RLS is **opt-in** via `ENABLE_WORKSPACE_RLS=true`. The app sets `app.wo
 7. Set `ENABLE_WORKSPACE_RLS=true` in staging env; smoke outbound + Template Studio + dashboard.
 8. Promote to production only after staging sign-off.
 
-**Rollback:** unset `ENABLE_WORKSPACE_RLS` (app falls back to `createdById` filters in code). RLS policies remain in DB but bypass when `app.workspace_id` is unset.
+**Rollback:** unset `ENABLE_WORKSPACE_RLS` only in a controlled non-production environment. Production startup rejects the configuration while RLS is disabled; RLS policies remain in the database.
 
 ---
 
@@ -179,11 +179,19 @@ pnpm install
 # Maak .env bestand
 cat > .env << 'EOF'
 DATABASE_URL="postgresql://digitify:KIES_EEN_STERK_WACHTWOORD@localhost:5432/digitify_leads"
+DIRECT_URL="postgresql://digitify:KIES_EEN_STERK_WACHTWOORD@localhost:5432/digitify_leads"
 REDIS_URL="redis://localhost:6379"
 NEXTAUTH_URL="https://leads.digitify.be"
 NEXTAUTH_SECRET="GENEREER_MET_openssl_rand_-base64_32"
+NEXT_PUBLIC_APP_URL="https://leads.digitify.be"
+SETTINGS_ENCRYPTION_KEY="GENEREER_APART_MET_openssl_rand_-base64_48"
+CRON_SECRET="GENEREER_MET_openssl_rand_-base64_24"
+ENABLE_WORKSPACE_RLS="true"
 NODE_ENV="production"
 EOF
+
+# Valideert alleen aanwezigheid en formaat; print geen secrets en wijzigt niets.
+PRODUCTION_ENV_FILE=.env pnpm check:production-env
 
 # Genereer Prisma client
 pnpm db:generate
@@ -192,7 +200,7 @@ pnpm db:generate
 pnpm db:migrate
 pnpm db:migrate-metadata
 
-# Seed initiële data
+# Alleen voor een bewust lege, eerste installatie. Nooit routinematig op productie uitvoeren.
 SEED_ADMIN_EMAIL="owner@jouwdomein.be" SEED_ADMIN_PASSWORD="sterk-wachtwoord-min-12" pnpm db:seed
 
 # Build de applicatie
@@ -366,12 +374,12 @@ pg_dump -U digitify digitify_leads > /backups/digitify_$(date +%Y%m%d).sql
 
 - [ ] DNS A-record wijst naar server
 - [ ] PostgreSQL draait met sterke wachtwoorden
-- [ ] `.env` bevat production waarden (NEXTAUTH_SECRET, DATABASE_URL)
+- [ ] `.env` slaagt voor `PRODUCTION_ENV_FILE=.env pnpm check:production-env`
 - [ ] NEXTAUTH_URL is `https://leads.digitify.be`
 - [ ] SSL certificaat is actief
 - [ ] Firewall staat alleen SSH + HTTP/HTTPS toe
 - [ ] PM2 is ingesteld met auto-start
-- [ ] Seed data is geladen
+- [ ] Eerste owner is alleen bij een bewust lege installatie geseed; geen routine-seed op productie
 - [ ] `SEED_ADMIN_EMAIL` + `SEED_ADMIN_PASSWORD` zijn via env gezet voor de eerste seed (geen hardcoded waarden in code/docs)
 - [ ] `SETTINGS_ENCRYPTION_KEY` is gezet (≠ default) — vereist voor versleutelde API-keys/SMTP/OAuth tokens
 - [ ] `NEXTAUTH_SECRET` is gezet en uniek per omgeving

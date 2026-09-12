@@ -1,3 +1,4 @@
+import { runLegacyImportOnce } from "./legacy-import-once";
 import type { PrismaClient } from "@digitify/db";
 import { readWorkspaceJsonSetting } from "./user-json-setting";
 import type { WorkspaceScope } from "./workspace-settings";
@@ -41,7 +42,7 @@ type LegacyInvoice = {
   items: LegacyInvoiceItem[];
 };
 
-export async function migrateLegacyWorkspaceInvoices(
+async function importRows(
   db: PrismaClient,
   scope: WorkspaceScope,
 ): Promise<{ imported: number }> {
@@ -110,4 +111,8 @@ export async function migrateLegacyWorkspaceInvoices(
   }
 
   return { imported };
+}
+
+export async function migrateLegacyWorkspaceInvoices(db: PrismaClient, scope: WorkspaceScope) {
+  return runLegacyImportOnce(db, scope.workspaceId, "invoices", (tx) => importRows(tx, scope));
 }

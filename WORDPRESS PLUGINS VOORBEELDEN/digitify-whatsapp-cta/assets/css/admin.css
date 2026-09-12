@@ -1,0 +1,428 @@
+/* Digitify WhatsApp CTA – Admin Styles */
+
+/* ============================================================
+   Page Shell
+   ============================================================ */
+.dwa-admin-page {
+	max-width: 1100px;
+}
+
+/* ============================================================
+   Header Banner
+   ============================================================ */
+.dwa-admin-header {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	background: linear-gradient(135deg, #25d366 0%, #128c4e 100%);
+	border-radius: 12px;
+	padding: 18px 24px;
+	margin: 20px 0 24px;
+	box-shadow: 0 4px 16px rgba(37, 211, 102, 0.25);
+}
+
+.dwa-admin-header__logo {
+	width: 48px;
+	height: 48px;
+	background: rgba(255, 255, 255, 0.2);
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+}
+
+.dwa-admin-header__text h1 {
+	margin: 0;
+	font-size: 22px;
+	font-weight: 700;
+	color: #ffffff;
+	line-height: 1.2;
+}
+
+.dwa-admin-header__text p {
+	margin: 2px 0 0;
+	font-size: 13px;
+	color: rgba(255, 255, 255, 0.75);
+}
+
+/* ============================================================
+   Two-column grid
+   ============================================================ */
+.dwa-admin-grid {
+	display: grid;
+	grid-template-columns: 1fr 340px;
+	gap: 20px;
+	align-items: start;
+}
+
+@media (max-width: 960px) {
+	.dwa-admin-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+/* ============================================================
+   Cards
+   ============================================================ */
+.dwa-admin-card {
+	background: #fff;
+	border: 1px solid #e6e8ea;
+	border-radius: 12px;
+	margin-bottom: 20px;
+	overflow: hidden;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.dwa-admin-card__header {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 14px 20px;
+	border-bottom: 1px solid #f0f0f0;
+	background: #fafafa;
+}
+
+.dwa-admin-card__icon {
+	font-size: 18px;
+	line-height: 1;
+}
+
+.dwa-admin-card__header h2 {
+	margin: 0;
+	font-size: 14px;
+	font-weight: 700;
+	color: #1d2327;
+	letter-spacing: 0.02em;
+	text-transform: uppercase;
+}
+
+.dwa-admin-card__body {
+	padding: 20px;
+}
+
+/* ============================================================
+   Field Rows
+   ============================================================ */
+.dwa-field-row {
+	display: grid;
+	grid-template-columns: 180px 1fr;
+	gap: 8px 16px;
+	align-items: center;
+	padding: 10px 0;
+	border-bottom: 1px solid #f4f4f4;
+}
+
+.dwa-field-row:last-child {
+	border-bottom: none;
+	padding-bottom: 0;
+}
+
+.dwa-field-row--stacked {
+	grid-template-columns: 1fr;
+}
+
+.dwa-field-label {
+	font-size: 13px;
+	font-weight: 600;
+	color: #3c434a;
+}
+
+.dwa-required {
+	color: #c0392b;
+}
+
+.dwa-field-control--inline {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.dwa-unit {
+	font-size: 12px;
+	color: #888;
+}
+
+/* ============================================================
+   Inputs
+   ============================================================ */
+.dwa-input,
+.dwa-select,
+.dwa-textarea {
+	width: 100%;
+	padding: 9px 12px;
+	border: 1px solid #d2d6da;
+	border-radius: 7px;
+	font-size: 13px;
+	font-family: inherit;
+	color: #1d2327;
+	background: #fff;
+	box-sizing: border-box;
+	transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.dwa-input:focus,
+.dwa-select:focus,
+.dwa-textarea:focus {
+	outline: none;
+	border-color: #25d366;
+	box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.12);
+}
+
+.dwa-input--small {
+	width: 80px;
+}
+
+.dwa-textarea {
+	resize: vertical;
+	min-height: 90px;
+	line-height: 1.5;
+}
+
+.dwa-section-intro {
+	font-size: 13px;
+	color: #555;
+	margin: 0 0 12px;
+}
+
+/* ============================================================
+   Toggle Switch
+   ============================================================ */
+.dwa-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	cursor: pointer;
+	user-select: none;
+}
+
+.dwa-toggle input[type="checkbox"] {
+	position: absolute;
+	opacity: 0;
+	width: 0;
+	height: 0;
+}
+
+.dwa-toggle__track {
+	position: relative;
+	width: 42px;
+	height: 24px;
+	background: #ccc;
+	border-radius: 24px;
+	flex-shrink: 0;
+	transition: background 0.2s ease;
+}
+
+.dwa-toggle__track::after {
+	content: '';
+	position: absolute;
+	top: 3px;
+	left: 3px;
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	background: #fff;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+	transition: transform 0.2s ease;
+}
+
+.dwa-toggle input:checked ~ .dwa-toggle__track {
+	background: #25d366;
+}
+
+.dwa-toggle input:checked ~ .dwa-toggle__track::after {
+	transform: translateX(18px);
+}
+
+.dwa-toggle__label {
+	font-size: 13px;
+	color: #3c434a;
+}
+
+/* ============================================================
+   Color Pickers
+   ============================================================ */
+.dwa-color-grid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 10px;
+	margin-top: 14px;
+}
+
+.dwa-color-item {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 5px;
+}
+
+.dwa-color-picker {
+	width: 100%;
+	height: 44px;
+	border: 1px solid #d2d6da;
+	border-radius: 8px;
+	cursor: pointer;
+	padding: 2px 3px;
+	background: #fff;
+}
+
+.dwa-color-item label {
+	font-size: 11px;
+	color: #666;
+	text-align: center;
+}
+
+/* ============================================================
+   Repeatable Questions
+   ============================================================ */
+.dwa-questions-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-bottom: 12px;
+}
+
+.dwa-question-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	background: #f9fbfc;
+	border: 1px solid #e6e8ea;
+	border-radius: 8px;
+	padding: 10px 12px;
+	border-left: 3px solid #25d366;
+	transition: box-shadow 0.15s ease;
+}
+
+.dwa-question-item:hover {
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
+}
+
+.dwa-question-item--new {
+	animation: dwa-item-in 0.25s ease;
+}
+
+@keyframes dwa-item-in {
+	from { opacity: 0; transform: translateY(-8px); }
+	to   { opacity: 1; transform: translateY(0); }
+}
+
+.dwa-question-item__drag {
+	padding-top: 6px;
+	cursor: grab;
+	opacity: 0.5;
+	flex-shrink: 0;
+}
+
+.dwa-question-item__fields {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	min-width: 0;
+}
+
+.dwa-input--label {
+	font-weight: 600;
+}
+
+.dwa-input--message {
+	font-size: 12px;
+	color: #555;
+	padding: 7px 10px;
+}
+
+.dwa-question-remove-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 50%;
+	background: transparent;
+	border: 1px solid transparent;
+	cursor: pointer;
+	color: #aaa;
+	flex-shrink: 0;
+	margin-top: 2px;
+	transition: background 0.15s ease, color 0.15s ease;
+}
+
+.dwa-question-remove-btn:hover {
+	background: #fef0f0;
+	color: #c0392b;
+	border-color: #fbd0d0;
+}
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+.dwa-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 9px 16px;
+	border-radius: 8px;
+	font-size: 13px;
+	font-weight: 600;
+	cursor: pointer;
+	border: none;
+	font-family: inherit;
+	transition: filter 0.15s ease, transform 0.1s ease;
+}
+
+.dwa-btn--add {
+	background: #eafaf1;
+	color: #1a9e50;
+	border: 1px dashed #25d366;
+	width: 100%;
+	justify-content: center;
+}
+
+.dwa-btn--add:hover {
+	background: #d5f5e3;
+}
+
+/* ============================================================
+   Save button area
+   ============================================================ */
+.dwa-admin-save {
+	position: sticky;
+	top: 32px;
+}
+
+.dwa-admin-save .button-primary {
+	width: 100%;
+	text-align: center;
+	height: 44px;
+	font-size: 14px;
+	font-weight: 700;
+	justify-content: center;
+	background: #25d366 !important;
+	border-color: #1fad58 !important;
+	box-shadow: 0 4px 12px rgba(37, 211, 102, 0.35) !important;
+	border-radius: 8px !important;
+}
+
+.dwa-admin-save .button-primary:hover {
+	background: #1fad58 !important;
+	box-shadow: 0 6px 16px rgba(37, 211, 102, 0.4) !important;
+}
+
+/* ============================================================
+   Help text
+   ============================================================ */
+.dwa-help-text {
+	font-size: 12px;
+	color: #777;
+	margin: 5px 0 0;
+	line-height: 1.5;
+}
+
+.dwa-help-text code {
+	background: #f0f0f0;
+	padding: 1px 4px;
+	border-radius: 3px;
+	font-size: 11px;
+	color: #c0392b;
+}

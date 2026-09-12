@@ -57,9 +57,43 @@ export class SmtpProvider implements EmailProvider {
         attachments: message.attachments as nodemailer.SendMailOptions["attachments"],
       } as nodemailer.SendMailOptions);
       return { success: true, messageId: info.messageId };
-    } catch (error: any) {
-      console.error("[smtp] Send failed:", error);
-      return { success: false, error: formatProviderSmtpError(error) };
+    } catch (error: unknown) {
+      const smtpError = error as { code?: string; command?: string; responseCode?: number };
+      const rejected = (smtpError.responseCode ?? 0) >= 400;
+      const beforeData = ["CONN", "EHLO", "HELO", "STARTTLS", "AUTH", "MAIL FROM", "RCPT TO"].includes(smtpError.command ?? "");
+      return {
+        success: false, error: formatProviderSmtpError(error),
+        delivery: rejected || beforeData ? "not_sent" : "unknown",
+      };
     }
+  }
+}
+
+/** Verifies SMTP credentials without sending a message. */
+export async function verifySmtpConnection(config: {
+  host: string;
+  port: number;
+  user: string;
+  pass: string;
+  secure?: boolean;
+  tls?: { rejectUnauthorized?: boolean; servername?: string };
+}) {
+  const transporter = nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: config.secure ?? config.port === 465,
+    auth: { user: config.user, pass: config.pass },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
+    tls: {
+      rejectUnauthorized: config.tls?.rejectUnauthorized ?? true,
+      ...(config.tls?.servername ? { servername: config.tls.servername } : {}),
+    },
+  });
+  try {
+    await transporter.verify();
+  } finally {
+    transporter.close();
   }
 }

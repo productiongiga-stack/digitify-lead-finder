@@ -38,7 +38,7 @@ Nieuwe beslissingen: voeg ADR toe onderaan met datum.
 **Status:** Actief (verplicht in productie)  
 **Context:** Defense-in-depth naast application-level filters.  
 **Beslissing:** `ENABLE_WORKSPACE_RLS=true` activeert RLS policies; app zet `app.workspace_id` per transaction (`packages/db/src/workspace-rls.ts`).  
-**Gevolgen:** Rollback = env unset (policies blijven in DB). Smoke: `pnpm rls:smoke`. Productie zonder RLS → kritieke waarschuwing in `server-env.ts`.
+**Gevolgen:** Productie start niet zonder `ENABLE_WORKSPACE_RLS=true`; policies blijven in DB. Smoke: `pnpm rls:smoke`. Een tijdelijke rollback is alleen toegestaan in een gecontroleerde niet-productieomgeving.
 
 ---
 

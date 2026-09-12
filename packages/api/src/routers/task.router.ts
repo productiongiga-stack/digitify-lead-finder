@@ -2,7 +2,6 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router, mutationProcedure } from "../trpc";
 import { assertLeadAccess } from "../lib/tenant";
-import { migrateLegacyWorkspaceTasks } from "../lib/migrate-workspace-tasks";
 import { workspaceScopeFromUser } from "../lib/workspace-settings";
 import {
   deleteGoogleTaskEvent,
@@ -133,7 +132,6 @@ export const taskRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
-      await migrateLegacyWorkspaceTasks(ctx.db, scope);
 
       const baseWhere = {
         createdById: scope.workspaceId,

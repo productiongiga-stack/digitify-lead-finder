@@ -549,6 +549,12 @@ export async function POST(request: Request) {
       ...row,
       key: row.key.replace(`user:${tenantUserId}:`, ""),
     }));
+    const publishedKnowledge = await prisma.knowledgeEntry.findMany({
+      where: { createdById: tenantUserId, status: "PUBLISHED" },
+      orderBy: { updatedAt: "desc" },
+      take: 50,
+      select: { title: true, content: true },
+    });
 
     const companyName =
       getSetting(settings, "chatbot.company_name", "") ||
@@ -559,7 +565,15 @@ export async function POST(request: Request) {
     const phone = getSetting(settings, "company.phone", "");
     const address = getSetting(settings, "company.address", "");
     const niche = getSetting(settings, "company.niche", "");
-    const trainingNotes = getSetting(settings, "chatbot.training_notes", "");
+    const configuredTrainingNotes = getSetting(settings, "chatbot.training_notes", "");
+    const publishedKnowledgeContext = publishedKnowledge
+      .map((entry) => `${entry.title}: ${entry.content}`)
+      .join("\n\n")
+      .slice(0, 24000);
+    const trainingNotes = [configuredTrainingNotes, publishedKnowledgeContext]
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, 28000);
     const knowledgePages = getSetting(settings, "chatbot.knowledge_pages", "");
     const responseStyle = getSetting(settings, "chatbot.response_style", "professioneel en helder");
     const language = getSetting(settings, "chatbot.language", "Nederlands");

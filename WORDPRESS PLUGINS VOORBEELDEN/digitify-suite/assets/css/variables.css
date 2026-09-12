@@ -1,0 +1,102 @@
+/* ============================================================
+ * Digitify Suite — Design Tokens
+ * Premium SaaS design system variables
+ * ============================================================ */
+
+:root {
+  /* ── Brand ─────────────────────────────────── */
+  --ds-primary: #6366f1;
+  --ds-primary-hover: #4f46e5;
+  --ds-primary-light: #eef2ff;
+  --ds-primary-50: #eef2ff;
+  --ds-primary-100: #e0e7ff;
+  --ds-primary-600: #4f46e5;
+  --ds-primary-700: #4338ca;
+
+  /* ── Neutrals ──────────────────────────────── */
+  --ds-bg: #f8fafc;
+  --ds-surface: #ffffff;
+  --ds-surface-hover: #f1f5f9;
+  --ds-border: #e2e8f0;
+  --ds-border-light: #f1f5f9;
+  --ds-text: #0f172a;
+  --ds-text-secondary: #475569;
+  --ds-text-muted: #94a3b8;
+  --ds-text-inverse: #ffffff;
+
+  /* ── Semantic ──────────────────────────────── */
+  --ds-success: #10b981;
+  --ds-success-light: #ecfdf5;
+  --ds-warning: #f59e0b;
+  --ds-warning-light: #fffbeb;
+  --ds-danger: #ef4444;
+  --ds-danger-light: #fef2f2;
+  --ds-info: #3b82f6;
+  --ds-info-light: #eff6ff;
+
+  /* ── Pipeline colors ───────────────────────── */
+  --ds-pipeline-new: #6366f1;
+  --ds-pipeline-contacted: #3b82f6;
+  --ds-pipeline-quoted: #f59e0b;
+  --ds-pipeline-won: #10b981;
+  --ds-pipeline-lost: #ef4444;
+
+  /* ── Spacing ───────────────────────────────── */
+  --ds-space-xs: 4px;
+  --ds-space-sm: 8px;
+  --ds-space-md: 16px;
+  --ds-space-lg: 24px;
+  --ds-space-xl: 32px;
+  --ds-space-2xl: 48px;
+
+  /* ── Radius ────────────────────────────────── */
+  --ds-radius-sm: 6px;
+  --ds-radius-md: 10px;
+  --ds-radius-lg: 14px;
+  --ds-radius-xl: 20px;
+  --ds-radius-full: 9999px;
+
+  /* ── Shadows ───────────────────────────────── */
+  --ds-shadow-sm: 0 1px 2px rgba(15,23,42,.05);
+  --ds-shadow-md: 0 4px 12px rgba(15,23,42,.08);
+  --ds-shadow-lg: 0 10px 30px rgba(15,23,42,.10);
+  --ds-shadow-xl: 0 20px 50px rgba(15,23,42,.14);
+
+  /* ── Typography ────────────────────────────── */
+  --ds-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --ds-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --ds-text-xs: 11px;
+  --ds-text-sm: 13px;
+  --ds-text-base: 14px;
+  --ds-text-md: 15px;
+  --ds-text-lg: 18px;
+  --ds-text-xl: 22px;
+  --ds-text-2xl: 28px;
+  --ds-text-3xl: 36px;
+
+  /* ── Layout ────────────────────────────────── */
+  --ds-sidebar-width: 260px;
+  --ds-sidebar-collapsed: 72px;
+  --ds-topbar-height: 56px;
+  --ds-content-max: 1400px;
+
+  /* ── Transitions ───────────────────────────── */
+  --ds-transition: 180ms ease;
+  --ds-transition-slow: 300ms ease;
+}
+
+/* ── Dark mode ─────────────────────────────── */
+[data-theme="dark"] {
+  --ds-bg: #0f172a;
+  --ds-surface: #1e293b;
+  --ds-surface-hover: #334155;
+  --ds-border: #334155;
+  --ds-border-light: #1e293b;
+  --ds-text: #f1f5f9;
+  --ds-text-secondary: #94a3b8;
+  --ds-text-muted: #64748b;
+  --ds-primary-light: #1e1b4b;
+  --ds-shadow-sm: 0 1px 2px rgba(0,0,0,.2);
+  --ds-shadow-md: 0 4px 12px rgba(0,0,0,.3);
+  --ds-shadow-lg: 0 10px 30px rgba(0,0,0,.4);
+}

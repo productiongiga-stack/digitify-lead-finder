@@ -34,12 +34,7 @@ export function Topbar() {
   const { branding } = useBranding();
   const onDashboard = pathname === "/dashboard";
   const pollAttention =
-    pathname.startsWith("/contacts") || pathname.startsWith("/leads");
-  const { data: dashboardOverview } = trpc.dashboard.getOverview.useQuery(undefined, {
-    enabled: onDashboard,
-    staleTime: 5 * 60_000,
-    refetchOnWindowFocus: false,
-  });
+    onDashboard || pathname.startsWith("/contacts") || pathname.startsWith("/leads");
   const { data: attentionSummary } = trpc.dashboard.getAttentionSummary.useQuery(undefined, {
     enabled: pollAttention,
     staleTime: 5 * 60_000,
@@ -64,9 +59,7 @@ export function Topbar() {
 
   const pageTitle = resolvePageTitle(pathname, branding.companyName);
   const attentionCount = mounted
-    ? onDashboard
-      ? (dashboardOverview?.attentionCount ?? 0)
-      : (attentionSummary?.totalCount ?? 0)
+    ? (attentionSummary?.totalCount ?? 0)
     : 0;
   const role = effectiveAppRole(
     session?.user as { role?: string; workspaceRole?: string } | undefined,

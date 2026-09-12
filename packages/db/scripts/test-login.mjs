@@ -13,8 +13,12 @@ function verifyPassword(password, storedHash) {
 }
 
 async function main() {
-  const email = process.argv[2] || "admin@digitify.local";
-  const password = process.argv[3] || "DigitifyDev2026!";
+  const [email, password] = process.argv.slice(2);
+  if (!email || !password) {
+    console.error("Usage: pnpm exec node scripts/test-login.mjs <email> <password>");
+    process.exitCode = 1;
+    return;
+  }
 
   const user = await prisma.user.findUnique({
     where: { email: email.toLowerCase().trim() },

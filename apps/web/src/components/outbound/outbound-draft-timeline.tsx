@@ -39,6 +39,7 @@ function getStepLabel(
   if (index === 3 && status === "FAILED") return "Mislukt";
   if (index === 3 && status === "BOUNCED") return "Bounced";
   if (index === 3 && status === "SENDING") return "Verzenden…";
+  if (index === 3 && status === "DELIVERY_UNKNOWN") return "Aflevering onzeker";
   return stepLabel;
 }
 

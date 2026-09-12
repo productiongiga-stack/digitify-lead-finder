@@ -2,6 +2,8 @@ import { z } from "zod";
 import { router, protectedProcedure, adminProcedure, mutationProcedure } from "../trpc";
 import { effectiveWorkspaceRole } from "../lib/effective-role";
 import { TRPCError } from "@trpc/server";
+import { sendApprovedDraft } from "../lib/approved-email-send";
+import { log } from "../lib/logger";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { sendApprovedQuoteDraft } from "../lib/quote-outbound-email";
 import { extractInvoiceIdFromDraftBody } from "../lib/invoice-outbound";
@@ -415,7 +417,12 @@ export const contactRouter = router({
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "E-mail niet gevonden." });
 
-      await ctx.db.emailDraft.delete({ where: { id: draft.id } });
+      const deleted = await ctx.db.emailDraft.deleteMany({
+        where: { id: draft.id, lead: { createdById: ctx.user.workspaceId! }, status: { notIn: ["SENDING", "DELIVERY_UNKNOWN"] } },
+      });
+      if (deleted.count !== 1) {
+        throw new TRPCError({ code: "CONFLICT", message: "Deze e-mail is intussen gewijzigd of wordt verwerkt." });
+      }
       await ctx.db.activity.create({
         data: {
           leadId: draft.leadId,
@@ -438,7 +445,7 @@ export const contactRouter = router({
       });
       const ids = drafts.map((draft) => draft.id);
       if (ids.length === 0) throw new TRPCError({ code: "NOT_FOUND", message: "Geen e-mails gevonden." });
-      const result = await ctx.db.emailDraft.deleteMany({ where: { id: { in: ids } } });
+      const result = await ctx.db.emailDraft.deleteMany({ where: { id: { in: ids }, status: { notIn: ["SENDING", "DELIVERY_UNKNOWN"] } } });
       return { success: true, deleted: result.count };
     }),
 
@@ -588,7 +595,7 @@ export const contactRouter = router({
           id: input.id,
           lead: { createdById: ctx.user.workspaceId! },
         },
-        select: { id: true, status: true, authorId: true },
+        select: { id: true, status: true, authorId: true, updatedAt: true },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
       if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(effectiveWorkspaceRole(ctx))) {
@@ -600,14 +607,11 @@ export const contactRouter = router({
       }
 
       const { id, ...data } = input;
-      const nextStatus = draft.status === "PENDING_APPROVAL" ? "PENDING_APPROVAL" : "DRAFT";
-      const approvalReset =
-        draft.status === "APPROVED"
-          ? { approverId: null, approvedAt: null, rejectedAt: null, rejectionNote: null }
-          : {};
+      const nextStatus = "DRAFT";
+      const approvalReset = { approverId: null, approvedAt: null, rejectedAt: null, rejectionNote: null };
 
       return ctx.db.emailDraft.update({
-        where: { id },
+        where: { id, status: draft.status, updatedAt: draft.updatedAt },
         data: { ...data, status: nextStatus, ...approvalReset },
       });
     }),
@@ -620,18 +624,18 @@ export const contactRouter = router({
           id: input.id,
           lead: { createdById: ctx.user.workspaceId! },
         },
-        select: { id: true, status: true, authorId: true },
+        select: { id: true, status: true, authorId: true, updatedAt: true },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
       if (draft.authorId !== ctx.user.id && !["OWNER", "ADMIN"].includes(effectiveWorkspaceRole(ctx))) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Geen toegang om dit concept in te dienen." });
       }
       if (draft.status !== "DRAFT") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Only drafts can be submitted for approval" });
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen concepten kunnen worden ingediend." });
       }
 
       return ctx.db.emailDraft.update({
-        where: { id: input.id },
+        where: { id: input.id, status: "DRAFT", updatedAt: draft.updatedAt },
         data: { status: "PENDING_APPROVAL" },
       });
     }),
@@ -644,11 +648,11 @@ export const contactRouter = router({
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
       if (draft.status !== "PENDING_APPROVAL") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Only pending emails can be approved" });
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen ingediende e-mails kunnen worden goedgekeurd." });
       }
 
       const updated = await ctx.db.emailDraft.update({
-        where: { id: input.id },
+        where: { id: input.id, status: "PENDING_APPROVAL", updatedAt: draft.updatedAt },
         data: {
           status: "APPROVED",
           approverId: ctx.user.id,
@@ -676,11 +680,11 @@ export const contactRouter = router({
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
       if (draft.status !== "PENDING_APPROVAL") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Only pending emails can be rejected" });
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen ingediende e-mails kunnen worden afgekeurd." });
       }
 
       return ctx.db.emailDraft.update({
-        where: { id: input.id },
+        where: { id: input.id, status: "PENDING_APPROVAL", updatedAt: draft.updatedAt },
         data: {
           status: "REJECTED",
           approverId: ctx.user.id,
@@ -693,131 +697,44 @@ export const contactRouter = router({
   sendEmail: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const draft = await ctx.db.emailDraft.findFirst({
-        where: {
-          id: input.id,
-          lead: { createdById: ctx.user.workspaceId! },
-        },
-        include: { lead: { select: { id: true, companyName: true } } },
-      });
-      if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
-      if (draft.status === "SENT") {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "Deze e-mail is al verzonden.",
-        });
+      const updated = await sendApprovedDraft(ctx.db, input.id, ctx.user.workspaceId!, (draft) =>
+        draft.type === "QUOTE" && draft.leadId
+          ? sendApprovedQuoteDraft(ctx.db, { ...draft, leadId: draft.leadId }, ctx.user.id, ctx.user.workspaceId!)
+          : sendBrandedEmail(ctx.db, {
+              toEmail: draft.toEmail, subject: draft.subject, body: draft.body,
+              recipientCompany: draft.lead?.companyName ?? draft.toEmail,
+              leadId: draft.leadId ?? undefined, userId: workspaceScopeFromUser(ctx.user),
+              trackingDraftId: draft.id,
+            }),
+      );
+      if (!updated) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "E-mail is verzonden, maar kon niet worden geregistreerd." });
       }
-      if (draft.status !== "APPROVED" && draft.status !== "FAILED") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Alleen goedgekeurde of mislukte e-mails kunnen worden verzonden",
-        });
-      }
-
-      await ctx.db.emailDraft.update({
-        where: { id: input.id },
-        data: { status: "SENDING" },
-      });
-
       try {
-        const followUpDays =
-          Number.parseInt(
-            getSettingString(
-              await loadWorkspaceSettingRows(
-                ctx.db,
-                workspaceScopeFromUser(ctx.user),
-                ["email.followup_days"],
-              ),
-              "email.followup_days",
-              "3",
-            ),
-            10,
-          ) || 3;
-
-        const result =
-          draft.type === "QUOTE" && draft.leadId
-            ? await sendApprovedQuoteDraft(
-                ctx.db,
-                { ...draft, leadId: draft.leadId },
-                ctx.user.id,
-                ctx.user.workspaceId!,
-              )
-            : await sendBrandedEmail(ctx.db, {
-                toEmail: draft.toEmail,
-                subject: draft.subject,
-                body: draft.body,
-                recipientCompany: draft.lead?.companyName ?? draft.toEmail,
-                leadId: draft.leadId ?? undefined,
-                userId: workspaceScopeFromUser(ctx.user),
-                trackingDraftId: draft.id,
-              });
-
-        if (!result.success) {
-          await ctx.db.emailDraft.update({
-            where: { id: input.id },
-            data: {
-              status: "FAILED",
-              rejectionNote: result.error || "E-mail verzenden mislukt",
-            },
-          });
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: result.error || "E-mail verzenden mislukt",
-          });
-        }
-
-        // Update draft status
-        const updated = await ctx.db.emailDraft.update({
-          where: { id: input.id },
-          data: {
-            status: "SENT",
-            sentAt: new Date(),
-            messageId: result.messageId,
-            rejectionNote: null,
-          },
-        });
-
-        const invoiceId = extractInvoiceIdFromDraftBody(draft.body);
+        const invoiceId = extractInvoiceIdFromDraftBody(updated.body);
         if (invoiceId) {
           await ctx.db.workspaceInvoice.updateMany({
-            where: {
-              id: invoiceId,
-              createdById: ctx.user.workspaceId!,
-              status: "DRAFT",
-            },
+            where: { id: invoiceId, createdById: ctx.user.workspaceId!, status: "DRAFT" },
             data: { status: "SENT" },
           });
         }
-
-        // Create activity record
+        if (updated.leadId) {
+          await ctx.db.lead.updateMany({
+            where: { id: updated.leadId, createdById: ctx.user.workspaceId! },
+            data: { lastContactedAt: updated.sentAt },
+          });
+        }
         await ctx.db.activity.create({
           data: {
-            leadId: draft.leadId,
-            userId: ctx.user.id,
-            type: draft.type === "QUOTE" ? "QUOTE_SENT" : "EMAIL_SENT",
-            title:
-              draft.type === "QUOTE"
-                ? `Offerte per e-mail verstuurd naar ${draft.toEmail}`
-                : `E-mail verzonden naar ${draft.toEmail}`,
-            metadata: { followUpDays },
+            leadId: updated.leadId, userId: ctx.user.id,
+            type: updated.type === "QUOTE" ? "QUOTE_SENT" : "EMAIL_SENT",
+            title: `E-mail verzonden naar ${updated.toEmail}`,
           },
         });
-
-        return updated;
       } catch (error) {
-        if (error instanceof TRPCError) throw error;
-        await ctx.db.emailDraft.update({
-          where: { id: input.id },
-          data: {
-            status: "FAILED",
-            rejectionNote: error instanceof Error ? error.message : "E-mail verzenden mislukt",
-          },
-        });
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: error instanceof Error ? error.message : "E-mail verzenden mislukt",
-        });
+        log.email.error("Sent email follow-up bookkeeping failed", { draftId: updated.id }, error);
       }
+      return updated;
     }),
 
   getDraftById: protectedProcedure

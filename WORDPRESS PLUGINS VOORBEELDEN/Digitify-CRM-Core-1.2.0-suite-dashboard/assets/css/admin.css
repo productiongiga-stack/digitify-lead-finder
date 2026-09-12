@@ -1,0 +1,762 @@
+/* ── Offerte Wizard v2 — Admin Panel CSS ────────────────────────────────── */
+
+/* ── Base / Reset ────────────────────────────────────────────────────────── */
+.owmc-page {
+  max-width: 1280px;
+  padding: 24px 0 64px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #111318;
+}
+.owmc-page *,
+.owmc-page *::before,
+.owmc-page *::after { box-sizing: border-box; }
+
+/* ── Page header ─────────────────────────────────────────────────────────── */
+.owmc-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.owmc-page-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #111318;
+  margin: 0;
+  line-height: 1.3;
+}
+.owmc-page-subtitle {
+  font-size: 13px;
+  color: #5b6472;
+  margin: 4px 0 0;
+}
+
+/* ── Notices ─────────────────────────────────────────────────────────────── */
+.owmc-notice {
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  margin-bottom: 20px;
+  border: 1px solid transparent;
+}
+.owmc-notice--success { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+.owmc-notice--error   { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+.owmc-notice--warning { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+
+/* ── KPI Row ─────────────────────────────────────────────────────────────── */
+.owmc-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.owmc-kpi-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  border: 1px solid rgba(17,19,24,.08);
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+}
+.owmc-kpi-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #5b6472;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 8px;
+}
+.owmc-kpi-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #111318;
+  line-height: 1.2;
+}
+.owmc-kpi-meta {
+  font-size: 12px;
+  color: #5b6472;
+  margin-top: 4px;
+}
+.owmc-kpi-trend { font-size: 12px; margin-left: 6px; }
+.owmc-kpi-trend--up   { color: #10b981; }
+.owmc-kpi-trend--down { color: #ef4444; }
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+.owmc-card {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid rgba(17,19,24,.08);
+  box-shadow: 0 2px 8px rgba(0,0,0,.05);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+.owmc-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(17,19,24,.08);
+  gap: 12px;
+}
+.owmc-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111318;
+  margin: 0;
+}
+.owmc-card-body { padding: 20px; }
+
+/* ── Dashboard 2-col grid ────────────────────────────────────────────────── */
+.owmc-dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 20px;
+  align-items: start;
+}
+
+/* ── Funnel chart ────────────────────────────────────────────────────────── */
+.owmc-funnel { display: flex; flex-direction: column; gap: 8px; }
+.owmc-funnel-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.owmc-funnel-label {
+  width: 160px;
+  font-size: 13px;
+  color: #5b6472;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.owmc-funnel-bar-wrap {
+  flex: 1;
+  background: rgba(17,19,24,.06);
+  border-radius: 4px;
+  height: 24px;
+  overflow: hidden;
+}
+.owmc-funnel-bar {
+  height: 100%;
+  background: #f7c600;
+  border-radius: 4px;
+  transition: width .4s ease;
+  min-width: 2px;
+}
+.owmc-funnel-count {
+  width: 40px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  color: #111318;
+  flex-shrink: 0;
+}
+
+/* ── Activity feed ───────────────────────────────────────────────────────── */
+.owmc-activity-feed { display: flex; flex-direction: column; }
+.owmc-activity-item {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(17,19,24,.06);
+}
+.owmc-activity-item:last-child { border-bottom: none; }
+.owmc-activity-icon {
+  font-size: 18px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: rgba(247,198,0,.1);
+  border-radius: 8px;
+}
+.owmc-activity-body { flex: 1; min-width: 0; }
+.owmc-activity-text {
+  font-size: 13px;
+  color: #111318;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.owmc-activity-time { font-size: 11px; color: #5b6472; margin-top: 2px; }
+
+/* ── Company list / table ────────────────────────────────────────────────── */
+.owmc-company-form-wrap {
+  display: none;
+  margin-bottom: 24px;
+}
+.owmc-company-form-wrap.owmc-visible { display: block; }
+
+.owmc-company-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #f7c600;
+  color: #111318;
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.owmc-company-logo { width: 36px; height: 36px; object-fit: contain; border-radius: 8px; }
+
+/* ── Forms ───────────────────────────────────────────────────────────────── */
+.owmc-form-grid { display: grid; gap: 16px; }
+.owmc-form-grid--2 { grid-template-columns: repeat(2, 1fr); }
+.owmc-form-grid--3 { grid-template-columns: repeat(3, 1fr); }
+.owmc-form-grid--4 { grid-template-columns: repeat(4, 1fr); }
+
+.owmc-field { display: flex; flex-direction: column; gap: 6px; }
+.owmc-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #111318;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+.owmc-input,
+.owmc-select,
+.owmc-textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1.5px solid rgba(17,19,24,.12);
+  border-radius: 8px;
+  background: #fff;
+  color: #111318;
+  font-family: inherit;
+  font-size: 14px;
+  transition: border-color .15s, box-shadow .15s;
+  outline: none;
+  -webkit-appearance: none;
+}
+.owmc-input:focus,
+.owmc-select:focus,
+.owmc-textarea:focus {
+  border-color: #f7c600;
+  box-shadow: 0 0 0 3px rgba(247,198,0,.2);
+}
+.owmc-input[readonly] { background: rgba(17,19,24,.04); color: #5b6472; }
+.owmc-textarea { resize: vertical; min-height: 80px; }
+
+.owmc-input-group { display: flex; gap: 8px; align-items: center; }
+.owmc-input-group .owmc-input { flex: 1; }
+
+.owmc-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.owmc-color-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 2px solid rgba(17,19,24,.1);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Section divider */
+.owmc-section-divider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  color: #5b6472;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  padding: 16px 0 8px;
+  border-bottom: 1px solid rgba(17,19,24,.08);
+  margin: 8px 0 16px;
+}
+
+.owmc-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 16px;
+  border-top: 1px solid rgba(17,19,24,.08);
+  margin-top: 20px;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.owmc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: all .15s;
+  font-family: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+  line-height: 1;
+}
+.owmc-btn:disabled { opacity: .45; cursor: not-allowed; }
+.owmc-btn--sm { padding: 6px 12px; font-size: 12px; }
+.owmc-btn--lg { padding: 12px 24px; font-size: 15px; }
+
+.owmc-btn--primary  { background: #f7c600; color: #111318; border-color: #f7c600; }
+.owmc-btn--primary:hover { background: #e5b800; border-color: #e5b800; }
+.owmc-btn--secondary{ background: transparent; color: #111318; border-color: rgba(17,19,24,.15); }
+.owmc-btn--secondary:hover { border-color: #111318; }
+.owmc-btn--danger   { background: transparent; color: #ef4444; border-color: #fecaca; }
+.owmc-btn--danger:hover { background: #fef2f2; border-color: #ef4444; }
+.owmc-btn--ghost    { background: transparent; color: #5b6472; border-color: transparent; padding-left: 8px; padding-right: 8px; }
+.owmc-btn--ghost:hover { background: rgba(17,19,24,.05); color: #111318; }
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+.owmc-table-wrap {
+  overflow-x: auto;
+}
+.owmc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.owmc-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: #5b6472;
+  padding: 10px 16px;
+  border-bottom: 2px solid rgba(17,19,24,.08);
+  white-space: nowrap;
+}
+.owmc-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(17,19,24,.06);
+  color: #111318;
+  vertical-align: middle;
+}
+.owmc-table tr:last-child td { border-bottom: none; }
+.owmc-table tr:hover td { background: rgba(247,198,0,.03); }
+
+.owmc-table-actions { display: flex; gap: 6px; align-items: center; }
+
+/* ── Badges / pills ──────────────────────────────────────────────────────── */
+.owmc-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+.owmc-badge--new         { background: #e0f2fe; color: #0369a1; }
+.owmc-badge--contacted   { background: #fef9c3; color: #854d0e; }
+.owmc-badge--quote       { background: #f3e8ff; color: #7c3aed; }
+.owmc-badge--won         { background: #f0fdf4; color: #166534; }
+.owmc-badge--lost        { background: #fef2f2; color: #991b1b; }
+.owmc-badge--sent        { background: #e0f2fe; color: #0369a1; }
+.owmc-badge--opened      { background: #f0fdf4; color: #166534; }
+.owmc-badge--failed      { background: #fef2f2; color: #991b1b; }
+.owmc-badge--queued      { background: rgba(17,19,24,.06); color: #5b6472; }
+
+/* ── Sticky filter bar ───────────────────────────────────────────────────── */
+.owmc-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid rgba(17,19,24,.08);
+}
+.owmc-filter-bar .owmc-input,
+.owmc-filter-bar .owmc-select {
+  width: auto;
+  min-width: 160px;
+  padding: 7px 12px;
+}
+.owmc-filter-sep { flex: 1; }
+
+/* ── Pagination ──────────────────────────────────────────────────────────── */
+.owmc-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding-top: 20px;
+}
+.owmc-page-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #5b6472;
+  border: 1px solid rgba(17,19,24,.1);
+  background: #fff;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all .15s;
+}
+.owmc-page-link:hover { border-color: #f7c600; color: #111318; }
+.owmc-page-link--active { background: #f7c600; border-color: #f7c600; color: #111318; font-weight: 700; }
+.owmc-page-link--dots { border: none; background: none; cursor: default; }
+
+/* ── Pipeline Kanban board ───────────────────────────────────────────────── */
+.owmc-pipeline-board {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.owmc-pipeline-col {
+  background: rgba(17,19,24,.03);
+  border-radius: 10px;
+  padding: 12px;
+  min-height: 120px;
+}
+.owmc-pipeline-col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.owmc-pipeline-col-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: #5b6472;
+}
+.owmc-pipeline-count {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(17,19,24,.08);
+  color: #5b6472;
+}
+.owmc-contact-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(17,19,24,.08);
+  cursor: pointer;
+  transition: box-shadow .15s;
+  text-decoration: none;
+  display: block;
+}
+.owmc-contact-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); border-color: rgba(247,198,0,.4); }
+.owmc-contact-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111318;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.owmc-contact-card-email {
+  font-size: 11px;
+  color: #5b6472;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.owmc-contact-card-date { font-size: 10px; color: #9aa0aa; margin-top: 4px; }
+
+/* ── Contact avatar ──────────────────────────────────────────────────────── */
+.owmc-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #f7c600;
+  color: #111318;
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.owmc-avatar--sm { width: 32px; height: 32px; font-size: 13px; }
+.owmc-avatar--lg { width: 56px; height: 56px; font-size: 22px; }
+
+/* ── Contact detail layout ───────────────────────────────────────────────── */
+.owmc-contact-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.owmc-sidebar-card {
+  position: sticky;
+  top: 32px;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid rgba(17,19,24,.08);
+  overflow: hidden;
+}
+.owmc-sidebar-header {
+  padding: 20px;
+  text-align: center;
+  border-bottom: 1px solid rgba(17,19,24,.08);
+}
+.owmc-sidebar-name { font-size: 16px; font-weight: 700; margin: 10px 0 2px; }
+.owmc-sidebar-email { font-size: 13px; color: #5b6472; }
+.owmc-sidebar-body { padding: 16px 20px; }
+.owmc-meta-list { display: flex; flex-direction: column; gap: 10px; }
+.owmc-meta-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.owmc-meta-row dt { color: #5b6472; }
+.owmc-meta-row dd { font-weight: 500; color: #111318; margin: 0; text-align: right; }
+
+/* Pipeline stage buttons */
+.owmc-stage-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.owmc-stage-btn {
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1.5px solid rgba(17,19,24,.12);
+  background: transparent;
+  color: #5b6472;
+  transition: all .15s;
+}
+.owmc-stage-btn:hover  { border-color: #f7c600; color: #111318; }
+.owmc-stage-btn--active { border-color: #f7c600; background: #f7c600; color: #111318; }
+
+/* Tags */
+.owmc-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.owmc-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(247,198,0,.15);
+  color: #92400e;
+  border: 1px solid rgba(247,198,0,.3);
+}
+.owmc-tag-remove {
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  opacity: .6;
+}
+.owmc-tag-remove:hover { opacity: 1; }
+
+/* Notes */
+.owmc-notes-save { margin-top: 8px; display: flex; justify-content: flex-end; }
+
+/* ── Timeline ────────────────────────────────────────────────────────────── */
+.owmc-timeline { display: flex; flex-direction: column; }
+.owmc-timeline-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(17,19,24,.06);
+  position: relative;
+}
+.owmc-timeline-item:last-child { border-bottom: none; }
+.owmc-timeline-dot {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(247,198,0,.15);
+  border: 2px solid rgba(247,198,0,.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.owmc-timeline-body { flex: 1; min-width: 0; }
+.owmc-timeline-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111318;
+}
+.owmc-timeline-meta { font-size: 11px; color: #5b6472; margin-top: 2px; }
+.owmc-timeline-time { font-size: 11px; color: #9aa0aa; margin-top: 2px; }
+
+/* ── Email log table ─────────────────────────────────────────────────────── */
+.owmc-email-log-table { font-size: 13px; }
+
+/* ── Settings page ───────────────────────────────────────────────────────── */
+.owmc-settings-grid {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+.owmc-settings-nav {
+  position: sticky;
+  top: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.owmc-settings-nav-link {
+  display: block;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #5b6472;
+  text-decoration: none;
+  transition: all .15s;
+}
+.owmc-settings-nav-link:hover { background: rgba(17,19,24,.04); color: #111318; }
+.owmc-settings-nav-link--active { background: rgba(247,198,0,.12); color: #111318; font-weight: 600; }
+
+.owmc-settings-section { margin-bottom: 28px; scroll-margin-top: 64px; }
+.owmc-settings-section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111318;
+  margin: 0 0 16px;
+}
+
+/* API token */
+.owmc-token-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(17,19,24,.04);
+  border-radius: 8px;
+  border: 1px solid rgba(17,19,24,.1);
+}
+.owmc-token-value {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 13px;
+  color: #111318;
+  flex: 1;
+  word-break: break-all;
+}
+.owmc-token-copy {
+  flex-shrink: 0;
+}
+
+/* Debug / version info */
+.owmc-debug-table {
+  width: 100%;
+  font-size: 13px;
+  border-collapse: collapse;
+}
+.owmc-debug-table td {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(17,19,24,.06);
+}
+.owmc-debug-table td:first-child { color: #5b6472; width: 200px; }
+.owmc-debug-table td:last-child { font-weight: 600; }
+
+/* Toggle / switch */
+.owmc-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #111318;
+}
+.owmc-toggle input[type="checkbox"] {
+  accent-color: #f7c600;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* ── Builder company selector ────────────────────────────────────────────── */
+.owmc-builder-company-select {
+  display: flex;
+  align-items: center;
+}
+.owmc-builder-company-select .owmc-select {
+  width: auto;
+  min-width: 180px;
+}
+
+/* ── Shortcode display ───────────────────────────────────────────────────── */
+.owmc-shortcode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(17,19,24,.05);
+  border-radius: 6px;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+  color: #111318;
+  border: 1px solid rgba(17,19,24,.08);
+}
+
+/* ── Logo / image preview ────────────────────────────────────────────────── */
+.owmc-img-preview {
+  margin-top: 8px;
+}
+.owmc-img-preview img {
+  height: 48px;
+  width: auto;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid rgba(17,19,24,.08);
+}
+
+/* ── JSON status ─────────────────────────────────────────────────────────── */
+.owmc-json-status {
+  font-size: 12px;
+  font-weight: 600;
+  margin-left: 8px;
+}
+.owmc-json-status--ok    { color: #10b981; }
+.owmc-json-status--error { color: #ef4444; }
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 1200px) {
+  .owmc-kpi-row { grid-template-columns: repeat(2, 1fr); }
+  .owmc-pipeline-board { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 900px) {
+  .owmc-dashboard-grid { grid-template-columns: 1fr; }
+  .owmc-contact-layout { grid-template-columns: 1fr; }
+  .owmc-sidebar-card { position: static; }
+  .owmc-settings-grid { grid-template-columns: 1fr; }
+  .owmc-settings-nav { position: static; flex-direction: row; flex-wrap: wrap; }
+  .owmc-form-grid--4 { grid-template-columns: repeat(2, 1fr); }
+  .owmc-pipeline-board { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .owmc-kpi-row { grid-template-columns: 1fr 1fr; }
+  .owmc-form-grid--2,
+  .owmc-form-grid--3 { grid-template-columns: 1fr; }
+  .owmc-pipeline-board { grid-template-columns: 1fr; }
+  .owmc-page-header { flex-direction: column; align-items: flex-start; }
+}

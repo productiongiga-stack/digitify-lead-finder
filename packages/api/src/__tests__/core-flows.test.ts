@@ -17,11 +17,22 @@ function makeCtx(db: Record<string, unknown>) {
   });
   const userFindFirst = vi.fn().mockResolvedValue(null);
 
-  return {
-    db: {
+  const database = {
       user: { findUnique: userFindUnique, findFirst: userFindFirst },
       ...db,
-    } as any,
+  } as any;
+  database.$transaction = vi.fn(async (run: (tx: any) => unknown) => run(database));
+  database.$executeRaw = vi.fn().mockResolvedValue(0);
+  database.lead ??= {};
+  database.lead.findMany ??= vi.fn().mockResolvedValue([]);
+  database.lead.create ??= vi.fn().mockImplementation(async ({ data }: any) => ({ id: "lead_test", ...data }));
+  database.setting ??= {};
+  database.setting.findUnique ??= vi.fn().mockResolvedValue(null);
+  database.setting.findMany ??= vi.fn().mockResolvedValue([]);
+  database.setting.create ??= vi.fn().mockResolvedValue({});
+
+  return {
+    db: database,
     user: {
       id: TEST_USER_ID,
       email: "owner@example.com",
@@ -64,6 +75,41 @@ describe("lead flow", () => {
       }),
     );
     expect(activityCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a workspace-scoped workflow summary with the next action", async () => {
+    const leadFindFirst = vi.fn().mockResolvedValue({
+      id: "lead_workflow",
+      status: "CONTACTED",
+      pipelineStage: { id: "stage_1", name: "Opvolgen", color: "#f59e0b" },
+      overallScore: 78,
+      scorePriority: "Warm",
+      email: "hello@acme.be",
+      doNotContact: false,
+      contacts: [{ id: "contact_1", name: "Ada Example", title: "Owner", email: "hello@acme.be", phone: null, isPrimary: true }],
+      emailDrafts: [{ id: "draft_1", subject: "Hallo", status: "SENT", toEmail: "hello@acme.be", updatedAt: new Date(), sentAt: new Date(), repliedAt: null }],
+    });
+    const caller = leadRouter.createCaller(
+      makeCtx({
+        lead: { findFirst: leadFindFirst },
+        activity: { findMany: vi.fn().mockResolvedValue([]) },
+        quote: { findMany: vi.fn().mockResolvedValue([]) },
+        workspaceInvoice: { findMany: vi.fn().mockResolvedValue([]) },
+        workspaceTask: { findMany: vi.fn().mockResolvedValue([]) },
+      }),
+    );
+
+    const summary = await caller.getWorkflowSummary({ leadId: "lead_workflow" });
+
+    expect(summary.nextAction).toEqual({
+      key: "follow_up",
+      label: "Plan de volgende opvolgactie.",
+      href: "/tasks",
+    });
+    expect(summary.lead.contacts).toHaveLength(1);
+    expect(leadFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: "lead_workflow", createdById: TEST_USER_ID }),
+    }));
   });
 });
 
@@ -136,23 +182,23 @@ describe("api endpoint behavior", () => {
 describe("lead import flow", () => {
   it("imports csv leads and skips duplicates", async () => {
     const leadFindMany = vi.fn().mockResolvedValue([
-      { companyName: "Acme BV", email: "hello@acme.be" },
+      { id: "existing-acme", companyName: "Acme BV", city: "Gent", address: "Korenmarkt 1", country: null, gmbPlaceId: null },
     ]);
-    const leadCreateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const leadCreate = vi.fn().mockImplementation(async ({ data }: any) => ({ id: "lead_new", ...data }));
     const activityCreate = vi.fn().mockResolvedValue({ id: "act_3" });
     const caller = leadRouter.createCaller(
       makeCtx({
-        lead: { findMany: leadFindMany, createMany: leadCreateMany },
+        lead: { findMany: leadFindMany, create: leadCreate },
         activity: { create: activityCreate },
       }),
     );
 
     const result = await caller.importCsv({
-      csv: "company,email,city\nAcme BV,hello@acme.be,Gent\nNova Studio,info@nova.be,Antwerpen",
+      csv: "company,email,city,address\nAcme BV,hello@acme.be,Gent,Korenmarkt 1\nNova Studio,info@nova.be,Antwerpen,Meir 2",
     });
 
     expect(result).toEqual({ created: 1, skipped: 1 });
-    expect(leadCreateMany).toHaveBeenCalledTimes(1);
+    expect(leadCreate).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -209,7 +255,7 @@ describe("invoice flow", () => {
     const activityCreate = vi.fn().mockResolvedValue({ id: "act_9" });
     const caller = invoiceRouter.createCaller(
       makeCtx({
-        setting: { findMany: vi.fn().mockResolvedValue([]) },
+        setting: { findMany: vi.fn().mockResolvedValue([]), findUnique: vi.fn().mockResolvedValue(null) },
         quote: { findFirst: quoteFindFirst },
         workspaceInvoice: {
           count: vi.fn().mockResolvedValue(0),

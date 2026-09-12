@@ -14,6 +14,7 @@ model User {
   email          String    @unique
   name           String?
   passwordHash   String?
+  sessionVersion Int       @default(0)
   image          String?
   emailVerified  DateTime?
   role           UserRole  @default(MEMBER)
@@ -65,10 +66,71 @@ model User {
   authoredMediaGenerations MediaGeneration[] @relation("MediaGenerationAuthor")
   tenantMediaGenerations   MediaGeneration[] @relation("MediaGenerationWorkspace")
   workspaceAnalyticsEvents WorkspaceAnalyticsEvent[] @relation("WorkspaceAnalyticsOwner")
+  leadForms          LeadForm[]
+  workflows          Workflow[]
+  workspaceFiles     WorkspaceFile[] @relation("WorkspaceFileWorkspace")
+  uploadedFiles      WorkspaceFile[] @relation("WorkspaceFileUploader")
+  knowledgeEntries   KnowledgeEntry[]
+  seoKeywords        SeoKeyword[]
+  seoCompetitors     SeoCompetitor[]
+  projects           Project[]
+  contracts          Contract[]
 
   @@index([workspaceOwnerId])
   @@index([activeWorkspaceId])
   @@map("users")
+}
+
+enum WorkflowStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum WorkflowRunStatus {
+  DRY_RUN
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+model Workflow {
+  id          String         @id @default(cuid())
+  createdById String
+  name        String
+  description String?
+  status      WorkflowStatus @default(DRAFT)
+  trigger     String
+  conditions  Json
+  actions     Json
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  createdBy User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  runs      WorkflowRun[]
+
+  @@index([createdById, status])
+  @@map("workflows")
+}
+
+model WorkflowRun {
+  idempotencyKey String           @id
+  workflowId     String
+  status         WorkflowRunStatus
+  triggerData    Json?
+  result         Json?
+  error          String?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime         @default(now())
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("workflow_runs")
 }
 
 enum WorkspaceType {
@@ -306,6 +368,7 @@ model Lead {
   reviewRequests  ReviewRequest[]
   quotes       Quote[]
   chatSessions   ChatSession[]
+  formSubmissions FormSubmission[]
 
   @@index([companyName])
   @@index([city, state, country])
@@ -337,6 +400,46 @@ enum LeadStatus {
   WON
   LOST
   ARCHIVED
+}
+
+enum LeadFormStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model LeadForm {
+  id          String         @id @default(cuid())
+  createdById String
+  name        String
+  publicKey   String         @unique @default(cuid())
+  status      LeadFormStatus @default(DRAFT)
+  fields      Json
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  createdBy   User             @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  submissions FormSubmission[]
+
+  @@index([createdById, status])
+  @@map("lead_forms")
+}
+
+model FormSubmission {
+  id          String   @id @default(cuid())
+  formId      String
+  leadId      String?
+  fingerprint String
+  data        Json
+  createdAt   DateTime @default(now())
+
+  form        LeadForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@unique([formId, fingerprint])
+  @@index([formId, createdAt(sort: Desc)])
+  @@index([leadId])
+  @@map("form_submissions")
 }
 
 model LeadContact {
@@ -645,6 +748,7 @@ enum EmailStatus {
   REJECTED
   SCHEDULED
   SENDING
+  DELIVERY_UNKNOWN
   SENT
   FAILED
   BOUNCED
@@ -705,6 +809,183 @@ model Activity {
   @@index([createdAt(sort: Desc)])
   @@index([userId, createdAt(sort: Desc)])
   @@map("activities")
+}
+
+// WORKSPACE FILES
+// The storage URL is intentionally kept out of normal list responses. Files are
+// served through the authenticated /api/files/:id route.
+model WorkspaceFile {
+  id           String   @id @default(cuid())
+  createdById  String
+  uploadedById String
+  name         String
+  storageUrl   String
+  storage      String   @default("local")
+  contentType  String
+  size         Int
+  relatedType  String?
+  relatedId    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspaceOwner User @relation("WorkspaceFileWorkspace", fields: [createdById], references: [id], onDelete: Cascade)
+  uploadedBy     User @relation("WorkspaceFileUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@index([createdById, createdAt(sort: Desc)])
+  @@index([createdById, relatedType, relatedId])
+  @@map("workspace_files")
+}
+
+enum KnowledgeEntryStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model KnowledgeEntry {
+  id          String              @id @default(cuid())
+  createdById String
+  title       String
+  slug        String
+  content     String              @db.Text
+  status      KnowledgeEntryStatus @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  createdBy User                   @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  versions  KnowledgeEntryVersion[]
+
+  @@unique([createdById, slug])
+  @@index([createdById, status, updatedAt(sort: Desc)])
+  @@map("knowledge_entries")
+}
+
+model KnowledgeEntryVersion {
+  id        String   @id @default(cuid())
+  entryId   String
+  version   Int
+  title     String
+  content   String   @db.Text
+  createdById String
+  createdAt DateTime @default(now())
+
+  entry KnowledgeEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@unique([entryId, version])
+  @@index([entryId, createdAt(sort: Desc)])
+  @@map("knowledge_entry_versions")
+}
+
+enum SeoKeywordStatus {
+  TRACKING
+  PAUSED
+}
+
+model SeoKeyword {
+  id            String          @id @default(cuid())
+  createdById   String
+  domainId      String?
+  keyword       String
+  keywordKey    String
+  location      String?
+  language      String?
+  targetUrl     String?
+  currentRank   Int?
+  previousRank  Int?
+  status        SeoKeywordStatus @default(TRACKING)
+  lastCheckedAt DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@unique([createdById, keywordKey])
+  @@index([createdById, status, updatedAt(sort: Desc)])
+  @@index([createdById, domainId])
+  @@map("seo_keywords")
+}
+
+model SeoCompetitor {
+  id          String   @id @default(cuid())
+  createdById String
+  domainId    String?
+  name        String
+  url         String
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([createdById, updatedAt(sort: Desc)])
+  @@index([createdById, domainId])
+  @@map("seo_competitors")
+}
+
+enum ProjectStatus {
+  PLANNED
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  ARCHIVED
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  createdById String
+  leadId      String?
+  quoteId     String?
+  name        String
+  clientName  String
+  description String?       @db.Text
+  status      ProjectStatus @default(PLANNED)
+  startAt     DateTime?
+  dueAt       DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([createdById, status, updatedAt(sort: Desc)])
+  @@index([createdById, leadId])
+  @@index([createdById, quoteId])
+  @@map("projects")
+}
+
+enum ContractStatus {
+  DRAFT
+  SENT
+  VIEWED
+  SIGNED
+  DECLINED
+  EXPIRED
+}
+
+model Contract {
+  id             String         @id @default(cuid())
+  createdById    String
+  projectId      String?
+  quoteId        String?
+  name           String
+  clientName     String
+  clientEmail    String?
+  content        String         @db.Text
+  version        Int            @default(1)
+  status         ContractStatus @default(DRAFT)
+  sentAt         DateTime?
+  viewedAt       DateTime?
+  signedAt       DateTime?
+  declinedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([createdById, status, updatedAt(sort: Desc)])
+  @@index([createdById, projectId])
+  @@index([createdById, quoteId])
+  @@map("contracts")
 }
 
 model IdempotencyKey {
@@ -1156,6 +1437,46 @@ model Setting {
   @@map("settings")
 }
 
+// SECURITY & SUPPORT ACCESS
+model AccountViewSession {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique
+  actorUserId String
+  targetUserId String
+  workspaceId String
+  mode        String    @default("VIEW_AS")
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  endedAt     DateTime?
+
+  @@index([actorUserId, endedAt, expiresAt])
+  @@index([targetUserId, endedAt, expiresAt])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@map("account_view_sessions")
+}
+
+model SecurityAuditEvent {
+  id          String   @id @default(cuid())
+  workspaceId String?
+  actorUserId String?
+  targetUserId String?
+  action      String
+  resource    String?
+  resourceId  String?
+  result      String
+  reason      String?
+  requestId   String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([actorUserId, createdAt(sort: Desc)])
+  @@index([targetUserId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@map("security_audit_events")
+}
+
 // BACKGROUND JOBS
 model BackgroundJob {
   id          String    @id @default(cuid())
@@ -1183,7 +1504,9 @@ enum JobStatus {
   RETRYING
 }
 
-// SAVED VIEWS
+// LEGACY SAVED VIEWS
+// The active feature is WorkspaceSavedSearch. Keep this table in the database
+// for rollback/data retention, but do not expose it through the Prisma client.
 model SavedView {
   id        String   @id @default(cuid())
   name      String
@@ -1197,6 +1520,7 @@ model SavedView {
   createdAt DateTime @default(now())
 
   @@map("saved_views")
+  @@ignore
 }
 
 // BOOKINGS

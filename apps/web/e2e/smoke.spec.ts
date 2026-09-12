@@ -1,36 +1,29 @@
 import { test, expect } from "@playwright/test";
+import { authStatePath } from "./auth-state";
 
-const email = process.env.PLAYWRIGHT_LOGIN_EMAIL ?? "admin@digitify.local";
-const password = process.env.PLAYWRIGHT_LOGIN_PASSWORD ?? "DigitifyDev2026!";
+const password = process.env.PLAYWRIGHT_LOGIN_PASSWORD ?? process.env.SEED_ADMIN_PASSWORD ?? "";
 
 test.describe("authenticated smoke", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(email);
-    await page.getByLabel("Wachtwoord").fill(password);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 30_000 });
+  test.use({ storageState: authStatePath("admin") });
+  test.beforeEach(() => {
+    test.skip(!password, "Set PLAYWRIGHT_LOGIN_PASSWORD or SEED_ADMIN_PASSWORD for authenticated E2E tests.");
   });
 
   test("templates studio loads", async ({ page }) => {
     await page.goto("/templates");
-    await expect(page.getByRole("heading", { name: "Template Studio" })).toBeVisible();
-    await expect(page.getByText("Intro — Modern outreach")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Standaard e-mailberichten" })).toBeVisible();
+    await expect(page.getByText("Opmaak vs. inhoud")).toBeVisible();
   });
 
-  test("template studio campaign filter scopes saved templates", async ({ page }) => {
+  test("template studio module filter updates the URL", async ({ page }) => {
     await page.goto("/templates");
-    await expect(page.getByText("Intro - Webdesign")).toBeVisible();
-    await expect(page.getByText("Intro - SEO")).toBeVisible();
-    await expect(page.getByText("Follow-up 1")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Alle modules" })).toBeVisible();
 
-    await page.getByTestId("template-campaign-filter").click();
-    await page.getByRole("option", { name: "Webdesign Gent" }).click();
+    const moduleButton = page.getByRole("button", { name: /Authenticatie & team/i });
+    await expect(moduleButton).toBeVisible();
+    await moduleButton.click();
 
-    await expect(page.getByText("Intro - Webdesign")).toBeVisible();
-    await expect(page.getByText("Follow-up 1")).toBeVisible();
-    await expect(page.getByText("Alle campagnes").first()).toBeVisible();
-    await expect(page.getByText("Intro - SEO")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/templates\?module=AUTH$/);
   });
 
   test("compose saves email draft when lead is selected", async ({ page }) => {
@@ -39,7 +32,7 @@ test.describe("authenticated smoke", () => {
 
     const leadTrigger = page.getByRole("combobox").first();
     await leadTrigger.click();
-    const firstLead = page.getByRole("option").nth(1);
+    const firstLead = page.getByRole("option").first();
     await firstLead.click();
 
     await page.getByLabel(/onderwerp/i).fill("E2E test onderwerp");
@@ -57,7 +50,7 @@ test.describe("authenticated smoke", () => {
 
   test("outbound center shows approval flow", async ({ page }) => {
     await page.goto("/contacts");
-    await expect(page.getByRole("heading", { name: "Outbound Center" })).toBeVisible();
+    await expect(page.locator("h1.app-page-title", { hasText: "Outbound Center" })).toBeVisible();
     await expect(page.getByText(/Concept.*goedkeuren.*verzenden/i)).toBeVisible();
     await page.getByRole("tab", { name: /info/i }).click();
     await expect(page.getByText(/klaar om te verzenden/i)).toBeVisible();

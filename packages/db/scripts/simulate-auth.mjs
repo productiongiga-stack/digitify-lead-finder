@@ -54,10 +54,13 @@ async function authorize(email, password) {
 }
 
 async function main() {
-  const result = await authorize(
-    process.argv[2] || "admin@digitify.local",
-    process.argv[3] || "DigitifyDev2026!",
-  );
+  const [email, password] = process.argv.slice(2);
+  if (!email || !password) {
+    console.error("Usage: pnpm exec node scripts/simulate-auth.mjs <email> <password>");
+    process.exitCode = 1;
+    return;
+  }
+  const result = await authorize(email, password);
   console.log("AUTH_SIMULATION", JSON.stringify(result));
 }
 

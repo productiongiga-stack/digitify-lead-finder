@@ -1,6 +1,6 @@
 import { type PrismaClient } from "@digitify/db";
 import { z } from "zod";
-import { router, protectedProcedure, ownerProcedure, publicRateLimitedProcedure } from "../trpc";
+import { router, protectedProcedure, ownerProcedure, sensitiveOwnerProcedure, publicRateLimitedProcedure } from "../trpc";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 import { ANALYTICS_SETTINGS_KEYS } from "../lib/settings-bundle-keys";
@@ -338,7 +338,7 @@ export const analyticsRouter = router({
       };
     }),
 
-  purgeOldEvents: ownerProcedure
+  purgeOldEvents: sensitiveOwnerProcedure
     .input(z.object({ days: z.number().min(7).max(365).default(90) }).optional())
     .mutation(async ({ ctx, input }) => {
       const workspaceId = ctx.user.workspaceId!;

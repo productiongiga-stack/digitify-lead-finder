@@ -1,0 +1,61 @@
+/* Premium SaaS-ish admin skin */
+.dol-wrap{max-width:1200px;margin:18px 18px 40px 0;}
+.dol-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px;}
+.dol-header h1{margin:0;font-size:24px;line-height:1.2;}
+.dol-muted{color:#64748b;}
+.dol-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+
+.dol-grid{display:grid;gap:12px;}
+.dol-grid-5{grid-template-columns:repeat(5,minmax(0,1fr));}
+@media (max-width:1200px){.dol-grid-5{grid-template-columns:repeat(2,minmax(0,1fr));}}
+
+.dol-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:14px;box-shadow:0 8px 22px rgba(15,23,42,.06);}
+.dol-card-kpi{font-size:26px;font-weight:800;color:#0f172a;}
+.dol-card-label{font-size:12px;color:#64748b;margin-top:2px;}
+.dol-mt{margin-top:14px;}
+
+.dol-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
+.dol-input{width:100%;max-width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;outline:none;box-shadow:none;}
+.dol-input:focus{border-color:#cbd5e1;box-shadow:0 0 0 3px rgba(148,163,184,.25);}
+.dol-required{color:#ef4444;font-weight:700;}
+
+.dol-table-wrap{overflow:auto;}
+.dol-table{width:100%;border-collapse:separate;border-spacing:0;}
+.dol-table th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;text-align:left;padding:10px;border-bottom:1px solid #eef2f7;}
+.dol-table td{padding:12px;border-bottom:1px solid #f1f5f9;vertical-align:top;}
+.dol-table tr:hover td{background:#fbfdff;}
+
+.dol-badge{display:inline-flex;align-items:center;gap:6px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:999px;padding:4px 10px;font-size:12px;color:#0f172a;font-weight:700;}
+.dol-badge[data-status="nieuw"]{background:#fff7ed;border-color:#fed7aa;}
+.dol-badge[data-status="gecontacteerd"]{background:#eff6ff;border-color:#bfdbfe;}
+.dol-badge[data-status="wacht_op_antwoord"]{background:#fdf4ff;border-color:#f5d0fe;}
+.dol-badge[data-status="gereageerd"]{background:#ecfeff;border-color:#a5f3fc;}
+.dol-badge[data-status="gesloten"]{background:#f1f5f9;border-color:#e2e8f0;}
+
+.dol-modal{position:fixed;inset:0;display:none;z-index:99999;}
+.dol-modal[aria-hidden="false"]{display:block;}
+.dol-modal-backdrop{position:absolute;inset:0;background:rgba(2,6,23,.55);}
+.dol-modal-card{position:relative;background:#fff;border:1px solid #e2e8f0;border-radius:18px;max-width:860px;margin:6vh auto;box-shadow:0 20px 70px rgba(2,6,23,.35);overflow:hidden;}
+.dol-modal-card-wide{max-width:1100px;}
+.dol-modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:14px 16px;border-bottom:1px solid #eef2f7;background:linear-gradient(180deg,#ffffff,#fbfdff);}
+.dol-modal-head h2{margin:0;font-size:18px;}
+.dol-modal-body{padding:14px 16px;}
+.dol-modal-foot{display:flex;justify-content:flex-end;gap:10px;padding:14px 16px;border-top:1px solid #eef2f7;background:#fff;}
+.dol-icon-btn{border:none;background:#f1f5f9;border-radius:12px;width:38px;height:38px;font-size:22px;line-height:38px;text-align:center;cursor:pointer;}
+
+.dol-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+.dol-form-grid label{display:block;font-size:12px;color:#475569;margin:0 0 6px 2px;font-weight:700;}
+.dol-colspan{grid-column:1/-1;}
+@media (max-width:900px){.dol-form-grid{grid-template-columns:1fr;}}
+
+.dol-divider{height:1px;background:#eef2f7;margin:14px 0;}
+.dol-mail{border:1px solid #eef2f7;border-radius:16px;padding:12px;background:#fbfdff;}
+.dol-mail-head{margin-bottom:10px;}
+.dol-mail-head h3{margin:0 0 4px 0;}
+.dol-mail-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:10px;}
+
+.dol-timeline{display:flex;flex-direction:column;gap:10px;}
+.dol-timeline-item{display:flex;gap:10px;padding:10px;border:1px solid #eef2f7;background:#fff;border-radius:14px;}
+.dol-timeline-dot{width:10px;height:10px;border-radius:999px;background:#0f172a;margin-top:4px;}
+.dol-timeline-meta{font-size:12px;color:#64748b;margin-top:2px;}
+.dol-upload input{display:none;}

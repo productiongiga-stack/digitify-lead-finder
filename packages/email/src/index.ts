@@ -1,4 +1,4 @@
-export { SmtpProvider } from "./providers/smtp";
+export { SmtpProvider, verifySmtpConnection } from "./providers/smtp";
 export { ConsoleProvider } from "./providers/console";
 export { renderTemplate, renderSubject, htmlFromText } from "./template-renderer";
 export { generateBrandedHtml, normalizeHtmlEmailDocument, htmlToPlainText } from "./html-template";

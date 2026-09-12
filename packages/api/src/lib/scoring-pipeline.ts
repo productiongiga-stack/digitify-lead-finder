@@ -39,7 +39,7 @@ type LeadWithEnrichment = {
   twitterUrl: string | null;
   tiktokUrl: string | null;
   youtubeUrl: string | null;
-  enrichmentData?: Array<{ data: unknown }>;
+  enrichmentData?: Array<{ data: unknown; source?: string; fetchedAt?: Date }>;
 };
 
 export function buildLeadDataFromRecord(lead: LeadWithEnrichment): LeadData {
@@ -48,7 +48,7 @@ export function buildLeadDataFromRecord(lead: LeadWithEnrichment): LeadData {
     website: lead.website,
     email: lead.email,
     phone: lead.phone,
-    gmbRating: lead.gmbRating ? Number(lead.gmbRating) : null,
+    gmbRating: lead.gmbRating != null ? Number(lead.gmbRating) : null,
     gmbReviewCount: lead.gmbReviewCount,
     gmbCategories: (lead.gmbCategories as string[]) || [],
     facebookUrl: lead.facebookUrl,
@@ -61,7 +61,8 @@ export function buildLeadDataFromRecord(lead: LeadWithEnrichment): LeadData {
 }
 
 export function buildEnrichmentFromLead(lead: LeadWithEnrichment): EnrichmentPayload {
-  const enrichmentRaw = lead.enrichmentData?.[0]?.data as Record<string, unknown> | null;
+  const rows = [...(lead.enrichmentData ?? [])].sort((a, b) => (b.fetchedAt?.getTime() ?? 0) - (a.fetchedAt?.getTime() ?? 0));
+  const enrichmentRaw = (rows.find((row) => row.source === "website_analyzer") ?? rows[0])?.data as Record<string, unknown> | null;
   return {
     website_analysis: enrichmentRaw?.website_analysis as EnrichmentPayload["website_analysis"],
     social_analysis: enrichmentRaw?.social_analysis as EnrichmentPayload["social_analysis"],
@@ -108,7 +109,8 @@ export async function persistLeadScore(
     weights: ScoringWeightRow[],
   ) => Promise<void>,
 ) {
-  await db.lead.update({
+  await db.$transaction(async (tx) => {
+  await tx.lead.update({
     where: { id: leadId },
     data: {
       overallScore: scoreResult.overallScore,
@@ -116,6 +118,8 @@ export async function persistLeadScore(
       scoreComputedAt: new Date(),
     },
   });
-  await upsertFactors(db, leadId, factors, weights);
+  await tx.leadScoringFactor.deleteMany({ where: { leadId } });
+  await upsertFactors(tx as unknown as PrismaClient, leadId, factors, weights);
+  });
   return scoreResult;
 }

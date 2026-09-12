@@ -81,7 +81,7 @@ pnpm test:integration         # RLS/IDOR (api, vereist DB)
 ENABLE_WORKSPACE_RLS=true pnpm rls:smoke
 ```
 
-**Let op:** Geen `.env.example` in repo (TODO: bevestigen of intentional). Env wordt gevalideerd via `packages/api/src/lib/server-env.ts` + `apps/web/src/instrumentation.ts`. Zie `docs/VERCEL.md` voor productie-vars.
+**Env:** Kopieer `.env.example` naar `.env` voor lokaal gebruik en vervang alle placeholdersecrets. Env wordt gevalideerd via `packages/api/src/lib/server-env.ts` + `apps/web/src/instrumentation.ts`. Zie `docs/VERCEL.md` voor productie-vars.
 
 ---
 

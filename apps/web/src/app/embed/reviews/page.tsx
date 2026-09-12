@@ -36,6 +36,7 @@ function ReviewEmbedContent() {
     "Geef eerst intern uw score. Bij 4 of 5 sterren kunt u meteen door naar het reviewplatform van uw keuze.";
   const company = params.get("company") || "Onze service";
   const tenant = params.get("tenant") || "";
+  const configurationMissing = !tenant;
   useWidgetAnalytics("reviews", tenant);
 
   const links = reviewPlatforms
@@ -66,6 +67,9 @@ function ReviewEmbedContent() {
   }
 
   async function saveInternalFeedback(extra?: { platform?: string }) {
+    if (configurationMissing) {
+      throw new Error("Deze reviewwidget is niet gekoppeld aan een werkruimte.");
+    }
     const response = await fetch("/api/public/reviews/embed-feedback", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -73,6 +77,7 @@ function ReviewEmbedContent() {
         rating,
         feedback,
         company,
+        tenant,
         platform: extra?.platform,
         pageUrl: typeof window !== "undefined" ? window.location.href : "",
       }),
@@ -114,7 +119,7 @@ function ReviewEmbedContent() {
   }
 
   function handleContinue() {
-    if (!rating || submitting || selectionLocked) return;
+    if (!rating || submitting || selectionLocked || configurationMissing) return;
     setSelectionLocked(true);
     setStatus(null);
     if (rating >= 4) {
@@ -134,6 +139,11 @@ function ReviewEmbedContent() {
           <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
           <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
           <p className="mt-3 text-xs font-medium uppercase tracking-[0.24em] text-slate-400">{company}</p>
+          {configurationMissing ? (
+            <p role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Deze reviewwidget is niet gekoppeld aan een werkruimte.
+            </p>
+          ) : null}
         </div>
 
         <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-5">
@@ -154,7 +164,7 @@ function ReviewEmbedContent() {
                   onMouseEnter={() => setHoveredRating(current)}
                   onMouseLeave={() => setHoveredRating(0)}
                   onClick={() => {
-                    if (selectionLocked) return;
+                    if (selectionLocked || configurationMissing) return;
                     setRating(current);
                     setStep("rating");
                     setStatus(null);
@@ -168,6 +178,7 @@ function ReviewEmbedContent() {
                     backgroundColor: active ? `${color}14` : "#ffffff",
                   }}
                   aria-label={`${current} sterren`}
+                  disabled={configurationMissing}
                 >
                   ★
                 </button>
@@ -202,7 +213,7 @@ function ReviewEmbedContent() {
               <button
                 type="button"
                 onClick={handleContinue}
-                disabled={!rating || submitting}
+                disabled={!rating || submitting || configurationMissing}
                 className="mt-5 h-12 rounded-full px-6 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50"
                 style={{ backgroundColor: color }}
               >

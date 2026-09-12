@@ -43,6 +43,7 @@ function statusLabel(type: string, draftStatus?: string) {
       case "DRAFT":
         return "Concept";
       case "FAILED":
+      case "DELIVERY_UNKNOWN":
         return "Mislukt";
       case "SENDING":
         return "Bezig met verzenden";

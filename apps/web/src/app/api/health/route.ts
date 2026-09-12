@@ -32,14 +32,14 @@ export async function GET() {
       },
       degraded ? { status: 503 } : undefined,
     );
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       {
         status: "degraded",
         db: "error",
         redis: "skipped",
         latencyMs: Date.now() - started,
-        message: error instanceof Error ? error.message : "database unreachable",
+        message: "database unreachable",
       },
       { status: 503 },
     );

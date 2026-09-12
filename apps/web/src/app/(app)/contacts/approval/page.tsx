@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { trpc } from "@/lib/trpc/client";
 import {
   Button,
@@ -21,12 +22,16 @@ import {
 import { CheckCircle, XCircle, Eye, Inbox, Mail, FileText, Clock, User, AtSign, Pencil } from "lucide-react";
 import { formatDate, formatRelativeTime } from "@/lib/utils";
 import Link from "next/link";
-import { EmailPreview } from "@/components/email/preview";
 import { OutboundWorkflowHelp } from "@/components/outbound/outbound-workflow-help";
 import { extractEmailTemplateMetadata } from "@/lib/email-content";
 import { OUTBOUND_STATUS_LABELS, OUTBOUND_STATUS_VARIANTS } from "@/lib/contact-status";
 import { extractQuoteIdFromDraftBody, getQuoteConfiguratorUrl } from "@/lib/quote-outbound";
 import { useShellEmailPreviewProps } from "@/lib/outbound-email-settings";
+
+const EmailPreview = dynamic(
+  () => import("@/components/email/preview").then((module) => module.EmailPreview),
+  { ssr: false, loading: () => <Skeleton className="h-96 w-full rounded-xl" /> },
+);
 
 export default function ApprovalPage() {
   const utils = trpc.useUtils();

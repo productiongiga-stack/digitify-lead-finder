@@ -74,6 +74,7 @@ export async function hasWorkspaceAccess(
   if (membership && statuses.includes(membership.status as "ACTIVE" | "INVITED")) {
     return true;
   }
+  if (membership) return false;
   const legacy = await db.user.findFirst({
     where: {
       id: userId,
@@ -417,7 +418,7 @@ export async function resolveWorkspaceContext(
     where: { id: userId },
     select: { role: true, workspaceOwnerId: true },
   });
-  if (legacyUser?.workspaceOwnerId === workspaceId) {
+  if (!membership && legacyUser?.workspaceOwnerId === workspaceId) {
     return {
       workspaceId,
       workspaceRole: legacyUser.role,
@@ -443,6 +444,7 @@ export async function getMembershipRole(
     select: { role: true, status: true },
   });
   if (membership?.status === "ACTIVE") return membership.role;
+  if (membership) return null;
   const legacy = await db.user.findFirst({
     where: { id: userId, workspaceOwnerId: workspaceId },
     select: { role: true },

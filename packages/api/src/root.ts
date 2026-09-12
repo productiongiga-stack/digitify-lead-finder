@@ -29,6 +29,16 @@ import { googleAdsRouter } from "./routers/google-ads.router";
 import { mediaRouter } from "./routers/media.router";
 import { workspaceRouter } from "./routers/workspace.router";
 import { analyticsRouter } from "./routers/analytics.router";
+import { securityAuditRouter } from "./routers/security-audit.router";
+import { formRouter } from "./routers/form.router";
+import { workflowRouter } from "./routers/workflow.router";
+import { fileRouter } from "./routers/file.router";
+import { activityRouter } from "./routers/activity.router";
+import { knowledgeRouter } from "./routers/knowledge.router";
+import { seoRouter } from "./routers/seo.router";
+import { projectRouter } from "./routers/project.router";
+import { contractRouter } from "./routers/contract.router";
+import { paymentRouter } from "./routers/payment.router";
 
 export const appRouter = router({
   dashboard: dashboardRouter,
@@ -61,6 +71,19 @@ export const appRouter = router({
   media: mediaRouter,
   workspace: workspaceRouter,
   analytics: analyticsRouter,
+  securityAudit: securityAuditRouter,
+  form: formRouter,
+  workflow: workflowRouter,
+  file: fileRouter,
+  activity: activityRouter,
+  knowledge: knowledgeRouter,
+  seo: seoRouter,
+  project: projectRouter,
+  contract: contractRouter,
+  payment: paymentRouter,
 });
 
 export type AppRouter = typeof appRouter;
+
+export { importLeadRecords } from "./lib/lead-import";
+export { createPublicFormSubmission } from "./lib/public-form-submission";

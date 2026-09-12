@@ -16,6 +16,7 @@ import { invalidateWorkspaceOwnerIdCache } from "../lib/workspace";
 import { countWorkspaceOwners } from "../lib/workspace-members";
 import { workspaceMemberUserIds } from "../lib/workspace-members";
 import { passwordPolicySchema } from "../lib/password-policy";
+import { recordSecurityAuditEvent } from "../lib/security-audit";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -82,6 +83,15 @@ export const workspaceRouter = router({
     .input(z.object({ workspaceId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const workspaceId = await switchActiveWorkspace(ctx.db, ctx.user.id, input.workspaceId);
+      await recordSecurityAuditEvent(ctx.db, {
+        workspaceId,
+        actorUserId: ctx.user.id,
+        action: "WORKSPACE_SWITCHED",
+        resource: "workspace",
+        resourceId: workspaceId,
+        result: "SUCCESS",
+        requestId: ctx.requestId,
+      });
       return { workspaceId };
     }),
 

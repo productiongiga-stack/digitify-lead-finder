@@ -7,7 +7,7 @@ import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Skeleton, Inpu
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@digitify/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@digitify/ui";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@digitify/ui";
-import { ArrowLeft, UserPlus, Loader2, Trash2, AlertTriangle, CheckCircle2, XCircle, CalendarDays, Layers, Users2, Pencil } from "lucide-react";
+import { ArrowLeft, UserPlus, Loader2, Trash2, AlertTriangle, CheckCircle2, XCircle, CalendarDays, Layers, Users2, Pencil, Eye } from "lucide-react";
 import Link from "next/link";
 import { formatDate } from "@/lib/utils";
 import { ALL_MODULES } from "@/lib/navigation";
@@ -61,6 +61,9 @@ export default function TeamSettingsPage() {
     | undefined;
   const currentRole = sessionUser?.workspaceRole ?? sessionUser?.role;
   const canManageUsers = currentRole === "OWNER";
+  const canManageModules = currentRole === "OWNER" || currentRole === "ADMIN";
+  const { data: platformAccess } = trpc.user.getPlatformAccess.useQuery();
+  const isPlatformOwner = platformAccess?.isPlatformOwner === true;
   const { data: workspaceInfo } = trpc.user.getWorkspaceInfo.useQuery();
   const canInviteMembers = canManageUsers && workspaceInfo && !workspaceInfo.isPersonal;
   const { data: users, isLoading } = trpc.user.list.useQuery();
@@ -120,6 +123,18 @@ export default function TeamSettingsPage() {
   const [editTarget, setEditTarget] = useState<{ id: string; name: string; email: string } | null>(null);
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
+  const [viewTargetId, setViewTargetId] = useState<string | null>(null);
+
+  async function startViewingAccount(userId: string) {
+    setViewTargetId(userId);
+    const response = await fetch("/api/account-view/start", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId }),
+    });
+    if (response.ok) window.location.href = "/dashboard";
+    else setViewTargetId(null);
+  }
 
   return (
     <div className="space-y-5">
@@ -195,6 +210,12 @@ export default function TeamSettingsPage() {
         </div>
       ) : null}
 
+      {isPlatformOwner ? (
+        <div className="rounded-xl border border-amber-300/60 bg-amber-50/70 px-4 py-3 text-sm text-amber-950">
+          <strong>Platformbeheer:</strong> je ziet alle geregistreerde accounts en hun veilige workspace-overzicht. Wachtwoorden, tokens en integratiesleutels blijven afgeschermd.
+        </div>
+      ) : null}
+
       <Card>
         <Table>
           <TableHeader>
@@ -265,7 +286,7 @@ export default function TeamSettingsPage() {
                   <TableCell>{user._count.leads}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{formatDate(user.createdAt)}</TableCell>
                   <TableCell>
-                    {canManageUsers ? (
+                    {canManageModules ? (
                       <div className="flex items-center gap-1">
                         <Button
                           variant="ghost"
@@ -284,19 +305,34 @@ export default function TeamSettingsPage() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                          title="Module toegang"
+                          title={user.id === (session?.user as { id?: string } | undefined)?.id
+                            ? "Je eigen moduletoegang kan niet worden gewijzigd"
+                            : "Module toegang"}
+                          disabled={user.id === (session?.user as { id?: string } | undefined)?.id}
                           onClick={() => setModuleTarget({ id: user.id, name: user.name || user.email })}
                         >
                           <Layers className="h-4 w-4" />
                         </Button>
-                        <Button
+                        {canManageUsers && user.id !== (session?.user as { id?: string } | undefined)?.id ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                            title="Account bekijken"
+                            disabled={viewTargetId === user.id}
+                            onClick={() => startViewingAccount(user.id)}
+                          >
+                            {viewTargetId === user.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+                          </Button>
+                        ) : null}
+                        {!isPlatformOwner ? <Button
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-destructive hover:text-destructive"
                           onClick={() => setDeleteTarget({ id: user.id, name: user.name })}
                         >
                           <Trash2 className="h-4 w-4" />
-                        </Button>
+                        </Button> : null}
                       </div>
                     ) : null}
                   </TableCell>
@@ -308,7 +344,7 @@ export default function TeamSettingsPage() {
       </Card>
 
       {/* Module access modal */}
-      {moduleTarget && canManageUsers && (
+      {moduleTarget && canManageModules && (
         <Dialog open={!!moduleTarget} onOpenChange={(open) => !open && setModuleTarget(null)}>
           <DialogContent className="max-w-lg">
             <DialogHeader>

@@ -63,6 +63,7 @@ export async function POST(request: Request) {
         where: { email },
         data: {
           passwordHash: hashPassword(password),
+          sessionVersion: { increment: 1 },
           emailVerified: new Date(),
           role: "OWNER",
         },
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, catchUp, user, schemaFixed: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "unknown_error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    log.api.error("Bootstrap database operation failed", {}, error);
+    return NextResponse.json({ error: "database_operation_failed" }, { status: 500 });
   }
 }

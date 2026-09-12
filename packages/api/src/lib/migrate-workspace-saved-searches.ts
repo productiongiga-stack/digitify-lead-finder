@@ -1,3 +1,4 @@
+import { runLegacyImportOnce } from "./legacy-import-once";
 import type { PrismaClient } from "@digitify/db";
 import { isMissingSchemaError } from "./prisma-schema";
 import { readWorkspaceJsonSetting } from "./user-json-setting";
@@ -17,7 +18,7 @@ type LegacySavedSearch = {
   updatedAt: string;
 };
 
-export async function migrateLegacyWorkspaceSavedSearches(
+async function importRows(
   db: PrismaClient,
   scope: WorkspaceScope,
 ): Promise<{ imported: number }> {
@@ -27,7 +28,7 @@ export async function migrateLegacyWorkspaceSavedSearches(
       where: { createdById: scope.workspaceId },
     });
   } catch (error) {
-    if (isMissingSchemaError(error)) return { imported: 0 };
+    if (isMissingSchemaError(error)) throw error;
     throw error;
   }
   if (existing > 0) return { imported: 0 };
@@ -64,4 +65,8 @@ export async function migrateLegacyWorkspaceSavedSearches(
     if (isMissingSchemaError(error)) return { imported: 0 };
     throw error;
   }
+}
+
+export async function migrateLegacyWorkspaceSavedSearches(db: PrismaClient, scope: WorkspaceScope) {
+  return runLegacyImportOnce(db, scope.workspaceId, "saved-searches", (tx) => importRows(tx, scope));
 }

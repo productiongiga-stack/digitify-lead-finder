@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import type { PrismaClient } from "@digitify/db";
 import { sendBrandedEmail } from "./email-sender";
+import { log } from "./logger";
 
 export const QUOTE_ID_MARKER_RE = /\[\[QUOTE_ID=([^\]]+)\]\]/;
 
@@ -135,6 +136,9 @@ export async function syncQuoteOutboundDrafts(
       body: appendQuoteIdMarker(body, quoteId),
       subject,
       toEmail: quote.clientEmail,
+      status: "DRAFT",
+      approvedAt: null,
+      approverId: null,
     },
   });
 
@@ -174,18 +178,9 @@ export async function sendApprovedQuoteDraft(
     throw new TRPCError({ code: "NOT_FOUND", message: "Gekoppelde offerte niet gevonden." });
   }
 
-  await syncQuoteOutboundDrafts(db, quote.id, workspaceId);
-
-  const freshQuote = await db.quote.findFirst({
-    where: { id: quoteId, createdById: workspaceId },
-    include: { items: { orderBy: { sortOrder: "asc" } } },
-  });
-  if (!freshQuote) {
-    throw new TRPCError({ code: "NOT_FOUND", message: "Gekoppelde offerte niet gevonden." });
-  }
-
-  const { body: composedBody } = buildQuoteOutboundEmailBody(freshQuote);
-  const subject = `Offerte ${freshQuote.quoteNumber} voor ${freshQuote.clientCompany || freshQuote.clientName}`;
+  const freshQuote = quote;
+  const composedBody = stripQuoteIdMarker(draft.body);
+  const subject = draft.subject;
   const pdfToken = createQuotePdfToken(freshQuote.id, freshQuote.validUntil);
   const attachmentName = `Offerte-${freshQuote.quoteNumber}.pdf`;
   const quoteDownloadUrl = `${getAppUrl()}/api/public/quotes/${freshQuote.id}/pdf?token=${encodeURIComponent(pdfToken)}&download=1`;
@@ -196,7 +191,7 @@ export async function sendApprovedQuoteDraft(
     body: composedBody,
     recipientCompany: freshQuote.clientCompany || freshQuote.clientName,
     leadId: draft.leadId,
-    userId,
+    userId: workspaceId,
     trackingDraftId: draft.id,
     placeholderContext: {
       quoteNumber: freshQuote.quoteNumber,
@@ -219,14 +214,7 @@ export async function sendApprovedQuoteDraft(
         status: freshQuote.status === "DRAFT" ? "SENT" : freshQuote.status,
         sentAt: freshQuote.sentAt || new Date(),
       },
-    });
-    await db.emailDraft.update({
-      where: { id: draft.id },
-      data: {
-        subject,
-        body: appendQuoteIdMarker(composedBody, freshQuote.id),
-      },
-    });
+    }).catch((error) => log.email.error("Sent quote bookkeeping failed", { quoteId, draftId: draft.id, userId }, error));
   }
 
   return result;

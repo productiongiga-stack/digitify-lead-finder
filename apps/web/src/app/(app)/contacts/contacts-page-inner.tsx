@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -7,9 +8,6 @@ import { trpc } from "@/lib/trpc/client";
 import {
   Button,
   Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   Badge,
   Skeleton,
   Dialog,
@@ -43,15 +41,12 @@ import {
   Info,
   CalendarDays,
 } from "lucide-react";
-import { OutboundAgendaPanel } from "@/components/outbound/outbound-agenda-panel";
 import {
   OUTBOUND_EMAIL_TYPE_OPTIONS,
   OUTBOUND_SOURCE_MODULE_OPTIONS,
-  getOutboundEmailTypeLabel,
   getOutboundSourceModuleLabel,
 } from "@/lib/outbound-source";
 import { formatDate } from "@/lib/utils";
-import { EmailPreview } from "@/components/email/preview";
 import { extractEmailTemplateMetadata } from "@/lib/email-content";
 import {
   type OutboundStatCardStatus,
@@ -66,12 +61,24 @@ import {
   getSendButtonLabel,
 } from "@/lib/contact-status";
 import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
-import { OutboundInfoPanel } from "@/components/outbound/outbound-info-panel";
 import {
   extractQuoteIdFromDraftBody,
   getQuoteConfiguratorUrl,
 } from "@/lib/quote-outbound";
 import { useShellEmailPreviewProps } from "@/lib/outbound-email-settings";
+
+const OutboundAgendaPanel = dynamic(
+  () => import("@/components/outbound/outbound-agenda-panel").then((module) => module.OutboundAgendaPanel),
+  { ssr: false },
+);
+const OutboundInfoPanel = dynamic(
+  () => import("@/components/outbound/outbound-info-panel").then((module) => module.OutboundInfoPanel),
+  { ssr: false },
+);
+const EmailPreview = dynamic(
+  () => import("@/components/email/preview").then((module) => module.EmailPreview),
+  { ssr: false },
+);
 
 function QuoteConfiguratorButton({
   draft,
@@ -155,7 +162,7 @@ export function ContactsPageInner() {
 
   const drafts = data?.items ?? [];
   const selectedSet = new Set(selectedDraftIds);
-  const selectableDrafts = drafts.filter((draft) => draft.status !== "SENDING");
+  const selectableDrafts = drafts.filter((draft) => !["SENDING", "DELIVERY_UNKNOWN"].includes(draft.status));
   const selectedDrafts = drafts.filter((draft) => selectedSet.has(draft.id));
   const allVisibleSelected = selectableDrafts.length > 0 && selectableDrafts.every((draft) => selectedSet.has(draft.id));
   const sendableSelectedCount = selectedDrafts.filter((draft) => canSendOutboundDraft(draft.status)).length;

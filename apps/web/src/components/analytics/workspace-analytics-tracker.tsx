@@ -2,8 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
-import { useSession } from "next-auth/react";
 import { trpc } from "@/lib/trpc/client";
+import { useShellContext } from "@/components/layout/shell-provider";
 
 function getSessionId() {
   if (typeof window === "undefined") return undefined;
@@ -25,12 +25,9 @@ function browserRequestsDnt() {
 
 export function WorkspaceAnalyticsTracker() {
   const pathname = usePathname();
-  const { status } = useSession();
-  const { data: trackingConfig } = trpc.analytics.getTrackingConfig.useQuery(undefined, {
-    enabled: status === "authenticated",
-    staleTime: 5 * 60_000,
-    refetchOnWindowFocus: false,
-  });
+  const { data: shell, isAppShell } = useShellContext();
+  const trackingConfig = shell?.tracking;
+  const status = isAppShell ? "authenticated" : "unauthenticated";
   const { mutate: trackPageView } = trpc.analytics.trackPageView.useMutation();
   const lastTracked = useRef<string | null>(null);
 

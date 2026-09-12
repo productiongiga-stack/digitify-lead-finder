@@ -39,7 +39,7 @@ export function computeInvoiceStatus(
   status: SerializedInvoice["status"],
   dueDate: Date,
 ): SerializedInvoice["status"] {
-  if (status === "PAID" || status === "CANCELLED") return status;
+  if (status === "DRAFT" || status === "PAID" || status === "CANCELLED") return status;
   if (dueDate.getTime() < Date.now() && status !== "OVERDUE") return "OVERDUE";
   return status;
 }

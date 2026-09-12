@@ -1,21 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/http-security";
 
 /**
  * Edge middleware: rate-limit credential login + registration.
  * Uses Upstash REST when UPSTASH_REDIS_REST_* is set; otherwise in-memory per edge node.
  */
-
-function clientIp(req: NextRequest): string {
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  const realIp = req.headers.get("x-real-ip");
-  if (realIp) return realIp.trim();
-  return "unknown";
-}
 
 const LIMITS: { match: (path: string) => boolean; key: string; limit: number; windowMs: number }[] = [
   {
@@ -46,7 +36,7 @@ const LIMITS: { match: (path: string) => boolean; key: string; limit: number; wi
 
 export async function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
-  const ip = clientIp(req);
+  const ip = getClientIp(req);
 
   for (const rule of LIMITS) {
     if (!rule.match(path)) continue;
@@ -77,7 +67,11 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+  if (path.startsWith("/api/auth/") || path.startsWith("/api/trpc/")) {
+    response.headers.set("Cache-Control", "private, no-store, max-age=0");
+  }
+  return response;
 }
 
 export const config = {

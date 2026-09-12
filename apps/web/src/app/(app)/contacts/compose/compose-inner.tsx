@@ -13,7 +13,6 @@ import {
   Label,
   Textarea,
   Badge,
-  Separator,
   Dialog,
   DialogContent,
   DialogHeader,
@@ -24,7 +23,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Skeleton,
 } from "@digitify/ui";
 import {
   Send,
@@ -138,7 +136,7 @@ export function ComposeInner() {
     forOutbound: true,
     campaignId: campaignFilterId || undefined,
   });
-  const templates = templateData?.templates ?? [];
+  const templates = useMemo(() => templateData?.templates ?? [], [templateData?.templates]);
   const preloadedTemplateQuery = trpc.template.get.useQuery(
     { id: templateIdFromQuery },
     { enabled: Boolean(templateIdFromQuery) },

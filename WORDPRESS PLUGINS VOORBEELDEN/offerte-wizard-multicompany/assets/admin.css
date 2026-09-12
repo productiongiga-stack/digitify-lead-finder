@@ -1,0 +1,55 @@
+
+/* Premium admin styling for Offerte Wizard pages */
+.owmc-admin .owmc-header{
+  display:flex; align-items:flex-start; justify-content:space-between;
+  gap:16px; flex-wrap:wrap; margin: 12px 0 18px;
+}
+.owmc-admin .owmc-h1{ font-size:28px; margin:0; letter-spacing:-.02em; }
+.owmc-admin .owmc-sub{ margin:6px 0 0; color:#5b6472; font-size:13.5px; }
+.owmc-admin .owmc-chipRow{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.owmc-admin .owmc-chip{
+  background:#fff; border:1px solid rgba(17,19,24,.12);
+  border-radius:999px; padding:8px 12px; box-shadow: 0 10px 24px rgba(0,0,0,.06);
+  font-size:12.5px;
+}
+.owmc-admin .owmc-grid2{
+  display:grid; grid-template-columns: 360px 1fr; gap:16px;
+}
+@media (max-width: 1180px){
+  .owmc-admin .owmc-grid2{ grid-template-columns: 1fr; }
+}
+.owmc-admin .owmc-card{
+  background:#fff; border:1px solid rgba(17,19,24,.12); border-radius:14px;
+  box-shadow: 0 14px 36px rgba(0,0,0,.08);
+  padding:16px;
+}
+.owmc-admin .owmc-cardFull{ margin-top:16px; }
+.owmc-admin .owmc-cardHead h2{ margin:0 0 4px; font-size:16px; }
+.owmc-admin .owmc-cardHead p{ margin:0 0 12px; color:#5b6472; }
+.owmc-admin .owmc-selectWide{
+  width:100%; max-width:100%;
+  padding:10px 12px; border-radius:12px;
+  border:1px solid rgba(17,19,24,.16);
+}
+.owmc-admin .owmc-textareaCode{
+  width:100%; max-width:100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size:12.5px; line-height:1.45;
+  border-radius:12px; border:1px solid rgba(17,19,24,.16);
+  padding:12px;
+  background: #0b1020;
+  color: #e7ecff;
+}
+.owmc-admin .owmc-actionsRow{
+  display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px;
+}
+.owmc-admin .owmc-hint{ color:#5b6472; font-size:12.5px; }
+.owmc-admin .owmc-list{ margin:0; padding-left:18px; color:#2b2f36; }
+.owmc-admin .owmc-list li{ margin:6px 0; }
+.owmc-admin .owmc-pre{
+  background:#0b1020; color:#e7ecff;
+  padding:14px; border-radius:12px;
+  border:1px solid rgba(17,19,24,.14);
+  overflow:auto;
+}
+.owmc-admin .owmc-spacer{ height:12px; }

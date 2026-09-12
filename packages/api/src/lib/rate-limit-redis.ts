@@ -17,7 +17,15 @@ async function getRedisClient(url: string): Promise<RedisClient | null> {
     clientPromise = (async () => {
       try {
         const { createClient } = await import("redis");
-        const client = createClient({ url }) as RedisClient;
+        const client = createClient({
+          url,
+          socket: {
+            // Rate limiting must never hold an application request hostage when
+            // Redis is unavailable. The distributed limiter falls back to memory.
+            connectTimeout: 1_000,
+            reconnectStrategy: false,
+          },
+        }) as RedisClient;
         client.on("error", () => {});
         await client.connect();
         return client;

@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { OpenClawClient, type OpenClawContext } from "@digitify/openclaw";
 import { type PrismaClient } from "@digitify/db";
 import { normalizeAiPlaceholderSyntax } from "../lib/email-utils";
+import { sendApprovedDraft } from "../lib/approved-email-send";
 import { sendBrandedEmail } from "../lib/email-sender";
 import { EMAIL_SYSTEM_TEMPLATES } from "../lib/email-template-starter-pack";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
@@ -142,37 +143,20 @@ async function runScheduledSequence(params: {
       continue;
     }
 
-    const sendResult = await sendBrandedEmail(db, {
-      toEmail,
-      subject: draft.subject,
-      body: draft.body,
-      recipientCompany: draft.lead.companyName,
-      leadId: draft.lead.id,
-      userId: workspaceId,
-      trackingDraftId: draft.id,
-    });
-
-    if (sendResult.success) {
-      await db.emailDraft.update({
-        where: { id: draft.id },
-        data: {
-          status: "SENT",
-          sentAt: now,
-          messageId: sendResult.messageId || null,
-          rejectionNote: null,
-        },
-      });
+    try {
+      await sendApprovedDraft(db, draft.id, workspaceId, (approved) => sendBrandedEmail(db, {
+        toEmail: approved.toEmail, subject: approved.subject, body: approved.body,
+        recipientCompany: approved.lead?.companyName, leadId: approved.leadId ?? undefined,
+        userId: workspaceId, trackingDraftId: approved.id,
+      }), { drip: true });
       sent += 1;
-    } else {
-      await db.emailDraft.update({
-        where: { id: draft.id },
-        data: {
-          status: "FAILED",
-          rejectionNote: sendResult.error || "Verzenden mislukt",
-        },
-      });
-      failed += 1;
-      errors.push(`${draft.lead.companyName}: ${sendResult.error || "verzenden mislukt"}`);
+    } catch (error) {
+      if (error instanceof TRPCError && ["CONFLICT", "FORBIDDEN"].includes(error.code)) {
+        stopped += 1;
+      } else {
+        failed += 1;
+        errors.push(`${draft.lead.companyName}: verzending vereist controle`);
+      }
     }
   }
 

@@ -9,7 +9,7 @@ import {
   redactSecretSettingValue,
   SECRET_REDACTION_MASK,
 } from "@digitify/db";
-import { router, publicRateLimitedProcedure, protectedProcedure, adminProcedure, ownerProcedure, mutationProcedure, aiRateLimitedProcedure } from "../trpc";
+import { router, publicRateLimitedProcedure, protectedProcedure, adminProcedure, ownerProcedure, sensitiveOwnerProcedure, mutationProcedure, aiRateLimitedProcedure } from "../trpc";
 import { effectiveWorkspaceRole } from "../lib/effective-role";
 import { generateMasterShellHtml } from "../lib/generate-email-shell";
 import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
@@ -42,7 +42,15 @@ import { applyWorkspaceCacheSettings, getDefaultCacheSettings } from "../lib/cac
 import { clearAllDashboardCache, invalidateDashboardCacheForUser } from "../lib/dashboard-cache";
 import { clearAllSettingsCache } from "../lib/user-settings";
 import { verifyGooglePlacesApiKey } from "../lib/google-places";
+import { isValidMetaAppId } from "../lib/oauth-credentials";
+import { resolveMetaGraphVersion } from "../lib/social-meta";
 import { ensurePublicTenantToken } from "../lib/public-tenant";
+import { loadUserMuapiKey } from "../lib/muapi-key";
+import { clearUserMuapiKey } from "../lib/muapi-key";
+import { recordSecurityAuditEvent } from "../lib/security-audit";
+import { CONNECTOR_IDS, CONNECTOR_SETTING_KEYS, connectorIdForSettingKey, missingConnectorConfiguration } from "../lib/connector-config";
+import { assertPublicHttpUrl, runLocalConnectorProbe } from "@digitify/connectors";
+import { verifySmtpConnection } from "@digitify/email";
 
 /* ---------- helpers ---------- */
 
@@ -57,6 +65,27 @@ function isSecretNoopUpdate(key: string, value: unknown) {
   if (!isSecretSettingKey(key)) return false;
   const normalized = typeof value === "string" ? value.trim() : value;
   return normalized === "" || normalized === SECRET_REDACTION_MASK || normalized === null || normalized === undefined;
+}
+
+const ACCOUNT_VIEW_BLOCKED_SETTING_PREFIXES = ["api.", "openclaw.", "integrations.", "analytics.", "cache.", "seo.", "social."];
+const ACCOUNT_VIEW_BLOCKED_SETTING_KEYS = new Set([
+  "bookings.google_calendar_timezone",
+  "bookings.google_service_account_private_key",
+  "bookings.webhook_secret",
+]);
+
+function assertCanChangeSettingWhileViewingAs(user: { isViewingAs?: boolean }, key: string) {
+  if (
+    user.isViewingAs &&
+    (isSecretSettingKey(key) ||
+      ACCOUNT_VIEW_BLOCKED_SETTING_KEYS.has(key) ||
+      ACCOUNT_VIEW_BLOCKED_SETTING_PREFIXES.some((prefix) => key.startsWith(prefix)))
+  ) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Gevoelige instellingen kunnen niet gewijzigd worden tijdens het bekijken van een account.",
+    });
+  }
 }
 
 function sanitizeSettingsForViewer(settings: Record<string, unknown>) {
@@ -223,7 +252,7 @@ export const settingsRouter = router({
     .input(z.object({ limit: z.number().min(5).max(200).default(50) }).optional())
     .query(async ({ input }) => getPerformanceSnapshot(input?.limit ?? 50)),
 
-  clearPerformanceMetrics: ownerProcedure.mutation(async () => {
+  clearPerformanceMetrics: sensitiveOwnerProcedure.mutation(async () => {
     clearPerformanceSnapshot();
     return { success: true };
   }),
@@ -381,7 +410,12 @@ export const settingsRouter = router({
   getSeoSettings: protectedProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, SEO_SETTINGS_KEYS)),
 
   /** Review embed & public copy settings (avoids getAll). */
-  getReviewsSettings: protectedProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, REVIEWS_SETTINGS_KEYS)),
+  getReviewsSettings: protectedProcedure.query(async ({ ctx }) => {
+    const scope = workspaceScopeFromUser(ctx.user);
+    const tenantToken = await ensurePublicTenantToken(ctx.db, scope.workspaceId);
+    const settings = await loadSettingsBundle(ctx, REVIEWS_SETTINGS_KEYS);
+    return { ...(settings as Record<string, unknown>), "chatbot.public_tenant_token": tenantToken };
+  }),
 
   /** Quote configurator embed & PDF settings (avoids getAll). */
   getQuotesConfiguratorSettings: protectedProcedure.query(async ({ ctx }) =>
@@ -392,6 +426,253 @@ export const settingsRouter = router({
   getIntegrationsSettings: protectedProcedure.query(async ({ ctx }) =>
     loadSettingsBundle(ctx, INTEGRATIONS_SETTINGS_KEYS),
   ),
+
+  /** Safe connector summary. Never returns secret values or access tokens. */
+  getConnectorOverview: protectedProcedure.query(async ({ ctx }) => {
+    const scope = workspaceScopeFromUser(ctx.user);
+    const [settingsRows, muapiKey, testEvents, configEvents] = await Promise.all([
+      loadWorkspaceSettingRows(ctx.db, scope, [
+        ...INTEGRATIONS_SETTINGS_KEYS,
+        "bookings.webhook_url",
+        "integrations.stripe_secret_key",
+        "integrations.wordpress_url",
+        "integrations.wordpress_username",
+        "integrations.wordpress_application_password",
+      ]),
+      loadUserMuapiKey(ctx.db, ctx.user.id),
+      ctx.db.securityAuditEvent.findMany({
+        where: { workspaceId: ctx.user.workspaceId!, action: { in: ["CONNECTOR_TESTED", "CONNECTOR_LIVE_TESTED"] }, resource: "connector" },
+        orderBy: { createdAt: "desc" },
+        distinct: ["resourceId"],
+        take: CONNECTOR_IDS.length,
+        select: { resourceId: true, result: true, reason: true, action: true, createdAt: true },
+      }),
+      ctx.db.securityAuditEvent.findMany({
+        where: { workspaceId: ctx.user.workspaceId!, action: "CONNECTOR_CONFIG_CHANGED", resource: "connector" },
+        orderBy: { createdAt: "desc" },
+        distinct: ["resourceId"],
+        take: CONNECTOR_IDS.length,
+        select: { resourceId: true, createdAt: true },
+      }),
+    ]);
+    const settings = settingsRowsToMap(settingsRows);
+    const has = (key: string) => Boolean(getSettingString(settings, key, "").trim());
+    const smtpConfigured = has("email.smtp_host") && has("email.smtp_user") && has("email.smtp_pass") && has("email.from_email");
+    const imapConfigured = has("email.imap_host") && has("email.imap_user") && has("email.imap_pass");
+    const googleOAuthConfigured = has("integrations.google_oauth_client_id") && has("integrations.google_oauth_client_secret");
+    const googleAccountConnected = has("bookings.google_oauth_account_email");
+    const metaConfigured = has("integrations.meta_app_id") && has("integrations.meta_app_secret");
+    const webhookConfigured = has("bookings.webhook_url");
+
+    const latestTestByConnector = new Map<string, (typeof testEvents)[number]>();
+    const latestConfigChangeByConnector = new Map(configEvents.flatMap((event) => event.resourceId ? [[event.resourceId, event.createdAt] as const] : []));
+    const liveConnected = new Set<string>();
+    for (const event of testEvents) {
+      if (event.resourceId && !latestTestByConnector.has(event.resourceId)) latestTestByConnector.set(event.resourceId, event);
+      if (event.action === "CONNECTOR_LIVE_TESTED" && event.result === "SUCCESS" && event.resourceId && (!latestConfigChangeByConnector.get(event.resourceId) || event.createdAt > latestConfigChangeByConnector.get(event.resourceId)!)) liveConnected.add(event.resourceId);
+    }
+
+    const connector = (id: string, label: string, configured: boolean, connected = false, note?: string) => ({
+      id,
+      label,
+      status: connected ? "CONNECTED" as const : configured ? "CONFIGURED" as const : "NOT_CONFIGURED" as const,
+      note: note ?? (connected ? "Klaar voor gebruik." : configured ? "Instellingen aanwezig; test de verbinding." : "Nog niet ingesteld."),
+      lastTest: latestTestByConnector.get(id)
+        ? {
+            result: latestTestByConnector.get(id)!.result,
+            reason: latestTestByConnector.get(id)!.reason,
+            mode: latestTestByConnector.get(id)!.action === "CONNECTOR_LIVE_TESTED" ? "live" as const : "lokaal" as const,
+            checkedAt: latestTestByConnector.get(id)!.createdAt,
+          }
+        : null,
+    });
+
+    return {
+      connectors: [
+        connector("google", "Google", googleOAuthConfigured, googleAccountConnected, googleAccountConnected ? "Google-account gekoppeld." : undefined),
+        connector("meta", "Meta", metaConfigured, false, metaConfigured ? "App-instellingen aanwezig; koppel een account." : undefined),
+        connector("smtp", "SMTP", smtpConfigured, liveConnected.has("smtp")),
+        connector("imap", "IMAP", imapConfigured, liveConnected.has("imap")),
+        connector("muapi", "MuAPI", Boolean(muapiKey)),
+        connector("webhook", "Webhook / API", webhookConfigured),
+        connector("stripe", "Stripe", has("integrations.stripe_secret_key"), liveConnected.has("stripe"), has("integrations.stripe_secret_key") ? undefined : "Nog niet ingesteld."),
+        connector("wordpress", "WordPress", has("integrations.wordpress_url"), liveConnected.has("wordpress"), has("integrations.wordpress_url") ? undefined : "Nog niet ingesteld."),
+      ],
+      lastCheckedAt: new Date(),
+    };
+  }),
+
+  testConnector: sensitiveOwnerProcedure
+    .input(z.object({ connectorId: z.enum(CONNECTOR_IDS) }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromUser(ctx.user);
+      const [rows, muapiKey] = await Promise.all([
+        loadWorkspaceSettingRows(ctx.db, scope, [...INTEGRATIONS_SETTINGS_KEYS, "bookings.webhook_url"]),
+        input.connectorId === "muapi" ? loadUserMuapiKey(ctx.db, ctx.user.id) : Promise.resolve(null),
+      ]);
+      const settings = settingsRowsToMap(rows);
+      const missing = missingConnectorConfiguration(input.connectorId, settings, muapiKey);
+      const probe = runLocalConnectorProbe({ connectorId: input.connectorId, missing });
+      const success = probe.status === "READY";
+      await recordSecurityAuditEvent(ctx.db, {
+        workspaceId: ctx.user.workspaceId,
+        actorUserId: ctx.user.actorUserId ?? ctx.user.id,
+        targetUserId: ctx.user.id,
+        action: "CONNECTOR_TESTED",
+        resource: "connector",
+        resourceId: input.connectorId,
+        result: success ? "SUCCESS" : "FAILED",
+        reason: probe.code,
+        requestId: ctx.requestId,
+        metadata: { connectorId: input.connectorId, adapter: probe.adapter, code: probe.code, missingCount: missing.length },
+      });
+      return {
+        connectorId: input.connectorId,
+        mode: probe.adapter,
+        status: probe.status,
+        code: probe.code,
+        message: probe.message,
+        missing,
+      };
+    }),
+
+  testConnectorLive: sensitiveOwnerProcedure
+    .input(z.object({ connectorId: z.enum(["google", "meta", "smtp", "imap", "stripe", "wordpress"] as const) }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromUser(ctx.user);
+      const keys = input.connectorId === "google"
+        ? ["api.google_places_key"]
+        : input.connectorId === "meta"
+          ? ["integrations.meta_app_id", "integrations.meta_app_secret"]
+          : input.connectorId === "smtp"
+            ? ["email.smtp_host", "email.smtp_port", "email.smtp_user", "email.smtp_pass", "email.smtp_servername", "email.smtp_tls_reject_unauthorized"]
+            : input.connectorId === "imap"
+              ? ["email.imap_host", "email.imap_port", "email.imap_user", "email.imap_pass", "email.imap_tls", "email.smtp_servername", "email.smtp_tls_reject_unauthorized"]
+              : input.connectorId === "stripe"
+                ? ["integrations.stripe_secret_key"]
+                : ["integrations.wordpress_url", "integrations.wordpress_username", "integrations.wordpress_application_password"];
+      const settings = settingsRowsToMap(await loadWorkspaceSettingRows(ctx.db, scope, keys));
+      const missing = input.connectorId === "google" && !getSettingString(settings, "api.google_places_key")
+        ? ["Google Places API-key"]
+        : missingConnectorConfiguration(input.connectorId, settings);
+      if (missing.length > 0) {
+        await recordSecurityAuditEvent(ctx.db, {
+          workspaceId: ctx.user.workspaceId,
+          actorUserId: ctx.user.actorUserId ?? ctx.user.id,
+          targetUserId: ctx.user.id,
+          action: "CONNECTOR_LIVE_TESTED",
+          resource: "connector",
+          resourceId: input.connectorId,
+          result: "FAILED",
+          reason: "MISSING_CONFIGURATION",
+          requestId: ctx.requestId,
+          metadata: { connectorId: input.connectorId, missingCount: missing.length },
+        });
+        return { connectorId: input.connectorId, mode: "LIVE" as const, status: "NOT_CONFIGURED" as const, code: "MISSING_CONFIGURATION" as const, message: "Configuratie ontbreekt.", missing };
+      }
+
+      try {
+        const host = getSettingString(settings, input.connectorId === "smtp" ? "email.smtp_host" : "email.imap_host");
+        const port = Number(getSettingString(settings, input.connectorId === "smtp" ? "email.smtp_port" : "email.imap_port", input.connectorId === "smtp" ? "587" : "993"));
+        const user = getSettingString(settings, input.connectorId === "smtp" ? "email.smtp_user" : "email.imap_user");
+        const pass = getSettingString(settings, input.connectorId === "smtp" ? "email.smtp_pass" : "email.imap_pass");
+        const tls = getSettingBoolean(settings, input.connectorId === "smtp" ? "email.smtp_tls_reject_unauthorized" : "email.imap_tls", true);
+        const servername = getSettingString(settings, "email.smtp_servername");
+
+        if (input.connectorId === "google") {
+          await verifyGooglePlacesApiKey(getSettingString(settings, "api.google_places_key"));
+        } else if (input.connectorId === "meta") {
+          const appId = getSettingString(settings, "integrations.meta_app_id");
+          const appSecret = getSettingString(settings, "integrations.meta_app_secret");
+          if (!isValidMetaAppId(appId)) throw new Error("invalid app id");
+          const url = new URL(`https://graph.facebook.com/${resolveMetaGraphVersion()}/oauth/access_token`);
+          url.searchParams.set("client_id", appId);
+          url.searchParams.set("client_secret", appSecret);
+          url.searchParams.set("grant_type", "client_credentials");
+          const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+          if (!response.ok) throw new Error("Meta app-auth mislukt");
+        } else if (input.connectorId === "stripe") {
+          const response = await fetch("https://api.stripe.com/v1/account", {
+            headers: { Authorization: `Bearer ${getSettingString(settings, "integrations.stripe_secret_key")}` },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!response.ok) throw new Error("Stripe account-check mislukt");
+        } else if (input.connectorId === "wordpress") {
+          const baseUrl = await assertPublicHttpUrl(getSettingString(settings, "integrations.wordpress_url"));
+          const endpoint = new URL("wp-json/", baseUrl).toString();
+          const username = getSettingString(settings, "integrations.wordpress_username");
+          const applicationPassword = getSettingString(settings, "integrations.wordpress_application_password");
+          const headers = username && applicationPassword
+            ? { Authorization: `Basic ${Buffer.from(`${username}:${applicationPassword}`).toString("base64")}` }
+            : undefined;
+          const response = await fetch(endpoint, { headers, signal: AbortSignal.timeout(10_000) });
+          if (!response.ok) throw new Error("WordPress REST-check mislukt");
+        } else if (input.connectorId === "smtp") {
+          await verifySmtpConnection({ host, port, user, pass, secure: port === 465, tls: { rejectUnauthorized: tls, servername: servername || undefined } });
+        } else {
+          const { ImapFlow } = await import("imapflow");
+          const client = new ImapFlow({
+            host, port, secure: tls, auth: { user, pass }, logger: false as any,
+            connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 15_000,
+            tls: { rejectUnauthorized: getSettingBoolean(settings, "email.smtp_tls_reject_unauthorized", true), ...(servername ? { servername } : {}) },
+          });
+          await client.connect();
+          await client.logout();
+        }
+
+        await recordSecurityAuditEvent(ctx.db, {
+          workspaceId: ctx.user.workspaceId,
+          actorUserId: ctx.user.actorUserId ?? ctx.user.id,
+          targetUserId: ctx.user.id,
+          action: "CONNECTOR_LIVE_TESTED",
+          resource: "connector",
+          resourceId: input.connectorId,
+          result: "SUCCESS",
+          reason: "CONNECTION_VERIFIED",
+          requestId: ctx.requestId,
+          metadata: { connectorId: input.connectorId, timeoutMs: 15_000 },
+        });
+        return { connectorId: input.connectorId, mode: "LIVE" as const, status: "READY" as const, code: "CONNECTION_VERIFIED" as const, message: `${input.connectorId.toUpperCase()}-verbinding geslaagd. Er is geen bericht verstuurd, mailbox gelezen of token opgeslagen.`, missing: [] };
+      } catch {
+        await recordSecurityAuditEvent(ctx.db, {
+          workspaceId: ctx.user.workspaceId,
+          actorUserId: ctx.user.actorUserId ?? ctx.user.id,
+          targetUserId: ctx.user.id,
+          action: "CONNECTOR_LIVE_TESTED",
+          resource: "connector",
+          resourceId: input.connectorId,
+          result: "FAILED",
+          reason: "CONNECTION_FAILED",
+          requestId: ctx.requestId,
+          metadata: { connectorId: input.connectorId, timeoutMs: 15_000 },
+        });
+        return { connectorId: input.connectorId, mode: "LIVE" as const, status: "FAILED" as const, code: "CONNECTION_FAILED" as const, message: `${input.connectorId.toUpperCase()}-verbinding mislukt. Controleer host, poort, TLS en toegangsgegevens.`, missing: [] };
+      }
+    }),
+
+  disconnectConnector: sensitiveOwnerProcedure
+    .input(z.object({ connectorId: z.enum(CONNECTOR_IDS) }))
+    .mutation(async ({ ctx, input }) => {
+      const scope = workspaceScopeFromUser(ctx.user);
+      if (input.connectorId === "muapi") {
+        await clearUserMuapiKey(ctx.db, ctx.user.id);
+      }
+      const keys = CONNECTOR_SETTING_KEYS[input.connectorId].map((key) => resolveSettingDbKey(scope, key));
+      const deleted = keys.length > 0 ? await ctx.db.setting.deleteMany({ where: { key: { in: keys } } }) : { count: 0 };
+      invalidateWorkspaceSettingsCache(scope);
+      await recordSecurityAuditEvent(ctx.db, {
+        workspaceId: ctx.user.workspaceId,
+        actorUserId: ctx.user.actorUserId ?? ctx.user.id,
+        targetUserId: ctx.user.id,
+        action: "CONNECTOR_DISCONNECTED",
+        resource: "connector",
+        resourceId: input.connectorId,
+        result: "SUCCESS",
+        requestId: ctx.requestId,
+        metadata: { connectorId: input.connectorId, removedSettingCount: deleted.count },
+      });
+      return { success: true, connectorId: input.connectorId, removedSettingCount: deleted.count };
+    }),
 
   /** Booking widget & calendar settings (avoids getAll). */
   getBookingsSettings: protectedProcedure.query(async ({ ctx }) => loadSettingsBundle(ctx, BOOKINGS_SETTINGS_KEYS)),
@@ -416,7 +697,7 @@ export const settingsRouter = router({
     };
   }),
 
-  clearWorkspaceCaches: ownerProcedure.mutation(async ({ ctx }) => {
+  clearWorkspaceCaches: sensitiveOwnerProcedure.mutation(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);
     invalidateWorkspaceSettingsCache(scope);
     clearAllSettingsCache();
@@ -501,6 +782,7 @@ export const settingsRouter = router({
       const key = normalizeSettingKey(input.key);
       const scope = workspaceScopeFromUser(ctx.user);
       assertCanManageSettingKey(effectiveWorkspaceRole(ctx), key);
+      assertCanChangeSettingWhileViewingAs(ctx.user, key);
       const scopedKey = resolveSettingDbKey(scope, key);
       if (isSecretNoopUpdate(key, input.value)) {
         const current = await ctx.db.setting.findUnique({ where: { key: scopedKey } });
@@ -524,6 +806,21 @@ export const settingsRouter = router({
           metadata: { key, isSecret: isSecretSettingKey(key) },
         },
       });
+      const connectorId = connectorIdForSettingKey(key);
+      if (connectorId) {
+        await recordSecurityAuditEvent(ctx.db, {
+          workspaceId: ctx.user.workspaceId,
+          actorUserId: ctx.user.actorUserId ?? ctx.user.id,
+          targetUserId: ctx.user.id,
+          action: "CONNECTOR_CONFIG_CHANGED",
+          resource: "connector",
+          resourceId: connectorId,
+          result: "SUCCESS",
+          reason: "SETTING_UPDATED",
+          requestId: ctx.requestId,
+          metadata: { keys: [key] },
+        });
+      }
       invalidateWorkspaceSettingsCache(scope);
       return result;
     }),
@@ -539,6 +836,7 @@ export const settingsRouter = router({
 
       for (const item of normalizedEntries) {
         assertCanManageSettingKey(effectiveWorkspaceRole(ctx), item.key);
+        assertCanChangeSettingWhileViewingAs(ctx.user, item.key);
       }
       const uniqueEntries = Array.from(
         new Map(
@@ -570,6 +868,25 @@ export const settingsRouter = router({
           },
         }),
       ]);
+      const connectorChanges = new Map<string, string[]>();
+      for (const item of uniqueEntries) {
+        const connectorId = connectorIdForSettingKey(item.key);
+        if (connectorId) connectorChanges.set(connectorId, [...(connectorChanges.get(connectorId) ?? []), item.key]);
+      }
+      for (const [connectorId, keys] of connectorChanges) {
+        await recordSecurityAuditEvent(ctx.db, {
+          workspaceId: ctx.user.workspaceId,
+          actorUserId: ctx.user.actorUserId ?? ctx.user.id,
+          targetUserId: ctx.user.id,
+          action: "CONNECTOR_CONFIG_CHANGED",
+          resource: "connector",
+          resourceId: connectorId,
+          result: "SUCCESS",
+          reason: "SETTING_UPDATED",
+          requestId: ctx.requestId,
+          metadata: { keys },
+        });
+      }
       invalidateWorkspaceSettingsCache(scope);
       const cachePatch = Object.fromEntries(
         uniqueEntries
@@ -590,6 +907,7 @@ export const settingsRouter = router({
 
       for (const key of normalizedKeys) {
         assertCanManageSettingKey(effectiveWorkspaceRole(ctx), key);
+        assertCanChangeSettingWhileViewingAs(ctx.user, key);
       }
 
       const storageKeys = normalizedKeys.map((key) => resolveSettingDbKey(scope, key));
@@ -607,6 +925,24 @@ export const settingsRouter = router({
           },
         })
         .catch(() => null);
+
+      const removedConnectorIds = new Set(
+        normalizedKeys.map(connectorIdForSettingKey).filter((connectorId): connectorId is NonNullable<typeof connectorId> => Boolean(connectorId)),
+      );
+      for (const connectorId of removedConnectorIds) {
+        await recordSecurityAuditEvent(ctx.db, {
+          workspaceId: ctx.user.workspaceId,
+          actorUserId: ctx.user.actorUserId ?? ctx.user.id,
+          targetUserId: ctx.user.id,
+          action: "CONNECTOR_CONFIG_CHANGED",
+          resource: "connector",
+          resourceId: connectorId,
+          result: "SUCCESS",
+          reason: "SETTING_REMOVED",
+          requestId: ctx.requestId,
+          metadata: { keys: normalizedKeys.filter((key) => connectorIdForSettingKey(key) === connectorId) },
+        });
+      }
 
       invalidateWorkspaceSettingsCache(scope);
       return { success: true, removed: deleted.count, keys: normalizedKeys };
@@ -643,7 +979,7 @@ export const settingsRouter = router({
 
   /* ---------- test connection endpoints ---------- */
 
-  testGooglePlaces: ownerProcedure
+  testGooglePlaces: sensitiveOwnerProcedure
     .input(z.object({ apiKey: z.string().optional() }).optional())
     .mutation(async ({ ctx, input }) => {
       const inlineKey = input?.apiKey?.trim();
@@ -664,7 +1000,7 @@ export const settingsRouter = router({
       }
     }),
 
-  testAnthropicKey: ownerProcedure.mutation(async ({ ctx }) => {
+  testAnthropicKey: sensitiveOwnerProcedure.mutation(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);
     const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["api.anthropic_key"]);
     const key = getSettingString(settingsRowsToMap(settings), "api.anthropic_key");
@@ -694,7 +1030,7 @@ export const settingsRouter = router({
     }
   }),
 
-  testOpenaiKey: ownerProcedure.mutation(async ({ ctx }) => {
+  testOpenaiKey: sensitiveOwnerProcedure.mutation(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);
     const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["api.openai_key"]);
     const key = getSettingString(settingsRowsToMap(settings), "api.openai_key");
@@ -714,7 +1050,7 @@ export const settingsRouter = router({
     }
   }),
 
-  testDeepseekKey: ownerProcedure.mutation(async ({ ctx }) => {
+  testDeepseekKey: sensitiveOwnerProcedure.mutation(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);
     const settings = await loadWorkspaceSettingRows(ctx.db, scope, ["api.deepseek_key"]);
     const key = getSettingString(settingsRowsToMap(settings), "api.deepseek_key");
@@ -743,7 +1079,7 @@ export const settingsRouter = router({
     }
   }),
 
-  testSmtp: ownerProcedure
+  testSmtp: sensitiveOwnerProcedure
     .input(
       z.object({
         toEmail: z.string().email().optional(),
@@ -799,7 +1135,7 @@ export const settingsRouter = router({
       };
     }),
 
-  checkEmailDns: ownerProcedure
+  checkEmailDns: sensitiveOwnerProcedure
     .input(
       z
         .object({
@@ -932,7 +1268,7 @@ export const settingsRouter = router({
       };
     }),
 
-  testImap: ownerProcedure.mutation(async ({ ctx }) => {
+  testImap: sensitiveOwnerProcedure.mutation(async ({ ctx }) => {
     const { ImapFlow } = await import("imapflow");
     const scope = workspaceScopeFromUser(ctx.user);
     const settings = await loadWorkspaceSettingRows(ctx.db, scope, [

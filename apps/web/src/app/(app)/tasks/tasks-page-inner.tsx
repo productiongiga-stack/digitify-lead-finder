@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { QueryErrorState } from "@/components/feedback/query-error-state";
 import { useToast } from "@/components/feedback/toast-provider";
@@ -203,6 +204,7 @@ function TaskCard({
 }
 
 export function TasksPageInner() {
+  const searchParams = useSearchParams();
   const { showToast } = useToast();
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "ALL">("ALL");
   const [createOpen, setCreateOpen] = useState(false);
@@ -222,6 +224,16 @@ export function TasksPageInner() {
   const [detailsStatus, setDetailsStatus] = useState<TaskStatus>("TODO");
   const [detailsDueAt, setDetailsDueAt] = useState("");
   const utils = trpc.useUtils();
+
+  useEffect(() => {
+    const requestedType = searchParams.get("relatedType");
+    const requestedId = searchParams.get("relatedId");
+    if (requestedType === "LEAD" && requestedId) {
+      setRelatedType("LEAD");
+      setRelatedId(requestedId);
+      setCreateOpen(true);
+    }
+  }, [searchParams]);
 
   const { data, isLoading, isError, error, refetch } = trpc.task.list.useQuery(
     statusFilter === "ALL" ? {} : { status: statusFilter },

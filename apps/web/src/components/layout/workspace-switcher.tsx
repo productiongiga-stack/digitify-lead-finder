@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
+import { useShellContext } from "@/components/layout/shell-provider";
 import { invalidateWorkspaceScopedCache } from "@/lib/invalidate-workspace-cache";
 import {
   Badge,
@@ -24,10 +25,9 @@ export function WorkspaceSwitcher() {
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
 
-  const { data: workspaces, isLoading } = trpc.workspace.listMine.useQuery(undefined, {
-    staleTime: 5 * 60_000,
-    refetchOnWindowFocus: false,
-  });
+  const { data: shell, isLoading: shellLoading } = useShellContext();
+  const workspaces = shell?.workspaces;
+  const isLoading = shellLoading && !workspaces;
   const { data: invitations } = trpc.workspace.listPendingInvitations.useQuery(undefined, {
     enabled: open,
     staleTime: 5 * 60_000,

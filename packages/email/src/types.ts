@@ -21,6 +21,7 @@ export interface EmailAttachment {
 
 export interface SendResult {
   success: boolean;
+  delivery?: "not_sent" | "unknown";
   messageId?: string;
   error?: string;
 }

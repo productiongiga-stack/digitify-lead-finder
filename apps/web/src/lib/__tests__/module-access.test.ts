@@ -12,4 +12,10 @@ describe("module access guard", () => {
     expect(isModuleDisabled("/social", disabled)).toBe(true);
     expect(isModuleDisabled("/dashboard", disabled)).toBe(false);
   });
+
+  it("resolves SEO for direct routes", () => {
+    expect(resolveModuleIdForPath("/seo")).toBe("seo");
+    expect(resolveModuleIdForPath("/seo/keywords")).toBe("seo");
+    expect(isModuleDisabled("/seo", new Set(["seo"]))).toBe(true);
+  });
 });

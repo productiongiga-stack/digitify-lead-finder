@@ -90,6 +90,7 @@ export default function ReviewSettingsPage() {
   const [googleUrl, setGoogleUrl] = useState("");
   const [trustpilotUrl, setTrustpilotUrl] = useState("");
   const [facebookUrl, setFacebookUrl] = useState("");
+  const [tenantToken, setTenantToken] = useState("");
   const [copied, setCopied] = useState(false);
   const [textValues, setTextValues] = useState<Record<string, string>>({});
 
@@ -97,7 +98,7 @@ export default function ReviewSettingsPage() {
     if (!settings || loaded) return;
 
     const get = (key: string, fallback = "") => {
-      const value = settings[key];
+      const value = (settings as Record<string, unknown>)[key];
       if (value === null || value === undefined) return fallback;
       try {
         const parsed = typeof value === "string" ? JSON.parse(value) : value;
@@ -114,6 +115,7 @@ export default function ReviewSettingsPage() {
     setGoogleUrl(get("reviews.google_url", ""));
     setTrustpilotUrl(get("reviews.trustpilot_url", ""));
     setFacebookUrl(get("reviews.facebook_url", ""));
+    setTenantToken(get("chatbot.public_tenant_token", ""));
     setTextValues(
       Object.fromEntries(
         [...REVIEW_PUBLIC_TEXT_FIELDS, ...REVIEW_EMBED_TEXT_FIELDS].map((field) => [
@@ -131,6 +133,7 @@ export default function ReviewSettingsPage() {
     url.searchParams.set("title", title);
     url.searchParams.set("description", description);
     url.searchParams.set("color", color);
+    if (tenantToken) url.searchParams.set("tenant", tenantToken);
     if (googleUrl.trim()) url.searchParams.set("googleUrl", googleUrl.trim());
     if (trustpilotUrl.trim()) url.searchParams.set("trustpilotUrl", trustpilotUrl.trim());
     if (facebookUrl.trim()) url.searchParams.set("facebookUrl", facebookUrl.trim());
@@ -146,7 +149,7 @@ export default function ReviewSettingsPage() {
   style="border:0;border-radius:24px;overflow:hidden"
   loading="lazy"
 ></iframe>`;
-  }, [company, title, description, color, googleUrl, trustpilotUrl, facebookUrl, textValues]);
+  }, [company, title, description, color, tenantToken, googleUrl, trustpilotUrl, facebookUrl, textValues]);
 
   const standaloneReviewUrl = useMemo(() => {
     const url = new URL(buildUrl("/embed/reviews"));
@@ -154,6 +157,7 @@ export default function ReviewSettingsPage() {
     url.searchParams.set("title", title);
     url.searchParams.set("description", description);
     url.searchParams.set("color", color);
+    if (tenantToken) url.searchParams.set("tenant", tenantToken);
     if (googleUrl.trim()) url.searchParams.set("googleUrl", googleUrl.trim());
     if (trustpilotUrl.trim()) url.searchParams.set("trustpilotUrl", trustpilotUrl.trim());
     if (facebookUrl.trim()) url.searchParams.set("facebookUrl", facebookUrl.trim());
@@ -162,7 +166,7 @@ export default function ReviewSettingsPage() {
       if (value) url.searchParams.set(field.key, value);
     });
     return url.toString();
-  }, [company, title, description, color, googleUrl, trustpilotUrl, facebookUrl, textValues]);
+  }, [company, title, description, color, tenantToken, googleUrl, trustpilotUrl, facebookUrl, textValues]);
 
   const platformQrCards = useMemo(
     () =>

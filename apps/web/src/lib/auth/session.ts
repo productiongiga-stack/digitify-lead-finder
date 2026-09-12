@@ -1,7 +1,8 @@
 import { cache } from "react";
 import { getServerSession } from "next-auth";
+import { cookies } from "next/headers";
 import { prisma } from "@digitify/db";
-import { resolveWorkspaceOwnerId } from "@digitify/api/src/lib/workspace";
+import { resolveAccountView, ACCOUNT_VIEW_COOKIE } from "@digitify/api/src/lib/account-view";
 import { authOptions } from "./options";
 
 type SessionUser = {
@@ -12,54 +13,43 @@ type SessionUser = {
   workspaceId?: string;
   workspaceRole?: string;
   isPersonalWorkspace?: boolean;
+  disabledModules?: string[];
+  isViewingAs?: boolean;
+  actorUserId?: string;
+  viewAsSessionId?: string;
+  viewAsTargetName?: string | null;
+};
+
+export type CurrentUser = {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  workspaceId: string;
+  workspaceRole: string;
+  isPersonalWorkspace: boolean;
+  disabledModules: string[];
+  isViewingAs?: boolean;
+  actorUserId?: string;
+  viewAsSessionId?: string;
+  viewAsTargetName?: string | null;
 };
 
 export const getSession = cache(async () => getServerSession(authOptions));
 
-export const getCurrentUser = cache(async () => {
+export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
+  // The JWT callback revalidates account, version and membership on each request.
   const session = await getSession();
-  const sessionUser = session?.user as SessionUser | undefined;
-  const userId = typeof sessionUser?.id === "string" ? sessionUser.id : "";
-  if (!userId) return null;
-
-  const workspaceIdFromSession =
-    typeof sessionUser?.workspaceId === "string" ? sessionUser.workspaceId : "";
-  if (
-    workspaceIdFromSession &&
-    typeof sessionUser?.email === "string" &&
-    typeof sessionUser?.role === "string"
-  ) {
-    return {
-      id: userId,
-      email: sessionUser.email,
-      name: sessionUser.name ?? null,
-      role: sessionUser.role,
-      workspaceId: workspaceIdFromSession,
-      workspaceRole:
-        typeof sessionUser.workspaceRole === "string" ? sessionUser.workspaceRole : sessionUser.role,
-      isPersonalWorkspace:
-        typeof sessionUser.isPersonalWorkspace === "boolean"
-          ? sessionUser.isPersonalWorkspace
-          : workspaceIdFromSession === userId,
-    };
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, email: true, name: true, role: true, workspaceOwnerId: true },
-  });
-  if (!user) return null;
-
-  const workspaceId = await resolveWorkspaceOwnerId(prisma, user.id);
-
-  return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    workspaceId,
-    workspaceRole: user.role,
-    isPersonalWorkspace: workspaceId === user.id,
+  const user = session?.user as SessionUser | undefined;
+  if (!user?.id || !user.email || !user.role || !user.workspaceId || !user.workspaceRole) return null;
+  const cookieStore = await cookies();
+  const viewToken = cookieStore.get(ACCOUNT_VIEW_COOKIE)?.value;
+  const viewedUser = viewToken ? await resolveAccountView(prisma, user as { id: string; workspaceId?: string; workspaceRole?: string }, viewToken) : null;
+  return viewedUser ?? {
+    id: user.id, email: user.email, name: user.name ?? null, role: user.role,
+    workspaceId: user.workspaceId, workspaceRole: user.workspaceRole,
+    isPersonalWorkspace: user.isPersonalWorkspace ?? false,
+    disabledModules: user.disabledModules ?? [],
   };
 });
 
