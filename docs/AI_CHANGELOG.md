@@ -3,6 +3,26 @@
 Chronologisch logboek van significante wijzigingen (mens + AI).  
 **Formaat:** nieuwste entries bovenaan.
 
+## 2026-09-17 — SMTP test: Cloudflare-host detectie + lokale foutmeldingen
+
+**Type:** Bugfix, UX  
+**Agent:** Composer
+
+- Root cause: workspace-SMTP host `smtp.digitify.be` resolve’t naar Cloudflare-proxy-IP’s; poort 587/465 time-out (MX is Stackmail → `smtp.stackmail.com` werkt wel).
+- DNS-preflight (`diagnoseSmtpHost`) faalt snel bij Cloudflare-proxied smtp./mail.-hosts i.p.v. 10s timeout.
+- Foutteksten onderscheiden lokaal vs Vercel; TLS-servername default = SMTP-host (niet mailboxdomein).
+- `EMAIL_PROVIDER=console` (non-prod) en expliciete DB-console worden gerespecteerd; SMTP-testknop forceert nog steeds echte SMTP (`forceSmtp`).
+- UI-waarschuwing voor proxied Digitify smtp/mail-hosts.
+
+## 2026-09-17 — SMTP: één per workspace (geen dual setup)
+
+**Type:** Docs, UX-copy  
+**Agent:** Composer
+
+- Productvraag beantwoord: er is bewust **één SMTP per workspace** (`email.smtp_*`), geen aparte website-/marketing-SMTP.
+- ADR-015 + PROJECT_BRAIN bijgewerkt; Integraties-UI verklaart dat platformmail de aangewezen Digitify-workspace-SMTP hergebruikt.
+- Geen schema- of send-path wijziging; geen dual-SMTP geïmplementeerd.
+
 ## 2026-09-16 — Fase 104: moduletoegang onder RLS herstellen
 
 **Type:** Beveiliging, autorisatie, database

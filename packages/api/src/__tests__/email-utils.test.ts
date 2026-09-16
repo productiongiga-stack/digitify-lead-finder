@@ -1,8 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   normalizeLegacyPlaceholders,
   normalizeAiPlaceholderSyntax,
   extractEmailCta,
+  resolveSmtpServername,
+  formatSmtpErrorMessage,
+  resolveEmailProviderName,
 } from "../lib/email-utils";
 
 describe("normalizeLegacyPlaceholders", () => {
@@ -92,5 +95,104 @@ describe("extractEmailCta", () => {
     const { ctaText, ctaUrl } = extractEmailCta(body);
     expect(ctaText).toBe("Meer info");
     expect(ctaUrl).toBeUndefined();
+  });
+});
+
+describe("resolveSmtpServername", () => {
+  it("prefers explicit servername", () => {
+    expect(
+      resolveSmtpServername({
+        host: "smtp.stackmail.com",
+        explicitServername: "smtp.stackmail.com",
+        username: "mail@digitify.be",
+      }),
+    ).toBe("smtp.stackmail.com");
+  });
+
+  it("defaults to SMTP host, not mailbox domain", () => {
+    expect(
+      resolveSmtpServername({
+        host: "smtp.stackmail.com",
+        username: "mail@digitify.be",
+      }),
+    ).toBe("smtp.stackmail.com");
+  });
+});
+
+describe("resolveEmailProviderName", () => {
+  it("uses EMAIL_PROVIDER=console outside production even with SMTP credentials", () => {
+    expect(
+      resolveEmailProviderName({
+        configuredProvider: "smtp",
+        hasSmtpCredentials: true,
+        envProvider: "console",
+        nodeEnv: "development",
+      }),
+    ).toBe("console");
+  });
+
+  it("does not let EMAIL_PROVIDER=console override production", () => {
+    expect(
+      resolveEmailProviderName({
+        configuredProvider: "smtp",
+        hasSmtpCredentials: true,
+        envProvider: "console",
+        nodeEnv: "production",
+      }),
+    ).toBe("smtp");
+  });
+
+  it("respects explicit DB console even when credentials exist", () => {
+    expect(
+      resolveEmailProviderName({
+        configuredProvider: "console",
+        hasSmtpCredentials: true,
+        envProvider: "",
+        nodeEnv: "production",
+      }),
+    ).toBe("console");
+  });
+
+  it("falls back to smtp when credentials exist and provider unset", () => {
+    expect(
+      resolveEmailProviderName({
+        configuredProvider: "",
+        hasSmtpCredentials: true,
+        envProvider: "",
+        nodeEnv: "production",
+      }),
+    ).toBe("smtp");
+  });
+});
+
+describe("formatSmtpErrorMessage", () => {
+  const prevVercel = process.env.VERCEL;
+  const prevVercelEnv = process.env.VERCEL_ENV;
+
+  afterEach(() => {
+    if (prevVercel === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = prevVercel;
+    if (prevVercelEnv === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = prevVercelEnv;
+  });
+
+  it("mentions Cloudflare/Stackmail locally on timeouts", () => {
+    delete process.env.VERCEL;
+    delete process.env.VERCEL_ENV;
+    const message = formatSmtpErrorMessage(new Error("connect ETIMEDOUT"));
+    expect(message).toContain("SMTP mislukt");
+    expect(message).toContain("Cloudflare");
+    expect(message).toContain("smtp.stackmail.com");
+    expect(message).not.toContain("Vercel");
+  });
+
+  it("mentions Vercel on timeouts when deployed there", () => {
+    process.env.VERCEL = "1";
+    const message = formatSmtpErrorMessage(new Error("connect ETIMEDOUT"));
+    expect(message).toContain("Vercel");
+  });
+
+  it("does not double-prefix already formatted messages", () => {
+    expect(formatSmtpErrorMessage("SMTP mislukt: al klaar")).toBe("SMTP mislukt: al klaar");
   });
 });

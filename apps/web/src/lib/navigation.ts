@@ -19,6 +19,7 @@ import {
   Palette,
   Sparkles,
   Key,
+  KeyRound,
   Mail,
   GitBranch,
   Bot,
@@ -212,7 +213,8 @@ export type SettingsSection = {
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/account", title: "Account & Profiel", description: "Naam, profielfoto en wachtwoord", icon: UserCircle },
   { href: "/settings/workspaces", title: "Werkruimtes", description: "Eigen of gedeelde werkruimte, uitnodigingen en teamleden", icon: Layers },
-  { href: "/settings/integrations", title: "Integraties & API-sleutels", description: "MuAPI, Google, Meta, AI, SMTP/IMAP en OAuth-koppelingen", icon: Key },
+  { href: "/settings/integrations", title: "Integraties & API-sleutels", description: "MuAPI, Google, Meta, AI, workspace-SMTP/IMAP en OAuth-koppelingen", icon: Key },
+  { href: "/settings/ase-licenses", title: "AI Builder licenses", description: "License keys voor Digitify AI Builder uitgeven en mailen", icon: KeyRound },
   { href: "/settings/branding", title: "Branding & afzender", description: "Logo, kleuren, favicon en standaard e-mailafzender", icon: Palette },
   { href: "/settings/seo", title: "SEO & vindbaarheid", description: "Titels, meta, sitemap en zoekmachines", icon: Globe2 },
   { href: "/settings/scoring", title: "Scoring-configuratie", description: "Pas scoringgewichten en factoren aan", icon: Gauge },

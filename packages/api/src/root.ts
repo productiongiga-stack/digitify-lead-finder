@@ -40,6 +40,7 @@ import { projectRouter } from "./routers/project.router";
 import { contractRouter } from "./routers/contract.router";
 import { paymentRouter } from "./routers/payment.router";
 import { passwordResetRouter } from "./routers/password-reset.router";
+import { aseLicenseRouter } from "./routers/ase-license.router";
 
 export const appRouter = router({
   dashboard: dashboardRouter,
@@ -83,6 +84,7 @@ export const appRouter = router({
   contract: contractRouter,
   payment: paymentRouter,
   passwordReset: passwordResetRouter,
+  aseLicense: aseLicenseRouter,
 });
 
 export type AppRouter = typeof appRouter;

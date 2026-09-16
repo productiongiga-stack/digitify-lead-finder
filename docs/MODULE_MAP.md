@@ -63,7 +63,7 @@ Alle paden relatief aan repo-root.
 |------|-----|
 | Router | `packages/api/src/routers/contact.router.ts` |
 | Inbox router | `packages/api/src/routers/inbox.router.ts` |
-| E-mail send | `packages/api/src/lib/email-sender.ts` |
+| E-mail send | `packages/api/src/lib/email-sender.ts` (één SMTP per workspace; ADR-015) |
 | Draft meta | `packages/api/src/lib/outbound-draft-meta.ts` |
 | UI center | `apps/web/src/app/(app)/contacts/contacts-page-inner.tsx` |
 | UI compose | `apps/web/src/app/(app)/contacts/compose/` |

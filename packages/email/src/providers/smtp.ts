@@ -1,6 +1,10 @@
 import nodemailer from "nodemailer";
 import type { EmailProvider, EmailMessage, SendResult } from "../types";
 
+function isRunningOnVercel() {
+  return Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+}
+
 function formatProviderSmtpError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("Hostname/IP does not match certificate's altnames")) {
@@ -10,7 +14,13 @@ function formatProviderSmtpError(error: unknown) {
     return "authenticatie geweigerd; controleer gebruikersnaam, wachtwoord of app-password";
   }
   if (/timeout|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|EHOSTUNREACH|EAI_AGAIN/i.test(message)) {
-    return "verbinding met de mailserver mislukt; controleer host, poort, firewall, DNS en of de SMTP-server verbindingen vanaf Vercel toestaat";
+    if (isRunningOnVercel()) {
+      return "verbinding met de mailserver mislukt; controleer host, poort, firewall, DNS en of de SMTP-server verbindingen vanaf Vercel toestaat";
+    }
+    return (
+      "verbinding met de mailserver mislukt; controleer host, poort, firewall en DNS. " +
+      "Proxied smtp./mail.-hosts via Cloudflare (bijv. smtp.digitify.be) werken niet — gebruik de echte mailhost (Stackmail: smtp.stackmail.com)"
+    );
   }
   return message;
 }

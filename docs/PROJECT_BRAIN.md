@@ -191,7 +191,7 @@ Cron auth: `packages/api/src/lib/cron-auth.ts` (`CRON_SECRET`).
 | Google Ads | `google-ads.ts`, `google-ads-oauth.ts` |
 | Google Calendar | `google-calendar.ts` |
 | MuAPI / Creative Studio | `media-studio`, `muapi-key.ts`, `media.router.ts` |
-| SMTP/IMAP | `email-sender.ts`, workspace settings |
+| SMTP/IMAP | `email-sender.ts`; **één SMTP per workspace** (`email.smtp_*`). Geen aparte website-SMTP — platform/marketingmail via aangewezen workspace (`REGISTRATION_NOTIFY_WORKSPACE_ID` / `PUBLIC_MARKETING_WORKSPACE_ID`) |
 | Vercel Blob | `BLOB_READ_WRITE_TOKEN`, `import-media-to-blob.ts` |
 | Sentry | `@sentry/nextjs`, `packages/api/src/lib/sentry.ts` |
 | OpenClaw AI | `@digitify/openclaw`, `openclaw.router.ts` |

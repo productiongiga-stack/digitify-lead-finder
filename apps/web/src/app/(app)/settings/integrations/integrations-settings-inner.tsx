@@ -150,16 +150,14 @@ const AI_PROVIDER_OPTIONS: Array<{
   },
 ];
 
-function resolveRecommendedTlsServername(host: string, username: string) {
-  const userDomain = username.split("@")[1]?.trim();
-  if (userDomain) return userDomain;
-
-  const hostParts = host.trim().split(".").filter(Boolean);
-  if (hostParts.length > 2) {
-    return hostParts.slice(-2).join(".");
-  }
-
+function resolveRecommendedTlsServername(host: string, _username: string) {
+  // TLS servername must match the SMTP host certificate (not the mailbox domain).
   return host.trim();
+}
+
+function looksLikeCloudflareProxiedSmtpHost(host: string) {
+  const normalized = host.trim().toLowerCase();
+  return /^(smtp|mail|email)\./i.test(normalized) && /\.(digitify\.be)$/i.test(normalized);
 }
 
 const TestResult = IntegrationTestResult;
@@ -922,7 +920,7 @@ export function IntegrationsSettingsInner() {
     { id: "deepseek", label: "DeepSeek", description: "DeepSeek API", icon: Bot, configured: deepseekConfiguredActive, dirty: deepseekDirty, group: "AI" },
     { id: "google-oauth", label: "Google OAuth", description: "Agenda, Meet & Ads", icon: CalendarDays, configured: googleOAuthConfigured || googleCalendarOAuthConnected, dirty: googleOAuthDirty || googleCalendarDirty, group: "OAuth" },
     { id: "meta", label: "Meta", description: "Facebook & Instagram", icon: Megaphone, configured: metaConfigured || Boolean(metaConnection.data?.connected), dirty: metaDirty, group: "OAuth" },
-    { id: "smtp", label: "SMTP", description: "Uitgaande e-mail", icon: Mail, configured: smtpConfigured, dirty: smtpDirty, group: "E-mail" },
+    { id: "smtp", label: "SMTP", description: "Uitgaande e-mail (deze workspace)", icon: Mail, configured: smtpConfigured, dirty: smtpDirty, group: "E-mail" },
     { id: "imap", label: "IMAP", description: "Inkomende inbox", icon: Inbox, configured: imapConfigured, dirty: imapDirty, group: "E-mail" },
   ];
   const integrationNavItems =
@@ -2223,7 +2221,11 @@ export function IntegrationsSettingsInner() {
               <div>
                 <CardTitle className="text-base">E-mail (SMTP)</CardTitle>
                 <CardDescription className="text-xs">
-                  Configureer SMTP voor het versturen van e-mails. Werkt met Gmail, Outlook, SendGrid, Mailgun, etc.
+                  Eén SMTP-configuratie per workspace voor alle uitgaande mail van dit account: outbound, bookings,
+                  systeemtemplates en notificaties. Er is geen aparte “website-SMTP”; marketing/platformmail gebruikt
+                  de SMTP van de aangewezen Digitify-workspace. Werkt met Gmail, Outlook, SendGrid, Mailgun, Stackmail, enz.
+                  Lokaal met <code className="text-[11px]">EMAIL_PROVIDER=console</code> gaan gewone mails naar de console;
+                  de testknop forceert nog steeds echte SMTP.
                 </CardDescription>
               </div>
               {smtpConfigured ? (
@@ -2240,7 +2242,7 @@ export function IntegrationsSettingsInner() {
                 <Input
                   value={smtpHost}
                   onChange={(e) => setSmtpHost(e.target.value)}
-                  placeholder="smtp.gmail.com"
+                  placeholder="smtp.stackmail.com"
                 />
               </div>
               <div className="space-y-2">
@@ -2290,12 +2292,13 @@ export function IntegrationsSettingsInner() {
                 placeholder="bijv. mail.mijnbedrijf.be (optioneel)"
               />
               <p className="text-xs text-muted-foreground">
-                Gebruik hier de hostnaam die in het SSL-certificaat staat. Laat je dit leeg, dan gebruikt de app automatisch:{" "}
+                Gebruik hier de hostnaam die in het SSL-certificaat staat (meestal gelijk aan de SMTP-host). Laat je dit leeg, dan gebruikt de app:{" "}
                 <span className="font-medium text-foreground">{effectiveTlsServername || "-"}</span>.
               </p>
-              {smtpHost.trim() === "smtp.digitify.be" ? (
+              {looksLikeCloudflareProxiedSmtpHost(smtpHost) ? (
                 <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  Voor `smtp.digitify.be` lijkt het certificaat op `digitify.be` te staan. Zet hier best `digitify.be` of gebruik de knop hieronder.
+                  <code className="text-[11px]">{smtpHost.trim()}</code> wijst via Cloudflare naar je website — SMTP-poorten (587/465) werken daar niet.
+                  Zet de host op <code className="text-[11px]">smtp.stackmail.com</code> (Stackmail/20i) en laat TLS-servernaam leeg of gelijk aan die host.
                 </div>
               ) : null}
               {smtpServername.trim() !== effectiveTlsServername && effectiveTlsServername ? (

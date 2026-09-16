@@ -236,7 +236,7 @@ Workflow: **Draft → indienen → goedkeuring → verzending**. Geen auto-send.
 | Google Ads | Ads studio | OAuth + developer token |
 | Google Calendar | Bookings sync | OAuth |
 | MuAPI | Creative Studio | Per-user key (`api.muapi_key`) |
-| SMTP/IMAP | Outbound + inbox | Workspace settings |
+| SMTP/IMAP | Outbound + inbox (één SMTP per workspace) | Workspace settings `email.smtp_*` / `email.imap_*` |
 | Vercel Blob | Uploads, social video | `BLOB_READ_WRITE_TOKEN` |
 | Redis/Upstash | Rate limits | Env vars |
 | Sentry | Error tracking | DSN |

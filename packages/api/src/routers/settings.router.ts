@@ -14,6 +14,7 @@ import { effectiveWorkspaceRole } from "../lib/effective-role";
 import { generateMasterShellHtml } from "../lib/generate-email-shell";
 import { loadEmailSettings, sendBrandedEmail } from "../lib/email-sender";
 import { formatSmtpErrorMessage, normalizeTlsOptions } from "../lib/email-utils";
+import { diagnoseSmtpHost } from "../lib/smtp-host-diagnostics";
 import { getSettingBoolean, getSettingString, settingsRowsToMap } from "../lib/settings";
 import {
   invalidateWorkspaceSettingsCache,
@@ -608,6 +609,10 @@ export const settingsRouter = router({
           const response = await fetch(endpoint, { headers, signal: AbortSignal.timeout(10_000) });
           if (!response.ok) throw new Error("WordPress REST-check mislukt");
         } else if (input.connectorId === "smtp") {
+          const diagnosis = await diagnoseSmtpHost(host);
+          if (diagnosis.status === "cloudflare_proxy" || diagnosis.status === "dns_failed") {
+            throw new Error(diagnosis.message);
+          }
           await verifySmtpConnection({ host, port, user, pass, secure: port === 465, tls: { rejectUnauthorized: tls, servername: servername || undefined } });
         } else {
           const { ImapFlow } = await import("imapflow");
@@ -1114,6 +1119,7 @@ export const settingsRouter = router({
         subject: `SMTP Test - ${companyName}`,
         body: "Dit is een test e-mail. Je SMTP configuratie werkt correct!",
         userId: scope,
+        forceSmtp: true,
       });
 
       if (!result.success) {

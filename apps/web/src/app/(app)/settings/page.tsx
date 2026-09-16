@@ -33,7 +33,7 @@ export default function SettingsPage() {
       ["/settings/email", "/settings/ai", "/settings/reviews", "/settings/chatbot", "/settings/feedback"].includes(section.href)
     ),
     operations: visibleSections.filter((section) =>
-      ["/settings/bookings", "/settings/quotes", "/settings/pipeline", "/settings/scoring", "/settings/team"].includes(section.href)
+      ["/settings/bookings", "/settings/quotes", "/settings/pipeline", "/settings/scoring", "/settings/team", "/settings/ase-licenses"].includes(section.href)
     ),
   };
   const domainTabs = [

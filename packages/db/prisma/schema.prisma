@@ -1947,3 +1947,28 @@ model WorkspaceAnalyticsEvent {
   @@index([userId, createdAt(sort: Desc)])
   @@map("workspace_analytics_events")
 }
+
+// ASE (AI Site Editor) product licenses
+model AseLicense {
+  id          String    @id @default(cuid())
+  keyHash     String    @unique
+  keyPrefix   String
+  status      String    @default("pending") // pending | issued | active | revoked | expired
+  email       String
+  name        String?
+  siteUrl     String?
+  domain      String?
+  message     String?   @db.Text
+  issuedAt    DateTime?
+  activatedAt DateTime?
+  lastSeenAt  DateTime?
+  expiresAt   DateTime?
+  meta        Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([email])
+  @@index([domain])
+  @@map("ase_licenses")
+}

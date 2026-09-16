@@ -8,7 +8,14 @@ import {
   DEFAULT_MASTER_SHELL_HTML,
 } from "@digitify/email";
 import { type PrismaClient } from "@digitify/db";
-import { formatSmtpErrorMessage, normalizeAiPlaceholderSyntax, normalizeLegacyPlaceholders, normalizeTlsOptions } from "./email-utils";
+import {
+  formatSmtpErrorMessage,
+  normalizeAiPlaceholderSyntax,
+  normalizeLegacyPlaceholders,
+  normalizeTlsOptions,
+  resolveEmailProviderName,
+} from "./email-utils";
+import { diagnoseSmtpHost } from "./smtp-host-diagnostics";
 import { log } from "./logger";
 import { createEmailTrackingToken } from "./email-tracking-token";
 import { getSettingBoolean, getSettingNumber, getSettingString, settingsRowsToMap } from "./settings";
@@ -80,6 +87,8 @@ interface SendBrandedEmailParams {
   unsubscribeUrl?: string;
   inReplyTo?: string;
   references?: string;
+  /** Force real SMTP even when EMAIL_PROVIDER/DB is console (SMTP test button). */
+  forceSmtp?: boolean;
 }
 
 function resolveAppUrl() {
@@ -145,10 +154,10 @@ export async function loadEmailSettings(db: PrismaClient, scope?: EmailSettingsS
       getSettingString(settings, "email.smtp_pass")
   );
   const configuredProvider = getSettingString(settings, "email.provider");
-  const providerName =
-    configuredProvider === "console" && hasSmtpCredentials
-      ? "smtp"
-      : configuredProvider || (hasSmtpCredentials ? "smtp" : "console");
+  const providerName = resolveEmailProviderName({
+    configuredProvider,
+    hasSmtpCredentials,
+  });
 
   return {
     providerName,
@@ -283,7 +292,8 @@ export async function sendBrandedEmail(
     ? `${html}<img src="${resolveAppUrl()}/api/public/email/open/${encodeURIComponent(params.trackingDraftId)}?t=${encodeURIComponent(createEmailTrackingToken(params.trackingDraftId))}" alt="" width="1" height="1" style="display:none;border:0;outline:none;"/>`
     : html;
 
-  if (cfg.providerName === "smtp" && (!cfg.smtpHost || !cfg.smtpUser || !cfg.smtpPass)) {
+  const providerName = params.forceSmtp ? "smtp" : cfg.providerName;
+  if (providerName === "smtp" && (!cfg.smtpHost || !cfg.smtpUser || !cfg.smtpPass)) {
     return {
       success: false,
       delivery: "not_sent" as const,
@@ -291,10 +301,21 @@ export async function sendBrandedEmail(
     };
   }
 
+  if (providerName === "smtp" && cfg.smtpHost) {
+    const diagnosis = await diagnoseSmtpHost(cfg.smtpHost);
+    if (diagnosis.status === "cloudflare_proxy" || diagnosis.status === "dns_failed") {
+      return {
+        success: false,
+        delivery: "not_sent" as const,
+        error: formatSmtpErrorMessage(diagnosis.message),
+      };
+    }
+  }
+
   const provider = createEmailProvider({
-    provider: cfg.providerName,
+    provider: providerName,
     smtp:
-      cfg.providerName === "smtp"
+      providerName === "smtp"
         ? {
             host: cfg.smtpHost,
             port: cfg.smtpPort,
@@ -327,15 +348,15 @@ export async function sendBrandedEmail(
   if (!result.success) {
     log.email.error("Email send failed", {
       userId: params.userId,
-      provider: cfg.providerName,
+      provider: providerName,
       to: params.toEmail,
       from: effectiveFromEmail,
-      smtpHost: cfg.providerName === "smtp" ? cfg.smtpHost : undefined,
+      smtpHost: providerName === "smtp" ? cfg.smtpHost : undefined,
     }, result.error);
   } else {
     log.email.info("Email sent", {
       userId: params.userId,
-      provider: cfg.providerName,
+      provider: providerName,
       to: params.toEmail,
       messageId: result.messageId,
     });

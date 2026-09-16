@@ -128,6 +128,17 @@ Nieuwe beslissingen: voeg ADR toe onderaan met datum.
 
 ---
 
+## ADR-015: Één SMTP per workspace (geen aparte website-SMTP)
+
+**Status:** Actief  
+**Datum:** 2026-09-17  
+**Context:** Gebruikers vroegen of er twee SMTP-setups nodig zijn: account/outbound vs website/marketing.  
+**Beslissing:** Bewust **één** SMTP-config per workspace via `email.smtp_*` (opgeslagen als `workspace:{ownerId}:email.smtp_*`). Alle uitgaande mail van die workspace (outbound, bookings, offertes, auth-templates, ASE-license als die workspace de afzender is) loopt via `loadEmailSettings` → `sendBrandedEmail`. Er is geen `website.smtp_*` of globale SMTP-UI. Platform/marketing-notificaties hergebruiken de SMTP van een aangewezen Digitify-workspace via `REGISTRATION_NOTIFY_WORKSPACE_ID` / `PUBLIC_MARKETING_WORKSPACE_ID`. `EMAIL_PROVIDER=console` is alleen een lokale/dev override die workspace-SMTP overslaat.  
+**Alternatieven verworpen:** Aparte website-SMTP-keys — zou dubbele secrets, dubbele DNS/alignment en verwarring over welke afzender wanneer geldt introduceren zonder codepad dat dit nodig heeft.  
+**Gevolgen:** UI toont één SMTP-paneel onder Integraties; afzender/branding onder Instellingen → E-mail. Digitify Website (extern) heeft geen SMTP in deze app.
+
+---
+
 ## Template voor nieuwe ADR
 
 ```markdown
