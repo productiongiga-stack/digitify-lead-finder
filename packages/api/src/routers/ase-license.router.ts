@@ -75,65 +75,97 @@ export const aseLicenseRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const result = await createLicenseForEmail({
-        email: input.email,
-        name: input.name,
-        siteUrl: input.siteUrl,
-        message: input.message,
-      });
-      if (!result.ok) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: result.error });
+      try {
+        const result = await createLicenseForEmail({
+          email: input.email,
+          name: input.name,
+          siteUrl: input.siteUrl,
+          message: input.message,
+        });
+        if (!result.ok) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: result.error });
+        }
+
+        const mail = await sendLicenseKeyEmail(ctx.db, {
+          toEmail: result.license.email,
+          name: result.license.name,
+          key: result.key,
+          userId: ctx.user.workspaceId ?? ctx.user.id,
+        });
+
+        return {
+          id: result.license.id,
+          key: result.key,
+          status: result.license.status,
+          email: result.license.email,
+          emailSent: mail.success,
+          emailError: mail.success ? null : mail.error || "Mail niet verzonden",
+        };
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        if (isAseLicenseUnavailableError(err)) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "ase_licenses ontbreekt — run prisma migrate deploy",
+          });
+        }
+        throw err;
       }
-
-      const mail = await sendLicenseKeyEmail(ctx.db, {
-        toEmail: result.license.email,
-        name: result.license.name,
-        key: result.key,
-        userId: ctx.user.workspaceId ?? ctx.user.id,
-      });
-
-      return {
-        id: result.license.id,
-        key: result.key,
-        status: result.license.status,
-        email: result.license.email,
-        emailSent: mail.success,
-        emailError: mail.success ? null : mail.error || "Mail niet verzonden",
-      };
     }),
 
   issue: sensitiveOwnerProcedure
     .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const result = await issueLicense(input.id);
-      if (!result.ok) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: result.error });
+      try {
+        const result = await issueLicense(input.id);
+        if (!result.ok) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: result.error });
+        }
+
+        const mail = await sendLicenseKeyEmail(ctx.db, {
+          toEmail: result.license.email,
+          name: result.license.name,
+          key: result.key,
+          userId: ctx.user.workspaceId ?? ctx.user.id,
+        });
+
+        return {
+          id: result.license.id,
+          key: result.key,
+          status: result.license.status,
+          email: result.license.email,
+          emailSent: mail.success,
+          emailError: mail.success ? null : mail.error || "Mail niet verzonden",
+        };
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        if (isAseLicenseUnavailableError(err)) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "ase_licenses ontbreekt — run prisma migrate deploy",
+          });
+        }
+        throw err;
       }
-
-      const mail = await sendLicenseKeyEmail(ctx.db, {
-        toEmail: result.license.email,
-        name: result.license.name,
-        key: result.key,
-        userId: ctx.user.workspaceId ?? ctx.user.id,
-      });
-
-      return {
-        id: result.license.id,
-        key: result.key,
-        status: result.license.status,
-        email: result.license.email,
-        emailSent: mail.success,
-        emailError: mail.success ? null : mail.error || "Mail niet verzonden",
-      };
     }),
 
   revoke: sensitiveOwnerProcedure
     .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      await ctx.db.aseLicense.update({
-        where: { id: input.id },
-        data: { status: "revoked" },
-      });
-      return { ok: true };
+      try {
+        await ctx.db.aseLicense.update({
+          where: { id: input.id },
+          data: { status: "revoked" },
+        });
+        return { ok: true };
+      } catch (err) {
+        if (isAseLicenseUnavailableError(err)) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "ase_licenses ontbreekt — run prisma migrate deploy",
+          });
+        }
+        throw err;
+      }
     }),
 });
