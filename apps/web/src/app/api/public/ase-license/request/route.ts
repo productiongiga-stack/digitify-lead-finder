@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { createLicenseRequest } from "@digitify/api/src/lib/ase-license";
+import {
+  createLicenseRequest,
+  isAseLicenseUnavailableError,
+} from "@digitify/api/src/lib/ase-license";
 import { notifyOwnersOfLicenseRequest } from "@digitify/api/src/lib/ase-license-email";
 import { enforceRateLimit } from "@/lib/http-security";
 
@@ -48,6 +51,10 @@ export async function POST(request: Request) {
       message: "Aanvraag ontvangen. Digitify stuurt je een license key na goedkeuring.",
     });
   } catch (err) {
+    if (isAseLicenseUnavailableError(err)) {
+      console.error("[ase-license/request] schema missing — run migrate deploy");
+      return NextResponse.json({ error: "unavailable" }, { status: 503 });
+    }
     console.error("[ase-license/request]", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "server_error" }, { status: 500 });
   }

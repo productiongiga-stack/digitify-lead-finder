@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { activateLicense } from "@digitify/api/src/lib/ase-license";
+import {
+  activateLicense,
+  isAseLicenseUnavailableError,
+} from "@digitify/api/src/lib/ase-license";
 import { enforceRateLimit } from "@/lib/http-security";
 
 export async function POST(request: Request) {
@@ -34,6 +37,10 @@ export async function POST(request: Request) {
     }
     return NextResponse.json(result);
   } catch (err) {
+    if (isAseLicenseUnavailableError(err)) {
+      console.error("[ase-license/activate] schema missing — run migrate deploy");
+      return NextResponse.json({ error: "unavailable" }, { status: 503 });
+    }
     console.error("[ase-license/activate]", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "server_error" }, { status: 500 });
   }

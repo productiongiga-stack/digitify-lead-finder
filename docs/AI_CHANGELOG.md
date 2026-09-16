@@ -3,6 +3,16 @@
 Chronologisch logboek van significante wijzigingen (mens + AI).  
 **Formaat:** nieuwste entries bovenaan.
 
+## 2026-09-17 — Prod outage: instrumentation DB-role soft-fail
+
+**Type:** Incidentfix (P0)  
+**Agent:** Composer
+
+- Root cause: `assertSafeDatabaseRole` in `instrumentation.ts` hard-failde wanneer `DATABASE_URL` een `SUPERUSER`/`BYPASSRLS`-rol gebruikt → alle App Router-pagina’s HTTP 500; `/api/health` bleef 200.
+- Soft-fail by default (log + continue); hard-fail alleen met `STRICT_DATABASE_ROLE_CHECK=true`.
+- ASE public routes: Prisma P2021/P2022 (`ase_licenses` ontbreekt) → 503 `unavailable` i.p.v. generieke 500.
+- Open: productie-`DATABASE_URL` naar `digitify_app` (non-BYPASSRLS) + `prisma migrate deploy` voor `20260916170000_ase_licenses`.
+
 ## 2026-09-17 — SMTP test: Cloudflare-host detectie + lokale foutmeldingen
 
 **Type:** Bugfix, UX  

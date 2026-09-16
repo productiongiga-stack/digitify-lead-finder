@@ -34,6 +34,13 @@ export function isLicenseUsable(status: string, expiresAt: Date | null | undefin
   return true;
 }
 
+/** Prisma P2021/P2022 when `ase_licenses` migration is not applied yet. */
+export function isAseLicenseUnavailableError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const code = (err as { code?: string }).code;
+  return code === "P2021" || code === "P2022";
+}
+
 export async function findLicenseByKey(key: string) {
   const keyHash = hashLicenseKey(key);
   return prisma.aseLicense.findUnique({ where: { keyHash } });

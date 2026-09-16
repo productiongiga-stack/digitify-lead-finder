@@ -22,6 +22,15 @@ export async function register() {
   const startupPrisma = new PrismaClient();
   try {
     await assertSafeDatabaseRole(startupPrisma);
+  } catch (err) {
+    // Soft-fail by default: a hard throw here 500s every App Router page while
+    // leaving /api/health up (exact production outage on leads.digitify.be).
+    // Opt into hard fail only after DATABASE_URL uses a non-BYPASSRLS role.
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[instrumentation] database role check failed: ${message}`);
+    if (process.env.STRICT_DATABASE_ROLE_CHECK === "true") {
+      throw err;
+    }
   } finally {
     await startupPrisma.$disconnect();
   }
