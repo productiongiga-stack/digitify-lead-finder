@@ -78,6 +78,8 @@ Verify: `RUN_REDIS_INTEGRATION=1 REDIS_URL=redis://localhost:6379 pnpm test:redi
 
 Server startup validates env via `apps/web/src/instrumentation.ts` + `packages/api/src/lib/server-env.ts` (Zod).
 
+Production also checks that the Prisma DB role is not `SUPERUSER` / `BYPASSRLS`. By default this is a **soft** check (log + continue) so a misconfigured role does not 500 every page. Set `STRICT_DATABASE_ROLE_CHECK=true` only after `DATABASE_URL` uses a non-bypass role (e.g. `digitify_app`).
+
 | Variable | Development | Production |
 |----------|-------------|------------|
 | `DATABASE_URL` | Required | Required |
@@ -85,6 +87,7 @@ Server startup validates env via `apps/web/src/instrumentation.ts` + `packages/a
 | `NEXTAUTH_SECRET` | Min. 32 chars | Min. 32 chars |
 | `SETTINGS_ENCRYPTION_KEY` | Optional (warn) | Required, min. 32 chars |
 | `CRON_SECRET` | Optional (`CRON_ALLOW_UNSIGNED_DEV=1`) | Required, min. 16 chars |
+| `STRICT_DATABASE_ROLE_CHECK` | Optional | Optional (`true` = hard-fail on unsafe role) |
 
 Invalid config fails at boot with a list of fields — not a generic 500 on first tRPC call.
 

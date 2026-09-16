@@ -16,11 +16,19 @@ import {
   generateLicenseKey,
   normalizeDomain,
   isLicenseUsable,
+  isAseLicenseUnavailableError,
   createLicenseForEmail,
   issueLicense,
 } from "../lib/ase-license";
 
 describe("ase-license helpers", () => {
+  it("detects missing-table Prisma codes", () => {
+    expect(isAseLicenseUnavailableError({ code: "P2021" })).toBe(true);
+    expect(isAseLicenseUnavailableError({ code: "P2022" })).toBe(true);
+    expect(isAseLicenseUnavailableError({ code: "P2002" })).toBe(false);
+    expect(isAseLicenseUnavailableError(new Error("boom"))).toBe(false);
+  });
+
   it("generates ASE-XXXX-XXXX-XXXX-XXXX keys", () => {
     const key = generateLicenseKey();
     expect(key).toMatch(/^ASE-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/);

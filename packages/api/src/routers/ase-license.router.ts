@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, ownerProcedure, sensitiveOwnerProcedure } from "../trpc";
-import { createLicenseForEmail, issueLicense } from "../lib/ase-license";
+import {
+  createLicenseForEmail,
+  isAseLicenseUnavailableError,
+  issueLicense,
+} from "../lib/ase-license";
 import { sendLicenseKeyEmail } from "../lib/ase-license-email";
 
 const optionalTrimmed = z
@@ -31,13 +35,20 @@ const listSelect = {
 
 export const aseLicenseRouter = router({
   list: ownerProcedure.query(async ({ ctx }) => {
-    const rows = await ctx.db.aseLicense.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 100,
-      select: listSelect,
-    });
-    const pendingCount = rows.filter((r) => r.status === "pending").length;
-    return { items: rows, pendingCount };
+    try {
+      const rows = await ctx.db.aseLicense.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 100,
+        select: listSelect,
+      });
+      const pendingCount = rows.filter((r) => r.status === "pending").length;
+      return { items: rows, pendingCount };
+    } catch (err) {
+      if (isAseLicenseUnavailableError(err)) {
+        return { items: [], pendingCount: 0 };
+      }
+      throw err;
+    }
   }),
 
   createForEmail: sensitiveOwnerProcedure
