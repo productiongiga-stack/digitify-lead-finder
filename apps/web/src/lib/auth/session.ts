@@ -44,7 +44,13 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   if (!user?.id || !user.email || !user.role || !user.workspaceId || !user.workspaceRole) return null;
   const cookieStore = await cookies();
   const viewToken = cookieStore.get(ACCOUNT_VIEW_COOKIE)?.value;
-  const viewedUser = viewToken ? await resolveAccountView(prisma, user as { id: string; workspaceId?: string; workspaceRole?: string }, viewToken) : null;
+  const viewedUser = viewToken
+    ? await resolveAccountView(
+        prisma,
+        user as { id: string; email: string; role: string; workspaceId?: string; workspaceRole?: string },
+        viewToken,
+      )
+    : null;
   return viewedUser ?? {
     id: user.id, email: user.email, name: user.name ?? null, role: user.role,
     workspaceId: user.workspaceId, workspaceRole: user.workspaceRole,

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { checkUpstashRateLimit } from "../lib/rate-limit-upstash";
+import { checkUpstashRateLimit, getUpstashRestConfig } from "../lib/rate-limit-upstash";
 
 describe("checkUpstashRateLimit", () => {
   const config = { url: "https://example.upstash.io", token: "test-token" };
@@ -10,6 +10,32 @@ describe("checkUpstashRateLimit", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    delete process.env.upstashredis_KV_REST_API_URL;
+    delete process.env.upstashredis_KV_REST_API_TOKEN;
+  });
+
+  it("accepts the Vercel Upstash integration variable names", () => {
+    process.env.upstashredis_KV_REST_API_URL = "https://example.upstash.io/";
+    process.env.upstashredis_KV_REST_API_TOKEN = "integration-token";
+
+    expect(getUpstashRestConfig()).toEqual({
+      url: "https://example.upstash.io",
+      token: "integration-token",
+    });
+  });
+
+  it("ignores unresolved Vercel variable references", () => {
+    process.env.UPSTASH_REDIS_REST_URL = "$upstashredis_KV_REST_API_URL";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "$upstashredis_KV_REST_API_TOKEN";
+    process.env.upstashredis_KV_REST_API_URL = "https://example.upstash.io/";
+    process.env.upstashredis_KV_REST_API_TOKEN = "integration-token";
+
+    expect(getUpstashRestConfig()).toEqual({
+      url: "https://example.upstash.io",
+      token: "integration-token",
+    });
   });
 
   it("allows until limit then blocks", async () => {

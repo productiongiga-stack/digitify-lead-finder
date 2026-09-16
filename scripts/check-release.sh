@@ -24,6 +24,7 @@ echo "==> generate + migrate (local DATABASE_URL required)"
 pnpm db:generate
 pnpm db:migrate
 pnpm --filter @digitify/db db:check-domain-schema
+pnpm db:check-role
 
 echo "==> model cost sync check"
 node packages/media-studio/scripts/sync-model-costs.mjs --check

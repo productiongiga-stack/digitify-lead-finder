@@ -242,7 +242,7 @@ Leads + dashboard zijn **altijd** beschikbaar (geen moduleId).
 
 Bron: `docs/PHASES.md`
 
-- Productie live + RLS op staging/productie: **open** (handmatig)
+- Productie live + `ENABLE_WORKSPACE_RLS=true`; database-rol zonder `SUPERUSER`/`BYPASSRLS` en productie-RLS-smoke: **open** (handmatig in Supabase)
 - `.env.example` bevat veilige lokale placeholders; productievariabelen staan in `docs/VERCEL.md`
 - `settings/quotes/page.tsx` ~5000 regels               → refactor gepland (fase 10)
 - Runtime JSON migraties op list endpoints               → fase 9.2

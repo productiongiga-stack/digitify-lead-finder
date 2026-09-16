@@ -3,6 +3,42 @@
 Chronologisch logboek van significante wijzigingen (mens + AI).  
 **Formaat:** nieuwste entries bovenaan.
 
+## 2026-09-16 — Fase 104: moduletoegang onder RLS herstellen
+
+**Type:** Beveiliging, autorisatie, database
+**Agent:** Codex
+
+- De `settings`-RLS-policy staat per-user module-instellingen toe voor actieve leden binnen de actieve workspace.
+- Platform-owner modulebeheer zet binnen de reeds geautoriseerde RLS-transactie tijdelijk de doelgebruiker-scope, zonder algemene RLS-bypass.
+- Dezelfde policy is idempotent op productie toegepast voor `settings`.
+- Verificatie: `pnpm typecheck` en de 13 gerichte `mutation-rbac`-tests slagen.
+
+## 2026-09-16 — Fase 105: RLS-helper hardenen
+
+**Type:** Beveiliging, database
+**Agent:** Codex
+
+- `app_user_id()` gebruikt nu een vaste `search_path` (`pg_catalog, public`).
+- De productie-advisor toont geen mutable-search-path-waarschuwing meer; de 7 bestaande informatieve meldingen voor tabellen zonder policies blijven bewust deny-by-default en worden apart opgevolgd.
+
+## 2026-09-16 — Fase 106: advertentie- en social-RLS herstellen
+
+**Type:** Beveiliging, database, integraties
+**Agent:** Codex
+
+- `google_ad_accounts`, `google_ad_plans`, `meta_ad_accounts`, `meta_ad_plans` en `social_posts` hebben nu een workspacegebonden policy op `createdById` en `FORCE ROW LEVEL SECURITY`.
+- Productie-Supabase heeft nu nog 2 informatieve meldingen: `feedback_items` en `registration_requests` blijven bewust gesloten zonder policy.
+- Er zijn geen gegevens verwijderd of aangepast.
+
+## 2026-09-16 — Fase 107: productieconnection-pool stabiliseren
+
+**Type:** Runtime, database, beschikbaarheid
+**Agent:** Codex
+
+- Vercel/Supabase gaf `EMAXCONNSESSION` omdat de session-pool van 15 verbindingen werd overschreden.
+- Productie gebruikt nu standaard `connection_limit=1` per Prisma-instance; `DATABASE_CONNECTION_LIMIT` kan dit gecontroleerd overschrijven.
+- Health controleerde daarna opnieuw database en Redis als `ok`; de nieuwe deployment is `READY`.
+
 ## 2026-09-12 — Fase 36: Vercel-opslagcontrole
 
 **Type:** Operations, storage, deployment hygiene
@@ -1228,3 +1264,510 @@ Tests: `pnpm typecheck`, `git diff --check`.
 - De test controleert daarmee ook de nieuwe lazy-loaded componentgrenzen zonder echte e-mails te verzenden.
 
 **Verificatie:** Playwright outbound smoke `6 passed`, webtests `42 passed`, typecheck en `git diff --check` geslaagd. De tijdelijke lokale testserver is gestopt. Geen databasewijziging, deployment of externe integratie uitgevoerd.
+
+## Fase 55 — Vercel Blob- en deploymentopslagcontrole (2026-09-14)
+
+- De accountbrede Vercel Usage-pagina is gecontroleerd voor Blob Storage en Functions Storage.
+- Blobgebruik staat op `305,36 MB` totaal; Functions Storage op `1,04 GB` voor de laatste 30 dagen.
+- De twee actieve projecten gebruiken respectievelijk ongeveer `830,8 MB` en `210,69 MB` function-opslag. Oude projectnamen in de usagegrafiek tonen `0 B`.
+- De Leads-store bevat 48 objecten (169,92 MB) en de Shop-store 120 objecten (121,29 MB). Dit bevestigt niet dat een store vol is.
+- Leads-health, de shop-homepage, de 3D GLB-route en de interactieve 3D-preview zijn live gecontroleerd. De preview eindigde zonder console-errors in `3D VOORBEELD`.
+- Er zijn geen Blob-objecten verwijderd. De Shop Production `DATABASE_URL` is leeg, waardoor objecten niet veilig tegen `upload_blobs` konden worden vergeleken.
+- De volledige meting en het veilige opruimprotocol staan in `docs/VERCEL_STORAGE_AUDIT.md`.
+
+**Verificatie:** Vercel CLI-project- en Blob-inventarisatie, Vercel Usage-pagina, `curl`-headers, live Leads-healthcheck en live shop-browsercontrole geslaagd. Geen productiegegevens gewijzigd, geen storage verwijderd en geen secrets gelogd.
+
+## Fase 56 — Team & Rollen beheer (2026-09-15)
+
+- `user.list` toont nu veilige workspacecontext per account: workspace, type, actuele rol en membershipstatus, zonder secrets of wachtwoordgegevens.
+- Platform-owner view-as accepteert een expliciete workspace, valideert target en membership opnieuw per request en blijft maximaal 30 minuten geldig. Gewone workspace-owners blijven beperkt tot hun eigen actieve workspace.
+- De Team-pagina heeft statistieken, zoeken, rol/workspace/statusfilters, een compacte desktopweergave en responsive accountkaarten op mobiel.
+- View-as toont vóór de start de doelaccount-, workspace-, verval- en beperkingsinformatie. Gevoelige acties blijven server-side geblokkeerd en worden geaudit.
+- Moduletoegang, uitnodigingen, rolwijzigingen, view-as en verwijderen tonen nu consistente laad-, fout-, retry- en succesfeedback. Uitnodigingswachtwoorden gebruiken dezelfde policy als de backend.
+- Er is geen databasemigratie uitgevoerd; de bestaande `AccountViewSession`- en auditmodellen zijn hergebruikt.
+
+**Verificatie:** `pnpm db:generate`, `pnpm test` geslaagd (`296 passed / 16 skipped` API, `42 passed` web), `pnpm typecheck`, `pnpm lint`, `pnpm build` en `git diff --check` geslaagd. Ingelogde lokale Playwright-controle is geblokkeerd door een mismatch tussen de lokale testcredentials en de actieve database. De RLS/IDOR-integratietests zijn geprobeerd maar geblokkeerd omdat PostgreSQL niet bereikbaar was op `localhost:5432`; de pure RBAC-integratietests slaagden. Geen credentials zijn gelogd.
+
+## Fase 57 — RLS/IDOR-controle met niet-superuser (2026-09-15)
+
+- Colima en de lokale Postgres/Redis-containers zijn gestart zonder productiegegevens te wijzigen.
+- De lokale migraties zijn toegepast en de bestaande seedfixtures zijn opnieuw geladen in de lokale database.
+- De eerste RLS-run met de Compose-beheerder was ongeldig voor securitybewijs, omdat die rol superuser/BYPASSRLS-rechten heeft. Daarom is uitsluitend lokaal een aparte `digitify_app`-rol zonder `SUPERUSER` en `BYPASSRLS` gebruikt.
+- Met die rol slagen workspace-RLS, IDOR en Team-RBAC samen `13/13` integratietests. De RLS-smoke bevestigt dat Owner B Owner A-leads niet kan lezen en dat beide workspaces alleen hun eigen leads zien.
+- De gerichte settings-browsercontrole voor Viewer, Member en Moderator is `4/4` geslaagd.
+
+**Open infrastructuurpunt:** productie moet dezelfde eigenschap behouden: Prisma mag niet verbinden met een superuser- of BYPASSRLS-account. Dit is een deploymentconfiguratiecontrole en is lokaal niet naar Vercel/Supabase gewijzigd.
+
+## Fase 58 — Owner Team- en view-as browserflow (2026-09-15)
+
+- De lokale Owner-flow is browsermatig doorlopen op `http://127.0.0.1:3000`.
+- Teamlijst geladen met 6 accounts en 4 toegankelijke view-as-acties.
+- Een account is via de bevestigingsdialoog geopend; de view-as-banner verscheen correct op het dashboard.
+- Vercel projectinventarisatie is read-only gecontroleerd: alleen `project-ubm6y` en `digitify-3d-webshop` staan in het team.
+- Geen productievariabelen gelezen, gewijzigd of gelogd; de verouderde Vercel CLI kon custom environments niet opvragen.
+
+**Verificatie:** Owner Team/view-as smoke geslaagd, login en healthcheck lokaal HTTP 200. De lokale devserver blijft draaien op `http://localhost:3000`.
+
+## Fase 59 — Vercel productieconfiguratie read-only inventarisatie (2026-09-15)
+
+- De lokale Vercel-link verwijst naar `project-ubm6y`; de teaminventaris bevat alleen `project-ubm6y` en `digitify-3d-webshop`.
+- Voor Leads zijn de verwachte productievariabelen als namen aanwezig, waaronder `DATABASE_URL`, `POSTGRES_PRISMA_URL`, `POSTGRES_URL_NON_POOLING`, `ENABLE_WORKSPACE_RLS`, `SETTINGS_ENCRYPTION_KEY`, `CRON_SECRET` en `PLATFORM_OWNER_EMAILS`.
+- Er zijn geen waarden of secrets geprint, gewijzigd, verwijderd of geroteerd.
+- De oude lokale Vercel CLI liet bij `env run` lokale `.env`-waarden voorgaan; een geïsoleerde read-only run vanuit een tijdelijke map kon geen productievariabelen aan het proces doorgeven. De effectieve databasegebruiker en de waarde van `ENABLE_WORKSPACE_RLS` zijn daarom nog niet bewezen.
+
+**Open:** controleer in Vercel Production handmatig of `ENABLE_WORKSPACE_RLS=true` en of `DATABASE_URL`/`POSTGRES_PRISMA_URL` niet met een superuser/BYPASSRLS-account verbinden. Daarna kan de productie-RLS-smoke worden uitgevoerd.
+
+## Fase 60 — Actuele Vercel CLI-controle (2026-09-15)
+
+- De actuele Vercel CLI is read-only uitgevoerd tegen Production.
+- Vercel blokkeert het lokaal ophalen van 16 secretwaarden; daardoor zijn `ENABLE_WORKSPACE_RLS` en de productie-databasegebruiker niet uitleesbaar zonder secrets te exporteren.
+- Er zijn geen secrets, environment values, deployments of projectinstellingen gewijzigd.
+
+**Status:** geblokkeerd voor automatische bewijsvoering; handmatige controle in Vercel Production blijft vereist.
+
+## Fase 61 — Veilige poging productie-secretcontrole (2026-09-15)
+
+- Met expliciete toestemming is een tijdelijke Vercel Production-env-export gebruikt voor uitsluitend metadata-controle.
+- Het tijdelijke bestand is na verwerking verwijderd; geen secretwaarde, token of wachtwoord is gelogd of aan de repository toegevoegd.
+- Vercel leverde de gevoelige waarden niet aan de CLI, waardoor de productie-databasegebruiker, Redis-status en effectieve `ENABLE_WORKSPACE_RLS`-waarde niet betrouwbaar konden worden vastgesteld.
+- Er zijn geen productievariabelen, deployments of infrastructuur gewijzigd.
+
+**Status:** handmatige Vercel-dashboardcontrole blijft vereist; de lokale niet-superuser RLS-tests blijven het bewezen securityresultaat.
+
+## Fase 62 — Database-role release guard (2026-09-15)
+
+- Nieuwe read-only check `pnpm db:check-role` controleert via `pg_roles` of de actieve Prisma-databasegebruiker geen `SUPERUSER` of `BYPASSRLS` heeft.
+- De veilige lokale `digitify_app`-rol slaagt; de Compose-beheerder wordt bewust geweigerd.
+- De check is toegevoegd aan de Vercel/RLS-runbook zodat productie vóór een rollout tegen de echte productie-URL kan worden gecontroleerd.
+
+**Verificatie:** veilige rol geslaagd, superuser-rol correct geweigerd, zonder databasewijzigingen.
+
+## Fase 63 — Releasecheck blokkering voor onveilige DB-rollen (2026-09-15)
+
+- `scripts/check-release.sh` voert nu `pnpm db:check-role` uit naast de schema-check.
+- De releasecheck en releasechecklist vereisen daarmee expliciet een Prisma-rol zonder `SUPERUSER` en `BYPASSRLS`.
+- De guard blijft read-only; er worden geen rollen, grants of databases aangepast.
+
+**Verificatie:** veilige lokale rol geslaagd, superuser lokaal geweigerd, typecheck en diffcontrole geslaagd.
+
+## Fase 64 — Vercel RLS-flag geactiveerd (2026-09-15)
+
+- Met expliciete toestemming is `ENABLE_WORKSPACE_RLS=true` ingesteld voor Production van `project-ubm6y`.
+- Er is geen secretwaarde gelezen, geroteerd of gewijzigd en er is geen deployment gestart.
+- De huidige live deployment blijft gezond: `https://leads.digitify.be/api/health` geeft `{"status":"ok","db":"ok"}` terug. Redis rapporteert nog `skipped` in de bestaande healthcheck.
+- De nieuwe waarde wordt pas actief in een volgende deployment; die wordt bewust uitgesteld totdat de productie-databasegebruiker en migratiestatus bevestigd zijn.
+
+**Status:** RLS-configuratie voorbereid; gecontroleerde deployment blijft de volgende stap.
+
+## Fase 65 — Schone productie-deployment en uploadhardening (2026-09-15)
+
+- `.vercelignore` sluit nu ook nested `node_modules`, buildcaches, Playwright `test-results` en `playwright-report` uit. De upload werd daarmee teruggebracht van honderden megabytes naar een klein bronpakket.
+- De eerste deploymentpoging faalde tijdens upload; de tweede build met het opgeschoonde pakket is succesvol afgerond en gealiased naar `https://leads.digitify.be`.
+- De deployment compileerde succesvol. Bestaande ESLint-waarschuwingen bleven waarschuwingen en blokkeerden de build niet.
+- De productie-healthcheck is na rollout gecontroleerd; er zijn geen secrets of testcredentials in de changelog of command-output opgenomen.
+
+**Verificatie:** deployment `Ready`, productie-alias actief, health endpoint gecontroleerd en `git diff --check` geslaagd. De productie-databasegebruiker en effectieve RLS-databasepolicy zijn nog niet onafhankelijk bewezen; dit blijft een operationeel controlepunt.
+
+## Fase 66 — Productie-rolcontrole voorbereid (2026-09-15)
+
+- De nieuwe read-only `db:check-role` is geprobeerd via `vercel env run -e production`; Vercel kan secretwaarden niet lokaal doorgeven en laadde daardoor de lokale `.env` als fallback.
+- De controle faalde lokaal bewust op de standaard superuser-rol `digitify`. Dit zegt niets over de productie-rol en is daarom niet als productie-resultaat geregistreerd.
+- Runbooks zijn bijgewerkt zodat de geldige productiecontrole rechtstreeks in Supabase gebeurt, zonder databasewijziging: `SELECT current_user, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user;`.
+
+**Status:** productie-database-rol en RLS-smoke blijven geblokkeerd tot de Supabase SQL Editor of een direct, niet-superuser `DIRECT_URL` beschikbaar is. Geen secrets zijn gelezen of opgeslagen.
+
+## Fase 67 — Lokale RLS-regressie opnieuw bevestigd (2026-09-15)
+
+- De lokale database bevat `digitify_app` zonder `SUPERUSER` en zonder `BYPASSRLS`; de standaard lokale rol `digitify` blijft uitsluitend voor beheer/testopstart.
+- Met `ENABLE_WORKSPACE_RLS=true` zijn de integratietests opnieuw geslaagd: `13/13` voor workspace-RLS, IDOR en settings-RBAC.
+- De RLS-smoke is opnieuw geslaagd: beide workspaces zien uitsluitend hun eigen leads en cross-workspace lead-ID's worden geblokkeerd.
+- Alleen de lokale testrol kreeg een tijdelijk lokaal wachtwoord; dit is niet gelogd, niet gedocumenteerd en niet naar productie gebruikt.
+
+**Status:** lokale securitycontrole geslaagd. Productiecontrole blijft open tot de rol rechtstreeks in Supabase is bevestigd.
+
+## Fase 68 — Productie-rolcheck tegen lokale vergissingen beschermd (2026-09-15)
+
+- Nieuwe command `pnpm db:check-production-role` weigert lokale databasehosts en voert daarna dezelfde read-only `pg_roles`-controle uit.
+- De releasechecklist en Vercel-runbook verwijzen nu naar deze expliciete productievariant.
+- Hiermee kan een geslaagde lokale test niet langer per ongeluk als productie-bewijs worden gebruikt.
+
+**Verificatie:** lokale URL wordt correct geweigerd; `git diff --check` geslaagd. De productieverbinding zelf is nog niet door deze guard gecontroleerd.
+
+## Fase 69 — Supabase productiecontrole overdraagbaar gemaakt (2026-09-15)
+
+- Nieuwe read-only checklist toegevoegd voor de database-rol, RLS-status, policies en tabelrechten.
+- De checklist waarschuwt expliciet tegen generieke `TO authenticated`-policies en onnodige Data API-rechten.
+- Er zijn geen queries tegen productie uitgevoerd en geen policies, grants of data gewijzigd.
+
+**Status:** klaar voor uitvoering in Supabase SQL Editor; productie-RLS-smoke blijft afhankelijk van een directe niet-superuser verbinding en bewuste keuze voor staging of productie.
+
+## Fase 70 — Lokale releaseverificatie (2026-09-15)
+
+- `pnpm typecheck` geslaagd.
+- `pnpm test` geslaagd; de bestaande API-, package- en webtests blijven groen. Integratietests die een expliciete DB-run vereisen blijven apart uitgevoerd via de niet-superuser RLS-run.
+- Geen nieuwe runtime- of databasewijziging in deze fase.
+
+**Status:** lokaal vrijgegeven voor de volgende gecontroleerde infrastructuurstap; productie-Supabase blijft handmatig te bevestigen.
+
+## Fase 71 — Productie publieke-surface smoke en CSP-versterking (2026-09-15)
+
+- Read-only smoke op `leads.digitify.be`: login HTTP 200; unauthenticated `user.list` en `domain.list` HTTP 401; responses bevatten geen database- of secretpatronen.
+- Cloudflare, HSTS, `nosniff`, `SAMEORIGIN`, `Permissions-Policy` en `Referrer-Policy` zijn aanwezig.
+- CSP blijft bewust `Report-Only` tijdens deze fase om frontendregressies te vermijden, maar is aangescherpt met `base-uri`, `object-src 'none'`, `form-action` en `worker-src`.
+
+**Verificatie:** typecheck en `git diff --check` geslaagd; na herstart van de lokale devserver geeft `/api/health` HTTP 200. **Open risico:** enforcement en CSP-reporting moeten eerst met echte browserflows worden gemeten; `unsafe-inline` en `unsafe-eval` blijven voorlopig nodig voor compatibiliteit.
+## Fase 72 — Supabase read-only audit afgerond (2026-09-15)
+
+- De Supabase-connector identificeerde de Leads- en Shop-projecten en haalde security- en performance-advisors op zonder wijzigingen.
+- Leads heeft 7 tabellen met RLS zonder policies; Shop heeft 16. Voor Leads zijn geen directe `anon`/`authenticated`-tabelrechten gevonden, waardoor dit geen aangetoond Data API-lek is.
+- De connector draait als `postgres` met `BYPASSRLS`; dit is geen bewijs voor de Vercel Prisma-rol. De actieve verbinding van de app was tijdens de korte controle niet zichtbaar.
+- Performance-advisors melden respectievelijk 28/10 ongeindexeerde foreign keys en 89/14 ongebruikte indexen. Geen indexen gewijzigd zonder querymeting.
+
+**Status:** auditrapport toegevoegd; P1-productierolcontrole blijft open. Geen productie-DML/DDL of secretwijziging uitgevoerd.
+
+## Fase 73 — Dashboard cache-miss coalescing (2026-09-15)
+
+- Productieruntime-aggregatie liet geen 5xx-cluster zien, maar wel herhaalde trage `dashboard.getOverview`-requests van 2,2–2,9 seconden.
+- Gelijktijdige cache misses voor hetzelfde workspace-dashboard worden nu binnen één runtime-instance samengevoegd tot één queryketen.
+- In-flight resultaten worden niet opnieuw gecachet wanneer een mutation de workspace-cache tijdens het laden invalideert.
+- Er zijn geen tenantgrenzen, queryresultaten of cache-keys gewijzigd; de bestaande korte TTL en mutation-invalidation blijven actief.
+
+**Verificatie:** `pnpm typecheck` geslaagd, API-tests `296 passed / 16 skipped`, `git diff --check` geslaagd. Productie-deployment van deze wijziging volgt pas na de resterende releasecontrole.
+
+## Fase 74 — Shop Data API-grants gecontroleerd (2026-09-15)
+
+- De Shop-Supabase is read-only gecontroleerd op directe `anon`- en `authenticated`-tabelrechten in schema `public`.
+- Er zijn geen zulke grants gevonden. De 16 RLS-tabellen zonder policy blijven wel expliciete configuratiepunten; er zijn geen policies of grants toegevoegd zonder per-tabel autorisatiemodel.
+- De controle zegt niet welke database-rol Vercel gebruikt. Dat blijft het open P1-punt totdat de echte niet-superuser Prisma-verbinding rechtstreeks is geverifieerd.
+
+**Verificatie:** Supabase SQL read-only geslaagd; geen DDL, DML, grant-, policy- of secretwijziging uitgevoerd.
+
+## Fase 75 — Fail-closed database-role startupguard (2026-09-15)
+
+- De database-rolcontrole is gecentraliseerd in `packages/db/src/database-role.ts` en wordt hergebruikt door de releasecheck.
+- Productie-startup controleert nu de actuele Prisma-rol en weigert `SUPERUSER`, `BYPASSRLS` of een niet-resolveerbare rol voordat de server verder initialiseert.
+- De guard lekt geen rolmetadata via health- of foutresponses. Lokale controle weigert bewust de lokale beheerrol met exitcode 1.
+- De bestaande releasecheck en de handmatige productiecontrole blijven behouden; deze guard vervangt geen RLS-smoke met twee workspaces.
+
+**Verificatie:** web-typecheck geslaagd, `git diff --check` geslaagd en lokale onveilige rol correct geweigerd. De aparte database-package typecheck is in fase 76 opnieuw groen gemaakt.
+
+## Fase 76 — Database-package typecheck en lokale migratie-runner (2026-09-15)
+
+- `prisma/migrate-workspace-settings.ts` behandelt JSON `null` nu expliciet als `Prisma.JsonNull`, waardoor de database-package typecheck weer slaagt.
+- Het root-commando `pnpm db:migrate-workspace-settings` gebruikt nu dezelfde lokale env-wrapper als de andere databasecommando's.
+- De lokale migratie is uitsluitend als dry-run uitgevoerd: `12` mogelijke kopieën, `3` bestaande records overgeslagen, `0` databasewijzigingen.
+
+**Verificatie:** database-package typecheck geslaagd, web-typecheck geslaagd, API-tests `296 passed / 16 skipped`, dry-run geslaagd en `git diff --check` geslaagd.
+
+## Fase 77 — Productiebuild gevalideerd (2026-09-15)
+
+- De volledige Next.js production build is geslaagd met de startupguard en database-role helper inbegrepen.
+- Alle 119 statische pagina's zijn gegenereerd; de bestaande ESLint-waarschuwingen blijven niet-blokkerend.
+- De lokale devserver bleef bereikbaar op `/api/health` met HTTP 200 na de build.
+- Er is geen productie-deployment gestart: de effectieve Vercel-database-rol en productie-RLS-smoke zijn nog niet bewezen.
+
+**Verificatie:** `pnpm build` geslaagd, web-typecheck geslaagd, database-package typecheck geslaagd, API-tests `296 passed / 16 skipped`, healthcheck HTTP 200.
+
+## Fase 78 — Productie Prisma-rol opnieuw gecontroleerd (2026-09-15)
+
+- Live `/api/health` gaf HTTP 200 en `db=ok`.
+- Direct daarna waren in Supabase alleen PostgREST, pooler, management en Supabase-systeemverbindingen zichtbaar; de Vercel-Prisma-verbinding kon niet aan een rol worden gekoppeld.
+- De loginrollenlijst bevat geen herkenbare aparte applicatierol. `postgres` heeft `BYPASSRLS`; dit is een risico als Vercel daarop draait, maar het is niet bewezen dat Vercel deze rol gebruikt.
+- Er zijn geen rollen, grants, wachtwoorden, environment variables of deployments gewijzigd.
+
+**Status:** productie-rollout blijft geblokkeerd totdat Vercel Production handmatig bevestigt welke niet-superuser/non-`BYPASSRLS`-rol de Prisma-verbinding gebruikt. Een nieuwe rol aanmaken zonder gelijktijdige gecontroleerde Vercel-secretwijziging is bewust niet uitgevoerd.
+
+## Fase 79 — Supabase rolcontrole uitgevoerd (2026-09-15)
+
+- De gevraagde read-only query is uitgevoerd op het Leads-Supabase-project.
+- Uitkomst: de SQL Editor gebruikt `postgres`, met `rolsuper=false` en `rolbypassrls=true`.
+- Dit bevestigt dat de beheerverbinding RLS kan omzeilen; het bewijst niet welke rol Vercel Prisma gebruikt.
+- Er zijn geen rollen, policies, grants, data of secrets gewijzigd.
+
+**Status:** Vercel Production moet nog aantonen dat de applicatieverbinding een aparte rol gebruikt met `rolsuper=false` en `rolbypassrls=false`.
+
+## Fase 80 — App-rolrotatie voorbereid (2026-09-15)
+
+- Een gecontroleerd runbook toegevoegd voor het aanmaken, testen, omschakelen en terugdraaien van een aparte Supabase-Prisma-approl.
+- Het runbook gebruikt placeholders voor credentials en bevat geen wachtwoord, token of connection string.
+- De rolwijziging, grants en Vercel-environment variables zijn bewust niet uitgevoerd; eerst is een onderhoudsmoment en stagingvalidatie nodig.
+
+**Status:** voorbereiding klaar; productie blijft ongewijzigd en het bestaande P1-releaseblok blijft actief.
+
+## Fase 81 — Browserregressiecontrole (2026-09-15)
+
+- De lokale Playwright-suite is uitgevoerd tegen de huidige devserver.
+- `8` tests slaagden en `25` tests werden bewust overgeslagen omdat ze ingelogde fixtures of extra integratieconfiguratie vereisen.
+- Geslaagde controles omvatten health, marketing responsive views, publieke embeds en portal-uploadvalidatie.
+- Er zijn geen browserfouten, datawijzigingen of productieacties uitgevoerd.
+
+**Verificatie:** `pnpm test:e2e` eindigde met `8 passed / 25 skipped`; lokale `/api/health` bleef HTTP 200.
+
+## Fase 82 — RLS-integratie opnieuw uitgevoerd met niet-superuser (2026-09-15)
+
+- De eerste lokale run met de standaard beheerverbinding is bewust afgekeurd: die rol kon RLS omzeilen en gaf daarom geen geldig securitybewijs.
+- Dezelfde run is daarna herhaald met de lokale niet-superuser/non-`BYPASSRLS`-approl.
+- Workspace-RLS, IDOR en settings-RBAC zijn volledig geslaagd: `13/13` tests.
+- De RLS-smoke bevestigt dat Owner A `20` eigen leads ziet, Owner B `2` eigen leads ziet en cross-workspace lead-ID's worden geblokkeerd.
+- Er zijn geen productieverbindingen, policies, grants of secrets gewijzigd.
+
+**Status:** lokale RLS- en IDOR-controle geslaagd. Productie-approl blijft nog handmatig te verifiëren.
+
+## Fase 83 — Preview-configuratie en runtimecontrole (2026-09-15)
+
+- De Vercel Preview-omgeving kreeg een aparte `NEXTAUTH_SECRET` en een Preview-`NEXTAUTH_URL`; secretwaarden zijn niet opgeslagen in de repository of rapportage.
+- Een nieuwe Preview-deployment is succesvol gebouwd en staat op `READY`; Production is niet opnieuw gedeployed of gewijzigd.
+- De eerste Preview-runtimecontrole vond de ontbrekende Auth-configuratie en gaf HTTP 500; na aanvulling zijn er geen nieuwe Preview-runtime-errors geregistreerd.
+- Rechtstreeks HTTP testen van de beschermde Preview blijft door Vercel Deployment Protection naar SSO omleiden. De lokale health- en loginchecks en de productie-healthcheck zijn wel uitgevoerd.
+
+**Verificatie:** Preview build `READY`, Preview runtime-log zonder nieuwe errors, lokale `/api/health` HTTP 200, lokale `/login` HTTP 200 en productie `/api/health` HTTP 200.
+
+## Fase 84 — Vercel secrets en databaseverbinding gecontroleerd (2026-09-15)
+
+- `BLOB_READ_WRITE_TOKEN`, `GOOGLE_CLIENT_SECRET` en `SETTINGS_ENCRYPTION_KEY` zijn in Vercel Production gemigreerd van het oudere `encrypted`-type naar `sensitive`; de waarden zijn niet uitgelezen of vervangen.
+- Production bevat een `DATABASE_URL`; de aparte variabele `database` is niet als vervanging gebruikt.
+- Historische Production-logs bevatten database-authenticatiefouten voor `postgres`. Een actuele publieke database-afhankelijke analytics-check gaf daarna HTTP 200 en de laatste tien minuten bevatten alleen HTTP 200-responses.
+- De Supabase-approl `digitify_app` bestaat en heeft `rolsuper=false`, `rolbypassrls=false` en loginrechten. Er is geen wachtwoord geroteerd en geen productie-connection string opgeslagen.
+
+**Status:** secretwaarschuwingen opgelost. Databaseverbinding actueel werkend; de productie-approl moet bij een volgende onderhoudscontrole opnieuw via de werkelijke `DATABASE_URL` worden bevestigd.
+
+## Fase 85 — Gedeelde productie-rate limiting gecontroleerd (2026-09-15)
+
+- Vercel Production bevat momenteel geen `REDIS_URL` en geen volledige `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`-configuratie.
+- De applicatie valt daarom terug op een per-instance geheugenbucket; dit blijft geschikt voor lokaal gebruik, maar niet als enige productiebeveiliging op meerdere Vercel-instances.
+- De bestaande releasecheck blokkeert een productieconfiguratie zonder gedeelde rate-limitbackend; er is geen niet-geautoriseerde fallback of nieuwe infrastructuur aangemaakt.
+
+**Verificatie:** rate-limittests `8/8` geslaagd; productiehealth blijft bereikbaar. Openstaand infrastructuurpunt: een Upstash Redis-store koppelen en daarna de gedeelde rate-limitintegratietest uitvoeren.
+
+## Fase 86 — Upstash-koppeling gecontroleerd en productie hersteld (2026-09-15)
+
+- De bestaande Vercel-integratievariabelen met prefix `upstashredis_` zijn niet uitgelezen; er zijn alleen gevoelige Vercel-verwijzingen aangemaakt voor `UPSTASH_REDIS_REST_URL` en `UPSTASH_REDIS_REST_TOKEN`.
+- Een productie-deployment met deze configuratie bouwde succesvol, maar de runtime-startupguard blokkeerde de server omdat de actieve `DATABASE_URL` nog met een `SUPERUSER`/`BYPASSRLS`-rol verbond.
+- De productie-alias is onmiddellijk teruggezet naar de vorige bewezen werkende deployment. Er is geen data verwijderd en geen databasepolicy gewijzigd.
+- De live healthcheck is daarna opnieuw gecontroleerd: HTTP `200`, database `ok`, Redis `skipped`. Dit betekent dat de app hersteld is, maar de gedeelde rate limiting nog niet live bewezen is.
+
+**Openstaand P1:** Vercel Production moet `DATABASE_URL` laten verbinden met de bestaande niet-superuser/non-`BYPASSRLS`-rol `digitify_app`. Zolang de actuele productieconnection string niet gecontroleerd of gecontroleerd vervangen is, wordt geen nieuwe productie-deployment met de startupguard uitgerold.
+
+## Fase 87 — Healthcheck uitgebreid voor Upstash REST (2026-09-15)
+
+- `/api/health` controleert nu naast `REDIS_URL` ook de bestaande Upstash REST-configuratie met een korte timeout en zonder tokenlogging.
+- Lokale typecheck en volledige tests zijn geslaagd: API `296 passed / 16 skipped`, web `42 passed`.
+- De production-build was `READY`, maar de runtime-startupguard blokkeerde opnieuw omdat de actieve productie-`DATABASE_URL` een `SUPERUSER`/`BYPASSRLS`-rol gebruikte.
+- De stabiele vorige deployment is opnieuw gepromoveerd; productie blijft bereikbaar via de bestaande alias.
+
+**Status:** code klaar voor de volgende gecontroleerde rollout. Openstaand P1 blijft de Vercel `DATABASE_URL` met `digitify_app`; Upstash kan pas daarna live worden bewezen.
+
+## Fase 88 — Upstash-variabelen robuuster gemaakt (2026-09-15)
+
+- De rate-limitconfiguratie accepteert nu zowel standaard Upstash-namen als de bestaande Vercel-integratienamen.
+- Onopgeloste Vercel-verwijzingen die letterlijk met `$` beginnen worden genegeerd; lokale regressietest en typecheck zijn geslaagd.
+- De production build was `READY`, maar de live Upstash-probe bleef `error` geven. Daarom is de stabiele vorige deployment opnieuw gepromoveerd.
+- Productie is opnieuw gecontroleerd: HTTP `200`, database `ok`, Redis `skipped`.
+
+**Openstaand:** de echte Upstash REST URL en write-token moeten in Vercel Production geldig aan de gekoppelde store verbonden zijn. Er zijn geen tokens uitgelezen of in de repository opgeslagen.
+
+## Fase 89 — Volledige lokale controle en RLS-verificatie (2026-09-15)
+
+- Projectinventarisatie uitgevoerd: monorepo, 40 API-routers en 91 App Router-pagina's gecontroleerd op entry points, moduleguards en securitygevoelige patronen.
+- Lokale devserver opnieuw gestart op `http://127.0.0.1:3000`; lokale healthcheck en loginpagina antwoorden succesvol.
+- Volledige tests geslaagd: API `298 passed / 16 skipped`, web `42 passed`; typecheck geslaagd.
+- Playwright geslaagd voor de beschikbare fixtures: `8 passed / 25 skipped`; de skips vereisen ingelogde fixtures of extra externe/integratieconfiguratie.
+- Database-integratie geslaagd: `13/13` tests, inclusief workspace-RLS, IDOR en settings-RBAC.
+- RLS-smoke geslaagd met twee workspaces en een niet-superuser/non-`BYPASSRLS`-rol; cross-workspace lead-ID's worden geblokkeerd.
+- Productiehealth blijft HTTP `200` met `db: ok`; gedeelde Redis/Upstash blijft het enige open infrastructuurpunt.
+
+**Open risico's:** bestaande lintwaarschuwingen blijven bestaan; productie-Upstash is nog niet bewezen; volledige geauthenticeerde browserflows voor alle rollen blijven afhankelijk van lokale testaccounts/fixtures.
+
+## Fase 90 — Productie Redis-herstel en documentatie (2026-09-15)
+
+- De productie-healthcheck is opnieuw uitgevoerd na het herstellen van de Vercel/Upstash-configuratie: HTTP `200`, database `ok` en Redis `ok`.
+- De productie-loginpagina antwoordt HTTP `200` met Cloudflare/Vercel securityheaders; er zijn geen nieuwe runtime-errors in de recente logcontrole gevonden.
+- De documentatie verduidelijkt nu dat zowel standaard Upstash REST-variabelen als Vercel-integratienamen worden ondersteund. Lokale in-memory rate limiting blijft uitsluitend een ontwikkelfallback.
+- Er zijn geen secrets uitgelezen, opgeslagen, geroteerd of in logs/documentatie geplaatst.
+
+**Verificatie:** volledige tests `298 passed / 16 skipped`, webtests `42 passed`, typecheck geslaagd, lint `0 errors / 29 warnings`, Playwright `8 passed / 25 skipped`, database-integratie `13/13` en RLS-smoke geslaagd. `git diff --check` geslaagd.
+
+**Open risico's:** 25 browserchecks blijven afhankelijk van ingelogde fixtures of extra integratieconfiguratie; lintwaarschuwingen zijn bestaande onderhoudspunten. De lokale healthcheck toont Redis bewust als `skipped` wanneer lokaal geen Redis-variabelen zijn geladen.
+
+## Fase 91 — Publieke route- en security-regressie (2026-09-15)
+
+- Productie `/login` antwoordt HTTP `200` en bevat Cloudflare, HSTS, `nosniff`, `SAMEORIGIN` en een beperkte Permissions-Policy.
+- Een niet-geauthenticeerde request naar `/dashboard` wordt HTTP `307` naar `/login` gestuurd met `private, no-cache, no-store`.
+- Een directe niet-geauthenticeerde tRPC-request levert geen tenantdata op; de gecontroleerde call antwoordde HTTP `404` zonder stacktrace of secretinformatie.
+- De ongeldige publieke reviews-embed antwoordt zonder serverfout en blijft `noindex, nofollow`; publieke embedheaders blijven bewust afwijkend (`frame-ancestors *`) voor de embed-use-case.
+- Er zijn geen loginpogingen, mails, mutaties of externe provideracties uitgevoerd.
+
+**Open risico:** de CSP is momenteel `report-only`. Enforce-mode vereist eerst een aparte inventarisatie van inline scripts, analytics en providerbronnen om geen login- of embedregressie te veroorzaken.
+
+## Fase 92 — CSP-bronnen gecontroleerd (2026-09-15)
+
+- De CSP-bronnen zijn opnieuw vergeleken met de code: Next.js-hydration, marketing boot scripts, workspace-analytics en de chatbot-loader gebruiken momenteel inline of dynamisch geladen scripts.
+- Analytics kan workspace-geconfigureerde scriptinhoud bevatten en gebruikt onder meer Google Tag Manager en LinkedIn. Een generieke enforce-policy zou nu legitieme tracking, login-hydration of embeds kunnen breken.
+- Daarom is CSP niet blind naar enforce-mode omgezet. De bestaande report-only policy blijft actief als meetlaag; er is geen schijnveiligheid toegevoegd die de applicatie functioneel kan beschadigen.
+- De route- en healthchecks blijven groen na deze controle; er zijn geen productievariabelen, tokens of databasegegevens aangepast.
+
+**Volgende concrete hardening:** inline/dynamische scripts omzetten naar nonce- of hash-gebaseerde scripts, analytics-hosts expliciet allowlisten en daarna CSP per route in enforce-mode testen.
+
+## Fase 93 — Nonce-infrastructuur voor CSP (2026-09-15)
+
+- Middleware maakt nu per request een nonce aan en geeft die door via request headers, zodat Next.js en server-rendered scripts dezelfde basis kunnen gebruiken.
+- De marketing critical-style en boot-script ontvangen de nonce expliciet.
+- De CSP-policy wordt centraal door middleware opgebouwd; de dubbele statische noncesloze header uit `next.config.js` is verwijderd.
+- CSP blijft report-only. Dynamisch door workspace-geconfigureerde analytics geïnjecteerde scripts moeten nog nonce-aware worden voordat enforce-mode veilig is.
+
+**Verificatie:** lokale login gaf HTTP `200` met één CSP report-only header en nonce; typecheck geslaagd; production webbuild geslaagd met `NODE_OPTIONS=--max-old-space-size=4096`; `git diff --check` geslaagd. Geen productie-deployment uitgevoerd.
+
+**Open risico:** de bestaande analytics-injectie ondersteunt nog geen nonce-doorgifte en gebruikt workspace-inhoud. CSP enforce-mode blijft daarom bewust uitgeschakeld.
+
+## Fase 94 — Analytics nonce-aware gemaakt (2026-09-15)
+
+- De nonce wordt vanuit de server-layout doorgegeven aan de client-side analytics-loader.
+- Dynamisch aangemaakte Plausible-, Google Tag Manager-, LinkedIn- en inline analytics-scripts krijgen nu dezelfde request-nonce wanneer analytics actief is.
+- De wijziging blijft compatibel met bestaande workspace-configuratie; er zijn geen analytics-instellingen of trackinggegevens aangepast.
+
+**Verificatie:** typecheck geslaagd; webbuild geslaagd met verhoogde Node-heap; lokale login HTTP `200` met nonce in de CSP report-only policy; `git diff --check` geslaagd.
+
+**Open risico:** CSP gebruikt nog `unsafe-inline`/`unsafe-eval` en report-only voor compatibiliteit met bestaande Next.js- en marketingcode. De volgende stap is gericht testen van alle marketing-, login- en embedroutes en daarna de overbodige uitzonderingen verwijderen.
+
+## Fase 95 — JSON-LD en productie-CSP verder aangescherpt (2026-09-15)
+
+- JSON-LD structured-data krijgt nu dezelfde request-nonce als de overige server-rendered inline scripts.
+- `unsafe-eval` wordt alleen nog in development aan de report-only policy toegevoegd; productie krijgt die uitzondering niet.
+- Productie-health blijft HTTP `200` met database en Redis actief.
+
+**Verificatie:** typecheck geslaagd, lokale homepage HTTP `200` met CSP report-only header, `git diff --check` geslaagd. De lokale schijfruimte is na buildcache ongeveer 2,2 GB vrij. Geen productie-deployment uitgevoerd.
+
+**Open risico:** `unsafe-inline` blijft tijdelijk nodig voor bestaande Next.js/marketingcompatibiliteit. De laatste stap blijft route-per-route CSP-rapporten beoordelen en daarna `unsafe-inline` verwijderen waar nonce/hashes volledig dekken.
+
+## Fase 96 — `unsafe-inline` verwijderd uit productie-scriptpolicy (2026-09-15)
+
+- Productie-CSP gebruikt nu nonce-gebaseerde scripts zonder `unsafe-inline` of `unsafe-eval` in `script-src`.
+- Development behoudt de benodigde compatibiliteitsuitzonderingen voor lokale Next.js tooling.
+- Een echte lokale `NODE_ENV=production`-start met tijdelijke, niet-opgeslagen secrets gaf HTTP `200`, HSTS en de aangescherpte CSP-header.
+- Een start zonder verplichte productievariabelen werd correct geweigerd door de bestaande fail-closed env-validatie.
+
+**Verificatie:** typecheck geslaagd, production webbuild geslaagd, lokale production header gecontroleerd en `git diff --check` geslaagd. De tijdelijke lokale server is gestopt; de gewone devserver blijft op poort `3000` beschikbaar.
+
+**Open risico:** `style-src 'unsafe-inline'` blijft nog nodig voor bestaande styling en moet afzonderlijk worden aangepakt met hashes/nonces of een gecontroleerde CSS-refactor.
+
+## Fase 97 — Style-CSP opgesplitst (2026-09-15)
+
+- Style-elementen gebruiken nu dezelfde request-nonce als scripts via `style-src` en `style-src-elem`.
+- Bestaande React inline style-attributen blijven expliciet toegestaan via `style-src-attr`, zodat de huidige interface niet breekt.
+- Een echte lokale production-start gaf HTTP `200`, HSTS en de gesplitste style-policy.
+
+**Verificatie:** typecheck geslaagd, webbuild geslaagd, production-header gecontroleerd en tijdelijke productionserver gestopt. Geen productie-deployment uitgevoerd.
+
+**Open risico:** `style-src-attr 'unsafe-inline'` blijft noodzakelijk zolang componenten inline style-attributen gebruiken. Dit is nu geïsoleerd van style-elementen en scripts.
+
+## Fase 98 — Inline style-inventarisatie (2026-09-15)
+
+- De resterende inline styling is gemeten: 353 style-attributen verspreid over 32 TSX-bestanden, waaronder branding, previews, advertenties en embeds.
+- Een volledige omzetting naar classes zou een brede visuele refactor zijn met reëel regressierisico; die is daarom niet blind uitgevoerd.
+- Twee opeenvolgende lokale requests kregen verschillende CSP-nonces. De nonce is dus requestgebonden en niet statisch hergebruikt.
+
+**Status:** script- en style-elementen zijn nonce-aware; inline style-attributen zijn geïsoleerd via `style-src-attr`. De resterende CSS-refactor blijft apart gepland.
+
+## Fase 99 — Registratie- en productieversiecontrole (2026-09-15)
+
+- Production `/register` antwoordt HTTP `200` met Cloudflare, HSTS, `nosniff` en `SAMEORIGIN`.
+- Een ongeldige registratiepayload antwoordt HTTP `400` met een validatiefout zonder secrets, stacktrace of database-informatie.
+- De interne database-herstelroute accepteert geen GET en antwoordt HTTP `405`.
+- Production `/api/health` blijft HTTP `200` met database en Redis actief.
+
+**Belangrijk:** production draait nog op de laatst bewezen deployment en bevat daarom nog de vorige statische report-only CSP-header. De nonce/CSP-wijzigingen zijn lokaal gebouwd en gecontroleerd, maar bewust nog niet gedeployed.
+
+## Fase 100 — Gecontroleerde productie-deployment (2026-09-15)
+
+- De lokale wijzigingen zijn op verzoek uitgerold naar Vercel-project `project-ubm6y` voor `leads.digitify.be`.
+- Deployment `dpl_6Rc9NSZcSNRZTk9q9jsB11N8F5fd` staat op `READY` en de productiealias is actief.
+- Production `/api/health` antwoordt HTTP `200` met database `ok` en Redis `ok`.
+- Production `/login` en `/register` antwoorden HTTP `200` met Cloudflare, HSTS, `nosniff`, `SAMEORIGIN` en de nonce-gebaseerde CSP report-only policy.
+- Een niet-geauthenticeerde `/dashboard`-request blijft HTTP `307` naar `/login` met `private, no-cache, no-store`.
+- De Vercel-build slaagde; bestaande lintwaarschuwingen blijven zichtbaar maar blokkeerden de build niet.
+
+**Status:** deployment geslaagd en post-deploy smokechecks geslaagd. Geen secrets uitgelezen of gewijzigd; geen databasewijziging, e-mail, externe publicatie of rollback uitgevoerd.
+
+## Fase 101 — Testaccount en auth-scope gecontroleerd (2026-09-15)
+
+- De bestaande seedprocedure is bevestigd als localhost-only; zij maakt de gedocumenteerde lokale rolfixtures aan en wijzigt niet automatisch productieaccounts.
+- `test@digitify.be` is daarom niet via de lokale seed tegen productie overschreven. Dat voorkomt een onbedoelde password-reset, lockout of wijziging in de verkeerde database.
+- Production registratie, loginpagina, unauthenticated redirect, tRPC-validatiefout en interne route-method protection zijn gecontroleerd zonder loginpogingen, wachtwoorden of resetsecrets te gebruiken.
+- Voor productie moet `test@digitify.be` via de normale password-reset/admin-flow worden hersteld, met een eenmalig tijdelijk wachtwoord dat niet in logs of documentatie wordt geplaatst.
+
+**Open punt:** een productie-reset kan pas verantwoord worden uitgevoerd via de geautoriseerde resetflow of met een expliciet gecontroleerde adminactie. De lokale seed blijft beschikbaar via `scripts/reset-local-test-accounts.sh`.
+## Fase 102 — Wachtwoord resetfunctie op login
+
+- Login heeft nu een link naar `/forgot-password`.
+- De publieke aanvraag geeft altijd dezelfde melding en is beschermd met IP-rate limiting; onbekende accounts worden niet onthuld. Ook oudere accounts zonder ingevulde `emailVerified`-datum kunnen via hun mailbox herstellen.
+- Resetlinks worden als eenmalige SHA-256-tokenhash opgeslagen in `password_reset_tokens`, verlopen na 30 minuten en maken eerdere tokens ongeldig.
+- Een geslaagde reset wijzigt het wachtwoord en verhoogt `sessionVersion`, zodat bestaande sessies opnieuw moeten aanmelden.
+- Nieuwe resetpagina’s: `/forgot-password` en `/reset-password?token=...`.
+- Lokale migratie en typecheck geslaagd; productie moet de nieuwe migratie eerst via de normale releaseprocedure uitvoeren.
+- Resetbevestiging claimt het token atomisch, zodat gelijktijdige submits geen dubbele wachtwoordwijziging kunnen veroorzaken.
+- Productie: `password_reset_tokens` aangemaakt met indexen en foreign key; `digitify_app` kreeg uitsluitend de noodzakelijke tabelrechten. `anon` en `authenticated` kregen geen toegang.
+- Vercel deployment `dpl_2nezWp5TP3N2FU7dX4mwNTRqMXzj` staat live. Health, login, resetpagina en ongeldige resetlink zijn live gecontroleerd.
+- Productieherstel: ontbrekende RLS-helperfuncties opnieuw aangemaakt en hun `search_path` vastgezet. Dit herstelde de e-mailinstellingenquery zonder publieke tabeltoegang te openen.
+
+## Fase 103 — Rate-limit response voor password reset hersteld
+
+- De wachtwoord-resetlimiet staat nu binnen tRPC in plaats van in Edge middleware. Daardoor blijft de limiet actief met Upstash/in-memory fallback, maar worden limietfouten als geldige tRPC-fouten teruggegeven.
+- De browser toont niet langer `Unable to transform response from server` wanneer de limiet bereikt is.
+- Production deployment `dpl_664kGsGKEG46SoHxayV7TdSdnGqt` staat op `READY`.
+
+**Verificatie:** typecheck geslaagd, API-tests `298 passed / 16 skipped`, production build geslaagd, production health `200` met database en Redis `ok`, veilige onbekende resetaanvraag `200`, `/forgot-password` `200` en `git diff --check` geslaagd.
+
+**Open punt:** een reset voor een bestaand productieaccount moet nog éénmalig met SMTP-configuratie en mailboxcontrole worden uitgevoerd; dat verstuurt een echte e-mail.
+
+## Fase 104 — Reviewaanvraag-modal zichtbaar en mobiel bruikbaar (2026-09-16)
+
+- De gedeelde `CreateModal`-content krijgt nu een expliciete laag boven de modal-overlay, zodat formulieren niet door de donkere achtergrond worden afgedekt.
+- De overlay is minder zwaar gemaakt en modals kunnen op kleine schermen intern scrollen.
+- Dit herstelt de knop `Review Aanvragen` op `/reviews` zonder wijzigingen aan reviewdata of verzendingen.
+
+**Verificatie:** typecheck geslaagd; productiecontrole bevestigde dat de reviewmodal opent. De live omgeving bevatte daarnaast oude niet-geauthenticeerde requests, maar geen review-specifieke serverfout.
+
+## Fase 105 — Releasecheck en modelcatalogus bijgewerkt (2026-09-16)
+
+- De MuAPI-kostenmetadata is gesynchroniseerd met de publieke catalogus: 684 endpoints, inclusief de bestaande lokale fallback.
+- De volledige releasecheck is daarna opnieuw uitgevoerd: Prisma-clientgeneratie, lokale migraties, domeinschema, database-rolcontrole, model-sync, tests, typecheck, lint en production build zijn geslaagd.
+- De bestaande lintwaarschuwingen blijven onderhoudspunten; er zijn geen nieuwe fouten door deze fase toegevoegd.
+
+**Verificatie:** `pnpm check:release` geslaagd; 298 API-tests en 42 webtests geslaagd, 16 integratietests overgeslagen omdat de optionele integratievlag niet actief was.
+
+## Fase 106 — Integratie- en RLS-smoke (2026-09-16)
+
+- Lokale integratietests zijn uitgevoerd met `RUN_DB_INTEGRATION=1 ENABLE_WORKSPACE_RLS=true`.
+- Workspace-RLS, IDOR-isolatie en settings-RBAC zijn gecontroleerd: 13 tests geslaagd.
+- De RLS-smoke met twee owners en twee workspaces bevestigde dat leads niet over workspaces heen leesbaar zijn.
+- De controle gebruikte uitsluitend de lokale PostgreSQL-database; productie is niet aangepast.
+
+**Open punt:** de resterende outbound- en Template Studio-browsercontrole op staging blijft handmatig, omdat die echte sessies en moduleflows vereist.
+
+## Fase 107 — Lokale browserregressiecontrole (2026-09-16)
+
+- Playwright draaide tegen een lokale server op poort 3001.
+- 8 publieke/responsive smoke-tests slaagden, inclusief health, marketing, embeds en portal-uploadbeveiliging.
+- 25 authenticatie-afhankelijke tests zijn overgeslagen omdat er geen lokale browser-auth-state was; dit is geen testfalen.
+- De lokale server is door Playwright automatisch gestopt.
+
+**Open punt:** voor volledige browserdekking moeten lokale seedaccounts via de bestaande auth-state setup worden geladen; er zijn geen productiecredentials gebruikt.
+
+## Fase 108 — Moduletoegang onder actieve RLS hersteld (2026-09-16)
+
+- Platform-owner reads/writes voor per-account module-instellingen draaien nu in één RLS-transactie met de gevalideerde scope van het doelaccount.
+- Dit voorkomt `settings`-policyfouten doordat de `app.user_id`-context tussen losse Prisma-transacties verloren ging.
+- De bestaande Owner/Admin-flow binnen de eigen workspace is ongewijzigd.
+
+**Verificatie:** typecheck, 13 module-RBAC-tests en 13 RLS/IDOR/settings-integratietests geslaagd; productie-deployment, healthcheck en error-logcontrole geslaagd.
+
+## Fase 109 — Volledige kerncontrole en releasecheck (2026-09-16)
+
+- Productie-health gecontroleerd: database en Redis zijn bereikbaar; de homepage en healthroute sturen geen tenantdata naar de cache.
+- Securityheaders gecontroleerd: HSTS, `nosniff`, `SAMEORIGIN`, restrictive permissions policy en Cloudflare-proxy zijn actief.
+- Lokale database-, rol- en domeinschema-controles zijn geslaagd; de applicatierol is geen `SUPERUSER` en heeft geen `BYPASSRLS`.
+- RLS-smoke met twee workspaces is geslaagd; cross-workspace lead-ID's blijven afgeschermd.
+- Volledige tests zijn geslaagd: 298 API-tests, 42 webtests en 13 database-integratietests.
+- Production build is geslaagd met een expliciete Node-heap van 4 GB. Zonder die instelling kan de lokale machine de build niet afronden door een heaplimiet; dit is geen compile- of typefout.
+
+**Open onderhoudspunt:** lint blijft groen met 109 bestaande waarschuwingen, voornamelijk ongebruikte imports en ontbrekende React-hook-dependencies. Deze zijn niet stilzwijgend aangepast omdat ze buiten de bevestigde moduletoegangfix vallen.

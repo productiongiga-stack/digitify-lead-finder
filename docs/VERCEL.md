@@ -25,12 +25,19 @@ Set these in **Vercel → Project → Settings → Environment Variables**:
 | `SETTINGS_ENCRYPTION_KEY` | Min. 32 characters (production) |
 | `CRON_SECRET` | Min. 16 characters; Vercel Cron sends `Authorization: Bearer …` |
 | `ENABLE_WORKSPACE_RLS` | **`true`** — required on `project-ubm6y` / production; without it the app returns 500 on all `/dashboard`, `/social`, etc. |
-| `REDIS_URL` or Upstash | `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` for Edge rate limits |
+| `REDIS_URL` or Upstash | `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` for shared rate limits. The Vercel Upstash integration names (`upstashredis_KV_REST_API_URL` and `upstashredis_KV_REST_API_TOKEN`) are also accepted by the app; never paste token values into source control or support tickets. |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob — logo/branding + **social video uploads** (required for videos >4MB on Vercel) |
 | `SENTRY_DSN` | Sentry project DSN (server errors + tRPC 500s) |
 | `NEXT_PUBLIC_SENTRY_DSN` | Same DSN for client `global-error` boundary |
 
-**Huidige controle:** de Lead Finder-healthcheck meldt `redis: skipped`; zonder Redis/Upstash is rate limiting per instance en niet geschikt als enige productiebeveiliging. Configureer Upstash vóór intensieve publieke formulieren, loginverkeer of campagnes. De productieomgeving is in deze fase niet aangepast.
+**Lokale controle:** zonder Redis/Upstash gebruikt de lokale app bewust een in-memory fallback. **Productie vereist** Redis of beide Upstash REST-variabelen; controleer na elke wijziging `/api/health` op `redis: ok` en voer daarna de login-, formulier- en rate-limitchecks uit. `ENABLE_WORKSPACE_RLS=true` is ingesteld in Production en actief in de gecontroleerde deployment.
+
+### Upstash koppelen zonder secrets te delen
+
+1. Open de gekoppelde Upstash-database in Vercel Storage/Marketplace.
+2. Controleer dat de Production-omgeving de REST URL en write-token krijgt via de integratie.
+3. Gebruik in Vercel de standaardnamen `UPSTASH_REDIS_REST_URL` en `UPSTASH_REDIS_REST_TOKEN`, of laat de bestaande `upstashredis_`-integratienamen staan; de applicatie ondersteunt beide.
+4. Trigger een nieuwe Production-deployment en controleer alleen de status van `/api/health`. Deel de waarden zelf nergens.
 
 ## Vercel-controle 2026-09-12
 
@@ -142,9 +149,13 @@ pnpm --filter @digitify/api test:integration
 
 # RLS smoke (set ENABLE_WORKSPACE_RLS=true on staging first)
 ENABLE_WORKSPACE_RLS=true pnpm rls:smoke
+
+# Database connection must not use a SUPERUSER or BYPASSRLS role
+pnpm db:check-role
 ```
 
 `test:integration` runs `workspace-rls`, `idor-smoke`, and `settings-rbac` specs. IDOR smoke covers lead/social/meta/google `getById` cross-tenant rejection.
+The release check also runs `db:check-role`; it must pass against the same database URL that the application will use. For production use `DATABASE_URL=<production-connection> pnpm db:check-production-role`; this command refuses `localhost`, `127.0.0.1` and `::1`.
 
 ## Google Ads module
 

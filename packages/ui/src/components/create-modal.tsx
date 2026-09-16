@@ -93,7 +93,12 @@ export function CreateModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={cn("z-[100]", contentClassName)}>
+      <DialogContent
+        className={cn(
+          "z-[210] max-h-[calc(100dvh-2rem)] overflow-y-auto",
+          contentClassName,
+        )}
+      >
         {asForm && onSubmit ? <form onSubmit={handleSubmit}>{body}</form> : body}
       </DialogContent>
     </Dialog>

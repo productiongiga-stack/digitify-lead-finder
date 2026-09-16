@@ -10,6 +10,8 @@ Voer uit vanaf de repository-root:
 pnpm install --frozen-lockfile
 PRODUCTION_ENV_FILE=.env.production.local pnpm check:production-env
 pnpm setup:db:preflight
+pnpm db:check-role
+# Voor productie: DATABASE_URL=<production-connection> pnpm db:check-production-role
 pnpm check:release
 ```
 
@@ -43,6 +45,7 @@ PLAYWRIGHT_BASE_URL=https://<staging-url> pnpm test:e2e
 - Vercel-project, domein en environment variables zijn gecontroleerd volgens `docs/VERCEL.md`.
 - `ENABLE_WORKSPACE_RLS=true`, `SETTINGS_ENCRYPTION_KEY`, `CRON_SECRET`, `DIRECT_URL` en rate-limitconfiguratie zijn aanwezig.
 - Database-preflight is uitgevoerd tegen de bedoelde staging- of productiehost.
+- De productie-startupguard kan de actuele Prisma-rol lezen en weigert `SUPERUSER` of `BYPASSRLS`; dit is aanvullend op de read-only preflight.
 - Migraties zijn beoordeeld en worden pas toegepast met expliciete productieautorisatie.
 - Geen seed uitvoeren op productie.
 - Na deployment: `GET /api/health`, login, RLS-smoke en kernflow controleren.

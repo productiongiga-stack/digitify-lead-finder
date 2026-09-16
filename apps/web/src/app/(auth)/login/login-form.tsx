@@ -9,6 +9,7 @@ import { Input } from "@digitify/ui/src/components/input";
 import { Label } from "@digitify/ui/src/components/label";
 import { Loader2 } from "lucide-react";
 import { AuthLogo } from "@/components/auth/auth-logo";
+import Link from "next/link";
 
 export function LoginForm() {
   const router = useRouter();
@@ -61,7 +62,12 @@ export function LoginForm() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="password">Wachtwoord</Label>
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="password">Wachtwoord</Label>
+              <Link href="/forgot-password" className="text-xs font-semibold text-primary hover:underline">
+                Wachtwoord vergeten?
+              </Link>
+            </div>
             <Input
               id="password"
               type="password"

@@ -23,6 +23,7 @@ function injectAnalyticsScripts(data: {
   ga4Id?: string | null;
   linkedinPartnerId?: string | null;
   respectDnt?: boolean;
+  nonce?: string;
 }) {
   if (!data.enabled) return;
   if (data.respectDnt && browserRequestsDnt()) return;
@@ -33,6 +34,7 @@ function injectAnalyticsScripts(data: {
     if (script.type === "plausible" && data.plausibleDomain) {
       const el = document.createElement("script");
       el.setAttribute(SCRIPT_MARKER, "true");
+      if (data.nonce) el.setAttribute("nonce", data.nonce);
       el.defer = true;
       el.dataset.domain = data.plausibleDomain;
       el.src = script.content;
@@ -43,11 +45,13 @@ function injectAnalyticsScripts(data: {
     if (script.type === "ga4" && data.ga4Id) {
       const loader = document.createElement("script");
       loader.setAttribute(SCRIPT_MARKER, "true");
+      if (data.nonce) loader.setAttribute("nonce", data.nonce);
       loader.async = true;
       loader.src = `https://www.googletagmanager.com/gtag/js?id=${data.ga4Id}`;
       loader.onload = () => {
         const inline = document.createElement("script");
         inline.setAttribute(SCRIPT_MARKER, "true");
+        if (data.nonce) inline.setAttribute("nonce", data.nonce);
         inline.text = script.content;
         document.head.appendChild(inline);
       };
@@ -58,11 +62,13 @@ function injectAnalyticsScripts(data: {
     if (script.type === "linkedin" && data.linkedinPartnerId) {
       const inline = document.createElement("script");
       inline.setAttribute(SCRIPT_MARKER, "true");
+      if (data.nonce) inline.setAttribute("nonce", data.nonce);
       inline.text = script.content;
       document.head.appendChild(inline);
 
       const loader = document.createElement("script");
       loader.setAttribute(SCRIPT_MARKER, "true");
+      if (data.nonce) loader.setAttribute("nonce", data.nonce);
       loader.async = true;
       loader.src = "https://snap.licdn.com/li.lms-analytics/insight.min.js";
       document.head.appendChild(loader);
@@ -73,12 +79,13 @@ function injectAnalyticsScripts(data: {
 
     const el = document.createElement("script");
     el.setAttribute(SCRIPT_MARKER, "true");
+    if (data.nonce) el.setAttribute("nonce", data.nonce);
     el.text = script.content;
     document.head.appendChild(el);
   }
 }
 
-function AnalyticsScriptsContent() {
+function AnalyticsScriptsContent({ nonce }: { nonce?: string }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tenant = searchParams.get("tenant");
@@ -105,16 +112,16 @@ function AnalyticsScriptsContent() {
 
   useEffect(() => {
     if (!scriptsData) return;
-    injectAnalyticsScripts(scriptsData);
-  }, [scriptsData]);
+    injectAnalyticsScripts({ ...scriptsData, nonce });
+  }, [nonce, scriptsData]);
 
   return null;
 }
 
-export function AnalyticsScripts() {
+export function AnalyticsScripts({ nonce }: { nonce?: string }) {
   return (
     <Suspense fallback={null}>
-      <AnalyticsScriptsContent />
+      <AnalyticsScriptsContent nonce={nonce} />
     </Suspense>
   );
 }

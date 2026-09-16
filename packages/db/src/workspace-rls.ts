@@ -45,6 +45,18 @@ export async function setWorkspaceRlsContext(
   if (userId) await db.$executeRaw`SELECT set_config('app.user_id', ${userId}, true)`;
 }
 
+/**
+ * Switch only the member scope inside the already validated RLS transaction.
+ * This is used for platform-owner operations after the API has checked the
+ * target account; it never changes the workspace tenant scope.
+ */
+export async function setWorkspaceRlsUserContext(
+  db: Prisma.TransactionClient,
+  userId: string,
+) {
+  await db.$executeRaw`SELECT set_config('app.user_id', ${userId}, true)`;
+}
+
 async function runInWorkspaceRlsTransaction<T>(
   prisma: PrismaClient,
   workspaceId: string,

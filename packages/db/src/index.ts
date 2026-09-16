@@ -21,16 +21,31 @@ function hasTenantIdentifier(value: string | undefined) {
   }
 }
 
+function applyProductionPoolLimit(value: string | undefined) {
+  if (!value || process.env.NODE_ENV !== "production") return value;
+  try {
+    const url = new URL(value);
+    if (!url.searchParams.has("connection_limit")) {
+      const configuredLimit = Number(process.env.DATABASE_CONNECTION_LIMIT ?? "1");
+      const limit = Number.isInteger(configuredLimit) && configuredLimit > 0 ? configuredLimit : 1;
+      url.searchParams.set("connection_limit", String(limit));
+    }
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
 function resolveDatabaseUrl() {
   const configured = nonEmpty(process.env.DATABASE_URL);
   const prismaUrl = nonEmpty(process.env.POSTGRES_PRISMA_URL);
   const pooledUrl = nonEmpty(process.env.POSTGRES_URL);
-  if (!configured) return prismaUrl || pooledUrl;
+  if (!configured) return applyProductionPoolLimit(prismaUrl || pooledUrl);
 
-  if (hasTenantIdentifier(configured)) return configured;
-  if (prismaUrl && hasTenantIdentifier(prismaUrl)) return prismaUrl;
-  if (pooledUrl && hasTenantIdentifier(pooledUrl)) return pooledUrl;
-  return configured;
+  if (hasTenantIdentifier(configured)) return applyProductionPoolLimit(configured);
+  if (prismaUrl && hasTenantIdentifier(prismaUrl)) return applyProductionPoolLimit(prismaUrl);
+  if (pooledUrl && hasTenantIdentifier(pooledUrl)) return applyProductionPoolLimit(pooledUrl);
+  return applyProductionPoolLimit(configured);
 }
 
 // Prefer a connection string that includes tenant routing metadata for managed Postgres providers.
@@ -75,6 +90,7 @@ export * from "./secure-settings";
 export * from "./request-context";
 export * from "./perf-metrics";
 export * from "./workspace-rls";
+export * from "./database-role";
 export { PrismaClient };
 export {
   EmailTemplateBodyFormat,

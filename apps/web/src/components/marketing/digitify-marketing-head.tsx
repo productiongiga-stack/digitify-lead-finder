@@ -13,7 +13,9 @@ const CRITICAL_CSS = [
 const BOOT_SCRIPT = `(function(){var r=document.documentElement;r.classList.add("digitify-shell-booting");function m(){if(!document.body)return;document.body.classList.add("digitify-leads-body","theme-light");}if(document.body)m();else document.addEventListener("DOMContentLoaded",m,{once:true});})();`;
 
 /** Server-rendered shell assets so marketing pages don't FOUC before client hydration. */
-export function DigitifyMarketingHead() {
+export async function DigitifyMarketingHead() {
+  const nonce = (await headers()).get("x-csp-nonce") ?? undefined;
+
   return (
     <>
       <link rel="stylesheet" href="/digitify/digitify-shell.css?v=3" />
@@ -22,8 +24,9 @@ export function DigitifyMarketingHead() {
       <link rel="stylesheet" href="/digitify/digitify-mobile-drawer.css?v=1" />
       <link rel="stylesheet" href="/digitify/digitify-footer.css?v=1" />
       <link rel="stylesheet" href="/digitify/digitify-leads-chrome.css?v=6" />
-      <style id="digitifyCriticalCssLeads" dangerouslySetInnerHTML={{ __html: CRITICAL_CSS }} />
-      <script id="digitifyMarketingBoot" dangerouslySetInnerHTML={{ __html: BOOT_SCRIPT }} />
+      <style id="digitifyCriticalCssLeads" nonce={nonce} dangerouslySetInnerHTML={{ __html: CRITICAL_CSS }} />
+      <script id="digitifyMarketingBoot" nonce={nonce} dangerouslySetInnerHTML={{ __html: BOOT_SCRIPT }} />
     </>
   );
 }
+import { headers } from "next/headers";

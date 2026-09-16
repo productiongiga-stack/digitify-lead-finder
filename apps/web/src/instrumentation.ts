@@ -12,6 +12,20 @@ export async function register() {
 
   if (process.env.NODE_ENV !== "production") return;
 
+  // Keep the startup guard independent from the db package barrel. The barrel
+  // also exports crypto-backed settings helpers that should not enter the
+  // instrumentation bundle.
+  const [{ PrismaClient }, { assertSafeDatabaseRole }] = await Promise.all([
+    import("@prisma/client"),
+    import("@digitify/db/src/database-role"),
+  ]);
+  const startupPrisma = new PrismaClient();
+  try {
+    await assertSafeDatabaseRole(startupPrisma);
+  } finally {
+    await startupPrisma.$disconnect();
+  }
+
   const dsn = process.env.SENTRY_DSN?.trim() || process.env.NEXT_PUBLIC_SENTRY_DSN?.trim();
   if (!dsn) return;
 

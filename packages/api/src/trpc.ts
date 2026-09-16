@@ -133,8 +133,20 @@ const withPublicRateLimit = t.middleware(async ({ ctx, next }) => {
   return next();
 });
 
+const withPasswordResetRateLimit = t.middleware(async ({ ctx, next, path }) => {
+  const ip = ctx.clientIp ?? ctx.requestId;
+  await enforceRateLimit({
+    key: `password-reset:${path}:${ip}`,
+    limit: path.endsWith(".confirm") ? 10 : 5,
+    windowMs: 60 * 60_000,
+    message: "Te veel resetpogingen. Probeer het later opnieuw.",
+  });
+  return next();
+});
+
 /** Unauthenticated endpoints with logging and IP-based rate limiting (60 req/min). */
 export const publicRateLimitedProcedure = t.procedure.use(withLogging).use(withPublicRateLimit);
+export const passwordResetRateLimitedProcedure = t.procedure.use(withLogging).use(withPasswordResetRateLimit);
 
 // --- General rate limit middleware (100 req/min per user; Redis when REDIS_URL is set) ---
 const withRateLimit = t.middleware(async ({ ctx, next }) => {

@@ -4,7 +4,7 @@ import type { Context } from "../trpc";
 import { leadStatusLabelNl } from "../lib/lead-status-labels";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 import { ownedChatSessionWhere } from "../lib/tenant";
-import { readDashboardCache, writeDashboardCache } from "../lib/dashboard-cache";
+import { getOrLoadDashboardCache, readDashboardCache, writeDashboardCache } from "../lib/dashboard-cache";
 
 function getSettingString(
   settings: Array<{ key: string; value: unknown }>,
@@ -830,42 +830,39 @@ type DashboardOverviewResult = {
 
 async function loadDashboardOverview(ctx: WorkspaceCtx): Promise<DashboardOverviewResult> {
   const cacheKey = `getOverview:${ctx.user.workspaceId}`;
-  const cached = readDashboardCache<DashboardOverviewResult>(cacheKey);
-  if (cached) return cached;
+  return getOrLoadDashboardCache(cacheKey, async () => {
+    const [
+      kpis,
+      recentActivity,
+      topLeads,
+      pipelineOverview,
+      reminders,
+      upcomingBookings,
+      openChats,
+      expiringDomains,
+    ] = await Promise.all([
+      loadKpis(ctx),
+      loadRecentActivity(ctx),
+      loadTopLeads(ctx),
+      loadPipelineOverview(ctx),
+      loadUnifiedReminders(ctx),
+      loadUpcomingBookings(ctx),
+      loadOpenChats(ctx),
+      loadExpiringDomains(ctx),
+    ]);
 
-  const [
-    kpis,
-    recentActivity,
-    topLeads,
-    pipelineOverview,
-    reminders,
-    upcomingBookings,
-    openChats,
-    expiringDomains,
-  ] = await Promise.all([
-    loadKpis(ctx),
-    loadRecentActivity(ctx),
-    loadTopLeads(ctx),
-    loadPipelineOverview(ctx),
-    loadUnifiedReminders(ctx),
-    loadUpcomingBookings(ctx),
-    loadOpenChats(ctx),
-    loadExpiringDomains(ctx),
-  ]);
-
-  const result: DashboardOverviewResult = {
-    kpis,
-    attentionCount: attentionCountFromOverviewParts(kpis, reminders, expiringDomains.length),
-    recentActivity,
-    topLeads,
-    pipelineOverview,
-    reminders,
-    upcomingBookings,
-    openChats,
-    expiringDomains,
-  };
-  writeDashboardCache(cacheKey, result);
-  return result;
+    return {
+      kpis,
+      attentionCount: attentionCountFromOverviewParts(kpis, reminders, expiringDomains.length),
+      recentActivity,
+      topLeads,
+      pipelineOverview,
+      reminders,
+      upcomingBookings,
+      openChats,
+      expiringDomains,
+    };
+  });
 }
 
 export const dashboardRouter = router({

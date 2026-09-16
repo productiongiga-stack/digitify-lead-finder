@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Poppins } from "next/font/google";
 import "./globals.css";
 import { TRPCProvider } from "@/lib/trpc/provider";
@@ -24,7 +25,9 @@ export async function generateMetadata(): Promise<Metadata> {
   return buildRootMetadata(config);
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const nonce = (await headers()).get("x-csp-nonce") ?? undefined;
+
   return (
     <html lang="nl" suppressHydrationWarning className={poppins.variable}>
       <body
@@ -37,7 +40,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <SessionProvider>
             <ToastProvider>
               <ShellProvider>
-                <AnalyticsScripts />
+                <AnalyticsScripts nonce={nonce} />
                 <BrandingCssVariables />
                 <UiDensityProvider />
                 {children}

@@ -67,7 +67,35 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  const response = NextResponse.next();
+  // Keep a per-request nonce available to Next.js and server-rendered inline scripts.
+  // CSP remains report-only until all client-injected analytics scripts are nonce-aware.
+  const nonce = crypto.randomUUID().replaceAll("-", "");
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-csp-nonce", nonce);
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  const frameAncestors = path.startsWith("/embed/") ? "*" : "'self'";
+  const developmentScriptAllowances = process.env.NODE_ENV === "development"
+    ? " 'unsafe-inline' 'unsafe-eval'"
+    : "";
+  response.headers.set(
+    "Content-Security-Policy-Report-Only",
+    [
+      `default-src 'self'`,
+      "base-uri 'self'",
+      "object-src 'none'",
+      "form-action 'self'",
+      `script-src 'self' 'nonce-${nonce}'${developmentScriptAllowances} https://www.googletagmanager.com https://snap.licdn.com`,
+      `style-src 'self' 'nonce-${nonce}'`,
+      `style-src-elem 'self' 'nonce-${nonce}'`,
+      "style-src-attr 'unsafe-inline'",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data:",
+      "connect-src 'self' https: wss:",
+      "frame-src 'self'",
+      `frame-ancestors ${frameAncestors}`,
+      "worker-src 'self' blob:",
+    ].join("; "),
+  );
   if (path.startsWith("/api/auth/") || path.startsWith("/api/trpc/")) {
     response.headers.set("Cache-Control", "private, no-store, max-age=0");
   }
@@ -75,5 +103,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/auth/callback/:path*", "/api/trpc/:path*"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

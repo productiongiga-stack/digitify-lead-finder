@@ -13,6 +13,7 @@
     "db:migrate-legacy-templates": "tsx prisma/migrate-legacy-templates.ts",
     "db:migrate-legacy-workspace-data": "tsx prisma/migrate-legacy-workspace-data.ts",
     "db:check-domain-schema": "tsx prisma/check-domain-schema.ts",
+    "db:check-role": "tsx prisma/check-database-role.ts",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:rls-smoke": "tsx prisma/rls-staging-smoke.ts",

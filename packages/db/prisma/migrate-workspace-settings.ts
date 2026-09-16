@@ -8,7 +8,7 @@
  *   pnpm db:migrate-workspace-settings
  *   pnpm db:migrate-workspace-settings -- --dry-run
  */
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 
 const MEMBER_SCOPED = (key: string) => {
   const k = key.trim();
@@ -74,7 +74,10 @@ async function main() {
 
       if (!dryRun) {
         await prisma.setting.create({
-          data: { key: targetKey, value: row.value },
+          data: {
+            key: targetKey,
+            value: row.value === null ? Prisma.JsonNull : row.value,
+          },
         });
         existingSet.add(targetKey);
       }

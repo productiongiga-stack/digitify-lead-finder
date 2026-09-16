@@ -39,6 +39,7 @@ import { seoRouter } from "./routers/seo.router";
 import { projectRouter } from "./routers/project.router";
 import { contractRouter } from "./routers/contract.router";
 import { paymentRouter } from "./routers/payment.router";
+import { passwordResetRouter } from "./routers/password-reset.router";
 
 export const appRouter = router({
   dashboard: dashboardRouter,
@@ -81,6 +82,7 @@ export const appRouter = router({
   project: projectRouter,
   contract: contractRouter,
   payment: paymentRouter,
+  passwordReset: passwordResetRouter,
 });
 
 export type AppRouter = typeof appRouter;

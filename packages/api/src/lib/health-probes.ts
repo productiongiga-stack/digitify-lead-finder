@@ -1,3 +1,5 @@
+import type { UpstashRestConfig } from "./rate-limit-upstash";
+
 export async function probeRedis(url: string): Promise<"ok" | "error"> {
   let client: ReturnType<typeof import("redis").createClient> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -21,5 +23,32 @@ export async function probeRedis(url: string): Promise<"ok" | "error"> {
   } finally {
     if (timer) clearTimeout(timer);
     client?.disconnect();
+  }
+}
+
+export async function probeUpstashRest(
+  config: UpstashRestConfig,
+): Promise<"ok" | "error"> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3_000);
+
+  try {
+    const response = await fetch(config.url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(["PING"]),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) return "error";
+    const payload = (await response.json()) as { result?: unknown };
+    return payload.result === "PONG" ? "ok" : "error";
+  } catch {
+    return "error";
+  } finally {
+    clearTimeout(timer);
   }
 }

@@ -19,7 +19,7 @@ import { invalidateUserSettingsCache, loadUserSettingRows, stripUserSettingRows,
 import { filterReadableSettingsForRole } from "../lib/permissions";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 import { listWorkspacesForUser } from "../lib/workspace-registry";
-import { redactSecretSettingValue } from "@digitify/db";
+import { isWorkspaceRlsEnabled, redactSecretSettingValue, setWorkspaceRlsUserContext } from "@digitify/db";
 import { recordSecurityAuditEvent } from "../lib/security-audit";
 import { isPlatformOwner } from "../lib/platform-admin";
 
@@ -262,6 +262,13 @@ export const userRouter = router({
       });
       return users.map((user) => ({
         ...user,
+        workspaces: user.workspaceMemberships.map((membership) => ({
+          id: membership.workspace.id,
+          name: membership.workspace.name,
+          type: membership.workspace.type,
+          role: membership.role,
+          status: membership.status,
+        })),
         googleCalendar: {
           connected: false,
           syncEnabled: false,
@@ -280,7 +287,7 @@ export const userRouter = router({
     const roleByUserId = new Map(memberships.map((row) => [row.userId, row.role]));
     const workspace = await ctx.db.workspace.findUnique({
       where: { id: workspaceId },
-      select: { ownerUserId: true },
+      select: { ownerUserId: true, name: true, type: true },
     });
 
     const users = await ctx.db.user.findMany({
@@ -332,6 +339,13 @@ export const userRouter = router({
     const statusByUserId = new Map(googleStatuses.map((status) => [status.userId, status.googleCalendar]));
     return users.map((user) => ({
       ...user,
+      workspaces: [{
+        id: workspaceId,
+        name: workspace?.name ?? "Workspace",
+        type: workspace?.type ?? "TEAM",
+        role: roleByUserId.get(user.id) ?? (user.id === workspace?.ownerUserId ? "OWNER" : user.role),
+        status: "ACTIVE" as const,
+      }],
       role:
         roleByUserId.get(user.id) ??
         (user.id === workspace?.ownerUserId ? "OWNER" : user.role),
@@ -603,6 +617,15 @@ export const userRouter = router({
     .input(z.object({ userId: z.string() }))
     .query(async ({ ctx, input }) => {
       if (isPlatformOwner(ctx.user)) {
+        if (isWorkspaceRlsEnabled()) {
+          return ctx.db.$transaction(async (tx) => {
+            await setWorkspaceRlsUserContext(tx as any, input.userId);
+            const rows = await loadUserSettingRows(tx as any, input.userId, ["modules.disabled"]);
+            const map = settingsRowsToMap(rows);
+            const raw = getSettingString(map, "modules.disabled", "");
+            return { disabled: raw ? raw.split(",").map((s: string) => s.trim()).filter(Boolean) : [] };
+          });
+        }
         const rows = await loadUserSettingRows(ctx.db as any, input.userId, ["modules.disabled"]);
         const map = settingsRowsToMap(rows);
         const raw = getSettingString(map, "modules.disabled", "");
@@ -634,6 +657,29 @@ export const userRouter = router({
         if (ctx.user.id === input.userId) throw new TRPCError({ code: "FORBIDDEN", message: "Je kunt je eigen moduletoegang niet wijzigen." });
         const target = await ctx.db.user.findUnique({ where: { id: input.userId }, select: { id: true } });
         if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Account niet gevonden." });
+        if (isWorkspaceRlsEnabled()) {
+          return ctx.db.$transaction(async (tx) => {
+            await setWorkspaceRlsUserContext(tx as any, input.userId);
+            const key = userSettingKey(input.userId, "modules.disabled");
+            const rows = await loadUserSettingRows(tx as any, input.userId, ["modules.disabled"]);
+            const map = settingsRowsToMap(rows);
+            const current = new Set((getSettingString(map, "modules.disabled", "") || "").split(",").map((s: string) => s.trim()).filter(Boolean));
+            if (input.enabled) current.delete(input.module); else current.add(input.module);
+            await tx.setting.upsert({ where: { key }, create: { key, value: Array.from(current).join(",") }, update: { value: Array.from(current).join(",") } });
+            await recordSecurityAuditEvent(tx as any, {
+              actorUserId: ctx.user.id,
+              targetUserId: input.userId,
+              action: "PLATFORM_MODULE_CHANGED",
+              resource: "user_module",
+              resourceId: input.userId,
+              result: "SUCCESS",
+              requestId: ctx.requestId,
+              metadata: { module: input.module, enabled: input.enabled },
+            });
+            invalidateUserSettingsCache(input.userId);
+            return { success: true };
+          });
+        }
         const key = userSettingKey(input.userId, "modules.disabled");
         const rows = await loadUserSettingRows(ctx.db as any, input.userId, ["modules.disabled"]);
         const map = settingsRowsToMap(rows);

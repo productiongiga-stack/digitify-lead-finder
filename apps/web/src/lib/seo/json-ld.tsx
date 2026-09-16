@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import type { PublicSeoConfig } from "@digitify/api/src/lib/seo-settings";
 
 type JsonLdProps = {
@@ -11,8 +12,10 @@ function absoluteUrl(config: PublicSeoConfig, path = "/") {
   return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-export function MarketingJsonLd({ config, path = "/" }: JsonLdProps) {
+export async function MarketingJsonLd({ config, path = "/" }: JsonLdProps) {
   if (!config.structuredDataEnabled) return null;
+
+  const nonce = (await headers()).get("x-csp-nonce") ?? undefined;
 
   const url = absoluteUrl(config, path);
   const logo = config.organizationLogoUrl.trim() || config.ogImageUrl.trim() || undefined;
@@ -49,6 +52,7 @@ export function MarketingJsonLd({ config, path = "/" }: JsonLdProps) {
   return (
     <script
       type="application/ld+json"
+      nonce={nonce}
       dangerouslySetInnerHTML={{ __html: JSON.stringify(payload) }}
     />
   );

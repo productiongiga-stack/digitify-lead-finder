@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
-import { probeRedis } from "@digitify/api/src/lib/health-probes";
+import { probeRedis, probeUpstashRest } from "@digitify/api/src/lib/health-probes";
+import { getUpstashRestConfig } from "@digitify/api/src/lib/rate-limit-upstash";
 
 export const dynamic = "force-dynamic";
 
 async function checkRedis(): Promise<"ok" | "skipped" | "error"> {
   const url = process.env.REDIS_URL?.trim();
-  if (!url) return "skipped";
-  return probeRedis(url);
+  if (url) return probeRedis(url);
+
+  const upstash = getUpstashRestConfig();
+  if (upstash) return probeUpstashRest(upstash);
+
+  return "skipped";
 }
 
 /**

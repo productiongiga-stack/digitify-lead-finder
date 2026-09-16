@@ -5,9 +5,22 @@ export type UpstashRestConfig = {
   token: string;
 };
 
+function firstConfigured(...values: Array<string | undefined>): string | undefined {
+  return values.find((value) => {
+    const trimmed = value?.trim();
+    return Boolean(trimmed && !trimmed.startsWith("$"));
+  })?.trim();
+}
+
 export function getUpstashRestConfig(): UpstashRestConfig | null {
-  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  const url = firstConfigured(
+    process.env.UPSTASH_REDIS_REST_URL,
+    process.env.upstashredis_KV_REST_API_URL,
+  );
+  const token = firstConfigured(
+    process.env.UPSTASH_REDIS_REST_TOKEN,
+    process.env.upstashredis_KV_REST_API_TOKEN,
+  );
   if (!url || !token) return null;
   return { url: url.replace(/\/$/, ""), token };
 }
