@@ -32,6 +32,15 @@ const ASE_LICENSE_SCHEMA_SQL = [
 let aseSchemaEnsurePromise: Promise<void> | null = null;
 let aseSchemaEnsured = false;
 
+function resolveDirectDatabaseUrl() {
+  const direct =
+    process.env.DIRECT_URL?.trim()
+    || process.env.POSTGRES_URL_NON_POOLING?.trim()
+    || "";
+  if (direct) return direct;
+  return process.env.DATABASE_URL?.trim() || "";
+}
+
 /** Idempotent catch-up when migration `20260916170000_ase_licenses` was not deployed yet. */
 export async function ensureAseLicensesSchema() {
   if (aseSchemaEnsured) return;
@@ -40,10 +49,37 @@ export async function ensureAseLicensesSchema() {
     return;
   }
   aseSchemaEnsurePromise = (async () => {
-    for (const statement of ASE_LICENSE_SCHEMA_SQL) {
-      await prisma.$executeRawUnsafe(statement);
+    const directUrl = resolveDirectDatabaseUrl();
+    const pooledUrl = (process.env.DATABASE_URL || "").trim();
+    const useDedicated = Boolean(directUrl) && directUrl !== pooledUrl;
+
+    let ddlPrisma = prisma;
+    let dedicated: { $executeRawUnsafe: typeof prisma.$executeRawUnsafe; $disconnect: () => Promise<void> } | null =
+      null;
+    if (useDedicated) {
+      const { PrismaClient } = await import("@prisma/client");
+      dedicated = new PrismaClient({
+        datasources: { db: { url: directUrl } },
+      });
+      ddlPrisma = dedicated as typeof prisma;
     }
-    aseSchemaEnsured = true;
+
+    try {
+      for (const statement of ASE_LICENSE_SCHEMA_SQL) {
+        await ddlPrisma.$executeRawUnsafe(statement);
+      }
+      aseSchemaEnsured = true;
+    } catch (err) {
+      console.error(
+        "[ase-license] schema ensure failed — run prisma migrate deploy / ase_licenses-only.sql",
+        err instanceof Error ? err.message : err,
+      );
+      throw err;
+    } finally {
+      if (dedicated) {
+        await dedicated.$disconnect().catch(() => undefined);
+      }
+    }
   })().finally(() => {
     aseSchemaEnsurePromise = null;
   });
@@ -89,7 +125,11 @@ export function isAseLicenseUnavailableError(err: unknown): boolean {
 }
 
 export async function findLicenseByKey(key: string) {
-  await ensureAseLicensesSchema();
+  try {
+    await ensureAseLicensesSchema();
+  } catch {
+    // DDL may fail on pooler; query still surfaces P2021 → 503 unavailable.
+  }
   const keyHash = hashLicenseKey(key);
   return prisma.aseLicense.findUnique({ where: { keyHash } });
 }
@@ -100,7 +140,11 @@ export async function createLicenseRequest(input: {
   siteUrl?: string;
   message?: string;
 }) {
-  await ensureAseLicensesSchema();
+  try {
+    await ensureAseLicensesSchema();
+  } catch {
+    // fall through
+  }
   const email = String(input.email || "")
     .trim()
     .toLowerCase();
@@ -122,7 +166,11 @@ export async function createLicenseRequest(input: {
 }
 
 export async function issueLicense(id: string) {
-  await ensureAseLicensesSchema();
+  try {
+    await ensureAseLicensesSchema();
+  } catch {
+    // fall through
+  }
   const existing = await prisma.aseLicense.findUnique({ where: { id } });
   if (!existing) return { ok: false as const, error: "not_found" };
   if (existing.status === "revoked") return { ok: false as const, error: "revoked" };
@@ -150,7 +198,11 @@ export async function createLicenseForEmail(input: {
   siteUrl?: string;
   message?: string;
 }) {
-  await ensureAseLicensesSchema();
+  try {
+    await ensureAseLicensesSchema();
+  } catch {
+    // fall through
+  }
   const email = String(input.email || "")
     .trim()
     .toLowerCase();

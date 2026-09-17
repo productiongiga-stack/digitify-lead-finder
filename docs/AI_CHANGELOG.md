@@ -9,7 +9,7 @@ Chronologisch logboek van significante wijzigingen (mens + AI).
 **Agent:** Composer
 
 - Productie had geen `ase_licenses` (migrate niet gedraaid; Vercel CLI niet ingelogd → geen DIRECT_URL).
-- `ensureAseLicensesSchema()` maakt tabel + indexes idempotent aan bij eerste ASE API/tRPC gebruik.
+- `ensureAseLicensesSchema()` maakt tabel + indexes via DIRECT_URL (pooler weigert DDL) bij eerste ASE API/tRPC gebruik.
 - Manual SQL: `packages/db/prisma/manual/ase_licenses-only.sql` + production-schema-catch-up include.
 - Open: alsnog `prisma migrate deploy` / `migrate resolve` voor `_prisma_migrations` sync; switch `DATABASE_URL` naar `digitify_app`.
 
