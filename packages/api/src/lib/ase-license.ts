@@ -3,6 +3,53 @@ import { prisma } from "@digitify/db";
 
 export type AseLicenseStatus = "pending" | "issued" | "active" | "revoked" | "expired";
 
+const ASE_LICENSE_SCHEMA_SQL = [
+  `CREATE TABLE IF NOT EXISTS "ase_licenses" (
+    "id" TEXT NOT NULL,
+    "keyHash" TEXT NOT NULL,
+    "keyPrefix" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "email" TEXT NOT NULL,
+    "name" TEXT,
+    "siteUrl" TEXT,
+    "domain" TEXT,
+    "message" TEXT,
+    "issuedAt" TIMESTAMP(3),
+    "activatedAt" TIMESTAMP(3),
+    "lastSeenAt" TIMESTAMP(3),
+    "expiresAt" TIMESTAMP(3),
+    "meta" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "ase_licenses_pkey" PRIMARY KEY ("id")
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "ase_licenses_keyHash_key" ON "ase_licenses"("keyHash")`,
+  `CREATE INDEX IF NOT EXISTS "ase_licenses_status_createdAt_idx" ON "ase_licenses"("status", "createdAt" DESC)`,
+  `CREATE INDEX IF NOT EXISTS "ase_licenses_email_idx" ON "ase_licenses"("email")`,
+  `CREATE INDEX IF NOT EXISTS "ase_licenses_domain_idx" ON "ase_licenses"("domain")`,
+] as const;
+
+let aseSchemaEnsurePromise: Promise<void> | null = null;
+let aseSchemaEnsured = false;
+
+/** Idempotent catch-up when migration `20260916170000_ase_licenses` was not deployed yet. */
+export async function ensureAseLicensesSchema() {
+  if (aseSchemaEnsured) return;
+  if (aseSchemaEnsurePromise) {
+    await aseSchemaEnsurePromise;
+    return;
+  }
+  aseSchemaEnsurePromise = (async () => {
+    for (const statement of ASE_LICENSE_SCHEMA_SQL) {
+      await prisma.$executeRawUnsafe(statement);
+    }
+    aseSchemaEnsured = true;
+  })().finally(() => {
+    aseSchemaEnsurePromise = null;
+  });
+  await aseSchemaEnsurePromise;
+}
+
 export function hashLicenseKey(key: string) {
   return createHash("sha256").update(String(key).trim().toUpperCase()).digest("hex");
 }
@@ -42,6 +89,7 @@ export function isAseLicenseUnavailableError(err: unknown): boolean {
 }
 
 export async function findLicenseByKey(key: string) {
+  await ensureAseLicensesSchema();
   const keyHash = hashLicenseKey(key);
   return prisma.aseLicense.findUnique({ where: { keyHash } });
 }
@@ -52,6 +100,7 @@ export async function createLicenseRequest(input: {
   siteUrl?: string;
   message?: string;
 }) {
+  await ensureAseLicensesSchema();
   const email = String(input.email || "")
     .trim()
     .toLowerCase();
@@ -73,6 +122,7 @@ export async function createLicenseRequest(input: {
 }
 
 export async function issueLicense(id: string) {
+  await ensureAseLicensesSchema();
   const existing = await prisma.aseLicense.findUnique({ where: { id } });
   if (!existing) return { ok: false as const, error: "not_found" };
   if (existing.status === "revoked") return { ok: false as const, error: "revoked" };
@@ -100,6 +150,7 @@ export async function createLicenseForEmail(input: {
   siteUrl?: string;
   message?: string;
 }) {
+  await ensureAseLicensesSchema();
   const email = String(input.email || "")
     .trim()
     .toLowerCase();

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@digitify/db", () => ({
   prisma: {
+    $executeRawUnsafe: vi.fn().mockResolvedValue(0),
     aseLicense: {
       create: vi.fn(),
       findUnique: vi.fn(),

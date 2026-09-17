@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { router, ownerProcedure, sensitiveOwnerProcedure } from "../trpc";
 import {
   createLicenseForEmail,
+  ensureAseLicensesSchema,
   isAseLicenseUnavailableError,
   issueLicense,
 } from "../lib/ase-license";
@@ -36,6 +37,7 @@ const listSelect = {
 export const aseLicenseRouter = router({
   list: ownerProcedure.query(async ({ ctx }) => {
     try {
+      await ensureAseLicensesSchema();
       const rows = await ctx.db.aseLicense.findMany({
         orderBy: { createdAt: "desc" },
         take: 100,

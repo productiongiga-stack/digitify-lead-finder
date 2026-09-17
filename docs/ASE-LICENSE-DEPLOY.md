@@ -4,6 +4,8 @@ Run on **leads.digitify.be** (dashboard-modern-layout):
 
 1. **Fix App Router 500 (DB role):** productie `DATABASE_URL` mag geen `SUPERUSER`/`BYPASSRLS` hebben. Instrumentation soft-failt by default (`STRICT_DATABASE_ROLE_CHECK=true` voor hard-fail na switch naar `digitify_app`).
 2. `pnpm db:migrate` / `bash scripts/prisma-migrate-deploy.sh` met productie **DIRECT_URL** (migration `20260916170000_ase_licenses`)
+   - Alternatief: Supabase SQL Editor → `packages/db/prisma/manual/ase_licenses-only.sql`, daarna `prisma migrate resolve --applied 20260916170000_ase_licenses`
+   - Runtime catch-up: `ensureAseLicensesSchema()` maakt de tabel aan bij eerste ASE API-call als migrate nog niet liep
 3. Redeploy web app (routes + `/ase-license` + admin `/settings/ase-licenses`)
 4. Smoke:
    - Owner: Settings → AI Builder licenses → key aanmaken voor e-mail (mailt automatisch)

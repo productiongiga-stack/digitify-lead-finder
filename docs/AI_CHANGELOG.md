@@ -3,7 +3,16 @@
 Chronologisch logboek van significante wijzigingen (mens + AI).  
 **Formaat:** nieuwste entries bovenaan.
 
-## 2026-09-17 — Prod outage: instrumentation DB-role soft-fail
+## 2026-09-17 — ASE: runtime schema catch-up for ase_licenses
+
+**Type:** Incident fix (P0)
+**Agent:** Composer
+
+- Productie had geen `ase_licenses` (migrate niet gedraaid; Vercel CLI niet ingelogd → geen DIRECT_URL).
+- `ensureAseLicensesSchema()` maakt tabel + indexes idempotent aan bij eerste ASE API/tRPC gebruik.
+- Manual SQL: `packages/db/prisma/manual/ase_licenses-only.sql` + production-schema-catch-up include.
+- Open: alsnog `prisma migrate deploy` / `migrate resolve` voor `_prisma_migrations` sync; switch `DATABASE_URL` naar `digitify_app`.
+
 
 **Type:** Incidentfix (P0)  
 **Agent:** Composer

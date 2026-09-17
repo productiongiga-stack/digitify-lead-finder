@@ -13,6 +13,7 @@ const MANUAL_SQL_FILES = [
   "production-catch-up.sql",
   "social-posts-and-meta-ads.sql",
   "google-ads-only.sql",
+  "ase_licenses-only.sql",
 ] as const;
 
 export async function runProductionSchemaCatchUp(db: PrismaClient) {
