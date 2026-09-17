@@ -28,5 +28,12 @@ CREATE INDEX IF NOT EXISTS "ase_licenses_status_createdAt_idx" ON "ase_licenses"
 CREATE INDEX IF NOT EXISTS "ase_licenses_email_idx" ON "ase_licenses"("email");
 CREATE INDEX IF NOT EXISTS "ase_licenses_domain_idx" ON "ase_licenses"("domain");
 
+-- App role used by leads.digitify.be (table owner grants alone are not enough).
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'digitify_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "ase_licenses" TO digitify_app;
+  END IF;
+END $$;
+
 -- After running this SQL, mark the Prisma migration applied (from repo root, with DIRECT_URL):
 --   pnpm --filter @digitify/db exec prisma migrate resolve --applied 20260916170000_ase_licenses

@@ -27,6 +27,8 @@ const ASE_LICENSE_SCHEMA_SQL = [
   `CREATE INDEX IF NOT EXISTS "ase_licenses_status_createdAt_idx" ON "ase_licenses"("status", "createdAt" DESC)`,
   `CREATE INDEX IF NOT EXISTS "ase_licenses_email_idx" ON "ase_licenses"("email")`,
   `CREATE INDEX IF NOT EXISTS "ase_licenses_domain_idx" ON "ase_licenses"("domain")`,
+  // Runtime role for leads.digitify.be; no-op when role absent (local/dev).
+  `DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'digitify_app') THEN GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "ase_licenses" TO digitify_app; END IF; END $$`,
 ] as const;
 
 const ASE_SCHEMA_FAILURE_RETRY_MS = 5 * 60 * 1000;
