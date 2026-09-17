@@ -28,3 +28,6 @@ playwright-report/
 apps/web/public/uploads/
 .env*
 !.env.example
+
+# Local ASE smoke key (never commit)
+.ase-test-license-key

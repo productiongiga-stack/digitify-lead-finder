@@ -3,6 +3,16 @@
 Chronologisch logboek van significante wijzigingen (mens + AI).  
 **Formaat:** nieuwste entries bovenaan.
 
+## 2026-09-17 — ASE: GRANT digitify_app in ensure/SQL + prod online
+
+**Type:** Incident fix / ops
+**Agent:** Composer
+
+- Prod `ase_licenses` bestond al; 503 kwam door ontbrekende GRANT aan `digitify_app` (opgelost live + in code).
+- Conditional `GRANT … TO digitify_app` in `ensureAseLicensesSchema` SQL + `ase_licenses-only.sql` (no-op zonder die rol).
+- Live smoke: validate/activate/deactivate met fake key → 404 `invalid_key`; echte Digitify test key activate+validate → 200 `ok`.
+- Plugin default API base blijft `https://leads.digitify.be`; `ASE_LICENSE_FORCE_VALID` uit laten.
+
 ## 2026-09-17 — ASE: soft-fail schema ensure (geen 500)
 
 **Type:** Incident fix (P0)
