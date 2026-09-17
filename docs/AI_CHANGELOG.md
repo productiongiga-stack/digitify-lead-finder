@@ -3,6 +3,16 @@
 Chronologisch logboek van significante wijzigingen (mens + AI).  
 **Formaat:** nieuwste entries bovenaan.
 
+## 2026-09-17 — ASE: soft-fail schema ensure (geen 500)
+
+**Type:** Incident fix (P0)
+**Agent:** Composer
+
+- Regressie na `17f05a1`: `ensureAseLicensesSchema()` goide DDL-fouten (pooler/permissions) door → public ASE routes HTTP 500 `server_error` i.p.v. 503 `unavailable`.
+- Fix: ensure soft-failt + retry-cooldown; prefer `DIRECT_URL`/`POSTGRES_URL_NON_POOLING` voor DDL; `isAseLicenseUnavailableError` dekt ook P2010/permission/missing relation.
+- Ontbrekende tabel blijft plugin-vriendelijk 503; werkende ensure (met DDL-rechten) activeert alsnog zonder manual migrate.
+- Open: `prisma migrate deploy` / SQL Editor `ase_licenses-only.sql` voor permanente schema + echte keys.
+
 ## 2026-09-17 — ASE: runtime schema catch-up for ase_licenses
 
 **Type:** Incident fix (P0)

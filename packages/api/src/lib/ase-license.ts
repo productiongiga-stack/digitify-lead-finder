@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "crypto";
-import { prisma } from "@digitify/db";
+import { PrismaClient, prisma } from "@digitify/db";
 
 export type AseLicenseStatus = "pending" | "issued" | "active" | "revoked" | "expired";
 
@@ -29,39 +29,69 @@ const ASE_LICENSE_SCHEMA_SQL = [
   `CREATE INDEX IF NOT EXISTS "ase_licenses_domain_idx" ON "ase_licenses"("domain")`,
 ] as const;
 
+const ASE_SCHEMA_FAILURE_RETRY_MS = 5 * 60 * 1000;
+
 let aseSchemaEnsurePromise: Promise<void> | null = null;
 let aseSchemaEnsured = false;
+let aseSchemaFailedAt = 0;
 
-function resolveDirectDatabaseUrl() {
-  const direct =
-    process.env.DIRECT_URL?.trim()
-    || process.env.POSTGRES_URL_NON_POOLING?.trim()
-    || "";
-  if (direct) return direct;
+/** Prefer DIRECT_URL / non-pooling for DDL; transaction poolers often reject CREATE. */
+function resolveDdlDatabaseUrl() {
+  const candidates = [
+    process.env.DIRECT_URL,
+    process.env.POSTGRES_URL_NON_POOLING,
+    process.env.DATABASE_URL,
+  ];
+  for (const value of candidates) {
+    const url = value?.trim();
+    if (!url) continue;
+    if (url.includes("pooler") && candidates.some((c) => c?.trim() && !c.includes("pooler"))) {
+      continue;
+    }
+    return url;
+  }
   return process.env.DATABASE_URL?.trim() || "";
 }
 
-/** Idempotent catch-up when migration `20260916170000_ase_licenses` was not deployed yet. */
+function errorText(err: unknown): string {
+  if (!err || typeof err !== "object") return String(err ?? "");
+  const metaMsg =
+    typeof (err as { meta?: { message?: unknown } }).meta?.message === "string"
+      ? (err as { meta: { message: string } }).meta.message
+      : "";
+  return [(err as { message?: string }).message, (err as { code?: string }).code, metaMsg]
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * Idempotent catch-up when migration `20260916170000_ase_licenses` was not deployed yet.
+ * Soft-fails on DDL permission/pooler errors so public routes can still return 503 unavailable
+ * (via P2021 on the subsequent query) instead of opaque 500.
+ */
 export async function ensureAseLicensesSchema() {
   if (aseSchemaEnsured) return;
+  const now = Date.now();
+  if (aseSchemaFailedAt > 0 && now - aseSchemaFailedAt < ASE_SCHEMA_FAILURE_RETRY_MS) {
+    return;
+  }
   if (aseSchemaEnsurePromise) {
     await aseSchemaEnsurePromise;
     return;
   }
-  aseSchemaEnsurePromise = (async () => {
-    const directUrl = resolveDirectDatabaseUrl();
-    const pooledUrl = (process.env.DATABASE_URL || "").trim();
-    const useDedicated = Boolean(directUrl) && directUrl !== pooledUrl;
 
-    let ddlPrisma = prisma;
-    let dedicated: { $executeRawUnsafe: typeof prisma.$executeRawUnsafe; $disconnect: () => Promise<void> } | null =
-      null;
+  aseSchemaEnsurePromise = (async () => {
+    const ddlUrl = resolveDdlDatabaseUrl();
+    const appUrl = (process.env.DATABASE_URL || "").trim();
+    const useDedicated = Boolean(ddlUrl) && ddlUrl !== appUrl;
+
+    let ddlPrisma: PrismaClient = prisma;
+    let dedicated: PrismaClient | null = null;
     if (useDedicated) {
-      const { PrismaClient } = await import("@prisma/client");
       dedicated = new PrismaClient({
-        datasources: { db: { url: directUrl } },
+        datasources: { db: { url: ddlUrl } },
       });
-      ddlPrisma = dedicated as typeof prisma;
+      ddlPrisma = dedicated;
     }
 
     try {
@@ -69,12 +99,13 @@ export async function ensureAseLicensesSchema() {
         await ddlPrisma.$executeRawUnsafe(statement);
       }
       aseSchemaEnsured = true;
+      aseSchemaFailedAt = 0;
     } catch (err) {
-      console.error(
-        "[ase-license] schema ensure failed — run prisma migrate deploy / ase_licenses-only.sql",
-        err instanceof Error ? err.message : err,
+      aseSchemaFailedAt = Date.now();
+      console.warn(
+        "[ase-license] schema ensure failed — run migrate or ase_licenses-only.sql:",
+        errorText(err).slice(0, 240),
       );
-      throw err;
     } finally {
       if (dedicated) {
         await dedicated.$disconnect().catch(() => undefined);
@@ -83,6 +114,7 @@ export async function ensureAseLicensesSchema() {
   })().finally(() => {
     aseSchemaEnsurePromise = null;
   });
+
   await aseSchemaEnsurePromise;
 }
 
@@ -117,19 +149,23 @@ export function isLicenseUsable(status: string, expiresAt: Date | null | undefin
   return true;
 }
 
-/** Prisma P2021/P2022 when `ase_licenses` migration is not applied yet. */
+/** Missing table/column, or DDL ensure failure that would otherwise become opaque 500. */
 export function isAseLicenseUnavailableError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const code = (err as { code?: string }).code;
-  return code === "P2021" || code === "P2022";
+  if (code === "P2021" || code === "P2022") return true;
+  const text = errorText(err).toLowerCase();
+  if (code === "P2010" && (text.includes("ase_licenses") || text.includes("does not exist") || text.includes("42501") || text.includes("permission denied"))) {
+    return true;
+  }
+  if (text.includes("ase_licenses") && (text.includes("does not exist") || text.includes("permission denied") || text.includes("42501"))) {
+    return true;
+  }
+  return false;
 }
 
 export async function findLicenseByKey(key: string) {
-  try {
-    await ensureAseLicensesSchema();
-  } catch {
-    // DDL may fail on pooler; query still surfaces P2021 → 503 unavailable.
-  }
+  await ensureAseLicensesSchema();
   const keyHash = hashLicenseKey(key);
   return prisma.aseLicense.findUnique({ where: { keyHash } });
 }
@@ -140,11 +176,7 @@ export async function createLicenseRequest(input: {
   siteUrl?: string;
   message?: string;
 }) {
-  try {
-    await ensureAseLicensesSchema();
-  } catch {
-    // fall through
-  }
+  await ensureAseLicensesSchema();
   const email = String(input.email || "")
     .trim()
     .toLowerCase();
@@ -166,11 +198,7 @@ export async function createLicenseRequest(input: {
 }
 
 export async function issueLicense(id: string) {
-  try {
-    await ensureAseLicensesSchema();
-  } catch {
-    // fall through
-  }
+  await ensureAseLicensesSchema();
   const existing = await prisma.aseLicense.findUnique({ where: { id } });
   if (!existing) return { ok: false as const, error: "not_found" };
   if (existing.status === "revoked") return { ok: false as const, error: "revoked" };
@@ -198,11 +226,7 @@ export async function createLicenseForEmail(input: {
   siteUrl?: string;
   message?: string;
 }) {
-  try {
-    await ensureAseLicensesSchema();
-  } catch {
-    // fall through
-  }
+  await ensureAseLicensesSchema();
   const email = String(input.email || "")
     .trim()
     .toLowerCase();

@@ -23,11 +23,28 @@ import {
 } from "../lib/ase-license";
 
 describe("ase-license helpers", () => {
-  it("detects missing-table Prisma codes", () => {
+  it("detects missing-table Prisma codes and DDL permission failures", () => {
     expect(isAseLicenseUnavailableError({ code: "P2021" })).toBe(true);
     expect(isAseLicenseUnavailableError({ code: "P2022" })).toBe(true);
+    expect(
+      isAseLicenseUnavailableError({
+        code: "P2010",
+        message: 'Raw query failed. Code: `42501`. Message: `permission denied for schema public`',
+      }),
+    ).toBe(true);
+    expect(
+      isAseLicenseUnavailableError(new Error('relation "ase_licenses" does not exist')),
+    ).toBe(true);
     expect(isAseLicenseUnavailableError({ code: "P2002" })).toBe(false);
     expect(isAseLicenseUnavailableError(new Error("boom"))).toBe(false);
+  });
+
+  it("soft-fails schema ensure so callers are not opaque 500s", async () => {
+    vi.mocked(prisma.$executeRawUnsafe).mockRejectedValueOnce(
+      new Error("permission denied for schema public"),
+    );
+    const { ensureAseLicensesSchema } = await import("../lib/ase-license");
+    await expect(ensureAseLicensesSchema()).resolves.toBeUndefined();
   });
 
   it("generates ASE-XXXX-XXXX-XXXX-XXXX keys", () => {
