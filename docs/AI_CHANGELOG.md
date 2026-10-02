@@ -8,7 +8,7 @@ Chronologisch logboek van significante wijzigingen (mens + AI).
 - Server-side tweestapslogin via gehashte HttpOnly-challenge; NextAuth accepteert geen rechtstreekse wachtwoordlogin meer. TOTP/recovery-code replaypreventie met accountlocks, duurzame limieten en server-issued JWT-factorbewijs.
 - Setup, lokaal QR, eenmalige herstelcodes, vervangen, uitschakelen, persoonlijke RLS, sessie-intrekking, headerwaarschuwing en operatorherstel zonder admin-reset/e-mailbypass. Twee additieve migraties uitsluitend lokaal toegepast.
 - Cryptotests, 25 echte database-isolatietests en twee lokale HTTP-end-to-endtests slagen. Typecheck, monorepo-tests, lint en production build gecontroleerd; nieuwe beveiligingscode heeft geen lintwaarschuwingen.
-- Bestaand Vercel-project en domein bevestigd; CLI-aanmelding veilig vernieuwd. Productie blijft ongemigreerd en ongepubliceerd wegens ontbrekende backup/verbinding, geïsoleerde previewconfiguratie en 2FA-key. Productie heeft geen Prisma-migratiehistoriek; geen blind repair toegepast.
+- Bestaand Vercel-project en domein bevestigd; CLI-aanmelding veilig vernieuwd en een onafhankelijke production-2FA-key veilig toegevoegd met lokale `0600`-backup buiten Git. Productie blijft ongemigreerd en ongepubliceerd wegens ontbrekende gecontroleerde backup/verbinding en nog onbevestigde preview-isolatie/beveiligingsconfiguratie. Productie heeft geen Prisma-migratiehistoriek; geen blind repair toegepast.
 - Next.js/React-, Vercel-configuratie- en PostgreSQL/Supabase-richtlijnen toegepast voor kleine clientschermen, private responses en persoonlijke databasepolicies. Details en expliciete operationele grenzen: `TWO_FACTOR_AUTH.md`.
 
 ## 2026-10-02 — Google-groepselectie en duurzame Ads-achtergrondtaken
