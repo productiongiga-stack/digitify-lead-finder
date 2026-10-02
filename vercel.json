@@ -8,7 +8,7 @@
   "crons": [
     {
       "path": "/api/cron/ads-optimize",
-      "schedule": "15 * * * *"
+      "schedule": "15 6 * * *"
     },
     {
       "path": "/api/cron/drip",

@@ -52,6 +52,8 @@ Productie heeft nog geen 2FA/Ads-tabellen en geen `public._prisma_migrations`. B
 
 Daarom geen productie-migratie, main-merge of deployment totdat backup/restore, gecontroleerde selectieve migratieprocedure en geïsoleerde previewverificatie afgerond zijn. Geen reset, seed, volledige historische migratierun of blinde baselining op productie. Compatibele additieve databasewijzigingen blijven bij applicatierollback staan. Externe advertenties en AI-planning blijven onaangeroerd.
 
+De release staat in draft-PR #6, branch `release/lead-finder-2fa-ads-2026-10-02`. De eerste automatische Vercel-controle weigerde de uurlijkse Ads-cron wegens de Hobby-daglimiet. Deze configuratie is gecorrigeerd naar één dagelijkse, opt-in run zonder abonnementupgrade of activering van workspace-analyses. CI en previewstatus worden apart van lokale testresultaten beoordeeld; geen geslaagde productie-deployment suggereren zolang de productiepoort openstaat.
+
 ## Resterende operationele controles
 
 - Verifieer security-mailaflevering met de echte mailprovider vóór release; lokale tests bewijzen geen externe aflevering.
