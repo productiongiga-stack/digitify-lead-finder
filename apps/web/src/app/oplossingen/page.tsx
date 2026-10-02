@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { MarketingSubpageClient } from "@/components/marketing/marketing-subpage-client";
+import { MarketingPage } from "@/components/marketing/marketing-page";
 import { DigitifyMarketingHead } from "@/components/marketing/digitify-marketing-head";
 import { MarketingSeoJsonLd } from "@/components/marketing/marketing-seo-json-ld";
 import { generateMarketingMetadata } from "@/lib/seo/generate-marketing-metadata";
@@ -13,7 +13,7 @@ export default function SolutionsPage() {
     <>
       <DigitifyMarketingHead />
       <MarketingSeoJsonLd path="/oplossingen" />
-      <MarketingSubpageClient page="solutions" />
+      <MarketingPage page="solutions" />
     </>
   );
 }

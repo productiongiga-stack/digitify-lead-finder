@@ -1,6 +1,19 @@
-import { redirect } from "next/navigation";
-import { getWordPressPageUrl } from "@/lib/digitify-unified-nav";
+import type { Metadata } from "next";
+import { MarketingPage } from "@/components/marketing/marketing-page";
+import { DigitifyMarketingHead } from "@/components/marketing/digitify-marketing-head";
+import { MarketingSeoJsonLd } from "@/components/marketing/marketing-seo-json-ld";
+import { generateMarketingMetadata } from "@/lib/seo/generate-marketing-metadata";
 
-export default function ContactRedirectPage() {
-  redirect(getWordPressPageUrl("contact"));
+export async function generateMetadata(): Promise<Metadata> {
+  return generateMarketingMetadata("contact");
+}
+
+export default function ContactPage() {
+  return (
+    <>
+      <DigitifyMarketingHead />
+      <MarketingSeoJsonLd path="/contact" />
+      <MarketingPage page="contact" />
+    </>
+  );
 }

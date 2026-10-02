@@ -20,7 +20,12 @@ const TEST_USER_ID = "user_owner";
 
 function planDb(delegate: Record<string, unknown>) {
   const findUnique = delegate.findUnique as ReturnType<typeof vi.fn> | undefined;
-  return { ...delegate, findFirst: delegate.findFirst ?? findUnique };
+  return { ...delegate, findFirst: delegate.findFirst ?? findUnique,
+    updateMany: delegate.updateMany ?? vi.fn(async (args) => {
+      if (typeof delegate.update === "function") await delegate.update(args);
+      return { count: 1 };
+    }),
+  };
 }
 
 function makeCtx(db: Record<string, unknown>, role = "OWNER") {

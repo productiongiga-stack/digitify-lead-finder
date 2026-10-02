@@ -26,13 +26,14 @@ export class OpenClawClient {
       this.openai = new OpenAI({
         apiKey: config.apiKey,
         baseURL: "https://api.deepseek.com",
+        timeout: config.timeoutMs,
       });
       this.model = config.model || "deepseek-chat";
     } else if (this.provider === "openai") {
-      this.openai = new OpenAI({ apiKey: config.apiKey });
+      this.openai = new OpenAI({ apiKey: config.apiKey, timeout: config.timeoutMs });
       this.model = config.model || "gpt-4o";
     } else {
-      this.anthropic = new Anthropic({ apiKey: config.apiKey });
+      this.anthropic = new Anthropic({ apiKey: config.apiKey, timeout: config.timeoutMs });
       this.model = config.model || "claude-sonnet-4-20250514";
     }
   }

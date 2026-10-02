@@ -30,6 +30,7 @@ const coreServerEnvSchema = z.object({
 });
 
 const productionServerEnvSchema = z.object({
+  TWO_FACTOR_ENCRYPTION_KEY: z.string().regex(/^[a-fA-F0-9]{64}$/, "TWO_FACTOR_ENCRYPTION_KEY must be a dedicated 32-byte hex key"),
   SETTINGS_ENCRYPTION_KEY: z
     .string()
     .min(32, "SETTINGS_ENCRYPTION_KEY must be at least 32 characters")

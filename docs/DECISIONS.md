@@ -3,6 +3,10 @@
 Technische beslissingen gedocumenteerd uit codebase en bestaande docs.  
 Nieuwe beslissingen: voeg ADR toe onderaan met datum.
 
+## Persoonlijke 2FA en releasepoort (2026-10-02)
+
+Authenticators behoren aan personen, niet aan workspaces. Ook workspacebeheerders en impersonaties krijgen geen reset- of leestoegang. NextAuth maakt pas een sessie na een atomisch verbruikte wachtwoordchallenge plus vereiste tweede factor; wijzigingen verhogen `sessionVersion`. Sleutels gebruiken een afzonderlijke AES-GCM-key, herstelcodes zijn eenmalig gehasht. Gecontroleerd operatorherstel levert uitsluitend een tijdelijke reenrollment-vergunning op en vereist voor OWNER/ADMIN een onafhankelijke tweede controle. Productie blijft geblokkeerd tot backup, werkelijk applicatierolbewijs, selectieve migratieprocedure en geïsoleerde previewdatabase gecontroleerd zijn. Ontbrekende Prisma-historiek wordt niet blind gerepareerd.
+
 ---
 
 ## ADR-001: Monorepo met pnpm + Turborepo
@@ -140,6 +144,18 @@ Nieuwe beslissingen: voeg ADR toe onderaan met datum.
 ---
 
 ## Template voor nieuwe ADR
+
+## Ads-achtergrondtaken: duurzame PostgreSQL-queue met veilige herstart
+
+**Datum:** 2026-10-02. **Status:** lokaal geïmplementeerd, scheduler niet automatisch actief.
+
+De bestaande cron plant afzonderlijke workspace-/providergebonden jobs in PostgreSQL en voert ze begrensd uit. Unieke periodekeys en atomische leases voorkomen dubbele claims. AI wacht op geslaagde sync; een verloren AI-lease vereist controle in plaats van blinde herhaling. Geen externe queuevendor of automatische advertentiewrites toegevoegd. Dit bewaart taken over procesherstarts, maar vervangt nog geen cursorpaginatie, eerlijke workspaceverdeling of een permanente worker. Google-versies bevatten tevens de gekozen adgroup/RSA/assetgroep; approvals en conflictchecks blijven op volledige snapshots gebaseerd.
+
+## Ads-workflow: voorstellen vóór externe writes
+
+**Datum:** 2026-10-02. **Status:** lokaal actief, verdere providerdekking nodig.
+
+Snapshots en approvals binden aan de inhoudshash; technische moduleguards blijven leidend. AI maakt alleen voorstellen. Een databaseclaim plus unieke campagneresourcekey serialiseert externe writes. Een uncertain resultaat wordt niet blind geretried, omdat Google/Meta geen universele transactionele idempotency ondersteunen: expliciete reconciliatie is noodzakelijk. Meta-creatives worden als nieuwe gepauzeerde advertentie gepubliceerd, met behoud van de oude versie. Activering vereist een afzonderlijk overstapvoorstel met nieuwe approval; de oude versies worden eerst gepauzeerd. Transient reads krijgen begrensde retries, writes niet. Zie `ADS_AUTOMATION.md` voor scope, operationele grenzen en nog niet voltooide delen van het plan.
 
 ```markdown
 ## ADR-NNN: Titel

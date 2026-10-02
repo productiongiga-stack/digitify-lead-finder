@@ -7,7 +7,7 @@
   "scripts": {
     "lint": "eslint src/",
     "test": "vitest run",
-    "test:integration": "RUN_DB_INTEGRATION=1 vitest run src/__tests__/workspace-rls.integration.test.ts src/__tests__/idor-smoke.integration.test.ts src/__tests__/settings-rbac.integration.test.ts",
+    "test:integration": "RUN_DB_INTEGRATION=1 vitest run src/__tests__/workspace-rls.integration.test.ts src/__tests__/idor-smoke.integration.test.ts src/__tests__/settings-rbac.integration.test.ts src/__tests__/ads-workflow.integration.test.ts src/__tests__/two-factor.integration.test.ts",
     "test:redis": "RUN_REDIS_INTEGRATION=1 vitest run src/__tests__/rate-limit-redis.integration.test.ts",
     "test:watch": "vitest"
   },
@@ -24,6 +24,7 @@
     "google-ads-api": "^20.0.0",
     "imapflow": "^2.0.0",
     "nodemailer": "^9.1.1",
+    "otplib": "13.4.0",
     "redis": "^4.7.0",
     "sharp": "^0.35.4",
     "superjson": "^2.2.0",

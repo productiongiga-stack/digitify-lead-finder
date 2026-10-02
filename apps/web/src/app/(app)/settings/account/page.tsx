@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage, Badge, Button, Card, CardContent, 
 import { ArrowLeft, Camera, KeyRound, Loader2, LogOut, Save, ShieldCheck, Trash2, UserCircle } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
 import { PasswordRulesPanel } from "@/components/settings/password-rules-panel";
+import { TwoFactorSettings } from "@/components/settings/two-factor-settings";
 import { checkPasswordPolicy } from "@digitify/api/src/lib/password-policy";
 
 function initials(name?: string | null, email?: string | null) {
@@ -245,6 +246,7 @@ export default function AccountSettingsPage() {
         </TabsContent>
 
         <TabsContent value="security" className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+          <TwoFactorSettings />
           <Card className="border-border/60">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">

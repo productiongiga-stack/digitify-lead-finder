@@ -20,12 +20,18 @@ vi.mock("../lib/google-ads", async (importActual) => {
 import * as googleAdsLib from "../lib/google-ads";
 import { defaultSearchTargeting } from "../lib/google-ads";
 import { googleAdsRouter } from "../routers/google-ads.router";
+import { fingerprint } from "../lib/ads-workflow-policy";
 
 const TEST_USER_ID = "ws_1";
 
 function planDb(delegate: Record<string, unknown>) {
   const findUnique = delegate.findUnique as ReturnType<typeof vi.fn> | undefined;
-  return { ...delegate, findFirst: delegate.findFirst ?? findUnique };
+  return { ...delegate, findFirst: delegate.findFirst ?? findUnique,
+    updateMany: delegate.updateMany ?? vi.fn(async (args) => {
+      if (typeof delegate.update === "function") await delegate.update(args);
+      return { count: 1 };
+    }),
+  };
 }
 
 function makeCtx(db: Record<string, unknown>, role = "OWNER") {
@@ -217,7 +223,8 @@ describe("googleAds router flow", () => {
     });
   });
 
-  it("loads and saves live campaign details", async () => {
+  it("loads live details and saves a proposal without publishing", async () => {
+    vi.mocked(googleAdsLib.listGoogleCampaigns).mockResolvedValue([{ id: "123", channelType: "SEARCH" }] as any);
     vi.mocked(googleAdsLib.getGoogleCampaignDetails).mockResolvedValue({
       campaignId: "123",
       name: "Live campagne",
@@ -244,11 +251,15 @@ describe("googleAds router flow", () => {
       status: "ENABLED",
     });
 
-    const caller = googleAdsRouter.createCaller(
-      makeCtx({
-        activity: { create: vi.fn().mockResolvedValue({ id: "act_1" }) },
-      }),
-    );
+    const snapshot = await vi.mocked(googleAdsLib.getGoogleCampaignDetails)({} as any, "123");
+    const version = { id: "version", accountId: baseConfig.customerId, campaignId: "123", snapshot, fingerprint: fingerprint(snapshot) };
+    const database: any = {
+      adVersion: { create: vi.fn().mockResolvedValue(version), findFirst: vi.fn().mockResolvedValue(version) },
+      adChangeSet: { create: vi.fn(async ({ data }) => ({ ...data, id: "proposal" })) },
+      adApprovalRequest: { create: vi.fn().mockResolvedValue({}) },
+    };
+    database.$transaction = vi.fn((fn) => fn(database));
+    const caller = googleAdsRouter.createCaller(makeCtx(database));
 
     const details = await caller.getCampaignDetails({ campaignId: "123" });
     expect(details.name).toBe("Live campagne");
@@ -262,7 +273,18 @@ describe("googleAds router flow", () => {
       creatives: { finalUrl: "https://example.com", headlines: ["H1", "H2", "H3"], descriptions: ["D1", "D2"] },
       targeting: { keywords: ["leads belgie"] },
     });
-    expect(saved.status).toBe("ENABLED");
-    expect(googleAdsLib.updateGoogleCampaignFromPlan).toHaveBeenCalled();
+    expect(saved.status).toBe("PENDING_APPROVAL");
+    expect(database.adApprovalRequest.create).toHaveBeenCalledOnce();
+    expect(googleAdsLib.updateGoogleCampaignFromPlan).not.toHaveBeenCalled();
+  });
+  it("requires owner/admin rights for workflow approval and publication", async () => {
+    const caller = googleAdsRouter.createCaller(makeCtx({}, "MEMBER"));
+    await expect(caller.workflowApprove({ id: "change", approve: true })).rejects.toThrow("rechten");
+    await expect(caller.workflowPublish({ id: "change" })).rejects.toThrow("rechten");
+  });
+  it("blocks advertising publication while viewing another account", async () => {
+    const ctx = makeCtx({});
+    const caller = googleAdsRouter.createCaller({ ...ctx, user: { ...ctx.user, isViewingAs: true } });
+    await expect(caller.workflowPublish({ id: "change" })).rejects.toThrow();
   });
 });

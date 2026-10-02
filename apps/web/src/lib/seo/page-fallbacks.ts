@@ -21,6 +21,11 @@ export const MARKETING_PAGE_FALLBACKS: Record<
     description: "Praktische groeiflows voor agencies, sales teams en lokale dienstverleners.",
     path: "/oplossingen",
   },
+  pricing: {
+    title: "Lead Finder prijzen — Kies je modules",
+    description: "Bekijk de transparante maandprijzen voor Lead Search, outreach, offertes, bookings, chatbot, reviews en de complete Lead Finder Suite.",
+    path: "/prijzen",
+  },
   about: {
     title: "Over ons",
     description: "Digitify bouwt praktische digitale groeitools voor teams die sneller willen schalen met controle.",

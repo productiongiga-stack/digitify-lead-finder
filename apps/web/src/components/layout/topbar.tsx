@@ -23,6 +23,7 @@ import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import { useHasMounted } from "@/lib/use-has-mounted";
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher";
+import { TwoFactorWarning } from "@/components/layout/two-factor-warning";
 
 export function Topbar() {
   const mounted = useHasMounted();
@@ -96,6 +97,7 @@ export function Topbar() {
 
       <div className="flex items-center gap-2">
         <WorkspaceSwitcher />
+        <TwoFactorWarning />
         {attentionCount > 0 ? (
           <Link href="/notifications" className="hidden md:block">
             <Badge variant="warning" className="h-8 px-3">
@@ -244,7 +246,7 @@ export function Topbar() {
             <DropdownMenuItem asChild>
               <Link href="/settings/account?tab=security">
                 <KeyRound className="mr-2 h-4 w-4" />
-                Wachtwoord wijzigen
+                Beveiliging & authenticator
               </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />

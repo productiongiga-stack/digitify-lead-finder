@@ -14,6 +14,13 @@ function database(overrides: Record<string, unknown> = {}, membership: unknown =
 }
 
 describe("session authority", () => {
+  it("requires server-issued factor proof for protected accounts and rejects recovery-only accounts", async () => {
+    const db = database({ twoFactorEnabled: true }) as unknown as PrismaClient;
+    expect(await resolveSessionIdentity(db, "member", 2)).toBeNull();
+    expect(await resolveSessionIdentity(db, "member", 2, false)).toBeNull();
+    expect(await resolveSessionIdentity(db, "member", 2, true)).not.toBeNull();
+    expect(await resolveSessionIdentity(database({ twoFactorRecoveryRequired: true }) as unknown as PrismaClient, "member", 2, true)).toBeNull();
+  });
   it("uses current membership role and module restrictions instead of stale global authority", async () => {
     const identity = await resolveSessionIdentity(database() as unknown as PrismaClient, "member", 2);
     expect(identity).toMatchObject({ workspaceRole: "VIEWER", disabledModules: ["social", "creativeStudio"] });

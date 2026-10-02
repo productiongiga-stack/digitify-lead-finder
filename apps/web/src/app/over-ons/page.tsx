@@ -1,6 +1,19 @@
-import { redirect } from "next/navigation";
-import { getWordPressPageUrl } from "@/lib/digitify-unified-nav";
+import type { Metadata } from "next";
+import { MarketingPage } from "@/components/marketing/marketing-page";
+import { DigitifyMarketingHead } from "@/components/marketing/digitify-marketing-head";
+import { MarketingSeoJsonLd } from "@/components/marketing/marketing-seo-json-ld";
+import { generateMarketingMetadata } from "@/lib/seo/generate-marketing-metadata";
+
+export async function generateMetadata(): Promise<Metadata> {
+  return generateMarketingMetadata("about");
+}
 
 export default function AboutPage() {
-  redirect(getWordPressPageUrl("over-ons"));
+  return (
+    <>
+      <DigitifyMarketingHead />
+      <MarketingSeoJsonLd path="/over-ons" />
+      <MarketingPage page="about" />
+    </>
+  );
 }

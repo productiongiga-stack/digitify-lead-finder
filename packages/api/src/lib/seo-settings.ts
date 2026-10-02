@@ -26,6 +26,8 @@ export const SEO_SETTING_KEYS = [
   "seo.page_product_description",
   "seo.page_solutions_title",
   "seo.page_solutions_description",
+  "seo.page_pricing_title",
+  "seo.page_pricing_description",
   "seo.page_about_title",
   "seo.page_about_description",
   "seo.page_contact_title",
@@ -37,6 +39,7 @@ export type MarketingSeoPageKey =
   | "home"
   | "product"
   | "solutions"
+  | "pricing"
   | "about"
   | "contact"
   | `solution:${string}`;
@@ -173,6 +176,7 @@ export function mapSettingsToPublicSeoConfig(
       home: getSettingString(settings, "seo.page_home_title", ""),
       product: getSettingString(settings, "seo.page_product_title", ""),
       solutions: getSettingString(settings, "seo.page_solutions_title", ""),
+      pricing: getSettingString(settings, "seo.page_pricing_title", ""),
       about: getSettingString(settings, "seo.page_about_title", ""),
       contact: getSettingString(settings, "seo.page_contact_title", ""),
     },
@@ -180,6 +184,7 @@ export function mapSettingsToPublicSeoConfig(
       home: getSettingString(settings, "seo.page_home_description", ""),
       product: getSettingString(settings, "seo.page_product_description", ""),
       solutions: getSettingString(settings, "seo.page_solutions_description", ""),
+      pricing: getSettingString(settings, "seo.page_pricing_description", ""),
       about: getSettingString(settings, "seo.page_about_description", ""),
       contact: getSettingString(settings, "seo.page_contact_description", ""),
     },
