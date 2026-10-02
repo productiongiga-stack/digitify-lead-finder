@@ -15,7 +15,6 @@ import {
   pushPausedGoogleAdPlan,
   removeGoogleCampaign,
   suggestBeneluxGeoTargets,
-  updateGoogleCampaignFromPlan,
   updateGoogleCampaignName,
   updateGoogleCampaignStatus,
   validateBudgetGuard,
@@ -40,6 +39,9 @@ import {
 } from "../lib/google-ads-oauth";
 import { workspaceScopeFromAuthenticatedUser } from "../lib/social-meta";
 import { findWorkspaceRecord } from "../lib/workspace-record";
+import { adWorkflowProcedures } from "./ads-workflow.procedures";
+import { captureAdVersion, createAdChange } from "../lib/ads-workflow";
+import { fingerprint } from "../lib/ads-workflow-policy";
 
 const PLAN_STATUS = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "PUSHING", "PUSHED_PAUSED", "FAILED", "CANCELLED"] as const;
 const CAMPAIGN_TYPES = ["SEARCH", "PERFORMANCE_MAX"] as const;
@@ -277,6 +279,10 @@ async function pushPlanToGoogle(
   id: string,
 ) {
   const plan = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, id, "Google Ads draft");
+  if (ctx.user.isViewingAs) throw new TRPCError({ code: "FORBIDDEN" });
+  if (plan.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) {
+    throw new TRPCError({ code: "CONFLICT", message: "Controleer eerst de externe campagne. Deze publicatie mag niet blind herhaald worden." });
+  }
   if (!["APPROVED", "FAILED"].includes(plan.status)) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen approved/failed drafts kunnen naar Google gepusht worden." });
   }
@@ -288,7 +294,11 @@ async function pushPlanToGoogle(
   }
   validateBudgetGuard(plan, config.maxDailyBudgetCents);
 
-  await ctx.db.googleAdPlan.update({ where: { id }, data: { status: "PUSHING", lastError: null } });
+  const claimed = await ctx.db.googleAdPlan.updateMany({
+    where: { id, createdById: ctx.user.workspaceId!, status: plan.status, updatedAt: plan.updatedAt },
+    data: { status: "PUSHING", lastError: null },
+  });
+  if (!claimed.count) throw new TRPCError({ code: "CONFLICT", message: "Deze draft is gewijzigd of wordt al gepubliceerd." });
 
   try {
     const externalIds = await pushPausedGoogleAdPlan({ config, plan });
@@ -320,7 +330,7 @@ async function pushPlanToGoogle(
     });
     return ctx.db.googleAdPlan.update({
       where: { id },
-      data: { status: "FAILED", retryCount: Number(plan.retryCount || 0) + 1, lastError: message },
+      data: { status: "FAILED", retryCount: Number(plan.retryCount || 0) + 1, lastError: "EXTERNAL_WRITE_UNCERTAIN: " + message },
     });
   }
 }
@@ -357,7 +367,13 @@ async function runGoogleAdsRead<T>(db: PrismaClient, scope: ReturnType<typeof wo
   }
 }
 
+const adsAdminProcedure = adminProcedure.use(({ ctx, next }) => {
+  if (ctx.user.isViewingAs) throw new TRPCError({ code: "FORBIDDEN", message: "Advertentiebeheer is niet beschikbaar tijdens het bekijken van een ander account." });
+  return next();
+});
+
 export const googleAdsRouter = router({
+  ...adWorkflowProcedures("GOOGLE"),
   connectionStatus: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadGoogleAdsWorkspaceConfig(ctx.db, scope);
@@ -488,28 +504,28 @@ export const googleAdsRouter = router({
     return runGoogleAdsRead(ctx.db, scope, (config) => getGoogleAdsInsights(config));
   }),
 
-  pauseInGoogle: adminProcedure
+  pauseInGoogle: adsAdminProcedure
     .input(z.object({ campaignId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
       return runGoogleAdsRead(ctx.db, scope, (config) => updateGoogleCampaignStatus(config, input.campaignId, "PAUSED"));
     }),
 
-  resumeInGoogle: adminProcedure
+  resumeInGoogle: adsAdminProcedure
     .input(z.object({ campaignId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
       return runGoogleAdsRead(ctx.db, scope, (config) => updateGoogleCampaignStatus(config, input.campaignId, "ENABLED"));
     }),
 
-  removeCampaign: adminProcedure
+  removeCampaign: adsAdminProcedure
     .input(z.object({ campaignId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
       return runGoogleAdsRead(ctx.db, scope, (config) => removeGoogleCampaign(config, input.campaignId));
     }),
 
-  updateCampaignName: adminProcedure
+  updateCampaignName: adsAdminProcedure
     .input(z.object({ campaignId: z.string().min(1), name: z.string().min(2).max(160) }))
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
@@ -523,7 +539,7 @@ export const googleAdsRouter = router({
       return runGoogleAdsRead(ctx.db, scope, (config) => getGoogleCampaignDetails(config, input.campaignId));
     }),
 
-  saveCampaignToGoogle: adminProcedure
+  saveCampaignToGoogle: adsAdminProcedure
     .input(
       z.object({
         campaignId: z.string().min(1),
@@ -531,24 +547,24 @@ export const googleAdsRouter = router({
       }).merge(draftInputSchema),
     )
     .mutation(async ({ ctx, input }) => {
-      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
-      const config = await loadReadableGoogleAdsConfig(ctx.db, scope);
-      const { campaignId, publishStatus, ...plan } = input;
-      try {
-        const result = await updateGoogleCampaignFromPlan(config, campaignId, { ...plan, publishStatus });
-        await createGoogleAdsActivity(ctx.db, {
-          userId: ctx.user.id,
-          type: "GOOGLE_AD_PUSHED_PAUSED",
-          title: publishStatus === "ENABLED" ? "Google campagne live bijgewerkt" : "Google campagne bijgewerkt",
-          metadata: { campaignId, publishStatus: publishStatus || null },
-        });
-        return result;
-      } catch (error) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: formatGoogleAdsError(error),
-        });
+      if (ctx.user.isViewingAs) throw new TRPCError({ code: "FORBIDDEN" });
+      const version = await captureAdVersion(ctx.db, ctx.user.workspaceId!, "GOOGLE", input.campaignId);
+      const before = version.snapshot as Record<string, any>;
+      const patches: Array<{ path: string; value: unknown }> = [];
+      for (const key of ["name", "dailyBudgetCents"] as const) {
+        if (input[key] !== undefined && fingerprint(input[key]) !== fingerprint(before[key])) patches.push({ path: key, value: input[key] });
       }
+      for (const group of ["targeting", "creatives"] as const) {
+        for (const [key, value] of Object.entries(input[group] || {})) {
+          if (key === "campaignSettings") {
+            for (const [setting, v] of Object.entries(value || {})) {
+              if (fingerprint(v) !== fingerprint(before[group]?.[key]?.[setting] ?? null)) patches.push({ path: group + "." + key + "." + setting, value: v });
+            }
+          } else if (fingerprint(value) !== fingerprint(before[group]?.[key] ?? null)) patches.push({ path: group + "." + key, value });
+        }
+      }
+      const proposal = await createAdChange(ctx.db, ctx.user.workspaceId!, ctx.user.id, "GOOGLE", version.id, patches, "Wijziging vanuit de campagne-wizard");
+      return { campaignId: input.campaignId, status: "PENDING_APPROVAL", changeSetId: proposal.id };
     }),
 
   searchGeoLocations: protectedProcedure
@@ -609,6 +625,7 @@ export const googleAdsRouter = router({
     .input(z.object({ id: z.string() }).merge(draftInputSchema.partial()))
     .mutation(async ({ ctx, input }) => {
       const row = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, input.id, "Google Ads draft");
+      if (row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Controleer eerst de externe publicatie; deze draft mag niet opnieuw worden verstuurd of gereset." });
       if (!["DRAFT", "FAILED", "CANCELLED"].includes(row.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen drafts, failed of cancelled plannen kunnen aangepast worden." });
       }
@@ -681,6 +698,7 @@ export const googleAdsRouter = router({
 
   submitForApproval: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const row = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, input.id, "Google Ads draft");
+    if (row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Controleer eerst de externe publicatie; deze draft mag niet opnieuw worden verstuurd of gereset." });
     if (!["DRAFT", "FAILED", "CANCELLED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Deze draft kan niet ter goedkeuring worden aangeboden." });
     }
@@ -697,8 +715,9 @@ export const googleAdsRouter = router({
     return updated;
   }),
 
-  approveDraft: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+  approveDraft: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const row = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, input.id, "Google Ads draft");
+    if (row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Controleer eerst de externe publicatie; deze draft mag niet opnieuw worden verstuurd of gereset." });
     if (!["PENDING_APPROVAL", "DRAFT", "FAILED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Deze draft kan niet goedgekeurd worden." });
     }
@@ -718,10 +737,11 @@ export const googleAdsRouter = router({
     return updated;
   }),
 
-  rejectDraft: adminProcedure
+  rejectDraft: adsAdminProcedure
     .input(z.object({ id: z.string(), reason: z.string().max(1000).optional() }))
     .mutation(async ({ ctx, input }) => {
       const row = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, input.id, "Google Ads draft");
+      if (row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Controleer eerst de externe publicatie; deze draft mag niet opnieuw worden verstuurd of gereset." });
       const reason = input.reason?.trim();
       const updated = await ctx.db.googleAdPlan.update({
         where: { id: input.id },
@@ -736,15 +756,16 @@ export const googleAdsRouter = router({
       return updated;
     }),
 
-  pushPausedToGoogle: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToGoogle(ctx, input.id)),
+  pushPausedToGoogle: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToGoogle(ctx, input.id)),
 
-  cancelDraft: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+  cancelDraft: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const row = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, input.id, "Google Ads draft");
+    if (row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Controleer eerst de externe publicatie; deze draft mag niet opnieuw worden verstuurd of gereset." });
     if (["PUSHING", "PUSHED_PAUSED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Een gepushte Google-campagne kan niet lokaal geannuleerd worden." });
     }
     return ctx.db.googleAdPlan.update({ where: { id: input.id }, data: { status: "CANCELLED" } });
   }),
 
-  retryFailed: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToGoogle(ctx, input.id)),
+  retryFailed: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToGoogle(ctx, input.id)),
 });

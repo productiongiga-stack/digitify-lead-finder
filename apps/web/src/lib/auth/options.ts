@@ -1,7 +1,8 @@
 import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@digitify/db";
-import { scryptSync, timingSafeEqual } from "crypto";
+import { authRateLimit, finishLogin } from "@digitify/api/src/lib/two-factor";
+import { LOGIN_COOKIE } from "./two-factor-http";
 import { log } from "@digitify/api/src/lib/logger";
 import { resolveWorkspaceContext } from "@digitify/api/src/lib/workspace-registry";
 import { resolveSessionIdentity } from "@digitify/api/src/lib/session-identity";
@@ -35,30 +36,6 @@ function resolveAuthBaseUrl(): string {
 // Guard against empty env values (for example VERCEL_URL="") that cause next-auth URL parsing to crash at build time.
 Object.assign(process.env, { NEXTAUTH_URL: resolveAuthBaseUrl() });
 
-function verifyPassword(password: string, storedHash: string): boolean {
-  if (storedHash.includes(":")) {
-    const [salt, hash] = storedHash.split(":");
-    if (!salt || !hash || !/^[a-f0-9]{128}$/i.test(hash)) return false;
-    const derivedHash = scryptSync(password, salt!, 64);
-    return timingSafeEqual(derivedHash, Buffer.from(hash!, "hex"));
-  }
-  // Legacy SHA256 — verify only, caller must upgrade hash afterwards
-  const { createHash } = require("crypto");
-  const legacyHash = createHash("sha256").update(password).digest("hex");
-  return legacyHash === storedHash;
-}
-
-function hashPassword(password: string): string {
-  const { randomBytes } = require("crypto");
-  const salt = randomBytes(16).toString("hex");
-  const hash = scryptSync(password, salt, 64).toString("hex");
-  return `${salt}:${hash}`;
-}
-
-function isLegacyHash(storedHash: string): boolean {
-  return !storedHash.includes(":");
-}
-
 export const authOptions: NextAuthOptions = {
   session: {
     strategy: "jwt",
@@ -74,76 +51,21 @@ export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
       name: "credentials",
-      credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
-      },
-      async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
-          log.auth.warn("Login attempt with missing credentials");
+      credentials: { code: { label: "Code", type: "text" }, method: { label: "Method", type: "text" } },
+      async authorize(credentials, request) {
+        try {
+          const cookie = String(request.headers?.cookie ?? "").split(";").map((part) => part.trim()).find((part) => part.startsWith(LOGIN_COOKIE + "="));
+          const challenge = cookie ? decodeURIComponent(cookie.slice(LOGIN_COOKIE.length + 1)) : undefined;
+          if (!challenge) return null;
+          const ip = String(request.headers?.["x-forwarded-for"] || "unknown").split(",")[0];
+          await authRateLimit(prisma, "login-finish-ip:" + ip, 30);
+          const user = await finishLogin(prisma, challenge, credentials?.code, credentials?.method === "recovery" ? "recovery" : "totp");
+          const workspace = await resolveWorkspaceContext(prisma, user.id);
+          return { id: user.id, email: user.email, name: user.name, role: user.role, workspaceId: workspace.workspaceId, workspaceRole: workspace.workspaceRole, isPersonalWorkspace: workspace.isPersonalWorkspace, sessionVersion: user.sessionVersion, twoFactorVerified: user.twoFactorEnabled };
+        } catch {
+          log.auth.warn("Login security challenge rejected");
           return null;
         }
-
-        const email = credentials.email.toLowerCase().trim();
-        const user = await prisma.user.findUnique({
-          where: { email },
-          select: {
-            id: true,
-            email: true,
-            name: true,
-            role: true,
-            passwordHash: true,
-            emailVerified: true,
-            workspaceOwnerId: true,
-            sessionVersion: true,
-          },
-        });
-
-        if (!user || !user.passwordHash) {
-          log.auth.warn("Login failed: unknown user", { email });
-          return null;
-        }
-
-        if (!verifyPassword(credentials.password, user.passwordHash)) {
-          log.auth.warn("Login failed: bad password", { email, userId: user.id });
-          return null;
-        }
-
-        if (!user.emailVerified) {
-          if (user.role === "OWNER" || user.role === "ADMIN") {
-            await prisma.user.update({
-              where: { id: user.id },
-              data: { emailVerified: new Date() },
-            });
-            log.auth.info("Backfilled emailVerified for privileged account", { userId: user.id });
-          } else {
-            log.auth.warn("Login blocked: email not verified", { email, userId: user.id });
-            return null;
-          }
-        }
-
-        // Transparently upgrade legacy SHA256 hashes to scrypt on successful login
-        if (isLegacyHash(user.passwordHash)) {
-          const upgraded = hashPassword(credentials.password);
-          await prisma.user.update({
-            where: { id: user.id },
-            data: { passwordHash: upgraded },
-          });
-          log.auth.info("Password hash upgraded to scrypt", { userId: user.id });
-        }
-
-        log.auth.info("Login success", { userId: user.id, email });
-        const workspace = await resolveWorkspaceContext(prisma, user.id);
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          workspaceId: workspace.workspaceId,
-          workspaceRole: workspace.workspaceRole,
-          isPersonalWorkspace: workspace.isPersonalWorkspace,
-          sessionVersion: user.sessionVersion,
-        };
       },
     }),
   ],
@@ -158,11 +80,12 @@ export const authOptions: NextAuthOptions = {
         token.workspaceRole = (user as { workspaceRole?: string }).workspaceRole;
         token.isPersonalWorkspace = (user as { isPersonalWorkspace?: boolean }).isPersonalWorkspace;
         token.sessionVersion = (user as { sessionVersion?: number }).sessionVersion;
+        token.twoFactorVerified = (user as { twoFactorVerified?: boolean }).twoFactorVerified === true;
         return token;
       }
 
       const identity = token.sub
-        ? await resolveSessionIdentity(prisma, token.sub, token.sessionVersion)
+        ? await resolveSessionIdentity(prisma, token.sub, token.sessionVersion, token.twoFactorVerified)
         : null;
       if (!identity) return {};
       return { ...token, ...identity, sub: identity.id };

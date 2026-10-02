@@ -77,8 +77,8 @@ export type NavGroup = {
 /** Sidebar groups — ordered top to bottom */
 export const SIDEBAR_NAV_GROUPS: NavGroup[] = [
   {
-    id: "prospectie",
-    label: "Prospectie",
+    id: "lead-engine",
+    label: "Lead Engine",
     icon: Users,
     defaultOpen: true,
     items: [
@@ -88,8 +88,8 @@ export const SIDEBAR_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    id: "communicatie",
-    label: "Communicatie",
+    id: "outreach-hub",
+    label: "Outreach Hub",
     icon: SendHorizonal,
     items: [
       { href: "/contacts", label: "Outbound", icon: SendHorizonal, moduleId: "contacts" },
@@ -98,8 +98,8 @@ export const SIDEBAR_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    id: "verkoop",
-    label: "Verkoop",
+    id: "sales-workspace",
+    label: "Sales Workspace",
     icon: Receipt,
     items: [
       { href: "/crm", label: "CRM", icon: Building2, moduleId: "crm" },
@@ -108,49 +108,51 @@ export const SIDEBAR_NAV_GROUPS: NavGroup[] = [
       { href: "/quotes", label: "Offertes", icon: Receipt, moduleId: "quotes" },
       { href: "/invoices", label: "Facturen", icon: Banknote, moduleId: "invoices" },
       { href: "/payments", label: "Betalingen", icon: Banknote, moduleId: "payments" },
-    ],
-  },
-  {
-    id: "analyse",
-    label: "Analyse",
-    icon: ScanSearch,
-    items: [
-      { href: "/reports/overview", label: "Rapportage", icon: BarChart3, moduleId: "reports" },
-      { href: "/reports", label: "Website auditor", icon: ScanSearch, moduleId: "reports" },
-      { href: "/seo", label: "SEO", icon: SearchCheck, moduleId: "seo" },
-    ],
-  },
-  {
-    id: "advertenties",
-    label: "Advertenties",
-    icon: Megaphone,
-    items: ADS_NAV_ITEMS,
-  },
-  {
-    id: "marketing",
-    label: "Marketing",
-    icon: Globe2,
-    items: [
-      { href: "/social", label: "Social Planner", icon: Megaphone, moduleId: "social" },
-      { href: "/creative-studio", label: "Creative Studio", icon: Sparkles, moduleId: "creativeStudio" },
-      { href: "/bookings", label: "Boekingen", icon: Calendar, moduleId: "bookings" },
-      { href: "/domains", label: "Domeinen", icon: Globe2, moduleId: "domains" },
-      { href: "/files", label: "Bestanden", icon: FileText, moduleId: "files" },
-      { href: "/reviews", label: "Reviews", icon: Star, moduleId: "reviews" },
-      { href: "/chatbot", label: "Chatbot", icon: MessageSquare, moduleId: "chatbot" },
-      { href: "/forms", label: "Formulieren", icon: Library, moduleId: "forms" },
-      { href: "/knowledge", label: "Kennisbank", icon: Library, moduleId: "knowledge" },
       { href: "/projects", label: "Projecten", icon: Layers, moduleId: "projects" },
       { href: "/contracts", label: "Contracten", icon: FileText, moduleId: "contracts" },
     ],
   },
   {
-    id: "automatisering",
-    label: "Automatisering",
+    id: "website-growth",
+    label: "Website Growth",
+    icon: Globe2,
+    items: [
+      { href: "/seo", label: "SEO", icon: SearchCheck, moduleId: "seo" },
+      { href: "/domains", label: "Domeinen", icon: Globe2, moduleId: "domains" },
+      { href: "/forms", label: "Formulieren", icon: Library, moduleId: "forms" },
+    ],
+  },
+  {
+    id: "marketing-studio",
+    label: "Marketing Studio",
+    icon: Palette,
+    items: [
+      { href: "/social", label: "Social Planner", icon: Megaphone, moduleId: "social" },
+      { href: "/creative-studio", label: "Creative Studio", icon: Sparkles, moduleId: "creativeStudio" },
+      ...ADS_NAV_ITEMS,
+    ],
+  },
+  {
+    id: "customer-experience",
+    label: "Customer Experience",
+    icon: MessageSquare,
+    items: [
+      { href: "/bookings", label: "Boekingen", icon: Calendar, moduleId: "bookings" },
+      { href: "/reviews", label: "Reviews", icon: Star, moduleId: "reviews" },
+      { href: "/chatbot", label: "Chatbot", icon: MessageSquare, moduleId: "chatbot" },
+    ],
+  },
+  {
+    id: "automation-insights",
+    label: "Automation & Insights",
     icon: GitBranch,
     items: [
+      { href: "/reports/overview", label: "Rapportage", icon: BarChart3, moduleId: "reports" },
+      { href: "/reports", label: "Website auditor", icon: ScanSearch, moduleId: "reports" },
       { href: "/automations", label: "Workflows", icon: GitBranch, moduleId: "automations" },
       { href: "/activity", label: "Activiteitenlog", icon: Activity, moduleId: "activityLog" },
+      { href: "/knowledge", label: "Kennisbank", icon: Library, moduleId: "knowledge" },
+      { href: "/files", label: "Bestanden", icon: FileText, moduleId: "files" },
     ],
   },
 ];
@@ -164,7 +166,7 @@ export const LEADS_WORKFLOW_ITEMS: QuickNavItem[] = SIDEBAR_NAV_GROUPS.flatMap((
 export const LEADS_MENU_ITEMS: QuickNavItem[] = SIDEBAR_NAV_GROUPS.flatMap((group) => group.items);
 
 /** @deprecated Use SIDEBAR_NAV_GROUPS marketing items */
-export const TOOL_NAV_ITEMS: NavItem[] = SIDEBAR_NAV_GROUPS.find((g) => g.id === "marketing")!.items.map(
+export const TOOL_NAV_ITEMS: NavItem[] = SIDEBAR_NAV_GROUPS.find((g) => g.id === "marketing-studio")!.items.map(
   (item) => ({ ...item }),
 );
 

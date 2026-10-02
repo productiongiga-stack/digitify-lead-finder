@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 import { loadPublicSeoConfig } from "@/lib/seo/load-public-seo";
-import { MARKETING_SOLUTION_SLUGS, MARKETING_STATIC_PATHS } from "@/lib/seo/solution-slugs";
+import { MARKETING_BUNDLE_SLUGS, MARKETING_STATIC_PATHS } from "@/lib/seo/solution-slugs";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const config = await loadPublicSeoConfig();
@@ -16,7 +16,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: path === "/" ? 1 : 0.8,
   }));
 
-  const solutionEntries: MetadataRoute.Sitemap = MARKETING_SOLUTION_SLUGS.map((slug) => ({
+  const solutionEntries: MetadataRoute.Sitemap = MARKETING_BUNDLE_SLUGS.map((slug) => ({
     url: `${base}/oplossingen/${slug}`,
     lastModified: now,
     changeFrequency: "monthly",

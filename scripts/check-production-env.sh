@@ -66,6 +66,15 @@ require_value NEXT_PUBLIC_APP_URL
 require_value NEXTAUTH_SECRET
 require_value SETTINGS_ENCRYPTION_KEY
 require_value CRON_SECRET
+require_value TWO_FACTOR_ENCRYPTION_KEY
+if [[ ! "${TWO_FACTOR_ENCRYPTION_KEY:-}" =~ ^[a-fA-F0-9]{64}$ ]]; then
+  echo "ERROR: TWO_FACTOR_ENCRYPTION_KEY must be a dedicated 32-byte key encoded as 64 hex characters." >&2
+  failed=1
+fi
+if [[ "${TWO_FACTOR_ENCRYPTION_KEY:-}" == "${SETTINGS_ENCRYPTION_KEY:-}" || "${TWO_FACTOR_ENCRYPTION_KEY:-}" == "${NEXTAUTH_SECRET:-}" ]]; then
+  echo "ERROR: TWO_FACTOR_ENCRYPTION_KEY must be independent from other auth/settings keys." >&2
+  failed=1
+fi
 
 # Credential and public-form protection must be shared across Vercel
 # instances. A local in-memory bucket is acceptable for development only.

@@ -54,6 +54,7 @@ describe("validateServerEnv", () => {
 
     process.env.CRON_SECRET = "production-cron-secret";
     process.env.ENABLE_WORKSPACE_RLS = "true";
+    process.env.TWO_FACTOR_ENCRYPTION_KEY = "a1".repeat(32);
     const env = validateServerEnv({ force: true });
     expect(env.CRON_SECRET).toBe("production-cron-secret");
   });
@@ -64,6 +65,14 @@ describe("validateServerEnv", () => {
     process.env.CRON_SECRET = "production-cron-secret";
     delete process.env.ENABLE_WORKSPACE_RLS;
     expect(() => validateServerEnv({ force: true })).toThrow(/ENABLE_WORKSPACE_RLS/);
+  });
+  it("fails closed when the dedicated authenticator key is missing in production", () => {
+    process.env.NODE_ENV = "production";
+    process.env.SETTINGS_ENCRYPTION_KEY = "production-settings-encryption-key-32";
+    process.env.CRON_SECRET = "production-cron-secret";
+    process.env.ENABLE_WORKSPACE_RLS = "true";
+    delete process.env.TWO_FACTOR_ENCRYPTION_KEY;
+    expect(() => validateServerEnv({ force: true })).toThrow(/TWO_FACTOR_ENCRYPTION_KEY/);
   });
 
   it("skips validation in test runtime by default", () => {

@@ -234,7 +234,7 @@ export async function getMetaCampaignDetails(params: { campaignId: string; acces
   const campaign = await getMetaCampaign(params);
   const adsetsRaw = (await metaGet(`${params.campaignId}/adsets`, {
     access_token: params.accessToken,
-    fields: "id,name,status,effective_status,daily_budget,lifetime_budget,optimization_goal,bid_strategy,updated_time,targeting",
+    fields: "id,name,status,effective_status,daily_budget,lifetime_budget,optimization_goal,bid_strategy,bid_amount,start_time,end_time,updated_time,targeting",
     limit: "100",
   })) as { data?: Array<Record<string, unknown>> };
   const adsets = adsetsRaw.data || [];
@@ -245,7 +245,7 @@ export async function getMetaCampaignDetails(params: { campaignId: string; acces
       if (!adsetId) return { adsetId, ads: [] };
       const adsRaw = (await metaGet(`${adsetId}/ads`, {
         access_token: params.accessToken,
-        fields: "id,name,status,effective_status,updated_time,creative{id,name,object_story_spec}",
+        fields: "id,name,status,effective_status,updated_time,tracking_specs,creative{id,name,object_story_spec}",
         limit: "100",
       })) as { data?: Array<Record<string, unknown>> };
       return { adsetId, ads: adsRaw.data || [] };
@@ -290,7 +290,7 @@ export async function getMetaInsights(params: { adAccountId: string; accessToken
         ? "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,impressions,reach,clicks,spend,cpc,ctr,actions"
         : params.level === "adset"
           ? "campaign_id,campaign_name,adset_id,adset_name,impressions,reach,clicks,spend,cpc,ctr,actions"
-          : "campaign_id,campaign_name,impressions,reach,clicks,spend,cpc,ctr,actions",
+          : "campaign_id,campaign_name,impressions,reach,clicks,spend,cpc,ctr,actions,action_values,purchase_roas",
     limit: "100",
   })) as { data?: unknown[] };
   return raw.data || [];

@@ -17,26 +17,28 @@ export function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [secondStep, setSecondStep] = useState(false);
+  const [code, setCode] = useState("");
+  const [method, setMethod] = useState("totp");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
 
-    const result = await signIn("credentials", {
-      email: email.toLowerCase().trim(),
-      password,
-      redirect: false,
-    });
-
-    setLoading(false);
-
-    if (result?.error) {
-      setError("Ongeldige inloggegevens");
-    } else {
-      router.push("/dashboard");
-      router.refresh();
-    }
+    try {
+      if (!secondStep) {
+        const response = await fetch("/api/auth/login-start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: email.trim().toLowerCase(), password }) });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message);
+        setPassword("");
+        if (payload.requiresTwoFactor) { setSecondStep(true); return; }
+      }
+      const result = await signIn("credentials", { code, method, redirect: false });
+      if (!result || result.error) throw new Error(secondStep ? "Code ongeldig, gebruikt of controle verlopen. Gebruik een nieuwe code of begin opnieuw." : "Inloggen mislukt. Begin opnieuw.");
+      router.push("/dashboard"); router.refresh();
+    } catch (err) { setError(err instanceof Error ? err.message : "Inloggen niet beschikbaar."); }
+    finally { setLoading(false); setCode(""); }
   }
 
   return (
@@ -50,11 +52,12 @@ export function LoginForm() {
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
+          {!secondStep && <><div className="space-y-2">
             <Label htmlFor="email">E-mail</Label>
             <Input
               id="email"
               type="email"
+              autoComplete="username"
               placeholder="naam@voorbeeld.be"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -71,19 +74,28 @@ export function LoginForm() {
             <Input
               id="password"
               type="password"
+              autoComplete="current-password"
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
-          </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          </div></>}
+          {secondStep && <div className="space-y-3">
+            <Label htmlFor="factor-code">{method === "totp" ? "Authenticatorcode" : "Eenmalige herstelcode"}</Label>
+            <p className="text-sm text-muted-foreground">Je wachtwoord is gecontroleerd. Bevestig nu je eigen authenticator.</p>
+            <Input id="factor-code" value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" inputMode={method === "totp" ? "numeric" : "text"} maxLength={method === "totp" ? 6 : 80} required autoFocus />
+            <Button type="button" variant="outline" onClick={() => { setMethod(method === "totp" ? "recovery" : "totp"); setCode(""); }}>{method === "totp" ? "Gebruik een herstelcode" : "Gebruik authenticator"}</Button>
+            <Button type="button" variant="ghost" onClick={() => { setSecondStep(false); setCode(""); setError(""); }}>Begin opnieuw</Button>
+          </div>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <Button type="submit" className="w-full rounded-full shadow-sm" disabled={loading}>
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Inloggen
+            {secondStep ? "Controleer code en log in" : "Inloggen"}
           </Button>
           <p className="text-center text-xs text-muted-foreground">
-            Neem contact op met je beheerder als je geen toegang hebt.
+            Authenticator kwijt en geen herstelcodes? Vraag gecontroleerd platformherstel.
+            <Link href="/two-factor-recovery" className="block underline">Herstel met ontvangen herstelvergunning</Link>
           </p>
         </form>
       </CardContent>

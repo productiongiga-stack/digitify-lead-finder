@@ -5,6 +5,7 @@ export async function resolveSessionIdentity(
   db: PrismaClient,
   userId: string,
   sessionVersion: unknown,
+  twoFactorVerified?: unknown,
 ) {
   if (!Number.isInteger(sessionVersion)) return null;
   const user = await db.user.findUnique({
@@ -12,9 +13,11 @@ export async function resolveSessionIdentity(
     select: {
       id: true, email: true, name: true, role: true, emailVerified: true,
       sessionVersion: true, activeWorkspaceId: true, workspaceOwnerId: true,
+      twoFactorEnabled: true, twoFactorRecoveryRequired: true,
     },
   });
   if (!user || !user.emailVerified || user.sessionVersion !== sessionVersion) return null;
+  if (user.twoFactorRecoveryRequired || (user.twoFactorEnabled && twoFactorVerified !== true)) return null;
   const workspaceId = user.activeWorkspaceId || user.workspaceOwnerId || user.id;
   const membership = await db.workspaceMembership.findUnique({
     where: { workspaceId_userId: { workspaceId, userId } },

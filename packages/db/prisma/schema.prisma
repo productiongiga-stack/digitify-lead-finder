@@ -9,12 +9,80 @@ datasource db {
 }
 
 // AUTH & USERS
+model UserTwoFactor {
+  userId String @id
+  secret String?
+  enabledAt DateTime?
+  lastUsedStep BigInt @default(-1)
+  pendingSecret String?
+  pendingExpiresAt DateTime?
+  pendingVersion Int?
+  pendingCodeHashes Json?
+  pendingProofHash String?
+  pendingStep BigInt?
+  failures Int @default(0)
+  failureWindowAt DateTime?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@map("user_two_factors")
+}
+
+model TwoFactorRecoveryCode {
+  id String @id @default(cuid())
+  userId String
+  codeHash String
+  usedAt DateTime?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@unique([userId, codeHash])
+  @@map("two_factor_recovery_codes")
+}
+
+model LoginChallenge {
+  id String @id @default(cuid())
+  purpose String @default("LOGIN")
+  tokenHash String @unique
+  userId String
+  sessionVersion Int
+  requiresTwoFactor Boolean
+  expiresAt DateTime
+  attempts Int @default(0)
+  usedAt DateTime?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@index([userId, expiresAt])
+  @@map("login_challenges")
+}
+
+model TwoFactorRecoveryGrant {
+  id String @id @default(cuid())
+  tokenHash String @unique
+  userId String
+  sessionVersion Int
+  expiresAt DateTime
+  usedAt DateTime?
+  operatorId String
+  ticket String
+  reason String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@map("two_factor_recovery_grants")
+}
+
+model AuthRateBucket {
+  key String @id
+  count Int @default(0)
+  expiresAt DateTime
+  @@map("auth_rate_buckets")
+}
 model User {
   id             String    @id @default(cuid())
   email          String    @unique
   name           String?
   passwordHash   String?
   sessionVersion Int       @default(0)
+  twoFactorEnabled Boolean @default(false)
+  twoFactorRecoveryRequired Boolean @default(false)
+  twoFactor UserTwoFactor?
+  twoFactorCodes TwoFactorRecoveryCode[]
+  loginChallenges LoginChallenge[]
+  factorRecoveries TwoFactorRecoveryGrant[]
   image          String?
   emailVerified  DateTime?
   role           UserRole  @default(MEMBER)
@@ -63,6 +131,14 @@ model User {
   googleAdAccounts     GoogleAdAccount[] @relation("GoogleAdAccountCreatedBy")
   googleAdPlans        GoogleAdPlan[]    @relation("GoogleAdPlanCreatedBy")
   approvedGoogleAdPlans GoogleAdPlan[]   @relation("GoogleAdPlanApprovedBy")
+  adVersions           AdVersion[]
+  adChangeSets         AdChangeSet[] @relation("AdChangeWorkspace")
+  authoredAdChanges    AdChangeSet[] @relation("AdChangeAuthor")
+  adApprovalRequests   AdApprovalRequest[] @relation("AdApprovalWorkspace")
+  decidedAdApprovals   AdApprovalRequest[] @relation("AdApprovalActor")
+  adSyncOperations     AdSyncOperation[]
+  aiOptimizationRuns   AiOptimizationRun[]
+  adBackgroundJobs     AdBackgroundJob[]
   authoredMediaGenerations MediaGeneration[] @relation("MediaGenerationAuthor")
   tenantMediaGenerations   MediaGeneration[] @relation("MediaGenerationWorkspace")
   workspaceAnalyticsEvents WorkspaceAnalyticsEvent[] @relation("WorkspaceAnalyticsOwner")
@@ -1170,6 +1246,132 @@ model MetaAdPlan {
   @@index([createdById, status])
   @@index([createdById, updatedAt(sort: Desc)])
   @@map("meta_ad_plans")
+}
+
+// Unified advertising workflow. createdById is always the workspace owner id.
+model AdBackgroundJob {
+  id String @id @default(cuid())
+  createdById String
+  provider String
+  kind String
+  dedupeKey String @unique
+  dependencyId String?
+  status String @default("PENDING")
+  attempts Int @default(0)
+  runAt DateTime @default(now())
+  leaseToken String?
+  leasedUntil DateTime?
+  result Json?
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@index([createdById, provider, status, runAt])
+  @@map("ad_background_jobs")
+}
+
+model AdVersion {
+  id          String   @id @default(cuid())
+  createdById String
+  provider    String
+  accountId   String
+  campaignId  String
+  fingerprint String
+  snapshot    Json
+  metrics     Json?
+  syncedAt    DateTime @default(now())
+  createdBy   User @relation(fields: [createdById], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  changes     AdChangeSet[]
+  @@index([createdById, provider, campaignId, syncedAt])
+  @@map("ad_versions")
+}
+
+model AdChangeSet {
+  id          String   @id @default(cuid())
+  createdById String
+  authorId    String
+  provider    String
+  accountId   String
+  campaignId  String
+  baseVersionId String
+  beforeHash  String
+  afterHash   String
+  before      Json
+  after       Json
+  reason      String
+  source      String   @default("MANUAL")
+  risk        String   @default("MEDIUM")
+  checks      Json
+  status      String   @default("PENDING_APPROVAL")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   User @relation("AdChangeWorkspace", fields: [createdById], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  author      User @relation("AdChangeAuthor", fields: [authorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  baseVersion AdVersion @relation(fields: [baseVersionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  approval    AdApprovalRequest?
+  operation   AdSyncOperation?
+  @@index([createdById, provider, status])
+  @@map("ad_change_sets")
+}
+
+model AdApprovalRequest {
+  id          String   @id @default(cuid())
+  createdById String
+  changeSetId String   @unique
+  versionHash String
+  status      String   @default("PENDING")
+  decidedById String?
+  decidedAt   DateTime?
+  reason      String?
+  remindedAt  DateTime?
+  createdAt   DateTime @default(now())
+  createdBy   User @relation("AdApprovalWorkspace", fields: [createdById], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  decidedBy   User? @relation("AdApprovalActor", fields: [decidedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  change      AdChangeSet @relation(fields: [changeSetId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@index([createdById, status])
+  @@map("ad_approval_requests")
+}
+
+model AdSyncOperation {
+  id          String   @id @default(cuid())
+  createdById String
+  provider    String
+  changeSetId String   @unique
+  idempotencyKey String @unique
+  resourceKey String? @unique
+  status      String   @default("PENDING")
+  attempts    Int      @default(0)
+  response    Json?
+  errorCode   String?
+  lastError   String?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   User @relation(fields: [createdById], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  change      AdChangeSet @relation(fields: [changeSetId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  @@index([createdById, status])
+  @@map("ad_sync_operations")
+}
+
+model AiOptimizationRun {
+  id          String   @id @default(cuid())
+  runKey      String?  @unique
+  createdById String
+  provider    String
+  periodStart DateTime
+  periodEnd   DateTime
+  promptVersion String
+  status      String   @default("RUNNING")
+  model       String?
+  input       Json
+  result      Json?
+  lastError   String?
+  createdAt   DateTime @default(now())
+  finishedAt  DateTime?
+  createdBy   User @relation(fields: [createdById], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@index([createdById, provider, createdAt])
+  @@map("ai_optimization_runs")
 }
 
 model GoogleAdAccount {

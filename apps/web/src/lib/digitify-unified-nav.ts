@@ -1,5 +1,6 @@
 export type DigitifyNavKey =
   | "home"
+  | "prijzen"
   | "diensten"
   | "cases"
   | "over-ons"
@@ -151,9 +152,23 @@ export function getUnifiedNavItems(options: { includeContact?: boolean; site?: "
 export function pageKeyToNavKey(page: string): DigitifyNavKey | null {
   if (page === "home") return "home";
   if (page === "product") return "lead-finder";
+  if (page === "pricing") return "prijzen";
+  if (page === "solutions") return "diensten";
   if (page === "about") return "over-ons";
   if (page === "contact") return "contact";
   return null;
+}
+
+/** Internal marketing navigation for the standalone Lead Finder product site. */
+export function getLeadFinderMarketingNavItems(): DigitifyNavItem[] {
+  return [
+    { key: "home", label: "Home", href: "/" },
+    { key: "lead-finder", label: "Product", href: "/product" },
+    { key: "diensten", label: "Modules", href: "/oplossingen" },
+    { key: "prijzen", label: "Prijzen", href: "/prijzen" },
+    { key: "over-ons", label: "Over het platform", href: "/over-ons" },
+    { key: "contact", label: "Contact", href: "/contact" },
+  ];
 }
 
 export const DIGITIFY_BRAND_SLOGAN = "Partner in Digital Solutions";

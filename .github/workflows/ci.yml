@@ -28,6 +28,7 @@ jobs:
       SEED_RLS_OWNER_B_PASSWORD: DigitifyCiSeed2026!
       SEED_VIEWER_EMAIL: viewer@digitify.ci
       SEED_VIEWER_PASSWORD: DigitifyCiSeed2026!
+      TWO_FACTOR_ENCRYPTION_KEY: a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
       SETTINGS_ENCRYPTION_KEY: ci-settings-encryption-key-min-32-chars
       CRON_SECRET: ci-cron-secret-min-16
 
@@ -153,6 +154,7 @@ jobs:
       NEXTAUTH_SECRET: ci-nextauth-secret-min-32-chars-long
       NEXTAUTH_URL: http://localhost:3000
       NEXT_PUBLIC_APP_URL: http://localhost:3000
+      TWO_FACTOR_ENCRYPTION_KEY: a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
       SETTINGS_ENCRYPTION_KEY: ci-settings-encryption-key-min-32-chars
       CRON_SECRET: ci-cron-secret-min-16
       ENABLE_WORKSPACE_RLS: "true"

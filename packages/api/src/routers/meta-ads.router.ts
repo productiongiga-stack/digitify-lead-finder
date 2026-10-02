@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { adWorkflowProcedures } from "./ads-workflow.procedures";
 import { type PrismaClient, Prisma } from "@digitify/db";
 import { OpenClawClient } from "@digitify/openclaw";
 import { z } from "zod";
@@ -331,6 +332,10 @@ async function renderVariantSuggestion(
 
 async function pushPlanToMeta(ctx: Pick<Context, "db" | "user"> & { user: NonNullable<Context["user"]> }, id: string) {
   const plan = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, id, "Meta Ads draft");
+  if (ctx.user.isViewingAs) throw new TRPCError({ code: "FORBIDDEN" });
+  if (plan.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) {
+    throw new TRPCError({ code: "CONFLICT", message: "Controleer eerst de externe campagne. Deze publicatie mag niet blind herhaald worden." });
+  }
   if (!["APPROVED", "FAILED"].includes(plan.status)) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen approved/failed drafts kunnen naar Meta gepusht worden." });
   }
@@ -347,7 +352,11 @@ async function pushPlanToMeta(ctx: Pick<Context, "db" | "user"> & { user: NonNul
     excludeLiveCampaignId: String(asRecord(plan.externalIds).campaignId || ""),
   });
 
-  await ctx.db.metaAdPlan.update({ where: { id }, data: { status: "PUSHING", lastError: null } });
+  const claimed = await ctx.db.metaAdPlan.updateMany({
+    where: { id, createdById: ctx.user.workspaceId!, status: plan.status, updatedAt: plan.updatedAt },
+    data: { status: "PUSHING", lastError: null },
+  });
+  if (!claimed.count) throw new TRPCError({ code: "CONFLICT", message: "Deze draft is gewijzigd of wordt al gepubliceerd." });
 
   try {
     const externalIds = await pushPausedMetaAdPlan({ config, plan });
@@ -383,7 +392,7 @@ async function pushPlanToMeta(ctx: Pick<Context, "db" | "user"> & { user: NonNul
       data: {
         status: "FAILED",
         retryCount: Number(plan.retryCount || 0) + 1,
-        lastError: message,
+        lastError: "EXTERNAL_WRITE_UNCERTAIN: " + message,
         externalIds: (partialExternalIds ?? undefined) as Prisma.InputJsonValue | undefined,
       },
     });
@@ -391,7 +400,13 @@ async function pushPlanToMeta(ctx: Pick<Context, "db" | "user"> & { user: NonNul
   }
 }
 
+const adsAdminProcedure = adminProcedure.use(({ ctx, next }) => {
+  if (ctx.user.isViewingAs) throw new TRPCError({ code: "FORBIDDEN", message: "Advertentiebeheer is niet beschikbaar tijdens het bekijken van een ander account." });
+  return next();
+});
+
 export const metaAdsRouter = router({
+  ...adWorkflowProcedures("META"),
   connectionStatus: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
@@ -441,14 +456,14 @@ export const metaAdsRouter = router({
     };
   }),
 
-  listAdAccounts: adminProcedure.query(async ({ ctx }) => {
+  listAdAccounts: adsAdminProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
     if (!config.accessToken) throw new TRPCError({ code: "BAD_REQUEST", message: "Koppel Meta eerst via Integraties." });
     return listMetaAdAccounts(config.accessToken);
   }),
 
-  selectAdAccount: adminProcedure
+  selectAdAccount: adsAdminProcedure
     .input(
       z.object({
         adAccountId: z.string().min(3),
@@ -490,7 +505,7 @@ export const metaAdsRouter = router({
       return row;
     }),
 
-  setAutoadsEnabled: adminProcedure
+  setAutoadsEnabled: adsAdminProcedure
     .input(z.object({ enabled: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
@@ -505,7 +520,7 @@ export const metaAdsRouter = router({
     return listMetaCampaigns({ adAccountId: config.adAccountId, accessToken: config.accessToken });
   }),
 
-  syncMetaCampaigns: adminProcedure.mutation(async ({ ctx }) => {
+  syncMetaCampaigns: adsAdminProcedure.mutation(async ({ ctx }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
     if (!config.accessToken || !config.adAccountId) {
@@ -593,6 +608,7 @@ export const metaAdsRouter = router({
 
   getDraftById: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
     const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
+    if (row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Controleer eerst de externe publicatie; deze draft mag niet opnieuw worden verstuurd of gereset." });
     return row;
   }),
 
@@ -624,6 +640,7 @@ export const metaAdsRouter = router({
 
   updateDraft: mutationProcedure.input(z.object({ id: z.string() }).merge(draftInputSchema.partial())).mutation(async ({ ctx, input }) => {
     const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
+    if (row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Controleer eerst de externe publicatie; deze draft mag niet opnieuw worden verstuurd of gereset." });
     if (!["DRAFT", "FAILED", "CANCELLED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen drafts, failed of cancelled plannen kunnen aangepast worden." });
     }
@@ -654,6 +671,7 @@ export const metaAdsRouter = router({
 
   duplicateDraft: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
+    if (row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Controleer eerst de externe publicatie; deze draft mag niet opnieuw worden verstuurd of gereset." });
     const reserved = await collectReservedMetaCampaignNames(ctx);
     const copyName = pickAvailableCopyName(row.name, reserved);
     return ctx.db.metaAdPlan.create({
@@ -681,6 +699,7 @@ export const metaAdsRouter = router({
 
   archiveDraft: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
+    if (row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Controleer eerst de externe publicatie; deze draft mag niet opnieuw worden verstuurd of gereset." });
     if (["PUSHING"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Een draft die nu naar Meta pusht kan niet gearchiveerd worden." });
     }
@@ -730,7 +749,7 @@ export const metaAdsRouter = router({
     notes: await loadMetaAdsAiTrainingNotes(ctx.db, ctx.user.workspaceId!),
   })),
 
-  updateAiTrainingNotes: adminProcedure
+  updateAiTrainingNotes: adsAdminProcedure
     .input(z.object({ notes: z.string().max(4000) }))
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
@@ -744,6 +763,7 @@ export const metaAdsRouter = router({
 
   submitForApproval: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
+    if (row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Controleer eerst de externe publicatie; deze draft mag niet opnieuw worden verstuurd of gereset." });
     if (!["DRAFT", "FAILED", "CANCELLED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Deze draft kan niet ter goedkeuring worden aangeboden." });
     }
@@ -757,8 +777,9 @@ export const metaAdsRouter = router({
     return updated;
   }),
 
-  approveDraft: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+  approveDraft: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
+    if (row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Controleer eerst de externe publicatie; deze draft mag niet opnieuw worden verstuurd of gereset." });
     if (!["PENDING_APPROVAL", "DRAFT", "FAILED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Deze draft kan niet goedgekeurd worden." });
     }
@@ -778,10 +799,11 @@ export const metaAdsRouter = router({
     return updated;
   }),
 
-  rejectDraft: adminProcedure
+  rejectDraft: adsAdminProcedure
     .input(z.object({ id: z.string(), reason: z.string().max(1000).optional() }))
     .mutation(async ({ ctx, input }) => {
       const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
+      if (row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Controleer eerst de externe publicatie; deze draft mag niet opnieuw worden verstuurd of gereset." });
       const reason = input.reason?.trim();
       const updated = await ctx.db.metaAdPlan.update({
         where: { id: input.id },
@@ -796,7 +818,7 @@ export const metaAdsRouter = router({
       return updated;
     }),
 
-  pauseInMeta: adminProcedure.input(z.object({ campaignId: z.string().min(1), draftId: z.string().optional() })).mutation(async ({ ctx, input }) => {
+  pauseInMeta: adsAdminProcedure.input(z.object({ campaignId: z.string().min(1), draftId: z.string().optional() })).mutation(async ({ ctx, input }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
     if (!config.accessToken) throw new TRPCError({ code: "BAD_REQUEST", message: "Meta is niet gekoppeld." });
@@ -822,7 +844,7 @@ export const metaAdsRouter = router({
     return { ok: true };
   }),
 
-  resumeInMeta: adminProcedure.input(z.object({ campaignId: z.string().min(1), draftId: z.string().optional() })).mutation(async ({ ctx, input }) => {
+  resumeInMeta: adsAdminProcedure.input(z.object({ campaignId: z.string().min(1), draftId: z.string().optional() })).mutation(async ({ ctx, input }) => {
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
     if (!config.accessToken) throw new TRPCError({ code: "BAD_REQUEST", message: "Meta is niet gekoppeld." });
@@ -848,15 +870,16 @@ export const metaAdsRouter = router({
     return { ok: true };
   }),
 
-  pushPausedToMeta: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToMeta(ctx, input.id)),
+  pushPausedToMeta: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToMeta(ctx, input.id)),
 
-  cancelDraft: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+  cancelDraft: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
+    if (row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Controleer eerst de externe publicatie; deze draft mag niet opnieuw worden verstuurd of gereset." });
     if (["PUSHING", "PUSHED_PAUSED"].includes(row.status)) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "Een gepushte Meta-campagne kan niet lokaal geannuleerd worden." });
     }
     return ctx.db.metaAdPlan.update({ where: { id: input.id }, data: { status: "CANCELLED" } });
   }),
 
-  retryFailed: adminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToMeta(ctx, input.id)),
+  retryFailed: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToMeta(ctx, input.id)),
 });

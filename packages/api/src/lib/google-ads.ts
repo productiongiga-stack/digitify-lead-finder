@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
 import { assertPublicHttpUrl } from "@digitify/connectors";
 import type { GoogleAdsApi, MutateOperation } from "google-ads-api";
+import { googleEditorSelectionSchema, type GoogleEditorSelection } from "./google-editor-selection";
 import { validateBudgetGuard } from "./meta-ads";
 import { type WorkspaceScope } from "./workspace-settings";
 import {
@@ -40,7 +41,7 @@ function asObject(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};
 }
 
-function asStringArray(value: unknown, min = 1): string[] {
+function asStringArray(value: unknown, _min = 1): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => String(item).trim()).filter(Boolean).slice(0, 15);
 }
@@ -166,12 +167,12 @@ export function defaultSearchTargeting(targeting: unknown) {
   const custom = asObject(targeting);
   const keywords = asLongStringArray(custom.keywords, 80);
   return {
-    geoTargetConstants: asStringArray(custom.geoTargetConstants).length
+    geoTargetConstants: Array.isArray(custom.geoTargetConstants)
       ? asStringArray(custom.geoTargetConstants)
       : ["geoTargetConstants/2056"],
-    keywords: keywords.length ? keywords : ["digitify leads", "lead generatie belgie"],
+    keywords: Array.isArray(custom.keywords) ? keywords : ["digitify leads", "lead generatie belgie"],
     negativeKeywords: asLongStringArray(custom.negativeKeywords, 80),
-    languageConstants: asStringArray(custom.languageConstants).length
+    languageConstants: Array.isArray(custom.languageConstants)
       ? asStringArray(custom.languageConstants)
       : ["languageConstants/1010"],
     matchType: String(custom.matchType || "PHRASE").toUpperCase(),
@@ -275,7 +276,16 @@ async function fetchImageAssetData(url: string) {
       message: error instanceof Error ? error.message : "Deze afbeelding-URL is niet toegestaan.",
     });
   }
-  const response = await fetch(safeUrl);
+  let response: Response;
+  const signal = AbortSignal.timeout(15000);
+  for (let redirects = 0; ; redirects++) {
+    response = await fetch(safeUrl, { redirect: "manual", signal });
+    if (![301, 302, 303, 307, 308].includes(response.status)) break;
+    const location = response.headers.get("location");
+    await response.body?.cancel();
+    if (!location || redirects >= 3) throw new TRPCError({ code: "BAD_REQUEST", message: "Te veel of ongeldige afbeelding-redirects." });
+    safeUrl = await assertPublicHttpUrl(new URL(location, safeUrl).toString());
+  }
   if (!response.ok) {
     throw new TRPCError({
       code: "BAD_REQUEST",
@@ -289,7 +299,22 @@ async function fetchImageAssetData(url: string) {
       message: `Afbeelding heeft ongeldig content-type (${contentType || "onbekend"}). Gebruik JPG, PNG of GIF.`,
     });
   }
-  const bytes = Buffer.from(await response.arrayBuffer());
+  if (Number(response.headers.get("content-length") || 0) > 5_120_000) {
+    await response.body?.cancel();
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Afbeelding is groter dan 5120 KB." });
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Afbeelding bevat geen gegevens.");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > 5_120_000) { await reader.cancel(); throw new Error("Afbeelding is groter dan 5120 KB."); }
+    chunks.push(value);
+  }
+  const bytes = Buffer.concat(chunks);
   if (bytes.length > 5_120_000) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Afbeelding is groter dan 5120 KB, Google Ads weigert deze asset." });
   }
@@ -534,10 +559,14 @@ export type GoogleCampaignLiveResources = {
   assetGroupResourceName?: string;
   keywordCriteria: Array<{ resourceName: string; text: string; negative: boolean }>;
   campaignCriteria: Array<{ resourceName: string; type: string }>;
-  textAssets: Array<{ resourceName: string; fieldType: string; text: string }>;
+  textAssets: Array<{ resourceName: string; fieldType: string; text: string; linkResourceName?: string }>;
+  rsaHeadlines?: Array<{ text?: string; pinned_field?: number }>;
+  rsaDescriptions?: Array<{ text?: string; pinned_field?: number }>;
+  finalUrls?: string[];
 };
 
 export type GoogleCampaignDetails = {
+  editorTarget?: GoogleEditorSelection;
   campaignId: string;
   name: string;
   status: string;
@@ -553,6 +582,8 @@ export type GoogleCampaignDetails = {
 };
 
 type GoogleCampaignPlanInput = {
+  editorTarget?: GoogleEditorSelection;
+  changedPaths?: string[];
   name: string;
   campaignType: string;
   dailyBudgetCents?: number | null;
@@ -587,7 +618,9 @@ function mapDescriptionPin(descriptions: Array<{ text?: string; pinned_field?: u
 export async function getGoogleCampaignDetails(
   config: GoogleAdsWorkspaceConfig,
   campaignId: string,
+  editorTarget?: GoogleEditorSelection,
 ): Promise<GoogleCampaignDetails> {
+  const target = googleEditorSelectionSchema.parse(editorTarget || {});
   const client = await createAdsClient(config);
   const customer = getGoogleAdsCustomer(client, config);
   const normalizedCampaignId = normalizeGoogleCustomerId(campaignId);
@@ -616,6 +649,9 @@ export async function getGoogleCampaignDetails(
   }
 
   const campaignType = normalizeChannelType(campaignRow.campaign.advertising_channel_type);
+  if ((campaignType === "SEARCH" && target.assetGroupId) || (campaignType === "PERFORMANCE_MAX" && (target.adGroupId || target.adId))) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "De gekozen groep past niet bij dit campagnetype." });
+  }
   const resources: GoogleCampaignLiveResources = {
     campaignResourceName: `customers/${normalizeGoogleCustomerId(config.customerId)}/campaigns/${normalizedCampaignId}`,
     campaignBudgetResourceName: String(campaignRow.campaign_budget?.resource_name || campaignRow.campaign?.campaign_budget || ""),
@@ -652,8 +688,8 @@ export async function getGoogleCampaignDetails(
   }
 
   let adGroupName = "";
-  let keywords: string[] = [];
-  let negativeKeywords: string[] = [];
+  const keywords: string[] = [];
+  const negativeKeywords: string[] = [];
   let matchType = "PHRASE";
   let creatives: Record<string, unknown> = {
     finalUrl: "",
@@ -672,10 +708,12 @@ export async function getGoogleCampaignDetails(
       FROM ad_group
       WHERE campaign.id = ${normalizedCampaignId}
         AND ad_group.status != 'REMOVED'
+        ${target.adGroupId ? `AND ad_group.id = ${target.adGroupId}` : ""}
       ORDER BY ad_group.id
       LIMIT 1
     `);
     const adGroupRow = adGroupRows[0] as any;
+    if (target.adGroupId && !adGroupRow) throw new TRPCError({ code: "NOT_FOUND", message: "Advertentiegroep hoort niet bij deze campagne." });
     resources.adGroupResourceName = String(adGroupRow?.ad_group?.resource_name || "");
     adGroupName = String(adGroupRow?.ad_group?.name || "");
 
@@ -683,6 +721,7 @@ export async function getGoogleCampaignDetails(
       const adRows = await customer.query(`
         SELECT
           ad_group_ad.resource_name,
+          ad_group_ad.ad.resource_name,
           ad_group_ad.ad.final_urls,
           ad_group_ad.ad.responsive_search_ad.headlines,
           ad_group_ad.ad.responsive_search_ad.descriptions,
@@ -692,15 +731,25 @@ export async function getGoogleCampaignDetails(
         WHERE campaign.id = ${normalizedCampaignId}
           AND ad_group_ad.status != 'REMOVED'
           AND ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD'
+          AND ad_group.resource_name = '${resources.adGroupResourceName}'
+          ${target.adId ? `AND ad_group_ad.ad.id = ${target.adId}` : ""}
+        ORDER BY ad_group_ad.ad.id
         LIMIT 1
       `);
       const adRow = adRows[0] as any;
+      if (target.adId && !adRow) throw new TRPCError({ code: "NOT_FOUND", message: "RSA hoort niet bij de gekozen advertentiegroep." });
       resources.adGroupAdResourceName = String(adRow?.ad_group_ad?.resource_name || "");
       const rsa = adRow?.ad_group_ad?.ad?.responsive_search_ad;
       const headlines = Array.isArray(rsa?.headlines) ? rsa.headlines : [];
       const descriptions = Array.isArray(rsa?.descriptions) ? rsa.descriptions : [];
+      resources.rsaHeadlines = headlines;
+      resources.rsaDescriptions = descriptions;
+      resources.finalUrls = adRow?.ad_group_ad?.ad?.final_urls || [];
       creatives = {
         finalUrl: String(adRow?.ad_group_ad?.ad?.final_urls?.[0] || ""),
+        finalUrls: resources.finalUrls,
+        headlineAssets: headlines,
+        descriptionAssets: descriptions,
         headlines: headlines.map((item: { text?: string }) => String(item.text || "").trim()).filter(Boolean),
         descriptions: descriptions.map((item: { text?: string }) => String(item.text || "").trim()).filter(Boolean),
         headlinePin1: mapHeadlinePin(headlines),
@@ -742,10 +791,12 @@ export async function getGoogleCampaignDetails(
       FROM asset_group
       WHERE campaign.id = ${normalizedCampaignId}
         AND asset_group.status != 'REMOVED'
+        ${target.assetGroupId ? `AND asset_group.id = ${target.assetGroupId}` : ""}
       ORDER BY asset_group.id
       LIMIT 1
     `);
     const assetGroupRow = assetGroupRows[0] as any;
+    if (target.assetGroupId && !assetGroupRow) throw new TRPCError({ code: "NOT_FOUND", message: "Assetgroep hoort niet bij deze campagne." });
     resources.assetGroupResourceName = String(assetGroupRow?.asset_group?.resource_name || "");
     creatives.assetGroupName = String(assetGroupRow?.asset_group?.name || "");
     creatives.finalUrl = String(assetGroupRow?.asset_group?.final_urls?.[0] || "");
@@ -754,9 +805,11 @@ export async function getGoogleCampaignDetails(
       SELECT
         asset.resource_name,
         asset.text_asset.text,
+        asset_group_asset.resource_name,
         asset_group_asset.field_type
       FROM asset_group_asset
       WHERE campaign.id = ${normalizedCampaignId}
+        AND asset_group_asset.asset_group = '${resources.assetGroupResourceName}'
         AND asset_group_asset.status != 'REMOVED'
         AND asset.text_asset.text != ''
     `);
@@ -765,12 +818,15 @@ export async function getGoogleCampaignDetails(
     const descriptions: string[] = [];
     for (const row of assetRows as any[]) {
       const text = String(row.asset?.text_asset?.text || "").trim();
-      const fieldType = String(row.asset_group_asset?.field_type || row.field_type || "").toUpperCase();
+      const { enums } = await loadGoogleAdsSdk();
+      const rawField = row.asset_group_asset?.field_type || row.field_type || "";
+      const fieldType = String(typeof rawField === "number" ? enums.AssetFieldType[rawField] : rawField).toUpperCase();
       if (!text || !row.asset?.resource_name) continue;
       resources.textAssets.push({
         resourceName: String(row.asset.resource_name),
         fieldType,
         text,
+        linkResourceName: String(row.asset_group_asset?.resource_name || ""),
       });
       if (fieldType.includes("LONG_HEADLINE")) longHeadlines.push(text);
       else if (fieldType.includes("HEADLINE")) headlines.push(text);
@@ -784,6 +840,10 @@ export async function getGoogleCampaignDetails(
 
   return {
     campaignId: normalizedCampaignId,
+    editorTarget: campaignType === "SEARCH" ? {
+      ...(resources.adGroupResourceName ? { adGroupId: resources.adGroupResourceName.split("/").pop() } : {}),
+      ...(resources.adGroupAdResourceName ? { adId: resources.adGroupAdResourceName.split("~").pop() } : {}),
+    } : { ...(resources.assetGroupResourceName ? { assetGroupId: resources.assetGroupResourceName.split("/").pop() } : {}) },
     name: String(campaignRow.campaign.name || ""),
     status: normalizeGoogleCampaignStatus(campaignRow.campaign.status),
     campaignType,
@@ -812,6 +872,25 @@ export async function getGoogleCampaignDetails(
     creatives,
     resources,
   };
+}
+
+export async function listGoogleEditorTargets(config: GoogleAdsWorkspaceConfig, campaignId: string) {
+  if (!/^\d{1,20}$/.test(campaignId)) throw new TRPCError({ code: "BAD_REQUEST", message: "Ongeldig campagne-ID." });
+  const customer = getGoogleAdsCustomer(await createAdsClient(config), config);
+  const [search, pmax] = await Promise.all([
+    customer.query(`SELECT ad_group.id, ad_group.name, ad_group_ad.ad.id
+      FROM ad_group_ad WHERE campaign.id = ${campaignId}
+      AND ad_group.status != 'REMOVED' AND ad_group_ad.status != 'REMOVED'
+      AND ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD' ORDER BY ad_group.id, ad_group_ad.ad.id`),
+    customer.query(`SELECT asset_group.id, asset_group.name FROM asset_group
+      WHERE campaign.id = ${campaignId} AND asset_group.status != 'REMOVED' ORDER BY asset_group.id`),
+  ]);
+  return [
+    ...search.map((row: any) => ({ label: `${row.ad_group.name} · RSA ${row.ad_group_ad.ad.id}`,
+      target: { adGroupId: String(row.ad_group.id), adId: String(row.ad_group_ad.ad.id) } as GoogleEditorSelection })),
+    ...pmax.map((row: any) => ({ label: `${row.asset_group.name} · PMax`,
+      target: { assetGroupId: String(row.asset_group.id) } as GoogleEditorSelection })),
+  ];
 }
 
 async function syncAdGroupKeywords(params: {
@@ -905,7 +984,8 @@ async function updateGoogleSearchCampaignLive(params: {
   const campaignSettings = asObject(targeting.campaignSettings);
   const dailyCents = Number(plan.dailyBudgetCents || 0);
 
-  if (resources.campaignBudgetResourceName && dailyCents > 0) {
+  const changed = (path: string) => !plan.changedPaths || plan.changedPaths.some((p) => p === path || p.startsWith(path + "."));
+  if (changed("dailyBudgetCents") && resources.campaignBudgetResourceName && dailyCents > 0) {
     await customer.campaignBudgets.update([
       {
         resource_name: resources.campaignBudgetResourceName,
@@ -916,54 +996,57 @@ async function updateGoogleSearchCampaignLive(params: {
 
   const campaignUpdate: Record<string, unknown> = {
     resource_name: resources.campaignResourceName,
-    name: plan.name,
-    network_settings: {
+    ...(changed("name") ? { name: plan.name } : {}),
+    ...(changed("targeting.searchPartners") || changed("targeting.displayExpansion") ? { network_settings: {
       target_google_search: true,
       target_search_network: targeting.searchPartners,
       target_content_network: targeting.displayExpansion,
-    },
+    } } : {}),
   };
-  if (campaignSettings.trackingTemplate) {
-    campaignUpdate.tracking_url_template = String(campaignSettings.trackingTemplate);
+  if (changed("targeting.campaignSettings")) {
+    campaignUpdate.tracking_url_template = String(campaignSettings.trackingTemplate || "");
   }
-  if (campaignSettings.finalUrlSuffix) {
-    campaignUpdate.final_url_suffix = String(campaignSettings.finalUrlSuffix);
+  if (changed("targeting.campaignSettings")) {
+    campaignUpdate.final_url_suffix = String(campaignSettings.finalUrlSuffix || "");
   }
   if (plan.publishStatus) {
     campaignUpdate.status =
       plan.publishStatus === "ENABLED" ? enums.CampaignStatus.ENABLED : enums.CampaignStatus.PAUSED;
   }
-  await customer.campaigns.update([campaignUpdate]);
+  if (Object.keys(campaignUpdate).length > 1) await customer.campaigns.update([campaignUpdate]);
 
-  if (resources.adGroupResourceName && targeting.adGroupName) {
+  if (changed("targeting.adGroupName") && resources.adGroupResourceName && targeting.adGroupName) {
     await customer.adGroups.update([
       { resource_name: resources.adGroupResourceName, name: targeting.adGroupName },
     ]);
   }
 
-  if (resources.adGroupAdResourceName) {
-    await customer.adGroupAds.update([
+  if (changed("creatives") && resources.adGroupAdResourceName) {
+    // RSA content is an AdService mutation, not an AdGroupAdService mutation.
+    const adId = resources.adGroupAdResourceName.split("~").pop();
+    const customerPrefix = resources.adGroupAdResourceName.split("/adGroupAds/")[0];
+    await customer.ads.update([
       {
-        resource_name: resources.adGroupAdResourceName,
-        ad: {
+        resource_name: customerPrefix + "/ads/" + adId,
           responsive_search_ad: {
             headlines: creative.headlines.map((text) =>
-              textAsset(text, text === creative.headlinePin1 ? enums.ServedAssetFieldType.HEADLINE_1 : undefined),
+              textAsset(text, changed("creatives.headlinePin1") ? (text === creative.headlinePin1 ? enums.ServedAssetFieldType.HEADLINE_1 : undefined)
+                : resources.rsaHeadlines?.find((asset) => asset.text === text)?.pinned_field),
             ),
             descriptions: creative.descriptions.slice(0, 4).map((text) =>
-              textAsset(text, text === creative.descriptionPin1 ? enums.ServedAssetFieldType.DESCRIPTION_1 : undefined),
+              textAsset(text, changed("creatives.descriptionPin1") ? (text === creative.descriptionPin1 ? enums.ServedAssetFieldType.DESCRIPTION_1 : undefined)
+                : resources.rsaDescriptions?.find((asset) => asset.text === text)?.pinned_field),
             ),
-            path1: creative.path1 || undefined,
-            path2: creative.path1 && creative.path2 ? creative.path2 : undefined,
+            path1: creative.path1 || "",
+            path2: creative.path1 && creative.path2 ? creative.path2 : "",
           },
-          final_urls: [creative.finalUrl],
-        },
+          final_urls: [...new Set([creative.finalUrl, ...(resources.finalUrls?.slice(1) || [])])],
       },
     ]);
   }
 
   if (resources.adGroupResourceName) {
-    await syncAdGroupKeywords({
+    if (changed("targeting.keywords") || changed("targeting.matchType")) await syncAdGroupKeywords({
       customer,
       adGroupResourceName: resources.adGroupResourceName,
       existing: resources.keywordCriteria.filter((item) => !item.negative),
@@ -972,7 +1055,7 @@ async function updateGoogleSearchCampaignLive(params: {
       negative: false,
       enums,
     });
-    await syncAdGroupKeywords({
+    if (changed("targeting.negativeKeywords") || changed("targeting.matchType")) await syncAdGroupKeywords({
       customer,
       adGroupResourceName: resources.adGroupResourceName,
       existing: resources.keywordCriteria.filter((item) => item.negative),
@@ -983,7 +1066,7 @@ async function updateGoogleSearchCampaignLive(params: {
     });
   }
 
-  await syncCampaignGeoLanguageCriteria({
+  if (changed("targeting.geoTargetConstants") || changed("targeting.languageConstants")) await syncCampaignGeoLanguageCriteria({
     customer,
     campaignResourceName: resources.campaignResourceName,
     existing: resources.campaignCriteria,
@@ -998,6 +1081,7 @@ async function updateGooglePerformanceMaxCampaignLive(params: {
   plan: GoogleCampaignPlanInput;
 }) {
   const { customer, resources, plan } = params;
+  const changed = (path: string) => !plan.changedPaths || plan.changedPaths.some((p) => p === path || p.startsWith(path + "."));
   const { enums } = await loadGoogleAdsSdk();
   const creative = normalizeSearchCreatives(plan.creatives);
   if (creative.headlines.length < 3) {
@@ -1013,7 +1097,7 @@ async function updateGooglePerformanceMaxCampaignLive(params: {
   const targeting = defaultSearchTargeting(plan.targeting);
   const campaignSettings = asObject(targeting.campaignSettings);
 
-  if (resources.campaignBudgetResourceName && dailyCents > 0) {
+  if (changed("dailyBudgetCents") && resources.campaignBudgetResourceName && dailyCents > 0) {
     await customer.campaignBudgets.update([
       {
         resource_name: resources.campaignBudgetResourceName,
@@ -1024,22 +1108,22 @@ async function updateGooglePerformanceMaxCampaignLive(params: {
 
   const campaignUpdate: Record<string, unknown> = {
     resource_name: resources.campaignResourceName,
-    name: plan.name,
   };
-  if (campaignSettings.finalUrlSuffix) campaignUpdate.final_url_suffix = String(campaignSettings.finalUrlSuffix);
-  if (campaignSettings.trackingTemplate) campaignUpdate.tracking_url_template = String(campaignSettings.trackingTemplate);
+  if (changed("name")) campaignUpdate.name = plan.name;
+  if (changed("targeting.campaignSettings.finalUrlSuffix")) campaignUpdate.final_url_suffix = String(campaignSettings.finalUrlSuffix || "");
+  if (changed("targeting.campaignSettings.trackingTemplate")) campaignUpdate.tracking_url_template = String(campaignSettings.trackingTemplate || "");
   if (plan.publishStatus) {
     campaignUpdate.status =
       plan.publishStatus === "ENABLED" ? enums.CampaignStatus.ENABLED : enums.CampaignStatus.PAUSED;
   }
-  await customer.campaigns.update([campaignUpdate]);
+  if (Object.keys(campaignUpdate).length > 1) await customer.campaigns.update([campaignUpdate]);
 
-  if (resources.assetGroupResourceName) {
+  if (resources.assetGroupResourceName && (changed("creatives.assetGroupName") || changed("creatives.finalUrl"))) {
     await customer.assetGroups.update([
       {
         resource_name: resources.assetGroupResourceName,
-        name: creative.assetGroupName || `${plan.name} Asset Group`,
-        final_urls: [creative.finalUrl],
+        ...(changed("creatives.assetGroupName") ? { name: creative.assetGroupName || `${plan.name} Asset Group` } : {}),
+        ...(changed("creatives.finalUrl") ? { final_urls: [creative.finalUrl] } : {}),
       },
     ]);
   }
@@ -1051,24 +1135,45 @@ async function updateGooglePerformanceMaxCampaignLive(params: {
     { fieldType: "BUSINESS_NAME", texts: creative.businessName ? [creative.businessName] : [] },
   ];
 
+  if (!resources.assetGroupResourceName) throw new Error("Asset group ontbreekt.");
+  // Text assets can be shared. Create new immutable assets and relink this group
+  // atomically instead of changing content belonging to other campaigns.
+  const prefix = resources.campaignResourceName.split("/campaigns/")[0];
+  const operations: MutateOperation<any>[] = [];
+  let tempId = -100;
   for (const group of desiredTextAssets) {
-    const existing = resources.textAssets.filter((item) => item.fieldType.toUpperCase().includes(group.fieldType));
-    for (let index = 0; index < group.texts.length; index += 1) {
-      const text = group.texts[index];
-      const asset = existing[index];
-      if (asset?.resourceName) {
-        await customer.assets.update([{ resource_name: asset.resourceName, text_asset: { text } }]);
-      }
+    const textPath = ({ HEADLINE: "headlines", LONG_HEADLINE: "longHeadlines", DESCRIPTION: "descriptions", BUSINESS_NAME: "businessName" } as Record<string, string>)[group.fieldType];
+    if (!changed("creatives." + textPath)) continue;
+    const existing = resources.textAssets.filter((item) => item.fieldType === group.fieldType);
+    if (JSON.stringify(existing.map((a) => a.text)) === JSON.stringify(group.texts)) continue;
+    for (const text of group.texts) {
+      const resourceName = prefix + "/assets/" + tempId--;
+      operations.push({ entity: "asset", operation: "create", resource: { resource_name: resourceName, text_asset: { text } } });
+      operations.push({ entity: "asset_group_asset", operation: "create", resource: {
+        asset_group: resources.assetGroupResourceName, asset: resourceName,
+        field_type: enums.AssetFieldType[group.fieldType as keyof typeof enums.AssetFieldType],
+      } } as MutateOperation<any>);
     }
+    for (const item of existing) if (item.linkResourceName) operations.push({
+      entity: "asset_group_asset", operation: "remove", resource: item.linkResourceName,
+    } as MutateOperation<any>);
   }
-
-  if (creative.imageUrl || creative.squareImageUrl || creative.logoUrl) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message:
-        "Performance Max afbeeldingen kunnen in deze versie nog niet live vervangen worden. Pas teksten, budget, URL en status aan, of wijzig afbeeldingen in Google Ads.",
-    });
+  for (const [url, fieldType, key] of [
+    [creative.imageUrl, enums.AssetFieldType.MARKETING_IMAGE, "imageUrl"],
+    [creative.squareImageUrl, enums.AssetFieldType.SQUARE_MARKETING_IMAGE, "squareImageUrl"],
+    [creative.logoUrl, enums.AssetFieldType.LOGO, "logoUrl"],
+    [creative.portraitImageUrl, enums.AssetFieldType.PORTRAIT_MARKETING_IMAGE, "portraitImageUrl"],
+    [creative.landscapeLogoUrl, enums.AssetFieldType.LANDSCAPE_LOGO, "landscapeLogoUrl"],
+  ] as const) {
+    if (!url || !changed("creatives." + key)) continue;
+    const resourceName = prefix + "/assets/" + tempId--;
+    const data = await fetchImageAssetData(url);
+    operations.push({ entity: "asset", operation: "create", resource: { resource_name: resourceName, image_asset: { data } } });
+    operations.push({ entity: "asset_group_asset", operation: "create", resource: {
+      asset_group: resources.assetGroupResourceName, asset: resourceName, field_type: fieldType,
+    } });
   }
+  if (operations.length) await customer.mutateResources(operations);
 }
 
 export async function updateGoogleCampaignFromPlan(
@@ -1077,7 +1182,7 @@ export async function updateGoogleCampaignFromPlan(
   plan: GoogleCampaignPlanInput,
 ) {
   validateBudgetGuard(plan, config.maxDailyBudgetCents);
-  const details = await getGoogleCampaignDetails(config, campaignId);
+  const details = await getGoogleCampaignDetails(config, campaignId, plan.editorTarget);
   const client = await createAdsClient(config);
   const customer = getGoogleAdsCustomer(client, config);
   const campaignType = String(plan.campaignType || details.campaignType).toUpperCase();
@@ -1109,7 +1214,8 @@ export async function getGoogleAdsInsights(config: GoogleAdsWorkspaceConfig) {
       metrics.clicks,
       metrics.cost_micros,
       metrics.ctr,
-      metrics.conversions
+      metrics.conversions,
+      metrics.conversions_value
     FROM campaign
     WHERE segments.date DURING LAST_30_DAYS
       AND campaign.status != 'REMOVED'
@@ -1122,8 +1228,11 @@ export async function getGoogleAdsInsights(config: GoogleAdsWorkspaceConfig) {
     impressions: Number(row.metrics?.impressions || 0),
     clicks: Number(row.metrics?.clicks || 0),
     spend: Number(row.metrics?.cost_micros || 0) / 1_000_000,
-    ctr: Number(row.metrics?.ctr || 0),
+    ctr: Number(row.metrics?.ctr || 0) * 100,
     conversions: Number(row.metrics?.conversions || 0),
+    conversionValue: Number(row.metrics?.conversions_value || 0),
+    cpa: Number(row.metrics?.conversions || 0) > 0 ? Number(row.metrics?.cost_micros || 0) / 1_000_000 / Number(row.metrics.conversions) : null,
+    roas: Number(row.metrics?.cost_micros || 0) > 0 ? Number(row.metrics?.conversions_value || 0) / (Number(row.metrics.cost_micros) / 1_000_000) : null,
     cpc: Number(row.metrics?.clicks || 0) > 0 ? Number(row.metrics?.cost_micros || 0) / Number(row.metrics?.clicks || 1) / 1_000_000 : 0,
   }));
 }

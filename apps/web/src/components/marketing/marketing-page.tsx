@@ -1,15 +1,25 @@
-"use client";
-
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
   SOLUTION_MODULE_DEFINITIONS,
   type MarketingSolutionSlug,
   type SolutionModuleDefinition,
 } from "@/lib/marketing/solution-modules";
-import { getDigitifySiteUrls } from "@/lib/digitify-unified-nav";
+import {
+  MARKETING_BUNDLES,
+  MARKETING_SUITE_PRICING,
+  type MarketingBundleSlug,
+  formatMarketingPrice,
+  getMarketingBundle,
+  getMarketingBundlesTotal,
+  getMarketingSuiteSavings,
+} from "@/lib/marketing/marketing-bundles";
+import { getMarketingModulePricing, getMarketingModulesTotal } from "@/lib/marketing/module-pricing";
 import { DigitifyMarketingFooter, DigitifyMarketingHeader } from "@/components/marketing/digitify-marketing-shell";
+import { MarketingContactPage } from "@/components/marketing/marketing-contact-page";
+import { MarketingHomeHeroTabs } from "@/components/marketing/marketing-home-hero-tabs";
+import { MarketingReveal } from "@/components/marketing/marketing-reveal";
 import {
   ArrowRight,
   BarChart3,
@@ -19,18 +29,15 @@ import {
   ChevronRight,
   FileText,
   Globe2,
-  Mail,
   MailCheck,
   Send,
   MapPin,
   MessageSquareText,
-  Phone,
   Quote,
   Search,
   ShieldCheck,
   Star,
   Users2,
-  Zap,
   Target,
   Layers3,
   TrendingUp,
@@ -39,76 +46,94 @@ import {
   Building2,
   Lightbulb,
   Heart,
-  ExternalLink,
-  Circle,
-  Tag,
   Filter,
   Palette,
   type LucideIcon,
 } from "lucide-react";
 
-type PageKey = "home" | "product" | "solutions" | "about" | "contact";
+const SHOW_LEGACY_MODULE_CARDS = false;
 
-/* ─── SCROLL REVEAL ─── */
-function useReveal() {
-  useEffect(() => {
-    const els = document.querySelectorAll(".reveal, .reveal-left, .reveal-right, .reveal-scale");
-    const io = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) return;
-          const el = entry.target as HTMLElement;
-          setTimeout(() => el.classList.add("in-view"), Number(el.dataset.delay ?? 0));
-          io.unobserve(el);
-        });
-      },
-      { threshold: 0.1 }
-    );
-    els.forEach((el) => io.observe(el));
-    return () => io.disconnect();
-  }, []);
-}
-
-/* ─── ANIMATED NUMBER ─── */
-function AnimatedNumber({ target, suffix = "" }: { target: number; suffix?: string }) {
-  const [val, setVal] = useState(0);
-  const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (!ref.current) return;
-    const io = new IntersectionObserver(([e]) => {
-      if (!e.isIntersecting) return;
-      io.disconnect();
-      let n = 0;
-      const step = () => {
-        n = Math.min(n + Math.ceil(target / 35), target);
-        setVal(n);
-        if (n < target) requestAnimationFrame(step);
-      };
-      requestAnimationFrame(step);
-    }, { threshold: 0.5 });
-    io.observe(ref.current);
-    return () => io.disconnect();
-  }, [target]);
-  return <span ref={ref}>{val}{suffix}</span>;
-}
+type PageKey = "home" | "product" | "solutions" | "pricing" | "about" | "contact";
 
 export type SolutionSlug = MarketingSolutionSlug;
+export type BundleSlug = MarketingBundleSlug;
 
 type SolutionModule = SolutionModuleDefinition & {
   icon: LucideIcon;
   mockup: ReactNode;
 };
 
+const MARKETING_BUNDLE_UI: Record<MarketingBundleSlug, { icon: LucideIcon; color: string }> = {
+  "lead-engine": { icon: Search, color: "#f9ae5a" },
+  "outreach-hub": { icon: MailCheck, color: "#06b6d4" },
+  "sales-workspace": { icon: FileText, color: "#e85d3a" },
+  "marketing-studio": { icon: Palette, color: "#10b981" },
+  "website-growth": { icon: Globe2, color: "#3b82f6" },
+  "customer-experience": { icon: Star, color: "#ec4899" },
+  "automation-insights": { icon: BarChart3, color: "#8b5cf6" },
+};
+
+function BundleCards({ compact = false, featured = false }: { compact?: boolean; featured?: boolean }) {
+  return (
+    <div className={`grid gap-5 ${compact ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-3"}`}>
+      {MARKETING_BUNDLES.map((bundle, index) => {
+        const { icon: Icon, color } = MARKETING_BUNDLE_UI[bundle.slug];
+        return (
+          <article key={bundle.slug} className={`reveal group relative flex h-full flex-col overflow-hidden rounded-[1.35rem] border border-[#e4e8e4] bg-[#fffdfa] shadow-[0_10px_28px_rgba(13,21,32,0.055)] transition-all duration-300 hover:-translate-y-1.5 hover:border-[#d4ddd5] hover:shadow-[0_20px_48px_rgba(13,21,32,0.12)] ${featured ? "min-h-[445px]" : ""}`} data-delay={String(index * 45)}>
+            <div className="absolute inset-x-0 top-0 h-24 opacity-70" style={{ background: `radial-gradient(circle at 18% 0%, ${color}2b, transparent 68%)` }} />
+            <div className="relative h-1.5 w-full" style={{ background: `linear-gradient(90deg, ${color}, #f9ae5a)` }} />
+            <div className={`relative flex h-full flex-col ${compact ? "p-4 sm:p-5" : "p-6 sm:p-7"}`}>
+              <div className="flex items-start justify-between gap-4">
+                <div className={`flex items-center justify-center rounded-2xl ring-white/60 ${compact ? "h-10 w-10 ring-6" : "h-12 w-12 ring-8"}`} style={{ backgroundColor: `${color}20` }}>
+                  <Icon className="h-5 w-5" style={{ color }} />
+                </div>
+                <div className="text-right">
+                  <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-[#8b98a4]">per maand</p>
+                  <p className="mt-0.5 text-xl font-extrabold tracking-tight text-[#0d1520]">{formatMarketingPrice(bundle.monthly)}<span className="ml-0.5 text-xs font-semibold text-[#7a8898]">/m</span></p>
+                </div>
+              </div>
+              <div className={`${compact ? "mt-4" : "mt-6"} flex items-center gap-2`}>
+                <span className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-extrabold" style={{ backgroundColor: `${color}18`, color }}>{String(index + 1).padStart(2, "0")}</span>
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color }}>{bundle.eyebrow}</p>
+              </div>
+              <h3 className={`${compact ? "mt-1 text-base" : "mt-2 text-xl"} font-extrabold tracking-tight text-[#0d1520]`}>{bundle.label}</h3>
+              <p className={`${compact ? "mt-1.5 text-xs leading-5" : "mt-2 text-sm leading-6"} flex-1 text-[#5a6878]`}>{bundle.description}</p>
+              <div className={`${compact ? "mt-3 rounded-xl p-3" : "mt-5 rounded-2xl p-4"} border border-[#edf1ee] bg-[#f8faf8]`}>
+                <p className={`${compact ? "mb-2" : "mb-3"} text-[10px] font-bold uppercase tracking-[0.14em] text-[#8b98a4]`}>Inbegrepen</p>
+                <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                  {bundle.included.map((item) => (
+                    <li key={item} className={`flex items-start gap-2 font-medium text-[#344052] ${compact ? "text-[10px] leading-4" : "text-xs leading-5"}`}>
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color }} />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className={`${compact ? "mt-3 pt-3" : "mt-5 pt-4"} flex items-center justify-between gap-3 border-t border-[#edf1ee]`}>
+                <p className={`${compact ? "text-[10px] leading-4" : "text-[11px] leading-5"} line-clamp-2 text-[#7a8898]`}>{bundle.audience}</p>
+                <Link href={`/oplossingen/${bundle.slug}`} className={`inline-flex shrink-0 items-center gap-1.5 rounded-full font-bold text-[#14100b] transition hover:brightness-95 ${compact ? "px-2.5 py-1.5 text-[10px]" : "px-3.5 py-2 text-xs"}`} style={{ backgroundColor: color }}>
+                  Ontdek <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                </Link>
+              </div>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ─── MAIN ─── */
 export function MarketingPage({ page }: { page: PageKey }) {
-  useReveal();
   return (
     <>
       <DigitifyMarketingHeader activePage={page} />
       <main className="digitify-page-content min-h-screen overflow-x-hidden bg-[#fff9f2] text-[#0d1520]">
+        <MarketingReveal />
         {page === "home" && <HomePage />}
         {page === "product" && <ProductPage />}
         {page === "solutions" && <SolutionsPage />}
+        {page === "pricing" && <PricingPage />}
         {page === "about" && <AboutPage />}
         {page === "contact" && <ContactPage />}
       </main>
@@ -162,14 +187,13 @@ function HomePage() {
 
             <div className="animate-fade-in delay-400 mt-8 flex flex-wrap gap-4">
               {[
-                "Lead Search",
-                "Outreach met AI",
-                "Rapporten",
-                "White-labelbaar",
-                "Offerte configurator",
-                "Booking agenda",
-                "Chatbot widget",
-                "Reviewsysteem",
+                "Lead Engine",
+                "Outreach Hub",
+                "Sales Workspace",
+                "Marketing Studio",
+                "Website Growth",
+                "Customer Experience",
+                "Automation & Insights",
               ].map((t) => (
                 <div key={t} className="flex items-center gap-1.5 text-xs font-medium text-[#5a6878]">
                   <CheckCircle2 className="h-3.5 w-3.5 text-[#12a66a]" />
@@ -189,14 +213,13 @@ function HomePage() {
         <div className="relative border-t border-[#e2e8e3]/60 bg-white/40 py-3.5 backdrop-blur-sm">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-center gap-5 px-5 sm:justify-between sm:px-8">
             {[
-              "Lead Search",
-              "Outreach met AI",
-              "Rapporten",
-              "White-labelbaar",
-              "Offerte configurator",
-              "Booking agenda",
-              "Chatbot widget",
-              "Reviewsysteem",
+              "Lead Engine",
+              "Outreach Hub",
+              "Sales Workspace",
+              "Marketing Studio",
+              "Website Growth",
+              "Customer Experience",
+              "Automation & Insights",
             ].map((t) => (
               <div key={t} className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#7a8898]">
                 <span className="h-1 w-4 rounded-full bg-[#f9ae5a]" />
@@ -212,15 +235,13 @@ function HomePage() {
         <div className="mx-auto max-w-7xl px-5 sm:px-8">
           <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
             {[
-              { n: 8,   s: "+", label: "Geïntegreerde modules" },
-              { n: 100, s: "%", label: "Belgisch product" },
-              { n: 6,   s: "+", label: "Groeiflows" },
-              { n: 0,   s: "",  label: "Losse tools nodig" },
-            ].map(({ n, s, label }) => (
+              { value: "7", label: "commerciële bundels" },
+              { value: "1", label: "werkplek voor je team" },
+              { value: "26", label: "technische mogelijkheden" },
+              { value: "€499/m", label: "voor de complete suite" },
+            ].map(({ value, label }) => (
               <div key={label} className="reveal text-center">
-                <div className="text-3xl font-extrabold text-[#0d1520]">
-                  <AnimatedNumber target={n} suffix={s} />
-                </div>
+                <div className="text-2xl font-extrabold text-[#0d1520]">{value}</div>
                 <div className="mt-1.5 text-sm text-[#6a7684]">{label}</div>
               </div>
             ))}
@@ -241,17 +262,22 @@ function HomePage() {
             </p>
           </div>
 
-          <div className="mt-12 grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-12">
+            <BundleCards compact />
+          </div>
+          {SHOW_LEGACY_MODULE_CARDS && <div className="hidden mt-12 grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
             {[
-              { icon: Search,        title: "Lead Search",          copy: "Vind snel lokale kansen met directe kwalificatie.", color: "#3b82f6" },
-              { icon: MailCheck,     title: "Outreach met AI",      copy: "Genereer en verstuur outreach in je eigen tone of voice.", color: "#f9ae5a" },
-              { icon: BarChart3,     title: "Rapporten",            copy: "Toon score, status en actiepunten in duidelijke rapporten.", color: "#8b5cf6" },
-              { icon: ShieldCheck,   title: "White-labelbaar",      copy: "Laat alles lopen in jouw branding, van app tot widgets.", color: "#10b981" },
-              { icon: FileText,      title: "Offerte configurator", copy: "Bouw live offertes met prijzen, opties en directe opvolging.", color: "#e85d3a" },
-              { icon: CalendarCheck, title: "Booking agenda",       copy: "Laat bezoekers meteen een vrij slot boeken zonder overlap.", color: "#f59e0b" },
-              { icon: Bot,           title: "Chatbot widget",       copy: "Kwalificeer gesprekken automatisch en stuur door naar pipeline.", color: "#06b6d4" },
-              { icon: Star,          title: "Reviewsysteem",        copy: "Zet feedback slim om naar publieke reviewgroei.", color: "#ec4899" },
-            ].map(({ icon: Icon, title, copy, color }, i) => (
+              { slug: "lead-search" as SolutionSlug, icon: Search,        title: "Lead Search",          copy: "Vind snel lokale kansen met directe kwalificatie.", color: "#3b82f6" },
+              { slug: "outreach-ai" as SolutionSlug, icon: MailCheck,     title: "Outreach met AI",      copy: "Genereer en verstuur outreach in je eigen tone of voice.", color: "#f9ae5a" },
+              { slug: "rapporten" as SolutionSlug, icon: BarChart3,       title: "Rapporten",            copy: "Toon score, status en actiepunten in duidelijke rapporten.", color: "#8b5cf6" },
+              { slug: "white-label" as SolutionSlug, icon: ShieldCheck,   title: "White-labelbaar",      copy: "Laat alles lopen in jouw branding, van app tot widgets.", color: "#10b981" },
+              { slug: "offerte-configurator" as SolutionSlug, icon: FileText, title: "Offerte configurator", copy: "Bouw live offertes met prijzen, opties en directe opvolging.", color: "#e85d3a" },
+              { slug: "booking-agenda" as SolutionSlug, icon: CalendarCheck, title: "Booking agenda",       copy: "Laat bezoekers meteen een vrij slot boeken zonder overlap.", color: "#f59e0b" },
+              { slug: "chatbot-widget" as SolutionSlug, icon: Bot,         title: "Chatbot widget",       copy: "Kwalificeer gesprekken automatisch en stuur door naar pipeline.", color: "#06b6d4" },
+              { slug: "reviewsysteem" as SolutionSlug, icon: Star,        title: "Reviewsysteem",        copy: "Zet feedback slim om naar publieke reviewgroei.", color: "#ec4899" },
+            ].map(({ slug, icon: Icon, title, copy, color }, i) => {
+              const pricing = getMarketingModulePricing(slug);
+              return (
               <article key={title} className="reveal group relative flex h-full flex-col overflow-hidden rounded-2xl border border-[#e2e8e3] bg-white p-5 shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:shadow-[0_16px_40px_rgba(13,21,32,0.1)]" data-delay={String(i * 50)}>
                 <div className="absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100" style={{ background: `radial-gradient(circle at top left, ${color}10, transparent 60%)` }} />
                 <div className="relative flex h-full flex-col">
@@ -260,10 +286,15 @@ function HomePage() {
                   </div>
                   <h3 className="mt-4 text-[15px] font-bold text-[#0d1520]">{title}</h3>
                   <p className="mt-1.5 flex-1 text-sm leading-6 text-[#5a6878]">{copy}</p>
+                  <div className="mt-4 flex items-center justify-between border-t border-[#edf1ee] pt-3">
+                    <span className="text-sm font-extrabold text-[#0d1520]">{formatMarketingPrice(pricing.monthly)}<span className="text-[10px] font-semibold text-[#7a8898]">/m</span></span>
+                    <Link href={`/oplossingen/${slug}`} className="inline-flex items-center gap-1 text-xs font-bold text-[#b66d1e]">Bekijk module <ArrowRight className="h-3.5 w-3.5" /></Link>
+                  </div>
                 </div>
               </article>
-            ))}
-          </div>
+              );
+            })}
+          </div>}
         </div>
       </section>
 
@@ -303,10 +334,10 @@ function HomePage() {
             </div>
             <div className="reveal-right grid grid-cols-2 gap-3.5">
               {[
-                { icon: TrendingUp,  label: "Pipeline waarde",  value: "€ 84.200", sub: "Voorbeeldcijfer",      color: "#f9ae5a" },
-                { icon: CheckCircle2,label: "Leads opgevolgd",  value: "147",       sub: "Actief in pipeline",   color: "#12a66a" },
-                { icon: Clock,       label: "Tijdsbesparing",   value: "~8u",       sub: "Per week vs losse tools",color: "#3b82f6" },
-                { icon: Award,       label: "Gem. lead score",  value: "76/100",    sub: "Commerciële fit",      color: "#8b5cf6" },
+                { icon: TrendingUp,  label: "Modules beschikbaar", value: "8",        sub: "Voor je commerciële flow", color: "#f9ae5a" },
+                { icon: CheckCircle2,label: "Eén werkplek",         value: "Lead Finder", sub: "Van prospectie tot review", color: "#12a66a" },
+                { icon: Clock,       label: "Bundels vanaf",         value: "€ 69/m",  sub: "Exclusief btw",           color: "#3b82f6" },
+                { icon: Award,       label: "Complete suite",        value: "€ 499/m", sub: "Zonder directe checkout",   color: "#8b5cf6" },
               ].map(({ icon: Icon, label, value, sub, color }) => (
                 <div key={label} className="group rounded-2xl border border-[#edd5bb] bg-white p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_32px_rgba(13,21,32,0.08)]">
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ backgroundColor: `${color}18` }}>
@@ -428,9 +459,9 @@ function ProductPage() {
               <Link href="/register" className="group inline-flex h-11 items-center rounded-xl bg-[#f9ae5a] px-7 text-sm font-bold text-[#14100b] shadow-[0_6px_24px_rgba(249,174,90,0.5)] transition-all hover:-translate-y-0.5 hover:bg-[#eca04e]">
                 Gratis aanmelden <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
               </Link>
-              <a href={`${getDigitifySiteUrls().wordpress}/contact/`} className="inline-flex h-11 items-center rounded-xl border border-[#cfd8d2] bg-white px-7 text-sm font-semibold text-[#172131] shadow-sm transition hover:border-[#f9ae5a]/40">
+              <Link href="/contact" className="inline-flex h-11 items-center rounded-xl border border-[#cfd8d2] bg-white px-7 text-sm font-semibold text-[#172131] shadow-sm transition hover:border-[#f9ae5a]/40">
                 Plan een demo
-              </a>
+              </Link>
             </div>
           </div>
 
@@ -443,7 +474,7 @@ function ProductPage() {
                 <span className="h-3 w-3 rounded-full bg-[#febc2e]" />
                 <span className="h-3 w-3 rounded-full bg-[#28c840]" />
                 <div className="ml-4 flex-1 rounded-md bg-white/[0.06] px-3 py-1 text-xs text-[#b8c3cf]">
-                  leads.digitify.be/app/leads
+                  app.leadfinder.local/leads
                 </div>
               </div>
               <div className="flex h-[340px]">
@@ -546,13 +577,18 @@ function ProductPage() {
       <section className="bg-[#f7f8f6] py-24">
         <div className="mx-auto max-w-7xl px-5 sm:px-8">
           <div className="reveal mx-auto max-w-xl text-center">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">Modules</p>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">Commerciële bundels</p>
             <h2 className="mt-3 text-3xl font-extrabold text-[#0d1520] sm:text-4xl">
-              Acht krachtige modules, <span className="gradient-text">één coherente flow.</span>
+              Zeven bundels, <span className="gradient-text">één coherente flow.</span>
             </h2>
           </div>
-          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {modules.map(({ slug, icon: Icon, title, color, summary, features }, i) => (
+          <div className="mt-12">
+            <BundleCards compact />
+          </div>
+          {SHOW_LEGACY_MODULE_CARDS && <div className="hidden mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {modules.map(({ slug, icon: Icon, title, color, summary, features }, i) => {
+              const pricing = getMarketingModulePricing(slug);
+              return (
               <article key={title} className="reveal group flex h-full flex-col overflow-hidden rounded-2xl border border-[#e2e8e3] bg-white shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:shadow-[0_16px_40px_rgba(13,21,32,0.1)]" data-delay={String(i * 45)}>
                 <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${color}, #f9ae5a)` }} />
                 <div className="p-5">
@@ -569,14 +605,19 @@ function ProductPage() {
                     </li>
                   ))}
                 </ul>
+                <div className="mt-5 border-t border-[#edf1ee] pt-4">
+                  <p className="text-lg font-extrabold text-[#0d1520]">{formatMarketingPrice(pricing.monthly)}<span className="text-xs font-semibold text-[#7a8898]">/maand</span></p>
+                  <p className="mt-1 text-[11px] text-[#7a8898]">Excl. btw · zonder checkout</p>
+                </div>
                 <Link href={`/oplossingen/${slug}`} className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-[#b66d1e] transition hover:text-[#8d5110]">
                   Lees meer
                   <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
                 </Link>
                 </div>
               </article>
-            ))}
-          </div>
+              );
+            })}
+          </div>}
         </div>
       </section>
 
@@ -677,7 +718,82 @@ function ProductPage() {
    SOLUTIONS
 ══════════════════════════════════════════════ */
 function SolutionsPage() {
-  const [activePreviewTab, setActivePreviewTab] = useState<SolutionSlug>("lead-search");
+  const audiences = [
+    { icon: Building2, title: "Agencies", copy: "Werk met meerdere klanten, campagnes en branded rapportages vanuit één commerciële omgeving." },
+    { icon: Users2, title: "Salesteams", copy: "Geef elke verkoper zicht op prioriteiten, opvolging, pipeline en de volgende actie." },
+    { icon: Globe2, title: "Lokale dienstverleners", copy: "Verbind website, aanvragen, afspraken, offertes en reviews met minder administratie." },
+  ];
+
+  return (
+    <>
+      <section className="relative overflow-hidden border-b border-[#e2e8e3]">
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[#fffdf9] via-[#faf7f2] to-[#f0ede7]" />
+        <div className="relative mx-auto max-w-7xl px-5 py-20 text-center sm:px-8">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-[#b66d1e]">Lead Finder bundels</p>
+          <h1 className="mx-auto mt-4 max-w-3xl text-[2.6rem] font-extrabold leading-tight text-[#0d1520] sm:text-5xl">
+            Kies een werkbare start, <span className="gradient-text">groei naar één suite.</span>
+          </h1>
+          <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-[#4d5b6b]">
+            De app bevat veel technische mogelijkheden, maar commercieel blijft het overzichtelijk: zeven bundels die samen de volledige flow van lead tot klant ondersteunen.
+          </p>
+          <div className="mt-8 flex flex-wrap justify-center gap-3">
+            <Link href="/prijzen" className="inline-flex h-11 items-center rounded-xl bg-[#f9ae5a] px-7 text-sm font-bold text-[#14100b] shadow-[0_6px_24px_rgba(249,174,90,0.45)] transition hover:bg-[#eca04e]">Bekijk prijzen <ArrowRight className="ml-2 h-4 w-4" /></Link>
+            <Link href="/register" className="inline-flex h-11 items-center rounded-xl border border-[#cfd8d2] bg-white px-7 text-sm font-semibold text-[#172131] transition hover:border-[#f9ae5a]/50">Start met Lead Finder</Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-[#f7f8f6] py-20">
+        <div className="mx-auto max-w-7xl px-5 sm:px-8">
+          <div className="reveal mx-auto max-w-2xl text-center">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">7 commerciële groepen</p>
+            <h2 className="mt-3 text-3xl font-extrabold text-[#0d1520] sm:text-4xl">Alle mogelijkheden, helder gegroepeerd.</h2>
+          </div>
+          <div className="mt-10"><BundleCards featured /></div>
+        </div>
+      </section>
+
+      <section className="bg-white py-20">
+        <div className="mx-auto max-w-7xl px-5 sm:px-8">
+          <div className="reveal mx-auto max-w-2xl text-center">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">Van lead tot klant</p>
+            <h2 className="mt-3 text-3xl font-extrabold text-[#0d1520] sm:text-4xl">Eén flow, met ruimte voor je eigen werkwijze.</h2>
+          </div>
+          <div className="mt-10 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            {[
+              ["1", "Lead vinden", "Lead Engine brengt zoekopdrachten, profielen en scores samen."],
+              ["2", "Contact leggen", "Outreach Hub helpt je communicatie voorbereiden, goedkeuren en opvolgen."],
+              ["3", "Verkopen", "Sales Workspace verbindt CRM, offertes, planning en uitvoering."],
+              ["4", "Zichtbaarheid", "Marketing Studio en Website Growth ondersteunen content, ads, SEO en inbound."],
+              ["5", "Ervaring", "Customer Experience maakt boeken, chatten en reviews eenvoudig."],
+              ["6", "Verbeteren", "Automation & Insights maakt patronen, rapporten en terugkerend werk zichtbaar."],
+            ].map(([step, title, copy]) => (
+              <article key={step} className="reveal rounded-2xl border border-[#e2e8e3] bg-[#f9fbfa] p-5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f9ae5a] text-sm font-extrabold text-[#14100b]">{step}</span>
+                <h3 className="mt-4 text-base font-extrabold text-[#0d1520]">{title}</h3>
+                <p className="mt-2 text-sm leading-6 text-[#5a6878]">{copy}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-[#fffbf5] py-20">
+        <div className="mx-auto max-w-7xl px-5 sm:px-8">
+          <div className="reveal mx-auto max-w-2xl text-center"><p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">Voor wie</p><h2 className="mt-3 text-3xl font-extrabold text-[#0d1520] sm:text-4xl">Gebouwd rond echte commerciële werkritmes.</h2></div>
+          <div className="mt-10 grid gap-4 md:grid-cols-3">
+            {audiences.map(({ icon: Icon, title, copy }) => <article key={title} className="reveal rounded-2xl border border-[#e2e8e3] bg-white p-6 shadow-sm"><Icon className="h-6 w-6 text-[#f9ae5a]" /><h3 className="mt-4 text-lg font-extrabold text-[#0d1520]">{title}</h3><p className="mt-2 text-sm leading-6 text-[#5a6878]">{copy}</p></article>)}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-[#0d1520] py-16 text-center text-white"><div className="mx-auto max-w-2xl px-5"><h2 className="text-3xl font-extrabold">Start met de bundel die vandaag past.</h2><p className="mt-3 text-sm leading-6 text-[#b8c3cf]">Je kunt later uitbreiden naar de Complete Lead Finder Suite zonder je technische routes of data te verliezen.</p><div className="mt-7 flex flex-wrap justify-center gap-3"><Link href="/register" className="inline-flex h-11 items-center rounded-xl bg-[#f9ae5a] px-7 text-sm font-bold text-[#14100b]">Aanmelden <ArrowRight className="ml-2 h-4 w-4" /></Link><Link href="/contact" className="inline-flex h-11 items-center rounded-xl border border-white/20 px-7 text-sm font-semibold text-white">Vraag een demo</Link></div></div></section>
+    </>
+  );
+}
+
+function LegacySolutionsPreviewPage() {
+  const activePreviewTab: SolutionSlug = "lead-search";
   const solutions = [
     { icon: Building2, title: "Voor digitale agencies",     color: "#f9ae5a", tagline: "Beheer prospectie en klantopvolging als een machine.",             intro: "Als agency balanceer je meerdere klanten, prospectiedoelen en rapportage tegelijk. Lead Finder geeft je één hub — per klantmandaat apart.", usecases: [{ t: "White-label ervaring", c: "Klanten zien jouw naam en kleuren." }, { t: "Klant-specifieke rapporten", c: "PDF-rapporten per klant met één klik." }, { t: "Campagnegoedkeuring", c: "E-mails gaan pas uit na goedkeuring." }, { t: "Multi-pipeline", c: "Alle prospects op één scherm." }], results: ["Minder manueel werk per klant", "Professionelere presentatie", "Snellere time-to-first-outreach"] },
     { icon: Users2,    title: "Voor sales teams",           color: "#8b5cf6", tagline: "Minder administratie, meer focus op kansen die converteren.",       intro: "Salesteams verliezen tijd aan handmatige opvolging en losse mails. Lead Finder geeft elk teamlid een duidelijk beeld van hun pipeline.", usecases: [{ t: "Lead scoring & prioriteit", c: "Focus op leads met de hoogste fit." }, { t: "Gedeelde pipeline", c: "Teamleden zien elkaars leads en activiteiten." }, { t: "E-mail opvolging", c: "Templates verkorten de follow-up cyclus." }, { t: "Quota rapportage", c: "Track voortgang per teamlid of periode." }], results: ["Minder gemiste opvolgkansen", "Kortere salescyclus", "Meer omzet per teamlid"] },
@@ -738,7 +854,6 @@ function SolutionsPage() {
                       <button
                         key={tab.slug}
                         type="button"
-                        onClick={() => setActivePreviewTab(tab.slug)}
                         className={`inline-flex h-10 items-center justify-center gap-2 rounded-lg px-3 text-xs font-bold transition-colors ${
                           isActive
                             ? "bg-[#f9ae5a] text-[#14100b]"
@@ -876,16 +991,131 @@ function SolutionsPage() {
   );
 }
 
-export function SolutionDetailMarketingPage({ slug }: { slug: SolutionSlug }) {
-  useReveal();
-  const module = getSolutionModuleBySlug(slug) ?? SOLUTION_MODULES[0];
-  const ModuleIcon = module.icon;
-  const wpContact = `${getDigitifySiteUrls().wordpress}/contact/`;
+function PricingPage() {
+  const bundleTotal = getMarketingBundlesTotal();
+  const savings = getMarketingSuiteSavings();
+  return (
+    <>
+      <section className="relative overflow-hidden border-b border-[#e2e8e3]"><div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[#fffdf9] via-[#faf7f2] to-[#f0ede7]" /><div className="relative mx-auto max-w-4xl px-5 py-20 text-center sm:px-8"><p className="text-[11px] font-bold uppercase tracking-widest text-[#b66d1e]">Transparante platformprijzen</p><h1 className="mt-4 text-[2.6rem] font-extrabold leading-tight text-[#0d1520] sm:text-5xl">7 bundels, <span className="gradient-text">één duidelijke keuze.</span></h1><p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-[#4d5b6b]">Kies de commerciële groep die je nodig hebt of verbind alles met de Complete Lead Finder Suite. Alle prijzen zijn per maand, exclusief btw.</p><div className="mt-8 flex flex-wrap justify-center gap-3"><Link href="/register" className="inline-flex h-11 items-center rounded-xl bg-[#f9ae5a] px-7 text-sm font-bold text-[#14100b]">Aanmelden <ArrowRight className="ml-2 h-4 w-4" /></Link><Link href="/contact" className="inline-flex h-11 items-center rounded-xl border border-[#cfd8d2] bg-white px-7 text-sm font-semibold text-[#172131]">Vraag een demo</Link></div></div></section>
+      <section className="bg-[#f7f8f6] py-20"><div className="mx-auto max-w-7xl px-5 sm:px-8"><BundleCards /></div></section>
+      <section className="bg-white py-20"><div className="mx-auto max-w-5xl px-5 sm:px-8"><div className="overflow-hidden rounded-3xl bg-[#0d1520] p-6 text-white shadow-[0_20px_60px_rgba(13,21,32,0.18)] sm:p-10"><div className="grid gap-8 lg:grid-cols-[1fr_auto] lg:items-center"><div><p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">Alles verbonden</p><h2 className="mt-3 text-3xl font-extrabold">{MARKETING_SUITE_PRICING.label}</h2><p className="mt-3 max-w-xl text-sm leading-7 text-[#b8c3cf]">Alle 7 bundels en de volledige Lead Finder-werkplek: van lead vinden en opvolgen tot sales, marketing, klantinteractie en inzichten.</p><p className="mt-5 text-sm text-[#b8c3cf]">Losse bundels: <span className="font-bold text-white">{formatMarketingPrice(bundleTotal)}/maand</span> · Besparing: <span className="font-bold text-[#f9ae5a]">{formatMarketingPrice(savings)}/maand</span></p></div><div className="lg:text-right"><p className="text-4xl font-extrabold text-[#f9ae5a]">{formatMarketingPrice(MARKETING_SUITE_PRICING.monthly)}<span className="text-sm font-semibold text-[#b8c3cf]">/maand</span></p><p className="mt-1 text-xs text-[#b8c3cf]">Exclusief btw · geen directe checkout</p><Link href="/contact" className="mt-5 inline-flex h-11 items-center rounded-xl bg-[#f9ae5a] px-6 text-sm font-bold text-[#14100b]">Bespreek jouw setup <ArrowRight className="ml-2 h-4 w-4" /></Link></div></div></div><p className="mt-6 text-center text-xs leading-6 text-[#7a8898]">Advertentiebudgetten en kosten van externe providers zoals Google, Meta of Stripe zijn niet inbegrepen. Er is geen directe checkout.</p></div></section>
+    </>
+  );
+}
+
+function LegacyPricingPage() {
+  const moduleTotal = getMarketingModulesTotal();
+  const savings = moduleTotal - MARKETING_SUITE_PRICING.monthly;
+
+  return (
+    <>
+      <section className="relative overflow-hidden border-b border-[#e2e8e3]">
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[#fffdf9] via-[#faf7f2] to-[#f0ede7]" />
+        <div className="pointer-events-none absolute -right-20 -top-20 h-[500px] w-[500px] rounded-full bg-[#f9ae5a]/10 blur-[100px]" />
+        <div className="relative mx-auto max-w-4xl px-5 py-20 text-center sm:px-8">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-[#b66d1e]">Transparante platformprijzen</p>
+          <h1 className="mt-4 text-[2.6rem] font-extrabold leading-tight text-[#0d1520] sm:text-5xl">
+            Kies de modules die jouw <span className="gradient-text">groei vooruithelpen.</span>
+          </h1>
+          <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-[#4d5b6b]">
+            Start met één module of combineer de volledige Lead Finder Suite. Je krijgt dezelfde centrale werkplek voor prospectie, opvolging en conversie.
+          </p>
+          <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <Link href="/register" className="inline-flex h-11 items-center rounded-xl bg-[#f9ae5a] px-7 text-sm font-bold text-[#14100b] shadow-[0_6px_24px_rgba(249,174,90,0.45)] transition hover:bg-[#eca04e]">
+              Aanmelden <ArrowRight className="ml-2 h-4 w-4" />
+            </Link>
+            <Link href="/contact" className="inline-flex h-11 items-center rounded-xl border border-[#cfd8d2] bg-white px-7 text-sm font-semibold text-[#172131] transition hover:border-[#f9ae5a]/50">
+              Vraag een demo
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-[#f7f8f6] py-20">
+        <div className="mx-auto max-w-7xl px-5 sm:px-8">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {SOLUTION_MODULES.map((module, index) => {
+              const pricing = getMarketingModulePricing(module.slug);
+              const Icon = module.icon;
+              return (
+                <article key={module.slug} className="reveal flex h-full flex-col rounded-2xl border border-[#e2e8e3] bg-white p-5 shadow-sm" data-delay={String(index * 45)}>
+                  <div className={`inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${module.chipClass}`}>
+                    <Icon className="h-3.5 w-3.5" />
+                    {module.label}
+                  </div>
+                  <h2 className="mt-5 text-lg font-extrabold text-[#0d1520]">{pricing.shortLabel}</h2>
+                  <p className="mt-2 min-h-[72px] text-sm leading-6 text-[#5a6878]">{module.description}</p>
+                  <div className="mt-5 border-t border-[#edf1ee] pt-4">
+                    <p className="text-2xl font-extrabold text-[#0d1520]">{formatMarketingPrice(pricing.monthly)}<span className="text-xs font-semibold text-[#7a8898]">/maand</span></p>
+                    <p className="mt-1 text-[11px] text-[#7a8898]">Exclusief btw</p>
+                  </div>
+                  <ul className="mt-4 space-y-2 text-xs text-[#344052]">
+                    {pricing.included.map((item) => <li key={item} className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#12a66a]" />{item}</li>)}
+                  </ul>
+                  <div className="mt-auto flex flex-wrap gap-3 pt-6">
+                    <Link href={`/oplossingen/${module.slug}`} className="text-xs font-bold text-[#b66d1e]">Bekijk module</Link>
+                    <Link href="/register" className="text-xs font-bold text-[#0d1520]">Aanmelden <ArrowRight className="ml-1 inline h-3.5 w-3.5" /></Link>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white py-20">
+        <div className="mx-auto max-w-5xl px-5 sm:px-8">
+          <div className="overflow-hidden rounded-3xl bg-[#0d1520] p-6 text-white shadow-[0_20px_60px_rgba(13,21,32,0.18)] sm:p-10">
+            <div className="grid gap-8 lg:grid-cols-[1fr_auto] lg:items-center">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">Voor teams die alles willen verbinden</p>
+                <h2 className="mt-3 text-3xl font-extrabold">{MARKETING_SUITE_PRICING.label}</h2>
+                <p className="mt-3 max-w-xl text-sm leading-7 text-[#b8c3cf]">Alle acht modules in één commerciële werkplek: van eerste lead tot opvolging, offerte, afspraak en review.</p>
+                <p className="mt-5 text-sm text-[#b8c3cf]">Losse modules: <span className="font-bold text-white">{formatMarketingPrice(moduleTotal)}/maand</span> · Besparing: <span className="font-bold text-[#f9ae5a]">{formatMarketingPrice(savings)}/maand</span></p>
+              </div>
+              <div className="lg:text-right">
+                <p className="text-4xl font-extrabold text-[#f9ae5a]">{formatMarketingPrice(MARKETING_SUITE_PRICING.monthly)}<span className="text-sm font-semibold text-[#b8c3cf]">/maand</span></p>
+                <p className="mt-1 text-xs text-[#b8c3cf]">Exclusief btw · geen directe checkout</p>
+                <Link href="/contact" className="mt-5 inline-flex h-11 items-center rounded-xl bg-[#f9ae5a] px-6 text-sm font-bold text-[#14100b] transition hover:bg-[#eca04e]">Bespreek jouw setup <ArrowRight className="ml-2 h-4 w-4" /></Link>
+              </div>
+            </div>
+          </div>
+          <p className="mt-6 text-center text-xs leading-6 text-[#7a8898]">Dit zijn transparante platformprijzen voor de huidige Lead Finder-opzet. We bevestigen de definitieve configuratie en eventuele integratiekosten tijdens een demo.</p>
+        </div>
+      </section>
+    </>
+  );
+}
+
+export function BundleDetailMarketingPage({ slug }: { slug: BundleSlug }) {
+  const bundle = getMarketingBundle(slug) ?? MARKETING_BUNDLES[0];
+  const { icon: BundleIcon, color } = MARKETING_BUNDLE_UI[bundle.slug];
 
   return (
     <>
       <DigitifyMarketingHeader activePage="solutions" />
       <main className="digitify-page-content min-h-screen overflow-x-hidden bg-[#fff9f2] text-[#0d1520]">
+        <MarketingReveal />
+        <section className="relative overflow-hidden border-b border-[#e2e8e3]"><div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[#fffdf9] via-[#faf7f2] to-[#f0ede7]" /><div className="relative mx-auto max-w-7xl px-5 py-16 sm:px-8"><div className="reveal max-w-3xl"><p className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-widest" style={{ borderColor: `${color}55`, backgroundColor: `${color}12`, color }}><BundleIcon className="h-3.5 w-3.5" /> Bundel detail</p><h1 className="mt-4 text-4xl font-extrabold leading-tight sm:text-5xl">{bundle.label}</h1><p className="mt-4 text-base leading-7 text-[#4d5b6b]">{bundle.detailIntro}</p><div className="mt-6 flex flex-wrap gap-3"><Link href="/register" className="inline-flex h-10 items-center rounded-xl bg-[#f9ae5a] px-5 text-sm font-bold text-[#14100b]">Aanmelden <ArrowRight className="ml-2 h-4 w-4" /></Link><Link href="/contact" className="inline-flex h-10 items-center rounded-xl border border-[#d5ddd7] bg-white px-5 text-sm font-semibold text-[#344052]">Vraag een demo</Link><Link href="/prijzen" className="inline-flex h-10 items-center rounded-xl border border-[#d5ddd7] bg-white px-5 text-sm font-semibold text-[#344052]">Alle prijzen</Link></div><div className="mt-6 inline-flex items-baseline gap-2 rounded-2xl border border-[#f9ae5a]/30 bg-white px-4 py-3 shadow-sm"><span className="text-2xl font-extrabold">{formatMarketingPrice(bundle.monthly)}</span><span className="text-sm font-semibold text-[#6a7684]">/maand excl. btw</span></div></div></div></section>
+        <section className="bg-[#f7f8f6] py-16"><div className="mx-auto max-w-7xl px-5 sm:px-8"><div className="grid gap-7 lg:grid-cols-[1fr_1.2fr]"><article className="reveal rounded-2xl border border-[#e2e8e3] bg-white p-6 shadow-sm"><p className="text-[11px] font-bold uppercase tracking-widest" style={{ color }}>In deze bundel</p><h2 className="mt-2 text-2xl font-extrabold">{bundle.shortLabel}</h2><ul className="mt-5 space-y-3">{bundle.included.map((item) => <li key={item} className="flex items-start gap-2.5 text-sm text-[#344052]"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#12a66a]" />{item}</li>)}</ul><p className="mt-6 border-t border-[#edf1ee] pt-5 text-sm leading-6 text-[#5a6878]">{bundle.audience}</p></article><article className="reveal rounded-2xl border border-[#e2e8e3] bg-white p-6 shadow-sm"><p className="text-[11px] font-bold uppercase tracking-widest text-[#b66d1e]">Zo werkt het</p><div className="mt-4 space-y-3">{bundle.detailSteps.map((step, index) => <div key={step} className="flex items-start gap-3 rounded-xl border border-[#edf1ee] bg-[#f9fbfa] p-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#f9ae5a] text-xs font-extrabold text-[#14100b]">{index + 1}</span><p className="text-sm leading-6 text-[#344052]">{step}</p></div>)}</div></article></div></div></section>
+        <section className="bg-white py-16"><div className="mx-auto max-w-7xl px-5 sm:px-8"><div className="grid gap-4 md:grid-cols-3">{bundle.detailImpact.map((impact) => <div key={impact} className="reveal rounded-2xl border border-[#e2e8e3] bg-[#f9fbfa] p-5"><CheckCircle2 className="h-5 w-5 text-[#12a66a]" /><p className="mt-3 text-sm font-semibold leading-6 text-[#344052]">{impact}</p></div>)}</div><div className="mt-10 rounded-2xl border border-[#e7ddd2] bg-[#fffbf5] p-6"><p className="text-[11px] font-bold uppercase tracking-widest text-[#b66d1e]">Technische mogelijkheden in deze bundel</p><div className="mt-4 flex flex-wrap gap-2">{bundle.routes.map((route) => <span key={route} className="rounded-lg border border-[#eadfce] bg-white px-3 py-2 text-xs font-semibold text-[#5a6878]">{route}</span>)}</div></div></div></section>
+        <section className="bg-[#0d1520] py-16 text-center text-white"><div className="mx-auto max-w-2xl px-5"><h2 className="text-2xl font-extrabold">Klaar om {bundle.label} te bekijken?</h2><p className="mt-3 text-sm text-[#b8c3cf]">Start met een demo of kies direct je gewenste bundel.</p><Link href="/contact" className="mt-7 inline-flex h-11 items-center rounded-xl bg-[#f9ae5a] px-7 text-sm font-bold text-[#14100b]">Plan een demo <ArrowRight className="ml-2 h-4 w-4" /></Link></div></section>
+      </main>
+      <DigitifyMarketingFooter />
+    </>
+  );
+}
+
+export function SolutionDetailMarketingPage({ slug }: { slug: SolutionSlug }) {
+  const module = getSolutionModuleBySlug(slug) ?? SOLUTION_MODULES[0];
+  const ModuleIcon = module.icon;
+  const pricing = getMarketingModulePricing(module.slug);
+
+  return (
+    <>
+      <DigitifyMarketingHeader activePage="solutions" />
+      <main className="digitify-page-content min-h-screen overflow-x-hidden bg-[#fff9f2] text-[#0d1520]">
+        <MarketingReveal />
 
       <section className="relative overflow-hidden border-b border-[#e2e8e3]">
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[#fffdf9] via-[#faf7f2] to-[#f0ede7]" />
@@ -905,6 +1135,10 @@ export function SolutionDetailMarketingPage({ slug }: { slug: SolutionSlug }) {
               <Link href="/oplossingen" className="inline-flex h-10 items-center rounded-xl border border-[#d5ddd7] bg-white px-5 text-sm font-semibold text-[#344052] transition hover:border-[#f9ae5a]/40 hover:text-[#b66d1e]">
                 Terug naar oplossingen
               </Link>
+            </div>
+            <div className="mt-6 inline-flex items-baseline gap-2 rounded-2xl border border-[#f9ae5a]/30 bg-white px-4 py-3 shadow-sm">
+              <span className="text-2xl font-extrabold text-[#0d1520]">{formatMarketingPrice(pricing.monthly)}</span>
+              <span className="text-sm font-semibold text-[#6a7684]">/maand excl. btw</span>
             </div>
           </div>
         </div>
@@ -928,6 +1162,17 @@ export function SolutionDetailMarketingPage({ slug }: { slug: SolutionSlug }) {
                   </li>
                 ))}
               </ul>
+              <div className="mt-5 border-t border-[#edf1ee] pt-4">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-[#b66d1e]">Inbegrepen</p>
+                <ul className="mt-2 space-y-1.5 text-xs text-[#5a6878]">
+                  {pricing.included.map((item) => (
+                    <li key={item} className="flex items-start gap-2">
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#12a66a]" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
             <div className="rounded-2xl border border-[#e2e8e3] bg-white p-4 shadow-sm sm:p-5">
               {module.mockup}
@@ -962,10 +1207,10 @@ export function SolutionDetailMarketingPage({ slug }: { slug: SolutionSlug }) {
                   </li>
                 ))}
               </ul>
-              <a href={wpContact} className="mt-6 inline-flex items-center gap-1 text-sm font-bold text-[#f9ae5a] transition hover:text-[#ffd19a]">
+              <Link href="/contact" className="mt-6 inline-flex items-center gap-1 text-sm font-bold text-[#f9ae5a] transition hover:text-[#ffd19a]">
                 Plan een demo voor deze flow
                 <ArrowRight className="h-4 w-4" />
-              </a>
+              </Link>
             </article>
           </div>
         </div>
@@ -1424,7 +1669,7 @@ function AboutPage() {
             <div>
               <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#f9ae5a]/30 bg-[#f9ae5a]/10 px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-widest text-[#b66d1e]">
                 <Image src="/favicon.ico" alt="" width={14} height={14} className="rounded-sm" />
-                Gemaakt door Digitify · België
+                Lead Finder · België
               </div>
               <h1 className="text-[2.6rem] font-extrabold leading-tight text-[#0d1520] sm:text-5xl">
                 Gebouwd door een team dat groei <span className="gradient-text">praktisch maakt.</span>
@@ -1433,15 +1678,15 @@ function AboutPage() {
                 Digitify bouwt digitale systemen voor ondernemers die meetbare groei willen. Lead Finder is ons antwoord op één concrete vraag: "Hoe haal je meer uit je leads, zonder meer tools?"
               </p>
               <Link href="/register" className="group mt-8 inline-flex h-11 items-center rounded-xl bg-[#f9ae5a] px-7 text-sm font-bold text-[#14100b] shadow-[0_6px_24px_rgba(249,174,90,0.5)] transition-all hover:bg-[#eca04e]">
-                Neem contact op <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
+                Ontdek de app <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
               </Link>
             </div>
             <div className="space-y-3.5">
               {[
                 { icon: Award,      t: "Belgisch team",     c: "Opgericht vanuit België, met lokale marktkennis.", color: "#f9ae5a" },
                 { icon: Lightbulb,  t: "Praktisch eerst",   c: "Elke feature begint met een vraag van een echte klant.", color: "#f9ae5a" },
-                { icon: TrendingUp, t: "Meetbaar resultaat",c: "We bouwen voor teams die groei willen aantonen, niet alleen nastreven.", color: "#f9ae5a" },
-              ].map(({ icon: Icon, t, c, color }, i) => (
+                { icon: TrendingUp, t: "Meetbaar resultaat",c: "We bouwen voor teams die groei willen aantonen, niet alleen nastreven." },
+              ].map(({ icon: Icon, t, c }, i) => (
                 <div key={t} className="reveal flex gap-4 rounded-2xl border border-[#e2e8e3] bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md" data-delay={String(i * 70)}>
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#f9ae5a]/12">
                     <Icon className="h-5 w-5 text-[#f9ae5a]" />
@@ -1466,12 +1711,12 @@ function AboutPage() {
                 Waarom we Lead Finder <span className="gradient-text">gebouwd hebben.</span>
               </h2>
               <div className="mt-7 space-y-5 text-sm leading-7 text-[#4d5b6b]">
-                <p>Digitify werkt dagelijks met bedrijven die online willen groeien. We bouwden websites, automatiseerden funnels en hielpen teams met digitale strategie. Maar we zagen steeds dezelfde bottleneck: leads vinden was makkelijk, maar opvolgen was chaos.</p>
-                <p>Lead Finder is ontstaan uit die frustratie. Één tool die het volledige commerciële pad dekt — van eerste contact tot klant — zonder dat je 5 abonnementen nodig hebt.</p>
-                <p>Vandaag is Lead Finder een volledig uitgewerkt platform dat agencies, salesteams en lokale dienstverleners helpt om professioneler en sneller te groeien.</p>
+                <p>Lead Finder is gebouwd voor teams die prospectie, opvolging en conversie vanuit één duidelijke werkplek willen organiseren.</p>
+                <p>De app brengt het commerciële pad samen: van lead search en kwalificatie tot outreach, offerte, booking en review-opvolging.</p>
+                <p>Agencies, salesteams en lokale dienstverleners kunnen starten met één module en later uitbreiden wanneer hun flow groeit.</p>
               </div>
-              <Link href="https://www.digitify.be" target="_blank" rel="noopener noreferrer" className="group mt-7 inline-flex items-center gap-2 text-sm font-bold text-[#f9ae5a] transition hover:text-[#eca04e]">
-                Bezoek www.digitify.be <ExternalLink className="h-3.5 w-3.5" />
+              <Link href="/product" className="group mt-7 inline-flex items-center gap-2 text-sm font-bold text-[#f9ae5a] transition hover:text-[#eca04e]">
+                Bekijk hoe Lead Finder werkt <ArrowRight className="h-3.5 w-3.5" />
               </Link>
             </div>
             <div className="reveal-right space-y-3.5">
@@ -1501,17 +1746,14 @@ function AboutPage() {
         <div className="relative mx-auto max-w-7xl px-5 sm:px-8">
           <div className="grid gap-10 lg:grid-cols-[1.4fr_1fr] lg:items-center">
             <div className="reveal-left">
-              <p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">Digitify ecosystem</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-[#f9ae5a]">Het platform</p>
               <h2 className="mt-3 text-3xl font-extrabold leading-tight">
-                Lead Finder is deel van <span className="gradient-text">iets groters.</span>
+                Eén werkplek voor <span className="gradient-text">commerciële groei.</span>
               </h2>
-              <p className="mt-4 text-sm leading-7 text-[#b8c3cf]">Naast Lead Finder bouwt Digitify websites, funnels, e-commerce, automatiseringen en digitale strategie.</p>
-              <Link href="https://www.digitify.be" target="_blank" rel="noopener noreferrer" className="group mt-7 inline-flex h-10 items-center gap-2 rounded-xl border border-white/20 px-5 text-sm font-bold text-white transition hover:bg-white/10">
-                Bezoek digitify.be <ExternalLink className="h-3.5 w-3.5" />
-              </Link>
+              <p className="mt-4 text-sm leading-7 text-[#b8c3cf]">Verbind prospectie, communicatie, verkoop, rapportage, marketing en automatisering zonder tussen losse tools te springen.</p>
             </div>
             <div className="reveal-right grid grid-cols-2 gap-3">
-              {[["Websites","Op maat"],["Funnels","Conversiegericht"],["Automatisering","Tijdbesparend"],["Lead Finder","Dit platform"]].map(([l, s]) => (
+              {[["Prospectie","Vind en kwalificeer"],["Communicatie","Outreach en inbox"],["Conversie","Offertes en bookings"],["Inzicht","Rapporten en reviews"]].map(([l, s]) => (
                 <div key={l} className="rounded-xl border border-white/8 bg-white/[0.05] p-5 transition hover:bg-white/[0.08]">
                   <div className="h-1.5 w-7 rounded-full bg-[#f9ae5a]" />
                   <div className="mt-3 text-[15px] font-extrabold">{l}</div>
@@ -1525,14 +1767,14 @@ function AboutPage() {
 
       <section className="bg-[#fffbf5] py-20">
         <div className="reveal mx-auto max-w-2xl px-5 text-center sm:px-8">
-          <h2 className="text-3xl font-extrabold text-[#0d1520]">Wil je samenwerken met Digitify?</h2>
-          <p className="mt-3 text-sm text-[#5a6878]">Plan een gesprek over Lead Finder of een breder digitaal groeiraject.</p>
+          <h2 className="text-3xl font-extrabold text-[#0d1520]">Klaar om Lead Finder te gebruiken?</h2>
+          <p className="mt-3 text-sm text-[#5a6878]">Bekijk de modules, vergelijk de prijzen of plan een demo voor jouw team.</p>
           <div className="mt-7 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
             <Link href="/register" className="group inline-flex h-11 items-center rounded-xl bg-[#f9ae5a] px-7 text-sm font-bold text-[#14100b] shadow-[0_6px_24px_rgba(249,174,90,0.5)] transition-all hover:bg-[#eca04e]">
               Aanmelden <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
             </Link>
-            <Link href="https://www.digitify.be" target="_blank" rel="noopener noreferrer" className="inline-flex h-11 items-center rounded-xl border border-[#cfd8d2] bg-white px-7 text-sm font-semibold text-[#172131] shadow-sm transition hover:border-[#9fb4c8]">
-              www.digitify.be <ExternalLink className="ml-2 h-3.5 w-3.5" />
+            <Link href="/prijzen" className="inline-flex h-11 items-center rounded-xl border border-[#cfd8d2] bg-white px-7 text-sm font-semibold text-[#172131] shadow-sm transition hover:border-[#9fb4c8]">
+              Bekijk prijzen <ArrowRight className="ml-2 h-3.5 w-3.5" />
             </Link>
           </div>
         </div>
@@ -1545,6 +1787,11 @@ function AboutPage() {
    CONTACT
 ══════════════════════════════════════════════ */
 function ContactPage() {
+  return <MarketingContactPage />;
+}
+
+/*
+function LegacyContactPage() {
   const [sent, setSent] = useState(false);
   const [sending, setSending] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", company: "", message: "" });
@@ -1652,7 +1899,6 @@ function ContactPage() {
                   { icon: Mail, l: "hello@digitify.be", href: "mailto:hello@digitify.be" },
                   { icon: Phone, l: "+32 (0) 486 51 57 73", href: "tel:+3248651573" },
                   { icon: MapPin, l: "België", href: undefined },
-                  { icon: Globe2, l: "www.digitify.be", href: "https://www.digitify.be" },
                 ].map(({ icon: Icon, l, href }) => (
                   <div key={l} className="flex items-center gap-3 py-2 text-sm text-[#4d5b6b]">
                     <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#f9ae5a]/10">
@@ -1683,31 +1929,47 @@ function ContactPage() {
     </>
   );
 }
+*/
 
 /* ─── HOME HERO TAB PREVIEW ─── */
 function HomeHeroModuleTabs() {
-  const [activeTab, setActiveTab] = useState<SolutionSlug>("lead-search");
-  const activeModule = SOLUTION_MODULES.find((module) => module.slug === activeTab) ?? SOLUTION_MODULES[0];
-  const ActiveIcon = activeModule.icon;
+  return <MarketingHomeHeroTabs />;
+}
+
+/*
+function LegacyHomeHeroModuleTabs() {
+  const [activeTab, setActiveTab] = useState<BundleSlug>("lead-engine");
+  const previewByBundle: Record<BundleSlug, SolutionSlug> = {
+    "lead-engine": "lead-search",
+    "outreach-hub": "outreach-ai",
+    "sales-workspace": "offerte-configurator",
+    "marketing-studio": "white-label",
+    "website-growth": "rapporten",
+    "customer-experience": "booking-agenda",
+    "automation-insights": "reviewsysteem",
+  };
+  const activeBundle = getMarketingBundle(activeTab) ?? MARKETING_BUNDLES[0];
+  const activeModule = SOLUTION_MODULES.find((module) => module.slug === previewByBundle[activeTab]) ?? SOLUTION_MODULES[0];
+  const ActiveIcon = MARKETING_BUNDLE_UI[activeBundle.slug].icon;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-[#dfe6e1] bg-white shadow-[0_22px_56px_rgba(13,21,32,0.14)]">
       <div className="border-b border-[#edf1ee] bg-[#f9fbfa] p-3">
         <div className="grid grid-cols-2 gap-1.5 lg:grid-cols-4">
-          {SOLUTION_MODULES.map((module) => {
-            const Icon = module.icon;
-            const isActive = module.slug === activeTab;
+          {MARKETING_BUNDLES.map((bundle) => {
+            const Icon = MARKETING_BUNDLE_UI[bundle.slug].icon;
+            const isActive = bundle.slug === activeTab;
             return (
               <button
-                key={module.slug}
+                key={bundle.slug}
                 type="button"
-                onClick={() => setActiveTab(module.slug)}
+                onClick={() => setActiveTab(bundle.slug)}
                 className={`inline-flex h-10 items-center justify-center gap-1.5 rounded-lg px-2 text-[10px] font-bold transition sm:h-10 sm:px-2.5 lg:h-11 lg:gap-2 lg:px-3 ${
                   isActive ? "bg-[#f9ae5a] text-[#14100b]" : "bg-white text-[#5a6878] hover:bg-[#fff8ee] hover:text-[#b66d1e]"
                 }`}
               >
                 <Icon className="!h-3.5 !w-3.5 shrink-0 sm:!h-4 sm:!w-4 lg:!h-5 lg:!w-5" />
-                <span className="truncate">{module.label}</span>
+                <span className="truncate">{bundle.label}</span>
               </button>
             );
           })}
@@ -1719,7 +1981,7 @@ function HomeHeroModuleTabs() {
             <ActiveIcon className="h-3 w-3" />
             Live UI
           </div>
-          <Link href={`/oplossingen/${activeModule.slug}`} className="inline-flex items-center gap-1 text-xs font-bold text-[#b66d1e] transition hover:text-[#8d5110]">
+          <Link href={`/oplossingen/${activeBundle.slug}`} className="inline-flex items-center gap-1 text-xs font-bold text-[#b66d1e] transition hover:text-[#8d5110]">
             Lees meer
             <ChevronRight className="h-3.5 w-3.5" />
           </Link>
@@ -1729,6 +1991,7 @@ function HomeHeroModuleTabs() {
     </div>
   );
 }
+*/
 
 /* ─── HOME DASHBOARD ─── */
 function HomeDashboard() {

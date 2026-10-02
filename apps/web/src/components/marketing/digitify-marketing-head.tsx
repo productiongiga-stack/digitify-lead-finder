@@ -1,3 +1,6 @@
+import { headers } from "next/headers";
+import { preload } from "react-dom";
+
 const CRITICAL_CSS = [
   "html.digitify-shell-booting .digitify-site-header{opacity:0}",
   "html.digitify-page-ready .digitify-site-header{opacity:1;transition:opacity .35s ease .08s}",
@@ -15,6 +18,20 @@ const BOOT_SCRIPT = `(function(){var r=document.documentElement;r.classList.add(
 /** Server-rendered shell assets so marketing pages don't FOUC before client hydration. */
 export async function DigitifyMarketingHead() {
   const nonce = (await headers()).get("x-csp-nonce") ?? undefined;
+  const shellStyles = [
+    "/digitify/digitify-shell.css?v=3",
+    "/digitify/digitify-header-deck.css?v=5",
+    "/digitify/digitify-header-ecosystem.css?v=4",
+    "/digitify/digitify-mobile-drawer.css?v=1",
+    "/digitify/digitify-footer.css?v=1",
+    "/digitify/digitify-leads-chrome.css?v=6",
+  ];
+
+  // The stylesheets are rendered below the root layout, so preload them from
+  // the document head to avoid a raw header flash during the first paint.
+  for (const href of shellStyles) {
+    preload(href, { as: "style" });
+  }
 
   return (
     <>
@@ -29,4 +46,3 @@ export async function DigitifyMarketingHead() {
     </>
   );
 }
-import { headers } from "next/headers";

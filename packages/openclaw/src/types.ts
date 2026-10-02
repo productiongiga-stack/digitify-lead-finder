@@ -75,6 +75,7 @@ export interface OpenClawContext {
 export type OpenClawProvider = "anthropic" | "openai" | "deepseek";
 
 export interface OpenClawConfig {
+  timeoutMs?: number;
   apiKey: string;
   model?: string;
   maxTokens?: number;

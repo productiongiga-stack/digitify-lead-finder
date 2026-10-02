@@ -3,6 +3,30 @@
 Chronologisch logboek van significante wijzigingen (mens + AI).  
 **Formaat:** nieuwste entries bovenaan.
 
+## 2026-10-02 — Persoonlijke authenticator-2FA en gecontroleerde releasevoorbereiding
+
+- Server-side tweestapslogin via gehashte HttpOnly-challenge; NextAuth accepteert geen rechtstreekse wachtwoordlogin meer. TOTP/recovery-code replaypreventie met accountlocks, duurzame limieten en server-issued JWT-factorbewijs.
+- Setup, lokaal QR, eenmalige herstelcodes, vervangen, uitschakelen, persoonlijke RLS, sessie-intrekking, headerwaarschuwing en operatorherstel zonder admin-reset/e-mailbypass. Twee additieve migraties uitsluitend lokaal toegepast.
+- Cryptotests, 25 echte database-isolatietests en twee lokale HTTP-end-to-endtests slagen. Typecheck, monorepo-tests, lint en production build gecontroleerd; nieuwe beveiligingscode heeft geen lintwaarschuwingen.
+- Bestaand Vercel-project en domein bevestigd; CLI-aanmelding veilig vernieuwd en een onafhankelijke production-2FA-key veilig toegevoegd met lokale `0600`-backup buiten Git. Productie blijft ongemigreerd en ongepubliceerd wegens ontbrekende gecontroleerde backup/verbinding en nog onbevestigde preview-isolatie/beveiligingsconfiguratie. Productie heeft geen Prisma-migratiehistoriek; geen blind repair toegepast.
+- Next.js/React-, Vercel-configuratie- en PostgreSQL/Supabase-richtlijnen toegepast voor kleine clientschermen, private responses en persoonlijke databasepolicies. Details en expliciete operationele grenzen: `TWO_FACTOR_AUTH.md`.
+
+## 2026-10-02 — Google-groepselectie en duurzame Ads-achtergrondtaken
+
+- Bestaande Google advertentiegroepen/RSA’s en PMax-assetgroepen selecteerbaar; snapshots, approvals en publicaties behouden het specifieke doelonderdeel en bestaande pins/URLs.
+- Nieuwe RLS-tabel `AdBackgroundJob`, uitsluitend lokaal gemigreerd. Afzonderlijke, gededupliceerde taken met atomische leases, sync-afhankelijke analyse en veilige retries; AI/publicaties worden niet blind herhaald.
+- Takenoverzicht en beheerretry voor niet-AI-taken onder Automatisering. Providercontrole is alleen een leescontrole, geen bewezen publicatierecht.
+- Google-browsercontrole desktop/mobiel en Meta-workflowcontrole; devserver herstart na Prisma-generatie. Unit tests, drie echte database-isolatietests, typecheck, lint en production build gecontroleerd. Geen externe advertentieactie of live deployment.
+- Next.js/React-skillchecks gebruikt om serverlogica en kleine interactieve editoronderdelen te scheiden. Resterende limieten blijven beschreven in `ADS_AUTOMATION.md`.
+
+## 2026-10-02 — Lokale Ads-editor en AI-goedkeuringsworkflow
+
+- Vijf nieuwe RLS-tabellen voor snapshots, voorstellen, versiegebonden approval, externe operatieclaims en duurzame AI-runs; drie lokale migraties zonder database-reset.
+- Gedeelde Editor & AI-tab voor Google/Meta, budgetguardrails, before/after, conflictdetectie, campaign-lock en expliciete reconciliatie van onzekere writes.
+- Google live save maakt nu een voorstel; RSA-update op Ad; PMax immutable assetlinks. Meta creativewijziging maakt nieuwe gepauzeerde advertentie en houdt oude versie intact.
+- Grote studio-clientfiles opgesplitst; relevante UI-hook/import-lintwaarschuwingen verwijderd. Cron is opt-in analyse-only; view-as schrijft niet.
+- Geen live deployment, credentialswijziging of externe advertentiemutatie. Implementatiegrenzen en resterend productwerk: `docs/ADS_AUTOMATION.md`.
+
 ## 2026-09-17 — ASE: GRANT digitify_app in ensure/SQL + prod online
 
 **Type:** Incident fix / ops

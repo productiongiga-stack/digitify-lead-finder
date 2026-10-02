@@ -5,6 +5,14 @@ Alle paden relatief aan repo-root.
 
 **Legenda:** 🔒 = module toggle (`moduleId` in `navigation.ts`)
 
+### Persoonlijke authenticatorbeveiliging (2026-10-02)
+
+DAL: `packages/api/src/lib/two-factor{,-crypto,-notifications}.ts`. Login: `apps/web/src/app/api/auth/login-start/route.ts` en `lib/auth/options.ts`. Persoonlijke REST-routes: `app/api/two-factor/`; scherm: `components/settings/two-factor-settings.tsx`; waarschuwing: `components/layout/two-factor-warning.tsx`. Operatorherstel: `packages/api/scripts/recover-two-factor.ts`. Geen technisch module-entitlement nodig: iedere rol kan het eigen account beveiligen. Tests: `two-factor{,-crypto,-http}.integration/test` in de API-package en `lib/auth/__tests__/two-factor-routes.test.ts` in web. Configuratie en releasepoort: `docs/TWO_FACTOR_AUTH.md`.
+
+### Gedeelde Google/Meta Ads-workflow (2026-10-02)
+
+Beide bestaande advertentierouters gebruiken `packages/api/src/routers/ads-workflow.procedures.ts`, de `ads-workflow*.ts` libraries en `apps/web/src/components/ads/`. Google-doelselectie: `google-editor-selection.ts` en `google-editor-target-picker.tsx`. Duurzame taken: `ads-background-jobs.ts`; uitvoerder: `apps/web/src/app/api/cron/ads-optimize/route.ts`. Opslag: AdVersion, AdChangeSet, AdApprovalRequest, AdSyncOperation, AiOptimizationRun en AdBackgroundJob. Tests: `ads-workflow{,-providers,-read,.integration}.test.ts`, `google-editor-selection.test.ts` en `ads-background-jobs.test.ts`. Functionele grenzen en configuratie: `docs/ADS_AUTOMATION.md`.
+
 ---
 
 ## Kern (altijd beschikbaar)

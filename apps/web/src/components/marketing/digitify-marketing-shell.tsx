@@ -5,10 +5,7 @@ import { useSession, signOut } from "next-auth/react";
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { LogOut } from "lucide-react";
 import {
-  DIGITIFY_BRAND_SLOGAN,
-  getDigitifySiteUrls,
-  getUnifiedNavItems,
-  getWordPressPageUrl,
+  getLeadFinderMarketingNavItems,
   pageKeyToNavKey,
   type DigitifyNavChild,
   type DigitifyNavItem,
@@ -16,7 +13,7 @@ import {
 import { isMarketingShellPath } from "@/lib/shell-paths";
 import { DigitifyChatbotLoader } from "@/components/marketing/digitify-chatbot-loader";
 
-type MarketingPageKey = "home" | "product" | "solutions" | "about" | "contact";
+type MarketingPageKey = "home" | "product" | "solutions" | "pricing" | "about" | "contact";
 
 const ICONS = {
   phone:
@@ -232,8 +229,7 @@ function useDigitifyShellBoot() {
 
 export function DigitifyMarketingHeader({ activePage }: { activePage: MarketingPageKey }) {
   useDigitifyShellBoot();
-  const urls = getDigitifySiteUrls();
-  const navItems = getUnifiedNavItems({ site: "leads" });
+  const navItems = getLeadFinderMarketingNavItems();
   const activeKey = pageKeyToNavKey(activePage);
   const [mobileOpen, setMobileOpen] = useState(false);
   const { data: session, status } = useSession();
@@ -274,7 +270,7 @@ export function DigitifyMarketingHeader({ activePage }: { activePage: MarketingP
             <div className="digitify-header__grid digitify-header__grid--leads digitify-header__grid--ecosystem">
               <div className="digitify-header__start">
                 <div className="digitify-header__brand">
-                  <a href={getWordPressPageUrl("home", urls)} className="digitify-logo digitify-logo--header" aria-label="Digitify — Home">
+                  <Link href="/" className="digitify-logo digitify-logo--header" aria-label="Lead Finder — Home">
                     <img
                       className="digitify-logo__img digitify-logo__img--brand"
                       src={logoSrc}
@@ -285,9 +281,9 @@ export function DigitifyMarketingHeader({ activePage }: { activePage: MarketingP
                       fetchPriority="high"
                       decoding="async"
                     />
-                  </a>
+                  </Link>
                 </div>
-                <p className="digitify-header__tag">{DIGITIFY_BRAND_SLOGAN}</p>
+                <p className="digitify-header__tag">Commerciële groei met Lead Finder</p>
               </div>
 
               <nav className="digitify-header__nav digitify-nav" role="navigation" aria-label="Hoofdnavigatie">
@@ -339,12 +335,12 @@ export function DigitifyMarketingHeader({ activePage }: { activePage: MarketingP
                       </>
                     )}
                   </span>
-                  <a href={getWordPressPageUrl("contact", urls)} className="digitify-header__cta">
-                    <span className="digitify-header__cta-label">Offerte</span>
+                  <Link href="/register" className="digitify-header__cta">
+                    <span className="digitify-header__cta-label">Start met Lead Finder</span>
                     <span className="digitify-header__cta-icon" aria-hidden="true">
                       &rarr;
                     </span>
-                  </a>
+                  </Link>
                 </div>
                 <button
                   className="digitify-menu-toggle"
@@ -374,7 +370,7 @@ export function DigitifyMarketingHeader({ activePage }: { activePage: MarketingP
           <div className="digitify-mobile-nav__overlay" onClick={closeMobile} role="presentation" />
           <div className="digitify-mobile-nav__panel" role="dialog" aria-modal="true" aria-label="Menu">
             <div className="digitify-mobile-nav__head">
-              <Link href="/product" className="digitify-mobile-nav__brand" aria-label="Digitify — Home" onClick={closeMobile}>
+              <Link href="/" className="digitify-mobile-nav__brand" aria-label="Lead Finder — Home" onClick={closeMobile}>
                 <img
                   className="digitify-logo__img digitify-logo__img--brand"
                   src={logoSrc}
@@ -391,55 +387,17 @@ export function DigitifyMarketingHeader({ activePage }: { activePage: MarketingP
             </div>
             <div className="digitify-mobile-nav__scroll">
               <nav className="digitify-mobile-nav__list" aria-label="Navigatie">
-                <Link
-                  href="/product"
-                  className={mobileNavItemClass(activeKey === "lead-finder", "accent")}
-                  onClick={closeMobile}
-                >
-                  Lead Finder
-                </Link>
-                <Link
-                  href="/oplossingen"
-                  className={mobileNavItemClass(activePage === "solutions", "accent")}
-                  onClick={closeMobile}
-                >
-                  Oplossingen
-                </Link>
+                <Link href="/" className={mobileNavItemClass(activeKey === "home")} onClick={closeMobile}>Home</Link>
+                <Link href="/product" className={mobileNavItemClass(activeKey === "lead-finder", "accent")} onClick={closeMobile}>Product</Link>
+                <Link href="/oplossingen" className={mobileNavItemClass(activeKey === "diensten", "accent")} onClick={closeMobile}>Modules</Link>
+                <Link href="/prijzen" className={mobileNavItemClass(activeKey === "prijzen", "accent")} onClick={closeMobile}>Prijzen</Link>
+                <Link href="/over-ons" className={mobileNavItemClass(activeKey === "over-ons")} onClick={closeMobile}>Over het platform</Link>
+                <Link href="/contact" className={mobileNavItemClass(activeKey === "contact")} onClick={closeMobile}>Contact</Link>
                 {status === "authenticated" ? (
                   <Link href="/dashboard" className={mobileNavItemClass(false, "accent")} onClick={closeMobile}>
                     Dashboard
                   </Link>
                 ) : null}
-                <div className="digitify-mobile-nav__divider" aria-hidden="true" />
-                <a href={getWordPressPageUrl("home", urls)} className={mobileNavItemClass(false)} onClick={closeMobile}>
-                  Home
-                </a>
-                <a href={getWordPressPageUrl("diensten", urls)} className={mobileNavItemClass(false)} onClick={closeMobile}>
-                  Diensten
-                </a>
-                <a href={getWordPressPageUrl("cases", urls)} className={mobileNavItemClass(false)} onClick={closeMobile}>
-                  Cases
-                </a>
-                <a
-                  href={getWordPressPageUrl("over-ons", urls)}
-                  className={mobileNavItemClass(activeKey === "over-ons")}
-                  onClick={closeMobile}
-                >
-                  Over ons
-                </a>
-                <a href={`${urls.shop}/`} className={mobileNavItemClass(false, "accent")} onClick={closeMobile}>
-                  Shop
-                </a>
-                <a href={`${urls.shop}/designer`} className={mobileNavItemClass(false, "accent")} onClick={closeMobile}>
-                  Designer
-                </a>
-                <a
-                  href={getWordPressPageUrl("contact", urls)}
-                  className={mobileNavItemClass(activeKey === "contact")}
-                  onClick={closeMobile}
-                >
-                  Contact
-                </a>
               </nav>
               <div className="digitify-mobile-nav__account" aria-label="Account">
                 {status === "authenticated" ? (
@@ -469,20 +427,14 @@ export function DigitifyMarketingHeader({ activePage }: { activePage: MarketingP
               </div>
             </div>
             <div className="digitify-mobile-nav__footer">
-              <a href={getWordPressPageUrl("contact", urls)} className="digitify-mobile-nav__cta" onClick={closeMobile}>
-                Offerte aanvragen
-              </a>
+              <Link href="/contact" className="digitify-mobile-nav__cta" onClick={closeMobile}>Vraag een demo</Link>
               <div className="digitify-mobile-nav__meta-links">
                 <a href="mailto:contact@digitify.be" className="digitify-mobile-nav__footer-link" onClick={closeMobile}>
                   contact@digitify.be
                 </a>
-                <a
-                  href={getWordPressPageUrl("home", urls)}
-                  className="digitify-mobile-nav__footer-link digitify-mobile-nav__footer-link--accent"
-                  onClick={closeMobile}
-                >
-                  digitify.be
-                </a>
+                <Link href="/prijzen" className="digitify-mobile-nav__footer-link digitify-mobile-nav__footer-link--accent" onClick={closeMobile}>
+                  Bekijk prijzen
+                </Link>
               </div>
             </div>
           </div>
@@ -493,8 +445,7 @@ export function DigitifyMarketingHeader({ activePage }: { activePage: MarketingP
 }
 
 export function DigitifyMarketingFooter() {
-  const urls = getDigitifySiteUrls();
-  const navItems = getUnifiedNavItems({ site: "leads" });
+  const navItems = getLeadFinderMarketingNavItems();
   const footerLogo = "/assets/branding/logo-header.png";
   const year = new Date().getFullYear();
 
@@ -511,20 +462,20 @@ export function DigitifyMarketingFooter() {
           </div>
           <div className="digitify-footer__cta-band">
             <div className="digitify-footer__cta-copy">
-              <span className="digitify-footer__cta-eyebrow">Klaar om te groeien?</span>
+              <span className="digitify-footer__cta-eyebrow">Lead Finder voor je team</span>
               <h2>
-                Start uw digitale project <span className="digitify-footer__cta-highlight">vandaag</span>
+                Maak je commerciële flow <span className="digitify-footer__cta-highlight">helder</span>
               </h2>
-              <p>Vertel ons over uw plannen — wij reageren binnen 24 uur met concrete tips.</p>
+              <p>Bekijk de app, vergelijk bundels en ontdek welke setup bij jouw team past.</p>
             </div>
             <div className="digitify-footer__cta-actions digitify-footer__cta-actions--band">
-              <a href={getWordPressPageUrl("contact", urls)} className="digitify-btn digitify-btn--primary digitify-footer__cta-primary">
-                Offerte aanvragen
+              <Link href="/contact" className="digitify-btn digitify-btn--primary digitify-footer__cta-primary">
+                Vraag een demo
                 <span className="digitify-footer__cta-primary-icon" aria-hidden="true">
                   &rarr;
                 </span>
-              </a>
-              <p className="digitify-footer__cta-trust">24u reactie · Gratis kennismaking · Gent &amp; remote</p>
+              </Link>
+              <p className="digitify-footer__cta-trust">Demo · Transparante prijzen · Gent &amp; remote</p>
               <div className="digitify-footer__cta-quick">
                 <a href="tel:+32486515773">
                   {icon("phone")} Bel ons
@@ -542,17 +493,17 @@ export function DigitifyMarketingFooter() {
         <div className="digitify-footer__studio">
           <div className="digitify-footer__studio-inner">
             <div className="digitify-footer__brand digitify-footer__brand-hero">
-              <a href={getWordPressPageUrl("home", urls)} className="digitify-footer__logo-link" aria-label="Digitify — Home">
+              <Link href="/" className="digitify-footer__logo-link" aria-label="Lead Finder — Home">
                 <img className="digitify-footer__logo-main" src={footerLogo} alt="Digitify" width={200} height={56} loading="lazy" decoding="async" />
-              </a>
+              </Link>
               <p className="digitify-footer__tagline">
-                <span>Partner in Digital Solutions</span>
+                <span>Lead Finder voor commerciële groei</span>
               </p>
-              <p className="digitify-footer__brand-note">Webdesign, media &amp; marketing voor groeiende merken.</p>
+              <p className="digitify-footer__brand-note">Vind, kwalificeer en converteer leads vanuit één werkplek.</p>
               <div className="digitify-footer__disciplines">
-                <span>Webdesign</span>
-                <span>Media</span>
-                <span>Marketing</span>
+                <span>Prospectie</span>
+                <span>Opvolging</span>
+                <span>Conversie</span>
               </div>
               <div className="digitify-footer__social">
                 <a href="https://www.facebook.com/digitify.be" className="digitify-social-btn digitify-social-btn--facebook" target="_blank" rel="noopener noreferrer" aria-label="Facebook">
@@ -581,23 +532,20 @@ export function DigitifyMarketingFooter() {
                       )}
                     </li>
                   ))}
-                  <li>
-                    <Link href="/oplossingen">Oplossingen</Link>
-                  </li>
                 </ul>
               </nav>
 
               <nav className="digitify-footer__col digitify-footer__col--services" aria-label="Footer diensten">
-                <span className="digitify-footer__col-label">Expertise</span>
+                <span className="digitify-footer__col-label">Lead Finder</span>
                 <ul className="digitify-footer__links digitify-footer__links--numbered">
                   <li>
-                    <a href={getWordPressPageUrl("webdesign", urls)}>Websites &amp; webshops</a>
+                    <Link href="/product">Wat kan de app?</Link>
                   </li>
                   <li>
-                    <a href={getWordPressPageUrl("media", urls)}>Video &amp; content</a>
+                    <Link href="/oplossingen">Alle bundels</Link>
                   </li>
                   <li>
-                    <a href={getWordPressPageUrl("marketing", urls)}>Ads &amp; campagnes</a>
+                    <Link href="/prijzen">Prijzen</Link>
                   </li>
                 </ul>
               </nav>
@@ -625,18 +573,20 @@ export function DigitifyMarketingFooter() {
 
         <div className="digitify-footer__ticker" aria-hidden="true">
           <div className="digitify-footer__ticker-track">
-            <span>Webdesign</span>
-            <span>Media</span>
-            <span>Marketing</span>
-            <span>Gent</span>
-            <span>Digital Solutions</span>
-            <span>Lead Finder</span>
-            <span>Webdesign</span>
-            <span>Media</span>
-            <span>Marketing</span>
-            <span>Gent</span>
-            <span>Digital Solutions</span>
-            <span>Lead Finder</span>
+            <span>Lead Engine</span>
+            <span>Outreach Hub</span>
+            <span>Sales Workspace</span>
+            <span>Marketing Studio</span>
+            <span>Website Growth</span>
+            <span>Customer Experience</span>
+            <span>Automation &amp; Insights</span>
+            <span>Lead Engine</span>
+            <span>Outreach Hub</span>
+            <span>Sales Workspace</span>
+            <span>Marketing Studio</span>
+            <span>Website Growth</span>
+            <span>Customer Experience</span>
+            <span>Automation &amp; Insights</span>
           </div>
         </div>
 
@@ -653,9 +603,9 @@ export function DigitifyMarketingFooter() {
               BE0685.556.507
             </p>
             <nav className="digitify-footer__legal" aria-label="Juridische links">
-              <a href={getWordPressPageUrl("algemene-voorwaarden", urls)}>Algemene Voorwaarden</a>
-              <a href={getWordPressPageUrl("cookiebeleid", urls)}>Cookiebeleid</a>
-              <a href={getWordPressPageUrl("privacyverklaring", urls)}>Privacyverklaring</a>
+              <Link href="/contact#voorwaarden">Algemene voorwaarden</Link>
+              <Link href="/contact#cookies">Cookiebeleid</Link>
+              <Link href="/contact#privacy">Privacyverklaring</Link>
             </nav>
           </div>
         </div>
