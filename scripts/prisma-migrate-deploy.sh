@@ -164,6 +164,36 @@ for attempt in $(seq 1 80); do
   fi
 
   failed_migration="$(printf '%s\n' "$migration_output" | sed -n 's/.*Migration name: \([^[:space:]]*\).*/\1/p' | tail -1)"
+  if [[ -z "$failed_migration" && "$migration_output" == *"P3009"* ]]; then
+    failed_migration="$(printf '%s\n' "$migration_output" | sed -n 's/.*The `\([^`]*\)` migration started.*/\1/p' | tail -1)"
+  fi
+
+  # Prisma refuses to retry a migration after a previous failed attempt until
+  # it is explicitly marked rolled back. Repair the known legacy orphan while
+  # using the privileged pooler connection, then let migrate deploy retry it.
+  if [[ "$migration_output" == *"P3009"* && "$failed_migration" == "20260615170000_schema_hardening" ]]; then
+    echo "==> clearing the previous failed schema-hardening attempt"
+    if [[ -n "$privileged_url" && -n "$application_url" ]]; then
+      pooler_url="$(PRIVILEGED_URL="$privileged_url" APPLICATION_URL="$application_url" POSTGRES_HOST="${POSTGRES_HOST:-}" node -e '
+        const privileged = new URL(process.env.PRIVILEGED_URL);
+        const pooler = new URL(process.env.APPLICATION_URL);
+        privileged.hostname = pooler.hostname;
+        privileged.port = pooler.port;
+        const projectRef = (process.env.POSTGRES_HOST || "").match(/^db\.([^.]+)\./)?.[1];
+        if (projectRef && !privileged.username.includes(".")) privileged.username = `${privileged.username}.${projectRef}`;
+        process.stdout.write(privileged.toString());
+      ')"
+      export DATABASE_URL="$pooler_url"
+      export DIRECT_URL="$pooler_url"
+      export PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK="1"
+    fi
+    pnpm exec prisma migrate resolve --rolled-back "$failed_migration"
+    repair_sql='UPDATE "media_generations" m SET "workspaceId" = m."userId" WHERE NOT EXISTS (SELECT 1 FROM "users" u WHERE u."id" = m."workspaceId") AND EXISTS (SELECT 1 FROM "users" u WHERE u."id" = m."userId");
+UPDATE "workspace_analytics_events" e SET "workspaceId" = e."userId" WHERE e."userId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "users" u WHERE u."id" = e."workspaceId") AND EXISTS (SELECT 1 FROM "users" u WHERE u."id" = e."userId");
+DELETE FROM "workspace_analytics_events" e WHERE NOT EXISTS (SELECT 1 FROM "users" u WHERE u."id" = e."workspaceId");'
+    printf '%s\n' "$repair_sql" | pnpm exec prisma db execute --stdin
+    continue
+  fi
 
   # A historical media row can outlive its workspace owner. The hardening
   # migration adds a user FK to workspaceId, so repair that legacy orphan to
