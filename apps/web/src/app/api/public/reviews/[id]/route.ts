@@ -10,6 +10,10 @@ function userSettingKey(userId: string, key: string) {
   return `user:${userId}:${key.trim()}`;
 }
 
+function workspaceSettingKey(workspaceId: string, key: string) {
+  return `workspace:${workspaceId}:${key.trim()}`;
+}
+
 function getCookieValue(request: Request, name: string) {
   const cookieHeader = request.headers.get("cookie") || "";
   const parts = cookieHeader.split(";").map((part) => part.trim());
@@ -74,22 +78,29 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
     });
   }
 
+  const settingKeys = [
+    "branding.company_name",
+    "branding.company_slogan",
+    "branding.primary_color",
+    "branding.logo_url",
+    ...REVIEW_PUBLIC_TEXT_FIELDS.map((field) => field.key),
+  ];
   const settings = await prisma.setting.findMany({
     where: {
-      key: {
-        in: [
-          "branding.company_name",
-          "branding.company_slogan",
-          "branding.primary_color",
-          "branding.logo_url",
-          ...REVIEW_PUBLIC_TEXT_FIELDS.map((field) => field.key),
-        ].map((key) => userSettingKey(review.createdById, key)),
-      },
+      key: { in: settingKeys.flatMap((key) => [
+        workspaceSettingKey(review.createdById, key),
+        userSettingKey(review.createdById, key),
+      ]) },
     },
   });
-  const scopedSettings = settings.map((row) => ({
+  const scopedSettings = settings
+    // Workspace settings are authoritative; user:* is kept as a legacy fallback.
+    .sort((left, right) => Number(right.key.startsWith("workspace:")) - Number(left.key.startsWith("workspace:")))
+    .map((row) => ({
     ...row,
-    key: row.key.replace(`user:${review.createdById}:`, ""),
+    key: row.key
+      .replace(`workspace:${review.createdById}:`, "")
+      .replace(`user:${review.createdById}:`, ""),
   }));
 
   const companyName = getSetting(scopedSettings, "branding.company_name", "Digitify");
