@@ -113,6 +113,21 @@ fi
 # fails the build.
 if [[ "$migration_output" == *"P3005"* ]]; then
   echo "==> existing schema detected without Prisma history; baselining init migration"
+  if [[ -n "$privileged_url" && -n "$application_url" ]]; then
+    pooler_url="$(PRIVILEGED_URL="$privileged_url" APPLICATION_URL="$application_url" node -e '
+      const privileged = new URL(process.env.PRIVILEGED_URL);
+      const pooler = new URL(process.env.APPLICATION_URL);
+      privileged.hostname = pooler.hostname;
+      privileged.port = pooler.port;
+      process.stdout.write(privileged.toString());
+    ')"
+    if [[ -n "$pooler_url" ]]; then
+      echo "==> using direct credentials through the reachable pooler for migration metadata"
+      export DATABASE_URL="$pooler_url"
+      export DIRECT_URL="$pooler_url"
+      export PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK="1"
+    fi
+  fi
   pnpm exec prisma migrate resolve --applied 20260522100000_init
   migration_status=1
   migration_output=""
