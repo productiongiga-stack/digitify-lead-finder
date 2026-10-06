@@ -275,7 +275,9 @@ export const scoringRouter = router({
           title: `Website audit: ${lead.companyName}`,
           type: "website_audit",
           leadId: lead.id,
-          generatedById: ctx.user.workspaceId!,
+          // Report.generatedById references User.id. Leads are still stored
+          // against the workspace owner for legacy tenant compatibility.
+          generatedById: leadOwnerId,
           data: auditPayload,
         },
       });

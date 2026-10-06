@@ -273,7 +273,7 @@ export const reportRouter = router({
           type: campaignId ? "campaign" : "all",
           data: reportData,
           campaignId: campaignId ?? null,
-          generatedById: ctx.user.workspaceId!,
+          generatedById: leadOwnerId,
         },
         include: {
           campaign: { select: { id: true, name: true } },

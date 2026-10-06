@@ -41,6 +41,7 @@ export const auditRouter = router({
     .mutation(async ({ ctx, input }) => {
       const targetUrl = normalizeUrl(input.url);
       if (!targetUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "URL is verplicht." });
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
 
       let lead: {
         id: string;
@@ -51,7 +52,6 @@ export const auditRouter = router({
       } | null = null;
       if (input.leadId) {
         await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
-        const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
         lead = await ctx.db.lead.findFirst({
           where: { id: input.leadId, createdById: leadOwnerId },
           select: {
@@ -103,7 +103,7 @@ export const auditRouter = router({
           title: `Website audit: ${lead?.companyName || analysis.url}`,
           type: "website_audit",
           leadId: lead?.id || null,
-          generatedById: ctx.user.workspaceId!,
+          generatedById: leadOwnerId,
           data: payload,
         },
       });
@@ -125,9 +125,10 @@ export const auditRouter = router({
     .input(z.object({ limit: z.number().min(1).max(50).default(12) }).optional())
     .query(async ({ ctx, input }) => {
       const limit = input?.limit ?? 12;
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       return ctx.db.report.findMany({
         where: {
-          generatedById: ctx.user.workspaceId!,
+          generatedById: leadOwnerId,
           type: "website_audit",
         },
         orderBy: { createdAt: "desc" },
