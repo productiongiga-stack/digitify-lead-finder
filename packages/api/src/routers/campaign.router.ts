@@ -10,6 +10,7 @@ import { EMAIL_SYSTEM_TEMPLATES } from "../lib/email-template-starter-pack";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
+import { resolveLeadOwnerId } from "../lib/tenant";
 import {
   computeDripScheduledFor,
   DEFAULT_CAMPAIGN_DRIP_STEPS,
@@ -73,6 +74,7 @@ async function runScheduledSequence(params: {
   workspaceId: string;
 }) : Promise<DripSequenceRunResult> {
   const { db, sequenceId, sequenceName, workspaceId } = params;
+  const leadOwnerId = await resolveLeadOwnerId(db, workspaceId);
   const sequenceMeta = parseSequenceMeta(sequenceName);
   const now = new Date();
   const dueDrafts = await db.emailDraft.findMany({
@@ -82,7 +84,7 @@ async function runScheduledSequence(params: {
       status: "APPROVED",
       sequenceStep: { in: [1, 2, 3] },
       scheduledFor: { lte: now },
-      lead: { createdById: workspaceId },
+      lead: { createdById: leadOwnerId },
     },
     include: {
       lead: {
@@ -217,6 +219,7 @@ export async function runAllDueDripsWorker(
     },
     select: {
       sequenceId: true,
+      workspaceId: true,
       lead: { select: { createdById: true } },
       sequence: { select: { name: true } },
     },
@@ -229,7 +232,7 @@ export async function runAllDueDripsWorker(
     if (!row.sequenceId || !row.sequence?.name || !row.lead) continue;
     const meta = parseSequenceMeta(row.sequence.name);
     if (!meta.campaignId) continue;
-    const workspaceId = row.lead.createdById;
+    const workspaceId = row.workspaceId;
     if (options?.workspaceId && workspaceId !== options.workspaceId) continue;
     const key = `${workspaceId}:${row.sequenceId}`;
     if (!byWorkspaceSequence.has(key)) {
@@ -1315,10 +1318,11 @@ export const campaignRouter = router({
   searchLeads: protectedProcedure
     .input(z.object({ query: z.string().min(1), excludeCampaignId: z.string().optional() }))
     .query(async ({ ctx, input }) => {
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const leads = await ctx.db.lead.findMany({
         where: {
           companyName: { contains: input.query, mode: "insensitive" },
-          createdById: ctx.user.workspaceId!,
+          createdById: leadOwnerId,
           ...(input.excludeCampaignId
             ? {
                 campaignLeads: {

@@ -8,7 +8,7 @@ import {
   syncQuoteOutboundDrafts,
 } from "../lib/quote-outbound-email";
 import { ensureLeadLink } from "../lib/lead-link";
-import { assertLeadAccess } from "../lib/tenant";
+import { assertLeadAccess, resolveLeadOwnerId } from "../lib/tenant";
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat("nl-BE", {
@@ -242,7 +242,7 @@ export const quoteRouter = router({
         });
       }
 
-      const leadResolution = await resolveQuoteLeadForEmail(ctx.db, quote, ctx.user.id);
+      const leadResolution = await resolveQuoteLeadForEmail(ctx.db, quote, await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!));
       return buildQuoteEmailPreflight(quote, leadResolution);
     }),
 
@@ -289,7 +289,7 @@ export const quoteRouter = router({
         if (clientEmail || companyCandidate) {
           const existingLead = await ctx.db.lead.findFirst({
             where: {
-              createdById: ctx.user.workspaceId!,
+              createdById: await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!),
               OR: [
                 ...(clientEmail ? [{ email: clientEmail }] : []),
                 ...(companyCandidate ? [{ companyName: companyCandidate }] : []),
@@ -558,7 +558,7 @@ export const quoteRouter = router({
 
       const preflight = buildQuoteEmailPreflight(
         quote,
-        await resolveQuoteLeadForEmail(ctx.db, quote, ctx.user.id),
+        await resolveQuoteLeadForEmail(ctx.db, quote, await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!)),
       );
       if (!preflight.canSend) {
         throw new TRPCError({
@@ -606,7 +606,7 @@ export const quoteRouter = router({
           type: "QUOTE",
           status: { in: ["PENDING_APPROVAL", "APPROVED"] },
           workspaceId: ctx.user.workspaceId!,
-          lead: { createdById: ctx.user.workspaceId! },
+          lead: { createdById: await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!) },
           body: { contains: `[[QUOTE_ID=${quote.id}]]` },
         },
         select: { id: true, status: true },
@@ -896,8 +896,9 @@ export const quoteRouter = router({
   createFromLead: mutationProcedure
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const lead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
+        where: { id: input.leadId, createdById: leadOwnerId },
         include: {
           scoringFactors: { include: { scoringWeight: true } },
         },

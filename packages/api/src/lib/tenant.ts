@@ -12,9 +12,30 @@ export function ownedLeadWhere(workspaceId: string, extra: Record<string, unknow
   return { ...extra, ...workspaceDataWhere(workspaceId) };
 }
 
+/**
+ * Leads are a legacy CRM table whose createdById is a foreign key to users.
+ * Team workspaces have their own cuid, so a workspace id cannot be written to
+ * this column. Resolve the workspace owner for all lead reads and writes while
+ * keeping the active workspace id for shared settings, jobs and analysis.
+ */
+export async function resolveLeadOwnerId(db: PrismaClient, workspaceId: string) {
+  const user = await db.user.findUnique({ where: { id: workspaceId }, select: { id: true } });
+  if (user) return user.id;
+  const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { ownerUserId: true } });
+  return workspace?.ownerUserId ?? workspaceId;
+}
+
+export async function ownedLeadWhereAsync(
+  db: PrismaClient,
+  workspaceId: string,
+  extra: Record<string, unknown> = {},
+) {
+  return ownedLeadWhere(await resolveLeadOwnerId(db, workspaceId), extra);
+}
+
 export async function assertLeadAccess(db: PrismaClient, workspaceId: string, leadId: string) {
   const lead = await db.lead.findFirst({
-    where: ownedLeadWhere(workspaceId, { id: leadId }),
+    where: await ownedLeadWhereAsync(db, workspaceId, { id: leadId }),
     select: { id: true },
   });
   if (!lead) {

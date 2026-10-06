@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@digitify/db";
+import { resolveLeadOwnerId } from "./tenant";
 
 type FileRelationType = "LEAD" | "QUOTE" | "CUSTOMER" | "PROJECT";
 
@@ -13,7 +14,7 @@ export async function assertWorkspaceFileRelation(
   if (!relatedType || !relatedId) throw new Error("Een bestandrelatie is onvolledig.");
 
   const found = relatedType === "LEAD" || relatedType === "CUSTOMER"
-    ? await db.lead.findFirst({ where: { id: relatedId, createdById: workspaceId }, select: { id: true } })
+    ? await db.lead.findFirst({ where: { id: relatedId, createdById: await resolveLeadOwnerId(db, workspaceId) }, select: { id: true } })
     : relatedType === "QUOTE"
       ? await db.quote.findFirst({ where: { id: relatedId, createdById: workspaceId }, select: { id: true } })
       : await db.project.findFirst({ where: { id: relatedId, createdById: workspaceId }, select: { id: true } });

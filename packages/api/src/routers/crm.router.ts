@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { router, protectedProcedure, mutationProcedure } from "../trpc";
-import { assertLeadAccess } from "../lib/tenant";
+import { assertLeadAccess, resolveLeadOwnerId } from "../lib/tenant";
 
 const crmSegmentSchema = z.enum(["CUSTOMERS"]);
 
@@ -22,8 +22,9 @@ export const crmRouter = router({
         .default({})
     )
     .query(async ({ ctx, input }) => {
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const search = input.search?.trim();
-      const where: Record<string, unknown> = { createdById: ctx.user.workspaceId! };
+      const where: Record<string, unknown> = { createdById: leadOwnerId };
 
       if (search) {
         where.OR = [
@@ -38,7 +39,7 @@ export const crmRouter = router({
       where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), crmCustomerFilter];
 
       const customerWhere = {
-        createdById: ctx.user.workspaceId!,
+        createdById: leadOwnerId,
         ...crmCustomerFilter,
       };
 
@@ -262,12 +263,13 @@ export const crmRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const email = input.email?.trim().toLowerCase();
       const companyName = input.companyName.trim();
 
       const existing = await ctx.db.lead.findFirst({
         where: {
-          createdById: ctx.user.workspaceId!,
+          createdById: leadOwnerId,
           OR: [
             ...(email ? [{ email }] : []),
             { companyName },
@@ -282,7 +284,7 @@ export const crmRouter = router({
 
       const lead = await ctx.db.lead.create({
         data: {
-          createdById: ctx.user.workspaceId!,
+          createdById: leadOwnerId,
           savedById: ctx.user.id,
           lastEditedById: ctx.user.id,
           companyName,
@@ -333,8 +335,9 @@ export const crmRouter = router({
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const lead = await ctx.db.lead.update({
-        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
+        where: { id: input.leadId, createdById: leadOwnerId },
         data: { status: "WON", lastEditedById: ctx.user.id },
         select: { id: true, companyName: true, status: true },
       });

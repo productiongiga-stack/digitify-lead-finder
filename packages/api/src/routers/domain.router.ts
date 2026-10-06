@@ -3,7 +3,7 @@ import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { Prisma } from "@digitify/db";
 import { analyzeWebsite } from "@digitify/connectors";
-import { assertLeadAccess } from "../lib/tenant";
+import { assertLeadAccess, resolveLeadOwnerId } from "../lib/tenant";
 import { isValidDomainName, normalizeDomainName } from "../lib/domain-name";
 import {
   deriveExpiryStatus,
@@ -390,8 +390,9 @@ export const domainRouter = router({
     .mutation(async ({ ctx, input }) => {
       const workspaceId = ctx.user.workspaceId!;
       await assertLeadAccess(ctx.db, workspaceId, input.leadId);
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, workspaceId);
       const lead = await ctx.db.lead.findFirst({
-        where: { id: input.leadId, createdById: workspaceId },
+        where: { id: input.leadId, createdById: leadOwnerId },
         select: { id: true, website: true },
       });
       if (!lead) throw new TRPCError({ code: "NOT_FOUND", message: "Lead niet gevonden." });

@@ -41,6 +41,7 @@ import { upsertMetaSettings, workspaceScopeFromAuthenticatedUser } from "../lib/
 import { loadAiBusinessProfile } from "../lib/ai-business-profile";
 import { findWorkspaceRecord } from "../lib/workspace-record";
 import { captureAdVersion, createAdChange } from "../lib/ads-workflow";
+import { resolveLeadOwnerId } from "../lib/tenant";
 
 const PLAN_STATUS = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "PUSHING", "PUSHED_PAUSED", "FAILED", "CANCELLED"] as const;
 const OBJECTIVES = [
@@ -260,7 +261,8 @@ async function renderAdSuggestion(
 
   const trainingNotes = await loadMetaAdsAiTrainingNotes(db, workspaceId);
   const profile = await loadAiBusinessProfile(db, workspaceId);
-  const lead = input.leadId ? await db.lead.findFirst({ where: { id: input.leadId, createdById: workspaceId }, select: { companyName: true, industry: true, city: true, overallScore: true } }) : null;
+  const leadOwnerId = input.leadId ? await resolveLeadOwnerId(db, workspaceId) : null;
+  const lead = input.leadId ? await db.lead.findFirst({ where: { id: input.leadId, createdById: leadOwnerId! }, select: { companyName: true, industry: true, city: true, overallScore: true } }) : null;
   if (input.leadId && !lead) throw new TRPCError({ code: "NOT_FOUND", message: "Lead niet gevonden in deze workspace." });
   const client = new OpenClawClient({ provider, model, apiKey, maxTokens: 900 });
   const response = await client.chat(
@@ -315,7 +317,8 @@ async function renderVariantSuggestion(
 
   const trainingNotes = await loadMetaAdsAiTrainingNotes(db, workspaceId);
   const profile = await loadAiBusinessProfile(db, workspaceId);
-  const lead = input.leadId ? await db.lead.findFirst({ where: { id: input.leadId, createdById: workspaceId }, select: { companyName: true, industry: true, city: true, overallScore: true } }) : null;
+  const leadOwnerId = input.leadId ? await resolveLeadOwnerId(db, workspaceId) : null;
+  const lead = input.leadId ? await db.lead.findFirst({ where: { id: input.leadId, createdById: leadOwnerId! }, select: { companyName: true, industry: true, city: true, overallScore: true } }) : null;
   if (input.leadId && !lead) throw new TRPCError({ code: "NOT_FOUND", message: "Lead niet gevonden in deze workspace." });
   const client = new OpenClawClient({ provider, model, apiKey, maxTokens: 650 });
   const response = await client.chat(

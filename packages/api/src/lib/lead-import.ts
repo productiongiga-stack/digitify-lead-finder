@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from "@digitify/db";
+import { resolveLeadOwnerId } from "./tenant";
 
 type LeadIdentity = {
   companyName: string;
@@ -26,10 +27,11 @@ export function sameLeadIdentity(left: LeadIdentity, right: LeadIdentity) {
 }
 
 export async function importLeadRecords(db: PrismaClient, workspaceId: string, inputs: Prisma.LeadCreateManyInput[]) {
+  const ownerId = await resolveLeadOwnerId(db, workspaceId);
   return db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`lead-import:${workspaceId}`}, 0))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`lead-import:${ownerId}`}, 0))`;
     const existing = await tx.lead.findMany({
-      where: { createdById: workspaceId },
+      where: { createdById: ownerId },
       select: { id: true, companyName: true, address: true, city: true, country: true, gmbPlaceId: true },
     });
     const created = [];
@@ -37,7 +39,7 @@ export async function importLeadRecords(db: PrismaClient, workspaceId: string, i
     for (const input of inputs) {
       const duplicate = existing.find((lead) => sameLeadIdentity(lead, input));
       if (duplicate) { duplicates.push(duplicate.id); continue; }
-      const lead = await tx.lead.create({ data: { ...input, companyName: input.companyName.trim(), createdById: workspaceId } });
+      const lead = await tx.lead.create({ data: { ...input, companyName: input.companyName.trim(), createdById: ownerId } });
       existing.push(lead);
       created.push(lead);
     }

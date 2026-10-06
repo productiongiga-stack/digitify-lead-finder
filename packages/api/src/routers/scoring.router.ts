@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, aiRateLimitedProcedure, mutationProcedure } from "../trpc";
 import { analyzeWebsite } from "@digitify/connectors";
-import { assertLeadAccess } from "../lib/tenant";
+import { assertLeadAccess, resolveLeadOwnerId } from "../lib/tenant";
 import { loadMergedScoringWeights } from "../lib/scoring-weights";
 import { buildWebsiteAuditPayload, websiteAnalysisToEnrichment } from "../lib/website-audit";
 import {
@@ -87,8 +87,9 @@ export const scoringRouter = router({
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const lead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
+        where: { id: input.leadId, createdById: leadOwnerId },
         include: { enrichmentData: true, scoringFactors: true },
       });
 
@@ -130,6 +131,7 @@ export const scoringRouter = router({
         .optional()
     )
     .mutation(async ({ ctx, input }) => {
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const params: {
         leadIds?: string[];
         onlyMissing: boolean;
@@ -143,7 +145,7 @@ export const scoringRouter = router({
       const weights = merged.filter((w) => w.enabled);
 
       const where: Record<string, unknown> = {
-        createdById: ctx.user.workspaceId!,
+        createdById: leadOwnerId,
       };
       if (params.leadIds?.length) {
         where.id = { in: params.leadIds };
@@ -198,8 +200,9 @@ export const scoringRouter = router({
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const lead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
+        where: { id: input.leadId, createdById: leadOwnerId },
       });
 
       const website = lead.website?.trim();
@@ -240,7 +243,7 @@ export const scoringRouter = router({
       }
 
       await ctx.db.lead.update({
-        where: { id: input.leadId, createdById: ctx.user.workspaceId!, updatedAt: lead.updatedAt },
+        where: { id: input.leadId, createdById: leadOwnerId, updatedAt: lead.updatedAt },
         data: { ...updates, lastEnrichedAt: new Date() },
       });
 
@@ -300,7 +303,7 @@ export const scoringRouter = router({
       // Now compute the score with the fresh enrichment data
       // Re-fetch lead with enrichment
       const enrichedLead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
+        where: { id: input.leadId, createdById: leadOwnerId },
         include: { enrichmentData: true },
       });
 
@@ -346,12 +349,13 @@ export const scoringRouter = router({
   bulkEnrich: aiRateLimitedProcedure
     .input(z.object({ leadIds: z.array(z.string()).min(1).max(50) }))
     .mutation(async ({ ctx, input }) => {
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const results: { leadId: string; score: number; priority: string; error?: string }[] = [];
 
       for (const leadId of input.leadIds) {
         try {
           const lead = await ctx.db.lead.findFirstOrThrow({
-            where: { id: leadId, createdById: ctx.user.workspaceId! },
+            where: { id: leadId, createdById: leadOwnerId },
           });
 
           if (lead.website) {
@@ -405,7 +409,7 @@ export const scoringRouter = router({
 
           // Compute score
           const enrichedLead = await ctx.db.lead.findFirstOrThrow({
-            where: { id: leadId, createdById: ctx.user.workspaceId! },
+            where: { id: leadId, createdById: leadOwnerId },
             include: { enrichmentData: true },
           });
 

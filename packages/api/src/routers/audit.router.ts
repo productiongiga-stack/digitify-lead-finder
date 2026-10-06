@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { analyzeWebsite } from "@digitify/connectors";
 import { protectedProcedure, router, mutationProcedure } from "../trpc";
-import { assertLeadAccess } from "../lib/tenant";
+import { assertLeadAccess, resolveLeadOwnerId } from "../lib/tenant";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
 import { buildWebsiteAuditPayload } from "../lib/website-audit";
@@ -51,8 +51,9 @@ export const auditRouter = router({
       } | null = null;
       if (input.leadId) {
         await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
+        const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
         lead = await ctx.db.lead.findFirst({
-          where: { id: input.leadId, createdById: ctx.user.workspaceId! },
+          where: { id: input.leadId, createdById: leadOwnerId },
           select: {
             id: true,
             companyName: true,

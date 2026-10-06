@@ -9,7 +9,7 @@ import { sendApprovedQuoteDraft } from "../lib/quote-outbound-email";
 import { extractInvoiceIdFromDraftBody } from "../lib/invoice-outbound";
 import { getSettingString } from "../lib/settings";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
-import { assertLeadAccess } from "../lib/tenant";
+import { assertLeadAccess, resolveLeadOwnerId } from "../lib/tenant";
 import { ensureLeadLink, findLeadByEmailInWorkspace } from "../lib/lead-link";
 import {
   buildOutboundSourceModuleWhere,
@@ -841,8 +841,9 @@ export const contactRouter = router({
           });
         }
         if (updated.leadId) {
+          const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
           await ctx.db.lead.updateMany({
-            where: { id: updated.leadId, createdById: ctx.user.workspaceId! },
+            where: { id: updated.leadId, createdById: leadOwnerId },
             data: { lastContactedAt: updated.sentAt },
           });
         }

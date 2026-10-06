@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import type { PrismaClient } from "@digitify/db";
 import { sendBrandedEmail } from "./email-sender";
 import { log } from "./logger";
+import { resolveLeadOwnerId } from "./tenant";
 
 export const QUOTE_ID_MARKER_RE = /\[\[QUOTE_ID=([^\]]+)\]\]/;
 
@@ -117,6 +118,7 @@ export async function syncQuoteOutboundDrafts(
   quoteId: string,
   workspaceId: string,
 ) {
+  const leadOwnerId = await resolveLeadOwnerId(db, workspaceId);
   const quote = await db.quote.findFirst({
     where: { id: quoteId, createdById: workspaceId },
     include: { items: { orderBy: { sortOrder: "asc" } } },
@@ -131,7 +133,7 @@ export async function syncQuoteOutboundDrafts(
       workspaceId,
       status: { in: ["DRAFT", "PENDING_APPROVAL", "APPROVED", "FAILED"] },
       body: { contains: `[[QUOTE_ID=${quoteId}]]` },
-      lead: { createdById: workspaceId },
+      lead: { createdById: leadOwnerId },
     },
     data: {
       body: appendQuoteIdMarker(body, quoteId),

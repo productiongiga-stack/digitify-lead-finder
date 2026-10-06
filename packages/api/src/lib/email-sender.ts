@@ -20,6 +20,7 @@ import { log } from "./logger";
 import { createEmailTrackingToken } from "./email-tracking-token";
 import { getSettingBoolean, getSettingNumber, getSettingString, settingsRowsToMap } from "./settings";
 import { extractEmailTemplateMetadata } from "./email-content";
+import { resolveLeadOwnerId } from "./tenant";
 import {
   loadWorkspaceSettingRows,
   type WorkspaceScope,
@@ -228,8 +229,10 @@ export async function sendBrandedEmail(
 
   let leadContext = {};
   if (params.leadId) {
+    const settingsScope = resolveEmailSettingsScope(params.userId);
+    const leadOwnerId = settingsScope ? await resolveLeadOwnerId(db, settingsScope.workspaceId) : null;
     const lead = await db.lead.findUnique({
-      where: { id: params.leadId },
+      where: { id: params.leadId, ...(leadOwnerId ? { createdById: leadOwnerId } : {}) },
       include: {
         contacts: {
           orderBy: [{ isPrimary: "desc" }, { name: "asc" }, { id: "asc" }],

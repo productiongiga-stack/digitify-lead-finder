@@ -42,6 +42,7 @@ import { findWorkspaceRecord } from "../lib/workspace-record";
 import { adWorkflowProcedures } from "./ads-workflow.procedures";
 import { captureAdVersion, createAdChange } from "../lib/ads-workflow";
 import { fingerprint } from "../lib/ads-workflow-policy";
+import { resolveLeadOwnerId } from "../lib/tenant";
 
 const PLAN_STATUS = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "PUSHING", "PUSHED_PAUSED", "FAILED", "CANCELLED"] as const;
 const CAMPAIGN_TYPES = ["SEARCH", "PERFORMANCE_MAX"] as const;
@@ -101,7 +102,8 @@ async function renderAdSuggestion(
   };
 
   const aiContext = await loadGoogleAdsAiContext(db, workspaceId);
-  const lead = input.leadId ? await db.lead.findFirst({ where: { id: input.leadId, createdById: workspaceId }, select: { companyName: true, industry: true, city: true, overallScore: true } }) : null;
+  const leadOwnerId = input.leadId ? await resolveLeadOwnerId(db, workspaceId) : null;
+  const lead = input.leadId ? await db.lead.findFirst({ where: { id: input.leadId, createdById: leadOwnerId! }, select: { companyName: true, industry: true, city: true, overallScore: true } }) : null;
   if (input.leadId && !lead) throw new TRPCError({ code: "NOT_FOUND", message: "Lead niet gevonden in deze workspace." });
   const { provider, model, apiKey } = await loadAiProviderConfig(db, workspaceId);
   if (!apiKey) {

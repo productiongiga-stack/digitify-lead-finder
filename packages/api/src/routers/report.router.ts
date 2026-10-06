@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
-import { assertLeadAccess } from "../lib/tenant";
+import { assertLeadAccess, resolveLeadOwnerId } from "../lib/tenant";
 
 export const reportRouter = router({
   overview: protectedProcedure
@@ -19,13 +19,14 @@ export const reportRouter = router({
       const from = input.from ?? new Date(now.getFullYear(), now.getMonth(), 1);
       const to = input.to ?? now;
       const range = { gte: from, lte: to };
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, workspaceId);
 
       const [leadCount, wonLeadCount, averageScore, quoteSummary, invoiceSummary, campaignCount, activeCampaignCount] =
         await Promise.all([
-          ctx.db.lead.count({ where: { createdById: workspaceId, createdAt: range } }),
-          ctx.db.lead.count({ where: { createdById: workspaceId, status: "WON", createdAt: range } }),
+          ctx.db.lead.count({ where: { createdById: leadOwnerId, createdAt: range } }),
+          ctx.db.lead.count({ where: { createdById: leadOwnerId, status: "WON", createdAt: range } }),
           ctx.db.lead.aggregate({
-            where: { createdById: workspaceId, createdAt: range, overallScore: { not: null } },
+            where: { createdById: leadOwnerId, createdAt: range, overallScore: { not: null } },
             _avg: { overallScore: true },
           }),
           ctx.db.quote.aggregate({
@@ -73,12 +74,13 @@ export const reportRouter = router({
         .default({})
     )
     .query(async ({ ctx, input }) => {
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const { page, perPage } = input;
       const skip = (page - 1) * perPage;
 
       const [reports, total] = await Promise.all([
         ctx.db.report.findMany({
-          where: { generatedById: ctx.user.workspaceId! },
+          where: { generatedById: leadOwnerId },
           orderBy: { createdAt: "desc" },
           skip,
           take: perPage,
@@ -87,7 +89,7 @@ export const reportRouter = router({
             generatedBy: { select: { id: true, name: true } },
           },
         }),
-        ctx.db.report.count({ where: { generatedById: ctx.user.workspaceId! } }),
+        ctx.db.report.count({ where: { generatedById: leadOwnerId } }),
       ]);
 
       return {
@@ -102,8 +104,9 @@ export const reportRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const report = await ctx.db.report.findFirst({
-        where: { id: input.id, generatedById: ctx.user.workspaceId! },
+        where: { id: input.id, generatedById: leadOwnerId },
         include: {
           campaign: { select: { id: true, name: true } },
           generatedBy: { select: { id: true, name: true } },
@@ -123,6 +126,7 @@ export const reportRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { campaignId } = input;
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
 
       // Fetch leads: either campaign-specific or all
       let leads;
@@ -152,7 +156,7 @@ export const reportRouter = router({
         leads = campaign.campaignLeads.map((cl) => cl.lead);
       } else {
         leads = await ctx.db.lead.findMany({
-          where: { createdById: ctx.user.workspaceId! },
+          where: { createdById: leadOwnerId },
           include: {
             pipelineStage: true,
             tags: { include: { tag: true } },
@@ -284,8 +288,9 @@ export const reportRouter = router({
     .input(z.object({ leadId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const lead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
+        where: { id: input.leadId, createdById: leadOwnerId },
         include: {
           scoringFactors: { include: { scoringWeight: true } },
           enrichmentData: true,
@@ -413,7 +418,7 @@ export const reportRouter = router({
       };
 
       const existing = await ctx.db.report.findFirst({
-        where: { leadId: lead.id, type: "lead_proposal", generatedById: ctx.user.workspaceId! },
+        where: { leadId: lead.id, type: "lead_proposal", generatedById: leadOwnerId },
         orderBy: { createdAt: "desc" },
         select: { id: true },
       });
@@ -425,7 +430,7 @@ export const reportRouter = router({
             data: {
               title,
               data: reportData,
-              generatedById: ctx.user.workspaceId!,
+              generatedById: leadOwnerId,
             },
             include: {
               generatedBy: { select: { id: true, name: true } },
@@ -437,7 +442,7 @@ export const reportRouter = router({
               type: "lead_proposal",
               leadId: lead.id,
               data: reportData,
-              generatedById: ctx.user.workspaceId!,
+              generatedById: leadOwnerId,
             },
             include: {
               generatedBy: { select: { id: true, name: true } },
@@ -467,7 +472,8 @@ export const reportRouter = router({
 
       if (!report) throw new TRPCError({ code: "NOT_FOUND", message: "Rapport niet gevonden" });
 
-      if (report.generatedById !== ctx.user.workspaceId!) {
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
+      if (report.generatedById !== leadOwnerId) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Rapport niet gevonden" });
       }
 

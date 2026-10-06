@@ -2,6 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, mutationProcedure, protectedProcedure, router } from "../trpc";
 import { recordSecurityAuditEvent } from "../lib/security-audit";
+import { resolveLeadOwnerId } from "../lib/tenant";
 
 const projectInput = z.object({
   name: z.string().trim().min(2).max(160),
@@ -15,8 +16,9 @@ const projectInput = z.object({
 
 async function validateSource(ctx: { db: any; user: { workspaceId?: string } }, input: { leadId?: string; quoteId?: string }) {
   const workspaceId = ctx.user.workspaceId!;
+  const leadOwnerId = await resolveLeadOwnerId(ctx.db, workspaceId);
   if (input.leadId) {
-    const lead = await ctx.db.lead.findFirst({ where: { id: input.leadId, createdById: workspaceId }, select: { id: true, status: true } });
+    const lead = await ctx.db.lead.findFirst({ where: { id: input.leadId, createdById: leadOwnerId }, select: { id: true, status: true } });
     if (!lead) throw new TRPCError({ code: "NOT_FOUND", message: "Lead niet gevonden in deze werkruimte." });
     if (lead.status !== "WON") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Een project kan pas starten vanuit een gewonnen lead." });
   }
@@ -30,8 +32,9 @@ async function validateSource(ctx: { db: any; user: { workspaceId?: string } }, 
 export const projectRouter = router({
   sources: protectedProcedure.query(async ({ ctx }) => {
     const workspaceId = ctx.user.workspaceId!;
+    const leadOwnerId = await resolveLeadOwnerId(ctx.db, workspaceId);
     const [leads, quotes] = await Promise.all([
-      ctx.db.lead.findMany({ where: { createdById: workspaceId, status: "WON" }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, companyName: true } }),
+      ctx.db.lead.findMany({ where: { createdById: leadOwnerId, status: "WON" }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, companyName: true } }),
       ctx.db.quote.findMany({ where: { createdById: workspaceId, status: "ACCEPTED" }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, quoteNumber: true, clientName: true, total: true, leadId: true } }),
     ]);
     return { leads, quotes };
@@ -39,9 +42,10 @@ export const projectRouter = router({
 
   list: protectedProcedure.query(async ({ ctx }) => {
     const workspaceId = ctx.user.workspaceId!;
+    const leadOwnerId = await resolveLeadOwnerId(ctx.db, workspaceId);
     const projects = await ctx.db.project.findMany({ where: { createdById: workspaceId }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, name: true, clientName: true, description: true, status: true, leadId: true, quoteId: true, startAt: true, dueAt: true, updatedAt: true } });
     const [leads, quotes] = await Promise.all([
-      ctx.db.lead.findMany({ where: { createdById: workspaceId, id: { in: projects.flatMap((project) => project.leadId ? [project.leadId] : []) } }, select: { id: true, companyName: true } }),
+      ctx.db.lead.findMany({ where: { createdById: leadOwnerId, id: { in: projects.flatMap((project) => project.leadId ? [project.leadId] : []) } }, select: { id: true, companyName: true } }),
       ctx.db.quote.findMany({ where: { createdById: workspaceId, id: { in: projects.flatMap((project) => project.quoteId ? [project.quoteId] : []) } }, select: { id: true, quoteNumber: true, total: true } }),
     ]);
     const leadNames = new Map(leads.map((lead) => [lead.id, lead.companyName]));

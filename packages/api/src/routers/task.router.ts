@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router, mutationProcedure } from "../trpc";
-import { assertLeadAccess } from "../lib/tenant";
+import { assertLeadAccess, resolveLeadOwnerId } from "../lib/tenant";
 import { workspaceScopeFromUser } from "../lib/workspace-settings";
 import {
   deleteGoogleTaskEvent,
@@ -19,6 +19,7 @@ async function resolveRelatedLabels(
     relatedId: string | null;
   }>,
 ) {
+  const leadOwnerId = await resolveLeadOwnerId(db, workspaceId);
   const leadIds = new Set<string>();
   const quoteIds = new Set<string>();
   const bookingIds = new Set<string>();
@@ -35,7 +36,7 @@ async function resolveRelatedLabels(
   const [leads, quotes, bookings, clients] = await Promise.all([
     leadIds.size > 0
       ? db.lead.findMany({
-          where: { id: { in: Array.from(leadIds) }, createdById: workspaceId },
+          where: { id: { in: Array.from(leadIds) }, createdById: leadOwnerId },
           select: { id: true, companyName: true },
         })
       : Promise.resolve([]),
@@ -53,7 +54,7 @@ async function resolveRelatedLabels(
       : Promise.resolve([]),
     clientIds.size > 0
       ? db.lead.findMany({
-          where: { id: { in: Array.from(clientIds) }, createdById: workspaceId },
+          where: { id: { in: Array.from(clientIds) }, createdById: leadOwnerId },
           select: { id: true, companyName: true },
         })
       : Promise.resolve([]),

@@ -12,6 +12,7 @@ import { serializeSavedSearch } from "../lib/saved-search-serializer";
 import { ensureTenantSchemaCompatibility } from "../lib/tenant-schema-compat";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 import { enqueueLeadAnalysis } from "../lib/lead-analysis";
+import { resolveLeadOwnerId } from "../lib/tenant";
 
 const searchStringSchema = z
   .string()
@@ -51,13 +52,6 @@ function extractCity(formattedAddress: string | undefined): string | undefined {
  * have a separate cuid in `workspaces.id`, so resolve that id to its owner
  * before querying or creating legacy lead rows.
  */
-async function resolveLeadOwnerId(db: PrismaClient, workspaceId: string) {
-  const owner = await db.user.findUnique({ where: { id: workspaceId }, select: { id: true } });
-  if (owner) return owner.id;
-  const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { ownerUserId: true } });
-  return workspace?.ownerUserId ?? workspaceId;
-}
-
 export const searchRouter = router({
   searchPlaces: mutationProcedure
     .input(

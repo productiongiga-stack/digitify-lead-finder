@@ -3,7 +3,7 @@ import { router, protectedProcedure } from "../trpc";
 import type { Context } from "../trpc";
 import { leadStatusLabelNl } from "../lib/lead-status-labels";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
-import { ownedChatSessionWhere } from "../lib/tenant";
+import { ownedChatSessionWhere, resolveLeadOwnerId } from "../lib/tenant";
 import { getOrLoadDashboardCache, readDashboardCache, writeDashboardCache } from "../lib/dashboard-cache";
 
 function getSettingString(
@@ -75,6 +75,7 @@ function asWorkspaceCtx(ctx: Context): WorkspaceCtx {
 }
 
 async function loadUnifiedReminders(ctx: WorkspaceCtx): Promise<UnifiedRemindersResult> {
+  const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId);
   const cacheKey = `getUnifiedReminders:${ctx.user.workspaceId!}`;
   const cached = readDashboardCache<UnifiedRemindersResult>(cacheKey);
   if (cached) return cached;
@@ -98,7 +99,7 @@ async function loadUnifiedReminders(ctx: WorkspaceCtx): Promise<UnifiedReminders
         status: "SENT",
         sentAt: { lte: emailThreshold },
         lead: {
-          createdById: ctx.user.workspaceId!,
+          createdById: leadOwnerId,
           status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
         },
       },
@@ -157,7 +158,7 @@ async function loadUnifiedReminders(ctx: WorkspaceCtx): Promise<UnifiedReminders
     }),
     ctx.db.lead.findMany({
       where: {
-        createdById: ctx.user.workspaceId!,
+        createdById: leadOwnerId,
         status: { in: ["CONTACTED", "RESPONDED", "QUALIFIED"] },
         activities: {
           none: {
@@ -515,6 +516,7 @@ async function loadAttentionCountOnly(ctx: WorkspaceCtx): Promise<number> {
 }
 
 async function loadKpis(ctx: WorkspaceCtx): Promise<KpiResult> {
+  const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId);
   const cacheKey = `getKpis:${ctx.user.workspaceId}`;
   const cached = readDashboardCache<KpiResult>(cacheKey);
   if (cached) return cached;
@@ -537,12 +539,12 @@ async function loadKpis(ctx: WorkspaceCtx): Promise<KpiResult> {
     pendingReviews,
     quoteStatusBuckets,
   ] = await Promise.all([
-    ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId } }),
-    ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId, createdAt: { gte: weekAgo } } }),
-    ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId, scorePriority: "Hot" } }),
+    ctx.db.lead.count({ where: { createdById: leadOwnerId } }),
+    ctx.db.lead.count({ where: { createdById: leadOwnerId, createdAt: { gte: weekAgo } } }),
+    ctx.db.lead.count({ where: { createdById: leadOwnerId, scorePriority: "Hot" } }),
     ctx.db.lead.groupBy({
       by: ["status"],
-      where: { createdById: ctx.user.workspaceId },
+      where: { createdById: leadOwnerId },
       _count: { _all: true },
     }),
     ctx.db.campaign.count({ where: { createdById: ctx.user.workspaceId } }),
@@ -553,7 +555,7 @@ async function loadKpis(ctx: WorkspaceCtx): Promise<KpiResult> {
     }),
     ctx.db.lead.aggregate({
       _avg: { overallScore: true },
-      where: { createdById: ctx.user.workspaceId, overallScore: { not: null } },
+      where: { createdById: leadOwnerId, overallScore: { not: null } },
     }),
     ctx.db.quote.count({ where: { createdById: ctx.user.workspaceId, status: { in: ["DRAFT", "SENT", "VIEWED"] } } }),
     ctx.db.quote.aggregate({
@@ -640,11 +642,12 @@ async function loadKpis(ctx: WorkspaceCtx): Promise<KpiResult> {
 }
 
 async function loadRecentActivity(ctx: WorkspaceCtx) {
+  const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId);
   return ctx.db.activity.findMany({
     where: {
       OR: [
         { userId: ctx.user.id },
-        { lead: { createdById: ctx.user.workspaceId } },
+        { lead: { createdById: leadOwnerId } },
       ],
     },
     take: 20,
@@ -657,6 +660,7 @@ async function loadRecentActivity(ctx: WorkspaceCtx) {
 }
 
 async function loadPipelineOverview(ctx: WorkspaceCtx) {
+  const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId);
   const [stages, leadCounts] = await Promise.all([
     ctx.db.pipelineStage.findMany({
       where: { createdById: ctx.user.workspaceId },
@@ -666,7 +670,7 @@ async function loadPipelineOverview(ctx: WorkspaceCtx) {
     ctx.db.lead.groupBy({
       by: ["pipelineStageId"],
       _count: { id: true },
-      where: { createdById: ctx.user.workspaceId, pipelineStageId: { not: null } },
+      where: { createdById: leadOwnerId, pipelineStageId: { not: null } },
     }),
   ]);
   const countMap = new Map(
@@ -683,8 +687,9 @@ async function loadPipelineOverview(ctx: WorkspaceCtx) {
 }
 
 async function loadTopLeads(ctx: WorkspaceCtx) {
+  const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId);
   const rows = await ctx.db.lead.findMany({
-    where: { overallScore: { not: null }, createdById: ctx.user.workspaceId },
+    where: { overallScore: { not: null }, createdById: leadOwnerId },
     orderBy: { overallScore: "desc" },
     take: 24,
     select: {
@@ -913,6 +918,7 @@ export const dashboardRouter = router({
   }),
 
   getScoreDistribution: protectedProcedure.query(async ({ ctx }) => {
+    const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
     const ranges = [
       { range: "0-20", min: 0, max: 20 },
       { range: "21-40", min: 21, max: 40 },
@@ -923,7 +929,7 @@ export const dashboardRouter = router({
 
     const counts = await Promise.all(
       ranges.map((b) =>
-        ctx.db.lead.count({ where: { createdById: ctx.user.workspaceId!, overallScore: { gte: b.min, lte: b.max } } })
+        ctx.db.lead.count({ where: { createdById: leadOwnerId, overallScore: { gte: b.min, lte: b.max } } })
       )
     );
 
@@ -931,10 +937,11 @@ export const dashboardRouter = router({
   }),
 
   getLeadsByNiche: protectedProcedure.query(async ({ ctx }) => {
+    const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
     const leads = await ctx.db.lead.groupBy({
       by: ["industry"],
       _count: { id: true },
-      where: { industry: { not: null }, createdById: ctx.user.workspaceId! },
+      where: { industry: { not: null }, createdById: leadOwnerId },
       orderBy: { _count: { id: "desc" } },
       take: 10,
     });
@@ -946,10 +953,11 @@ export const dashboardRouter = router({
   }),
 
   getLeadsByLocation: protectedProcedure.query(async ({ ctx }) => {
+    const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
     const leads = await ctx.db.lead.groupBy({
       by: ["city"],
       _count: { id: true },
-      where: { city: { not: null }, createdById: ctx.user.workspaceId! },
+      where: { city: { not: null }, createdById: leadOwnerId },
       orderBy: { _count: { id: "desc" } },
       take: 10,
     });
@@ -961,12 +969,13 @@ export const dashboardRouter = router({
   }),
 
   getLeadsNeedingFollowUp: protectedProcedure.query(async ({ ctx }) => {
+    const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
     const leads = await ctx.db.lead.findMany({
       where: {
-        createdById: ctx.user.workspaceId!,
+        createdById: leadOwnerId,
         status: { in: ["CONTACTED", "RESPONDED", "QUALIFIED"] },
         activities: {
           none: {
@@ -1010,8 +1019,9 @@ export const dashboardRouter = router({
   }),
 
   getSavedSearchCount: protectedProcedure.query(async ({ ctx }) => {
+    const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
     const count = await ctx.db.lead.count({
-      where: { source: { not: null }, createdById: ctx.user.workspaceId! },
+      where: { source: { not: null }, createdById: leadOwnerId },
     });
     return count;
   }),

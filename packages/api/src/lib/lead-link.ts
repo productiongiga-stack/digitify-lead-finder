@@ -1,4 +1,5 @@
 import type { Lead, LeadContact, PrismaClient } from "@digitify/db";
+import { resolveLeadOwnerId } from "./tenant";
 
 export type LinkedLead = Lead & {
   contacts: Array<Pick<LeadContact, "name" | "isPrimary">>;
@@ -49,9 +50,10 @@ export async function findLeadByEmailInWorkspace(
 ): Promise<LinkedLead | null> {
   const normalized = cleanEmail(email);
   if (!normalized) return null;
+  const leadOwnerId = await resolveLeadOwnerId(db, workspaceId);
 
   const byLeadEmail = await db.lead.findFirst({
-    where: { createdById: workspaceId, email: normalized },
+    where: { createdById: leadOwnerId, email: normalized },
     include: leadInclude,
     orderBy: { updatedAt: "desc" },
   });
@@ -60,7 +62,7 @@ export async function findLeadByEmailInWorkspace(
   const viaContact = await db.leadContact.findFirst({
     where: {
       email: normalized,
-      lead: { createdById: workspaceId },
+      lead: { createdById: leadOwnerId },
     },
     include: {
       lead: { include: leadInclude },
@@ -93,10 +95,11 @@ export async function ensureLeadLink(input: EnsureLeadLinkInput): Promise<Linked
   const email = cleanEmail(input.email);
   const companyName = input.companyName?.trim() || "";
   const workspaceId = input.workspaceId || input.userId;
+  const leadOwnerId = await resolveLeadOwnerId(input.db, workspaceId);
 
   if (input.leadId) {
     const existing = await input.db.lead.findFirst({
-      where: { id: input.leadId, createdById: workspaceId },
+      where: { id: input.leadId, createdById: leadOwnerId },
       include: leadInclude,
     });
     if (existing) return existing;
@@ -109,7 +112,7 @@ export async function ensureLeadLink(input: EnsureLeadLinkInput): Promise<Linked
 
   if (companyName) {
     const byCompany = await input.db.lead.findFirst({
-      where: { companyName, createdById: workspaceId },
+      where: { companyName, createdById: leadOwnerId },
       include: leadInclude,
       orderBy: { updatedAt: "desc" },
     });
@@ -125,7 +128,7 @@ export async function ensureLeadLink(input: EnsureLeadLinkInput): Promise<Linked
 
   return input.db.lead.create({
     data: {
-      createdById: workspaceId,
+      createdById: leadOwnerId,
       savedById: input.userId,
       lastEditedById: input.userId,
       companyName: companyName || deriveCompanyFromEmail(email),

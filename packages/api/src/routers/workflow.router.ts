@@ -2,6 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import type { Prisma } from "@digitify/db";
 import { adminProcedure, mutationProcedure, protectedProcedure, router } from "../trpc";
+import { resolveLeadOwnerId } from "../lib/tenant";
 
 const triggerSchema = z.enum(["LEAD_CREATED", "LEAD_STATUS_CHANGED", "FORM_SUBMITTED", "TASK_DUE"]);
 const actionSchema = z.object({
@@ -71,7 +72,8 @@ export const workflowRouter = router({
       }
 
       const leadId = typeof input.triggerData.leadId === "string" ? input.triggerData.leadId : null;
-      const lead = leadId ? await ctx.db.lead.findFirst({ where: { id: leadId, createdById: ctx.user.workspaceId! }, select: { id: true, companyName: true } }) : null;
+      const leadOwnerId = leadId ? await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!) : null;
+      const lead = leadId ? await ctx.db.lead.findFirst({ where: { id: leadId, createdById: leadOwnerId! }, select: { id: true, companyName: true } }) : null;
       const actions = Array.isArray(workflow.actions) ? workflow.actions as Array<{ type: string; title: string }> : [];
       const createdTaskIds: string[] = [];
       const blockedActions: string[] = [];

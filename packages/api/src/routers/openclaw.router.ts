@@ -4,7 +4,7 @@ import { OpenClawClient, type OpenClawContext } from "@digitify/openclaw";
 import { normalizeAiPlaceholderSyntax } from "../lib/email-utils";
 import { type PrismaClient, Prisma } from "@digitify/db";
 import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
-import { assertLeadAccess } from "../lib/tenant";
+import { assertLeadAccess, resolveLeadOwnerId } from "../lib/tenant";
 import { generateDraftAiRewrite, generateInboxAiMessage } from "../lib/inbox-ai-reply";
 import { extractEmailTemplateMetadata } from "../lib/email-content";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
@@ -101,8 +101,9 @@ export const openclawRouter = router({
       openclawContext.businessContext = businessContextData.businessContext;
 
       if (input.context.leadId) {
+        const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
         const lead = await ctx.db.lead.findFirst({
-          where: { id: input.context.leadId, createdById: ctx.user.workspaceId! },
+          where: { id: input.context.leadId, createdById: leadOwnerId },
           include: { scoringFactors: { include: { scoringWeight: true } } },
         });
         if (lead) {
@@ -198,8 +199,9 @@ export const openclawRouter = router({
       }
 
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const lead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
+        where: { id: input.leadId, createdById: leadOwnerId },
         include: { scoringFactors: { include: { scoringWeight: true } } },
       });
 
@@ -358,8 +360,9 @@ export const openclawRouter = router({
       }
 
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const lead = await ctx.db.lead.findFirstOrThrow({
-        where: { id: input.leadId, createdById: ctx.user.workspaceId! },
+        where: { id: input.leadId, createdById: leadOwnerId },
         include: {
           scoringFactors: { include: { scoringWeight: true } },
           enrichmentData: true,

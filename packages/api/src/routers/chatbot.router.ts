@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
-import { assertLeadAccess, ownedChatSessionWhere } from "../lib/tenant";
+import { assertLeadAccess, ownedChatSessionWhere, resolveLeadOwnerId } from "../lib/tenant";
 import { enforceRateLimit } from "../lib/rate-limit";
 import { isGoogleSlotAvailable } from "../lib/google-calendar";
 import {
@@ -190,6 +190,7 @@ export const chatbotRouter = router({
       });
       if (!session) throw new TRPCError({ code: "NOT_FOUND" });
       if (session.leadId) throw new TRPCError({ code: "BAD_REQUEST", message: "Sessie is al gekoppeld aan een lead" });
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
 
       const lead = await ctx.db.lead.create({
         data: {
@@ -198,7 +199,7 @@ export const chatbotRouter = router({
           phone: session.visitorPhone,
           source: "chatbot",
           industry: session.intent || undefined,
-          createdById: ctx.user.workspaceId!,
+          createdById: leadOwnerId,
           savedById: ctx.user.id,
           lastEditedById: ctx.user.id,
         },
@@ -233,6 +234,7 @@ export const chatbotRouter = router({
 
       let leadId = session.leadId;
       if (!leadId) {
+        const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
         const lead = await ctx.db.lead.create({
           data: {
             companyName: session.visitorCompany || session.visitorName || "Chatbot Lead",
@@ -240,7 +242,7 @@ export const chatbotRouter = router({
             phone: session.visitorPhone,
             source: "chatbot",
             industry: session.intent || undefined,
-            createdById: ctx.user.workspaceId!,
+            createdById: leadOwnerId,
             savedById: ctx.user.id,
             lastEditedById: ctx.user.id,
           },

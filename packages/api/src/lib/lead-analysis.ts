@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from "@digitify/db";
 import { OpenClawClient } from "@digitify/openclaw";
 import { loadAiProviderConfig } from "./ai-provider-config";
 import { businessProfileToContext, loadAiBusinessProfile } from "./ai-business-profile";
+import { resolveLeadOwnerId } from "./tenant";
 
 export const LEAD_ANALYSIS_PROMPT_VERSION = "lead-analysis-v2";
 
@@ -18,8 +19,9 @@ export async function enqueueLeadAnalysis(
     const existing = await db.leadAnalysisRun.findUnique({ where: { idempotencyKey } });
     if (existing) return existing;
   }
+  const leadOwnerId = await resolveLeadOwnerId(db, input.workspaceId);
   const lead = await db.lead.findFirst({
-    where: { id: input.leadId, createdById: input.workspaceId },
+    where: { id: input.leadId, createdById: leadOwnerId },
     select: { id: true, companyName: true, website: true, city: true, industry: true, overallScore: true, scorePriority: true, gmbRating: true, gmbReviewCount: true },
   });
   if (!lead) throw new Error("Lead niet gevonden in deze workspace.");
