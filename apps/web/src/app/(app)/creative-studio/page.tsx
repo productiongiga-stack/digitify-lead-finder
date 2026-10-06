@@ -124,6 +124,7 @@ export default function CreativeStudioPage() {
   const draftRef = useRef<{ id?: string; revision: number }>({ revision: 0 });
   const savedSnapshot = useRef("");
   const saving = useRef(false);
+  const saveInFlight = useRef<Promise<boolean> | null>(null);
   const latest = useRef({ goal, step, state });
   latest.current = { goal, step, state };
   const saveMutation = trpc.media.saveCreativeDraft.useMutation();
@@ -226,7 +227,9 @@ export default function CreativeStudioPage() {
     setSaved(true);
   }, [draft.data]);
   const save = useCallback(async (): Promise<boolean> => {
-    if (saving.current || !latest.current.goal) return false;
+    if (!latest.current.goal) return false;
+    if (saveInFlight.current) return saveInFlight.current;
+    const operation = (async (): Promise<boolean> => {
     const snapshot = JSON.stringify(latest.current);
     if (snapshot === savedSnapshot.current) {
       setSaved(true);
@@ -262,6 +265,13 @@ export default function CreativeStudioPage() {
       return false;
     } finally {
       saving.current = false;
+    }
+    })();
+    saveInFlight.current = operation;
+    try {
+      return await operation;
+    } finally {
+      if (saveInFlight.current === operation) saveInFlight.current = null;
     }
   }, []);
   useEffect(() => {
@@ -909,8 +919,9 @@ export default function CreativeStudioPage() {
                         (step === 2 && !ready)
                       }
                       onClick={() => {
-                        void save();
-                        setStep((s) => s + 1);
+                        void save().then((didSave) => {
+                          if (didSave) setStep((s) => s + 1);
+                        });
                       }}
                     >
                       {step === 2 ? "Gebruik resultaat" : "Volgende"}

@@ -15,6 +15,10 @@ import { prepareGoogleCreativeAsset } from "../lib/creative-google-asset";
 import { importRemoteMediaToBlob } from "../lib/import-media-to-blob";
 
 const goal = z.enum(["social", "ads", "images", "video", "lipsync"]);
+
+function activeWorkspaceId(user: { id: string; workspaceId?: string | null }) {
+  return user.workspaceId ?? user.id;
+}
 const settings = z.object({
   resolution: z.string().max(30).optional(),
   quality: z.string().max(30).optional(),
@@ -38,13 +42,13 @@ export const creativeStudioProcedures = {
     .query(({ ctx, input }) =>
       loadCreativeBrandContextForKit(
         ctx.db,
-        ctx.user.workspaceId!,
+        activeWorkspaceId(ctx.user),
         input.brandKitId,
       ),
     ),
   listCreativeDrafts: protectedProcedure.query(({ ctx }) =>
     prisma.creativeDraft.findMany({
-      where: { userId: ctx.user.id, workspaceId: ctx.user.workspaceId! },
+      where: { userId: ctx.user.id, workspaceId: activeWorkspaceId(ctx.user) },
       orderBy: { updatedAt: "desc" },
       take: 20,
     }),
@@ -56,7 +60,7 @@ export const creativeStudioProcedures = {
         where: {
           id: input.id,
           userId: ctx.user.id,
-          workspaceId: ctx.user.workspaceId!,
+          workspaceId: activeWorkspaceId(ctx.user),
         },
       });
       if (!draft)
@@ -87,7 +91,7 @@ export const creativeStudioProcedures = {
       if (
         input.jobId &&
         !(await ctx.db.mediaGeneration.findFirst({
-          where: { id: input.jobId, workspaceId: ctx.user.workspaceId! },
+          where: { id: input.jobId, workspaceId: activeWorkspaceId(ctx.user) },
         }))
       )
         throw new TRPCError({
@@ -105,17 +109,17 @@ export const creativeStudioProcedures = {
           data: {
             ...data,
             userId: ctx.user.id,
-            workspaceId: ctx.user.workspaceId!,
+            workspaceId: activeWorkspaceId(ctx.user),
           },
         });
       return prisma.$transaction(async (tx) => {
-        await setWorkspaceRlsContext(tx, ctx.user.workspaceId!, ctx.user.id);
+        await setWorkspaceRlsContext(tx, activeWorkspaceId(ctx.user), ctx.user.id);
         await tx.$queryRaw`SELECT id FROM creative_drafts WHERE id = ${input.id!} FOR UPDATE`;
         const existing = await tx.creativeDraft.findFirst({
           where: {
             id: input.id!,
             userId: ctx.user.id,
-            workspaceId: ctx.user.workspaceId!,
+            workspaceId: activeWorkspaceId(ctx.user),
           },
         });
         if (!existing)
@@ -152,7 +156,7 @@ export const creativeStudioProcedures = {
           where: {
             id: input.id!,
             userId: ctx.user.id,
-            workspaceId: ctx.user.workspaceId!,
+            workspaceId: activeWorkspaceId(ctx.user),
             revision: input.revision ?? 0,
           },
           data: { ...data, revision: { increment: 1 } },
@@ -275,7 +279,7 @@ export const creativeStudioProcedures = {
         create: {
           id,
           userId: ctx.user.id,
-          workspaceId: ctx.user.workspaceId!,
+          workspaceId: activeWorkspaceId(ctx.user),
           bundleId: bundle.id,
           credits: bundle.credits,
           priceCents: bundle.priceCents,
@@ -366,7 +370,7 @@ export const creativeStudioProcedures = {
       const job = await ctx.db.mediaGeneration.findFirst({
         where: {
           id: input.jobId,
-          workspaceId: ctx.user.workspaceId!,
+          workspaceId: activeWorkspaceId(ctx.user),
           status: "COMPLETED",
         },
       });
@@ -383,7 +387,7 @@ export const creativeStudioProcedures = {
       if (input.brandKitId)
         await loadCreativeBrandContextForKit(
           ctx.db,
-          ctx.user.workspaceId!,
+          activeWorkspaceId(ctx.user),
           input.brandKitId,
         );
       if (
@@ -392,7 +396,7 @@ export const creativeStudioProcedures = {
           where: {
             id: input.draftId,
             userId: ctx.user.id,
-            workspaceId: ctx.user.workspaceId!,
+            workspaceId: activeWorkspaceId(ctx.user),
           },
         }))
       )
@@ -406,7 +410,7 @@ export const creativeStudioProcedures = {
         googleAssetUrl = (
           await prepareGoogleCreativeAsset({
             sourceUrl: job.blobUrl || job.outputUrl!,
-            workspaceId: ctx.user.workspaceId!,
+            workspaceId: activeWorkspaceId(ctx.user),
             userId: ctx.user.id,
             slot: input.slot || "landscape",
             jobId: job.id,
@@ -416,7 +420,7 @@ export const creativeStudioProcedures = {
       if (!assetUrl) {
         const stored = await importRemoteMediaToBlob({
           sourceUrl: job.outputUrl!,
-          workspaceId: ctx.user.workspaceId!,
+          workspaceId: activeWorkspaceId(ctx.user),
           userId: ctx.user.id,
           filename: `creative-${job.id}`,
         });
