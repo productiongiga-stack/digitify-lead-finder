@@ -67,8 +67,10 @@ if [[ "$migration_output" == *"P1001"* && -n "$application_url" && "$application
   export DATABASE_URL="$application_url"
   export DIRECT_URL="$application_url"
   export PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK="1"
+  set +e
   migration_output="$(pnpm exec prisma migrate deploy 2>&1)"
   migration_status=$?
+  set -e
   printf '%s\n' "$migration_output"
 fi
 
@@ -89,8 +91,10 @@ fi
 for attempt in $(seq 1 80); do
   [[ "$migration_status" -eq 0 ]] && exit 0
 
+  set +e
   migration_output="$(pnpm exec prisma migrate deploy 2>&1)"
   migration_status=$?
+  set -e
   printf '%s\n' "$migration_output"
   [[ "$migration_status" -eq 0 ]] && exit 0
 
