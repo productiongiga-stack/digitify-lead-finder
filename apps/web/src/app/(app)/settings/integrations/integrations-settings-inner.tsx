@@ -1189,6 +1189,7 @@ export function IntegrationsSettingsInner() {
   if (sessionStatus === "loading" || (canManageWorkspaceIntegrations && isLoading)) {
     return (
       <div className="space-y-5">
+        {integrationsTab === "muapi" ? <MuapiIntegrationPanel /> : null}
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-96" />
       </div>
@@ -1198,6 +1199,7 @@ export function IntegrationsSettingsInner() {
   if (error && !settings) {
     return (
       <div className="space-y-4">
+        {integrationsTab === "muapi" ? <MuapiIntegrationPanel /> : null}
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
           <p className="font-medium text-destructive">Integraties konden niet geladen worden</p>
           <p className="mt-1 text-muted-foreground">{error.message}</p>

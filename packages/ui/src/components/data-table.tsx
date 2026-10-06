@@ -196,6 +196,25 @@ export function DataTable<T>({
                     ? (event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
+                          if (event.currentTarget.dataset.keyboardActivated === "true") return;
+                          event.currentTarget.dataset.keyboardActivated = "true";
+                          onRowClick(row);
+                        }
+                    }
+                    : undefined
+                }
+                onKeyUp={
+                  onRowClick
+                    ? (event) => {
+                        // Some browsers do not dispatch Enter's keydown to a
+                        // focusable table row consistently. Keep keyboard
+                        // activation reliable as a keyup fallback.
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          if (event.currentTarget.dataset.keyboardActivated === "true") {
+                            delete event.currentTarget.dataset.keyboardActivated;
+                            return;
+                          }
                           onRowClick(row);
                         }
                       }
