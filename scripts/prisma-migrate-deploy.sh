@@ -10,6 +10,14 @@ cd "$root/packages/db"
 # needed when the migration directory changed. A deployment that intentionally
 # needs to run migrations can set RUN_DB_MIGRATIONS=1.
 if [[ "${VERCEL:-}" == "1" && "${RUN_DB_MIGRATIONS:-}" != "1" ]]; then
+  # Manual `vercel deploy` uploads source without the .git history that the
+  # Git integration provides. In that mode there is no safe diff to inspect,
+  # so keep the build database-independent unless migrations are explicitly
+  # requested with RUN_DB_MIGRATIONS=1.
+  if [[ -z "${VERCEL_GIT_PREVIOUS_SHA:-}" && ! -d "$root/.git" ]]; then
+    echo "==> manual Vercel build without Git history; skipping production migration"
+    exit 0
+  fi
   previous_sha="${VERCEL_GIT_PREVIOUS_SHA:-$(git -C "$root" rev-parse HEAD^ 2>/dev/null || true)}"
   if [[ -n "$previous_sha" ]] && git -C "$root" diff --quiet "$previous_sha" HEAD -- packages/db/prisma/migrations; then
     echo "==> no Prisma migration changes; skipping production migration"
