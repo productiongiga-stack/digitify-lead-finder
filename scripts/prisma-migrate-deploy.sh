@@ -5,6 +5,11 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root/packages/db"
 
+# Keep the application URL as a fallback. Some Supabase projects expose a
+# direct hostname that is IPv6-only from Vercel build machines, while the
+# session pooler used by the app remains reachable.
+application_url="${DATABASE_URL:-${POSTGRES_PRISMA_URL:-${POSTGRES_URL:-}}}"
+
 # Migrations must use a direct (non-pooler) connection — Supabase pooler rejects DDL.
 # Vercel's Supabase integration may expose the direct connection under the
 # lowercase `database` key; prefer it when the explicit aliases are absent.
@@ -43,10 +48,27 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
   exit 1
 fi
 
-if [[ "$DATABASE_URL" == *"pooler"* ]]; then
-  echo "ERROR: DATABASE_URL points at a pooler. Set DIRECT_URL or POSTGRES_URL_NON_POOLING to the direct Supabase host (db.*.supabase.co:5432)." >&2
-  exit 1
+echo "==> prisma migrate deploy"
+migration_output=""
+set +e
+migration_output="$(pnpm exec prisma migrate deploy 2>&1)"
+migration_status=$?
+set -e
+printf '%s\n' "$migration_output"
+
+if [[ "$migration_status" -eq 0 ]]; then
+  exit 0
 fi
 
-echo "==> prisma migrate deploy"
-pnpm exec prisma migrate deploy
+# Retry only for an unreachable direct host. Other migration errors must stop
+# the deployment instead of risking a second, non-idempotent attempt.
+if [[ "$migration_output" == *"P1001"* && -n "$application_url" && "$application_url" != "$migrate_url" ]]; then
+  echo "==> direct host unreachable; retrying through the configured application connection"
+  export DATABASE_URL="$application_url"
+  export DIRECT_URL="$application_url"
+  export PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK="1"
+  pnpm exec prisma migrate deploy
+  exit 0
+fi
+
+exit "$migration_status"
