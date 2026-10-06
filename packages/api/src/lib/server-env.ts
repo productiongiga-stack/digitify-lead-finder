@@ -92,13 +92,24 @@ export function validateServerEnv(options?: { force?: boolean }): ValidatedServe
     return cachedEnv;
   }
 
-  const core = coreServerEnvSchema.safeParse(process.env);
+  // Vercel's Supabase integration exposes the Prisma runtime connection as
+  // POSTGRES_PRISMA_URL. Treat it as the DATABASE_URL equivalent when an old
+  // manually configured DATABASE_URL was removed, while keeping the parsed
+  // contract stable for callers.
+  const env = {
+    ...process.env,
+    DATABASE_URL:
+      process.env.DATABASE_URL?.trim() ||
+      process.env.POSTGRES_PRISMA_URL?.trim() ||
+      process.env.POSTGRES_URL?.trim(),
+  };
+  const core = coreServerEnvSchema.safeParse(env);
   if (!core.success) {
     throw new Error(formatZodEnvError(core.error));
   }
 
   if (isProduction()) {
-    const production = productionServerEnvSchema.safeParse(process.env);
+    const production = productionServerEnvSchema.safeParse(env);
     if (!production.success) {
       throw new Error(formatZodEnvError(production.error));
     }

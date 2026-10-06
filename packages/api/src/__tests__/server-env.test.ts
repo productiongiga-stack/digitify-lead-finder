@@ -36,6 +36,13 @@ describe("validateServerEnv", () => {
     expect(() => validateServerEnv({ force: true })).toThrow(/DATABASE_URL/);
   });
 
+  it("accepts the Vercel Prisma connection alias when DATABASE_URL is absent", () => {
+    delete process.env.DATABASE_URL;
+    process.env.POSTGRES_PRISMA_URL = "postgresql://user:pass@pooler.example:6543/db?pgbouncer=true";
+    const env = validateServerEnv({ force: true });
+    expect(env.DATABASE_URL).toBe(process.env.POSTGRES_PRISMA_URL);
+  });
+
   it("rejects short NEXTAUTH_SECRET", () => {
     process.env.NEXTAUTH_SECRET = "short";
     expect(() => validateServerEnv({ force: true })).toThrow(/32 characters/);
