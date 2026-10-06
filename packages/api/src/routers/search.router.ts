@@ -332,9 +332,14 @@ export const searchRouter = router({
         ? input.primaryType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
         : undefined;
 
-      const workspaceId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
+      // Legacy CRM rows keep `createdById` as a user foreign key, while all
+      // analysis and workspace-scoped jobs must keep the active workspace id.
+      // Keep both values so team-workspace leads are saved under the valid
+      // owner user but remain associated with the workspace everywhere else.
+      const activeWorkspaceId = ctx.user.workspaceId!;
+      const ownerId = await resolveLeadOwnerId(ctx.db, activeWorkspaceId);
       const existing = await ctx.db.lead.findFirst({
-        where: { createdById: workspaceId, gmbPlaceId: input.placeId },
+        where: { createdById: ownerId, gmbPlaceId: input.placeId },
       });
       if (existing) {
         const update: Record<string, unknown> = {};
@@ -350,11 +355,11 @@ export const searchRouter = router({
           ? await ctx.db.lead.update({ where: { id: existing.id }, data: { ...update, lastEditedById: ctx.user.id } })
           : existing;
         await ctx.db.activity.create({ data: { leadId: lead.id, userId: ctx.user.id, type: "LEAD_UPDATED", title: `Lead "${lead.companyName}" hergebruikt vanuit Google Places`, metadata: { placeId: input.placeId, outcome: "reused" } } });
-        await enqueueLeadAnalysis(ctx.db, { workspaceId, leadId: lead.id, createdById: ctx.user.id }).catch(() => null);
+        await enqueueLeadAnalysis(ctx.db, { workspaceId: activeWorkspaceId, leadId: lead.id, createdById: ctx.user.id }).catch(() => null);
         return { lead, outcome: "reused" as const };
       }
 
-      const imported = await importLeadRecords(ctx.db, workspaceId, [{
+      const imported = await importLeadRecords(ctx.db, ownerId, [{
           companyName: input.displayName,
           address: input.formattedAddress,
           city,
@@ -367,15 +372,15 @@ export const searchRouter = router({
           gmbCategories: input.types ?? [],
           source: "google_places",
           sourceQuery: input.displayName,
-          createdById: workspaceId,
+          createdById: ownerId,
           savedById: ctx.user.id,
           lastEditedById: ctx.user.id,
       }]);
       const lead = imported.created[0];
       if (!lead) {
-        const reused = await ctx.db.lead.findFirst({ where: { createdById: workspaceId, gmbPlaceId: input.placeId } });
+        const reused = await ctx.db.lead.findFirst({ where: { createdById: ownerId, gmbPlaceId: input.placeId } });
         if (!reused) throw new TRPCError({ code: "CONFLICT", message: "Dit bedrijf kon niet worden opgeslagen. Probeer opnieuw." });
-        await enqueueLeadAnalysis(ctx.db, { workspaceId, leadId: reused.id, createdById: ctx.user.id }).catch(() => null);
+        await enqueueLeadAnalysis(ctx.db, { workspaceId: activeWorkspaceId, leadId: reused.id, createdById: ctx.user.id }).catch(() => null);
         return { lead: reused, outcome: "reused" as const };
       }
 
@@ -389,7 +394,7 @@ export const searchRouter = router({
           metadata: { placeId: input.placeId, source: "google_places" },
         },
       });
-      await enqueueLeadAnalysis(ctx.db, { workspaceId, leadId: lead.id, createdById: ctx.user.id }).catch(() => null);
+      await enqueueLeadAnalysis(ctx.db, { workspaceId: activeWorkspaceId, leadId: lead.id, createdById: ctx.user.id }).catch(() => null);
       return { lead, outcome: "created" as const };
     }),
 });
