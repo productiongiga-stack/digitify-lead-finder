@@ -22,7 +22,9 @@ test.describe("Leads list smoke", () => {
     const detailRow = page.locator("table tbody tr").filter({ has: page.locator("td") }).first();
     await expect(detailRow).toBeVisible({ timeout: 20_000 });
     await detailRow.press("Enter");
-    await page.waitForURL(/\/leads\/[^/]+$/, { timeout: 20_000 });
+    // The App Router uses a client-side transition here, so wait for the URL
+    // commit instead of a full document load.
+    await page.waitForURL(/\/leads\/[^/]+$/, { timeout: 20_000, waitUntil: "commit" });
     await expect(page.getByRole("heading").first()).toBeVisible({ timeout: 20_000 });
   });
 });
