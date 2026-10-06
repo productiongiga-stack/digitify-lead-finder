@@ -163,6 +163,22 @@ for attempt in $(seq 1 80); do
     continue
   fi
 
+  failed_migration="$(printf '%s\n' "$migration_output" | sed -n 's/.*Migration name: \([^[:space:]]*\).*/\1/p' | tail -1)"
+
+  # A historical media row can outlive its workspace owner. The hardening
+  # migration adds a user FK to workspaceId, so repair that legacy orphan to
+  # its existing uploader before retrying. Analytics rows without any
+  # surviving user cannot be tenant-scoped and are removed as telemetry.
+  if [[ "$migration_output" == *"P3018"* && "$failed_migration" == "20260615170000_schema_hardening" && "$migration_output" == *"23503"* ]]; then
+    echo "==> repairing orphaned legacy workspace references before schema hardening"
+    pnpm exec prisma migrate resolve --rolled-back "$failed_migration"
+    repair_sql='UPDATE "media_generations" m SET "workspaceId" = m."userId" WHERE NOT EXISTS (SELECT 1 FROM "users" u WHERE u."id" = m."workspaceId") AND EXISTS (SELECT 1 FROM "users" u WHERE u."id" = m."userId");
+UPDATE "workspace_analytics_events" e SET "workspaceId" = e."userId" WHERE e."userId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "users" u WHERE u."id" = e."workspaceId") AND EXISTS (SELECT 1 FROM "users" u WHERE u."id" = e."userId");
+DELETE FROM "workspace_analytics_events" e WHERE NOT EXISTS (SELECT 1 FROM "users" u WHERE u."id" = e."workspaceId");'
+    printf '%s\n' "$repair_sql" | pnpm exec prisma db execute --stdin
+    continue
+  fi
+
   if [[ "$migration_output" == *"P3018"* && ( "$migration_output" == *"already exists"* || "$migration_output" == *"duplicate key"* || "$migration_output" == *"42701"* || "$migration_output" == *"42710"* || "$migration_output" == *"42P07"* ) ]]; then
     failed_migration="$(printf '%s\n' "$migration_output" | sed -n 's/.*Applying migration `\([^`]*\)`.*$/\1/p' | tail -1)"
     if [[ -z "$failed_migration" ]]; then
