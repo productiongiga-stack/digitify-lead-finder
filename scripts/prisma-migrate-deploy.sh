@@ -5,6 +5,18 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root/packages/db"
 
+# Vercel rebuilds the application for many code-only commits. Do not make
+# those builds wait on a database migration connection: migrations are only
+# needed when the migration directory changed. A deployment that intentionally
+# needs to run migrations can set RUN_DB_MIGRATIONS=1.
+if [[ "${VERCEL:-}" == "1" && "${RUN_DB_MIGRATIONS:-}" != "1" ]]; then
+  previous_sha="${VERCEL_GIT_PREVIOUS_SHA:-$(git -C "$root" rev-parse HEAD^ 2>/dev/null || true)}"
+  if [[ -n "$previous_sha" ]] && git -C "$root" diff --quiet "$previous_sha" HEAD -- packages/db/prisma/migrations; then
+    echo "==> no Prisma migration changes; skipping production migration"
+    exit 0
+  fi
+fi
+
 # Keep the application URL as a fallback. Some Supabase projects expose a
 # direct hostname that is IPv6-only from Vercel build machines, while the
 # session pooler used by the app remains reachable.
