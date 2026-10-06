@@ -5,19 +5,24 @@ import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "
 import Link from "next/link";
 
 type Status = { enabled: boolean; recoveryCodesRemaining: number };
+type ActionResult = { message?: string; secret?: string; uri?: string; codes?: string[]; proof?: string };
 export function TwoFactorSettings({ recovery = false }: { recovery?: boolean }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [password, setPassword] = useState(""), [code, setCode] = useState(""), [method, setMethod] = useState("totp");
   const [email, setEmail] = useState(""), [grant, setGrant] = useState("");
   const [setup, setSetup] = useState<{ secret: string; uri: string } | null>(null), [qr, setQr] = useState("");
   const [codes, setCodes] = useState<string[]>([]), [proof, setProof] = useState(""), [saved, setSaved] = useState(false);
-  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [busy, setBusy] = useState(false), [error, setError] = useState(""), [statusRetry, setStatusRetry] = useState(0);
   useEffect(() => {
     if (recovery) return;
     let active = true;
-    fetch("/api/two-factor/status", { cache: "no-store" }).then(async (r) => { if (!r.ok) throw new Error("Status niet beschikbaar."); return r.json(); }).then((value) => { if (active) setStatus(value); }).catch(() => { if (active) setError("Beveiligingsstatus niet beschikbaar. Probeer later opnieuw."); });
+    fetch("/api/two-factor/status", { cache: "no-store" }).then(async (r) => {
+      const payload = await r.json().catch(() => null) as { message?: string } | null;
+      if (!r.ok) throw new Error(payload?.message || "Beveiligingsstatus tijdelijk niet beschikbaar.");
+      return payload;
+    }).then((value) => { if (active) { setStatus(value as Status); setError(""); } }).catch((err) => { if (active) setError(err instanceof Error ? err.message : "Beveiligingsstatus tijdelijk niet beschikbaar."); });
     return () => { active = false; };
-  }, [recovery]);
+  }, [recovery, statusRetry]);
   useEffect(() => {
     let active = true;
     if (setup) import("qrcode").then((module) => module.default.toDataURL(setup.uri, { width: 240, margin: 2 })).then((url) => { if (active) setQr(url); }).catch(() => { if (active) setError("QR-code niet beschikbaar. Gebruik de handmatige sleutel."); });
@@ -29,17 +34,17 @@ export function TwoFactorSettings({ recovery = false }: { recovery?: boolean }) 
       const path = recovery ? "/api/two-factor/recovery/" : "/api/two-factor/";
       const body = recovery ? { email, password, grant, code, proof, saved } : { password, code, method, proof, saved };
       const response = await fetch(path + actionName, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.message);
-      if (actionName === "setup" || actionName === "begin") { setSetup(result); setPassword(""); setCode(""); setGrant(""); }
-      if (actionName === "verify" || actionName === "regenerate") { setCodes(result.codes); setProof(result.proof ?? ""); setSaved(false); setSetup(null); setQr(""); setPassword(""); setCode(""); }
+      const result = await response.json().catch(() => ({})) as ActionResult;
+      if (!response.ok) throw new Error(result.message || "Beveiligingsactie mislukt. Probeer opnieuw.");
+      if ((actionName === "setup" || actionName === "begin") && result.secret && result.uri) { setSetup({ secret: result.secret, uri: result.uri }); setPassword(""); setCode(""); setGrant(""); }
+      if ((actionName === "verify" || actionName === "regenerate") && result.codes) { setCodes(result.codes); setProof(result.proof ?? ""); setSaved(false); setSetup(null); setQr(""); setPassword(""); setCode(""); }
       if (actionName === "disable" || actionName === "confirm") await signOut({ callbackUrl: "/login" });
     } catch (err) { setError(err instanceof Error ? err.message : "Beveiligingscontrole mislukt."); }
     finally { setBusy(false); }
   }
   return <Card className="lg:col-span-2"><CardHeader><CardTitle>Authenticator · tweestapsverificatie</CardTitle></CardHeader><CardContent className="space-y-5">
     <p className="text-sm text-muted-foreground">Beveilig je persoonlijke account met Google Authenticator, Microsoft Authenticator of een andere TOTP-app. Beschikbaar voor iedere rol. Bewaar herstelcodes offline; elke code werkt één keer.</p>
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {error && <div role="alert" className="space-y-2 text-sm text-destructive"><p>{error}</p>{!recovery && <Button type="button" variant="outline" size="sm" onClick={() => { setError(""); setStatusRetry((value) => value + 1); }}>Opnieuw proberen</Button>}</div>}
     {!setup && !codes.length && <div className="max-w-xl space-y-4">
       {!recovery && <p className={status?.enabled ? "text-green-700" : "text-amber-700"}>{status ? status.enabled ? `Actief · ${status.recoveryCodesRemaining} herstelcodes beschikbaar` : "Nog niet ingesteld — je account mist extra beveiliging." : "Beveiligingsstatus wordt gecontroleerd…"}</p>}
       {recovery && <><p className="text-sm">Alleen met een afzonderlijk verkregen herstelvergunning na identiteitcontrole. Dit geeft geen toegang tot de app; je moet eerst een nieuwe authenticator bevestigen. De vergunning is eenmalig en 24 uur geldig.</p><Label htmlFor="recovery-email">E-mail</Label><Input id="recovery-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" /><Label htmlFor="recovery-grant">Herstelvergunning</Label><Input id="recovery-grant" type="password" value={grant} onChange={(e) => setGrant(e.target.value)} autoComplete="off" /></>}

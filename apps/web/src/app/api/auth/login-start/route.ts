@@ -14,5 +14,5 @@ export async function POST(request: Request) {
     const response = authJson({ requiresTwoFactor: result.requiresTwoFactor });
     response.cookies.set(LOGIN_COOKIE, result.token, { ...factorCookieOptions, maxAge: 300 });
     return response;
-  } catch (error) { return authError(error); }
+  } catch (error) { return authError(error, { route: "/api/auth/login-start" }); }
 }

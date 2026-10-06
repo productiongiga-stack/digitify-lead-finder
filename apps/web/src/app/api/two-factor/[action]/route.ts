@@ -29,5 +29,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
       return authJson(result);
     }
     return authJson({ message: "Onbekende actie." }, 404);
-  } catch (error) { return authError(error); }
+  } catch (error) { return authError(error, { route: "/api/two-factor/[action]" }); }
 }

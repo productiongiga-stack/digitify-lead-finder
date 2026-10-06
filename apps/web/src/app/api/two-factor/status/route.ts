@@ -10,5 +10,5 @@ export async function GET() {
     const userId = (session?.user as { id?: string } | undefined)?.id;
     if (!userId) return authJson({ message: "Niet aangemeld." }, 401);
     return authJson(await factorStatus(prisma, userId));
-  } catch (error) { return authError(error); }
+  } catch (error) { return authError(error, { route: "/api/two-factor/status" }); }
 }
