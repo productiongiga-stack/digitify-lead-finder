@@ -12,6 +12,15 @@ export async function register() {
 
   if (process.env.NODE_ENV !== "production") return;
 
+  // Vercel's Postgres integration exposes the Prisma connection as
+  // POSTGRES_PRISMA_URL. The startup role check imports Prisma directly
+  // (before the db package can normalise its environment), so mirror that
+  // alias here as well.
+  if (!process.env.DATABASE_URL?.trim()) {
+    const prismaUrl = process.env.POSTGRES_PRISMA_URL?.trim() || process.env.POSTGRES_URL?.trim();
+    if (prismaUrl) process.env.DATABASE_URL = prismaUrl;
+  }
+
   // Keep the startup guard independent from the db package barrel. The barrel
   // also exports crypto-backed settings helpers that should not enter the
   // instrumentation bundle.
