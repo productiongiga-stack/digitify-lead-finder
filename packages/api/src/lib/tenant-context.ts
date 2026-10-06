@@ -59,14 +59,19 @@ export async function resolveTenantContext(db: PrismaClient, user: {
       throw error;
     }),
   ]);
-  if (!workspace) throw new TRPCError({ code: "FORBIDDEN", message: "Je actieve bedrijf bestaat niet meer." });
+  // Older personal accounts can have a valid user-scoped dataset before the
+  // personal Workspace row was backfilled. Keep those accounts usable while
+  // the migration catches up; non-personal missing workspaces remain denied.
+  if (!workspace && base.workspaceId !== user.id) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Je actieve bedrijf bestaat niet meer." });
+  }
 
   const allowlistedPlatformOwner = Boolean(member?.email && (process.env.PLATFORM_OWNER_EMAILS ?? "").split(",").map((value) => value.trim().toLowerCase()).includes(member.email.toLowerCase()));
   const accountClass = allowlistedPlatformOwner ? "PLATFORM_OWNER" : member?.accountClass
     ?? (member?.platformRole === "OWNER" ? "PLATFORM_OWNER" : member?.platformRole === "SUPPORT" ? "PLATFORM_SUPPORT" : member?.role === "TESTER" ? "TESTER" : member?.role === "TRIAL" ? "TRIAL" : base.workspaceRole === "OWNER" ? "CLIENT_OWNER" : "CLIENT_MEMBER");
   return {
     workspaceId: base.workspaceId,
-    ownerUserId: workspace.ownerUserId,
+    ownerUserId: workspace?.ownerUserId ?? user.id,
     memberId: user.id,
     workspaceRole: base.workspaceRole,
     accountClass,

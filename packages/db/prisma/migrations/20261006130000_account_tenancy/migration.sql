@@ -7,7 +7,10 @@ CREATE TYPE "PlatformRole" AS ENUM ('OWNER', 'SUPPORT');
 -- store the company owner's user id in createdById, so their policies use the
 -- derived owner function below.
 CREATE OR REPLACE FUNCTION app_workspace_owner_id() RETURNS text AS $$
-  SELECT w."ownerUserId" FROM "workspaces" w WHERE w."id" = app_workspace_id();
+  SELECT COALESCE(
+    (SELECT w."ownerUserId" FROM "workspaces" w WHERE w."id" = app_workspace_id()),
+    app_workspace_id()
+  );
 $$ LANGUAGE sql STABLE;
 
 ALTER TABLE "users"

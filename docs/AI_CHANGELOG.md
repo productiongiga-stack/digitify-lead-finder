@@ -1914,3 +1914,4 @@ Tests: `pnpm typecheck`, `git diff --check`.
 - Nieuwe uitgenodigde gebruikers behouden hun aangevraagde workspace-rol, inclusief `VIEWER`, `TESTER` en `TRIAL`.
 - Tests toegevoegd voor expliciete platform-owner supportmodus en module-entitlements.
 - Lokale verificatie: 419 API-tests geslaagd, 9 integratiesuites overgeslagen zonder databaseflag, API/web-typecheck en monorepo-lint geslaagd met bestaande waarschuwingen.
+- GitHub-integratiecontrole vond een legacy-RLS-randgeval zonder persoonlijke Workspace-row; de owner-resolver valt nu veilig terug op de actieve user-ID en behoudt die accounts tijdens backfill.
