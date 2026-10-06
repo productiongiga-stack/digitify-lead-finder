@@ -67,8 +67,53 @@ if [[ "$migration_output" == *"P1001"* && -n "$application_url" && "$application
   export DATABASE_URL="$application_url"
   export DIRECT_URL="$application_url"
   export PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK="1"
-  pnpm exec prisma migrate deploy
-  exit 0
+  migration_output="$(pnpm exec prisma migrate deploy 2>&1)"
+  migration_status=$?
+  printf '%s\n' "$migration_output"
 fi
+
+# Some early production databases were created from idempotent catch-up SQL
+# before Prisma migration history was introduced. Prisma reports those
+# databases as P3005 (non-empty schema). Baseline the original schema, then
+# continue with normal migrations. If a historical migration is already
+# represented in that schema, Prisma can fail only because an object already
+# exists; record that migration as applied and continue. Any other error still
+# fails the build.
+if [[ "$migration_output" == *"P3005"* ]]; then
+  echo "==> existing schema detected without Prisma history; baselining init migration"
+  pnpm exec prisma migrate resolve --applied 20260522100000_init
+  migration_status=1
+  migration_output=""
+fi
+
+for attempt in $(seq 1 80); do
+  [[ "$migration_status" -eq 0 ]] && exit 0
+
+  migration_output="$(pnpm exec prisma migrate deploy 2>&1)"
+  migration_status=$?
+  printf '%s\n' "$migration_output"
+  [[ "$migration_status" -eq 0 ]] && exit 0
+
+  if [[ "$migration_output" == *"P3005"* ]]; then
+    pnpm exec prisma migrate resolve --applied 20260522100000_init
+    continue
+  fi
+
+  if [[ "$migration_output" == *"P3018"* && ( "$migration_output" == *"already exists"* || "$migration_output" == *"duplicate key"* || "$migration_output" == *"42701"* || "$migration_output" == *"42710"* || "$migration_output" == *"42P07"* ) ]]; then
+    failed_migration="$(printf '%s\n' "$migration_output" | sed -n 's/.*Applying migration `\([^`]*\)`.*$/\1/p' | tail -1)"
+    if [[ -z "$failed_migration" ]]; then
+      echo "ERROR: Prisma reported a duplicate object but did not expose the migration name." >&2
+      exit "$migration_status"
+    fi
+    echo "==> migration $failed_migration is already represented in the existing schema; recording it as applied"
+    pnpm exec prisma migrate resolve --applied "$failed_migration"
+    continue
+  fi
+
+  exit "$migration_status"
+done
+
+echo "ERROR: Prisma migration recovery exceeded its safety limit." >&2
+exit 1
 
 exit "$migration_status"
