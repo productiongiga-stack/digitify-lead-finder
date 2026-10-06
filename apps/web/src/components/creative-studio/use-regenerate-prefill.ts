@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useContext, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
+import { StudioContext } from "./studio-context";
 import { metadataRecord } from "./generator-utils";
 
 type PrefillHandlers = {
@@ -21,6 +22,7 @@ type PrefillHandlers = {
 };
 
 export function useRegeneratePrefill({ onPrefill, expectedType }: PrefillHandlers) {
+  const studio = useContext(StudioContext);
   const searchParams = useSearchParams();
   const regenerateId = searchParams.get("regenerate");
 
@@ -38,6 +40,7 @@ export function useRegeneratePrefill({ onPrefill, expectedType }: PrefillHandler
 
     const metadata = metadataRecord(regenerateQuery.data.metadata);
     appliedJobId.current = regenerateQuery.data.jobId;
+    if (studio && typeof metadata.brandKitId === "string") studio.setState(current => ({...current,brandKitId:metadata.brandKitId as string}));
     onPrefill({
       prompt: regenerateQuery.data.prompt,
       model: regenerateQuery.data.model,

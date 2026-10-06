@@ -34,6 +34,7 @@ export function useMediaJob(jobId: string | null, options?: UseMediaJobOptions) 
   }, [options?.onCompleted, options?.onAutoImported, options?.onPollError]);
 
   const importToBlob = trpc.media.importToBlob.useMutation({
+    onError: () => { autoImportRef.current = false; setPollError("Opslaan mislukt. Je resultaat blijft beschikbaar; probeer opnieuw op te slaan."); },
     onSuccess: (result) => {
       if (result.blobUrl) {
         setBlobUrl(result.blobUrl);

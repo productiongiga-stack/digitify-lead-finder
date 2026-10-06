@@ -30,6 +30,8 @@ import { MediaJobProgress } from "./media-job-progress";
 import { MuapiKeyGate } from "./muapi-key-gate";
 import { BrandPromptPreview } from "./brand-prompt-preview";
 import { ReferencePicker } from "./reference-picker";
+import { StudioContext, StudioSection, useStudioField, useCreativeQuote, CreditQuote } from "./studio-context";
+import { useContext, useRef } from "react";
 import { useMediaJob } from "./use-media-job";
 import { useRegeneratePrefill } from "./use-regenerate-prefill";
 
@@ -55,25 +57,28 @@ type Props = {
 
 export function LipSyncGenerator({ socialPostId }: Props) {
   const { showToast } = useToast();
+  const studio = useContext(StudioContext);
+  const requestKey = useRef<string | null>(null);
   const models = trpc.media.listModels.useQuery(undefined, MEDIA_MODELS_QUERY_OPTIONS);
   const keyStatus = trpc.media.getMuapiKeyStatus.useQuery(undefined, MUAPI_KEY_QUERY_OPTIONS);
-  const brandKit = trpc.media.getBrandKit.useQuery(undefined, MUAPI_KEY_QUERY_OPTIONS);
+  const brandKit = trpc.media.getCreativeBrand.useQuery({ brandKitId: studio?.state.brandKitId || undefined }, MUAPI_KEY_QUERY_OPTIONS);
 
   const lipSyncModels = useMemo(
     () => (models.data ?? []).filter((model) => model.type === "LIP_SYNC") as ModelListItem[],
     [models.data],
   );
 
-  const [mode, setMode] = useState<LipSyncMode>("PORTRAIT");
-  const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState("infinitetalk-image-to-video");
-  const [resolution, setResolution] = useState("720p");
-  const [imageUrls, setImageUrls] = useState<string[]>([]);
-  const [videoUrl, setVideoUrl] = useState("");
-  const [audioUrl, setAudioUrl] = useState("");
+  const [uploadingSource,setUploadingSource] = useState(false);
+  const [mode, setMode] = useStudioField<LipSyncMode>("mode", "PORTRAIT");
+  const [prompt, setPrompt] = useStudioField("prompt", "");
+  const [model, setModel] = useStudioField("model", "infinitetalk-image-to-video");
+  const [resolution, setResolution] = useStudioField("resolution", "720p");
+  const [imageUrls, setImageUrls] = useStudioField<string[]>("imageUrls", []);
+  const [videoUrl, setVideoUrl] = useStudioField("videoUrl", "");
+  const [audioUrl, setAudioUrl] = useStudioField("audioUrl", "");
   const [audioFile, setAudioFile] = useState<File | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [linkedSocialPostId, setLinkedSocialPostId] = useState<string | null>(socialPostId ?? null);
+  const [jobId, setJobId] = useStudioField<string | null>("jobId", null);
+  const [linkedSocialPostId, setLinkedSocialPostId] = useStudioField<string | null>("linkedSocialPostId", socialPostId ?? null);
 
   const filteredModels = useMemo(
     () =>
@@ -83,6 +88,7 @@ export function LipSyncGenerator({ socialPostId }: Props) {
     [lipSyncModels, mode],
   );
 
+  const pricing = useCreativeQuote(model, { resolution: resolution || undefined, quality: undefined, duration: undefined, aspectRatio: undefined });
   const selectedModel = filteredModels.find((item) => item.id === model) ?? filteredModels[0];
   const resolutionOptions = selectedModel?.resolutions ?? ["720p"];
 
@@ -122,6 +128,7 @@ export function LipSyncGenerator({ socialPostId }: Props) {
   const startLipSync = trpc.media.startLipSyncGeneration.useMutation({
     onSuccess: (result) => {
       setJobId(result.jobId);
+      requestKey.current = null;
       showToast({ title: "Lip sync gestart", description: "Dit kan enkele minuten duren." });
     },
     onError: (error) => showToast({ title: "Lip sync mislukt", description: error.message, variant: "error" }),
@@ -141,7 +148,7 @@ export function LipSyncGenerator({ socialPostId }: Props) {
     onPollError: (message) => showToast({ title: "Status ophalen mislukt", description: message, variant: "error" }),
   });
 
-  const isSubmitting = startLipSync.isPending || uploadMedia.isPending || job.isPolling || job.isAutoImporting;
+  const isSubmitting = uploadingSource || startLipSync.isPending || uploadMedia.isPending || job.isPolling || job.isAutoImporting;
 
   async function handleGenerate() {
     if (!audioUrl.trim() && !audioFile) {
@@ -169,7 +176,12 @@ export function LipSyncGenerator({ socialPostId }: Props) {
         resolvedAudioUrl = uploaded.url;
       }
 
+      setAudioUrl(resolvedAudioUrl);
       startLipSync.mutate({
+        requestKey: requestKey.current || (requestKey.current = crypto.randomUUID()),
+        expectedCredits: pricing.quote.data?.credits,
+        draftId: studio?.draftId,
+        brandKitId: studio?.state.brandKitId || undefined,
         prompt: prompt.trim() || undefined,
         model,
         resolution: resolution || undefined,
@@ -197,20 +209,21 @@ export function LipSyncGenerator({ socialPostId }: Props) {
         icon={Mic}
         title="Lip Sync Studio"
         description="Maak pratende video's van een portret of sync audio op bestaande video."
-        costLabel={selectedModel?.costLabel}
+        costLabel={keyStatus.data?.central ? undefined : selectedModel?.costLabel}
         brandActive={brandKit.data?.enabled}
       >
+        <StudioSection kind="content">
         <GeneratorModeToggle
           value={mode}
           onChange={setMode}
           options={[
-            { value: "PORTRAIT", label: "Portret + audio", hint: "Talking head" },
-            { value: "VIDEO", label: "Video + audio", hint: "Lipsync" },
+            { value: "PORTRAIT", label: "Portret laten spreken" },
+            { value: "VIDEO", label: "Video synchroniseren" },
           ]}
         />
 
         <div className="space-y-2">
-          <Label htmlFor="lipsync-prompt">Prompt (optioneel)</Label>
+          <Label htmlFor="lipsync-prompt">Beweging of sfeer (optioneel)</Label>
           <Textarea
             id="lipsync-prompt"
             value={prompt}
@@ -221,6 +234,7 @@ export function LipSyncGenerator({ socialPostId }: Props) {
           <BrandPromptPreview brand={brandKit.data} prompt={prompt} modelType="LIP_SYNC" />
         </div>
 
+        <StudioSection kind="advanced">
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-2">
             <Label>Model</Label>
@@ -249,8 +263,9 @@ export function LipSyncGenerator({ socialPostId }: Props) {
           ) : null}
         </div>
 
+        </StudioSection>
         <div className={studioSectionClass}>
-          {mode === "PORTRAIT" ? (
+        {mode === "PORTRAIT" ? (
             <ReferencePicker
               label="Portretafbeelding"
               selectedUrls={imageUrls}
@@ -300,13 +315,21 @@ export function LipSyncGenerator({ socialPostId }: Props) {
             <Input
               type="file"
               accept="audio/*"
-              onChange={(event) => {
+              disabled={uploadingSource}
+              onChange={async (event) => {
                 const file = event.target.files?.[0] ?? null;
                 if (file && file.size > MAX_UPLOAD_BYTES) {
                   showToast({ title: "Audio te groot", description: "Max 25MB.", variant: "error" });
                   return;
                 }
                 setAudioFile(file);
+                if (!file) return;
+                setUploadingSource(true);
+                try {
+                  const uploaded=await uploadMedia.mutateAsync({filename:file.name,contentType:file.type || "audio/mpeg",base64:await readFileAsBase64(file)});
+                  setAudioUrl(uploaded.url); setAudioFile(null);
+                } catch(error) {showToast({title:"Audio uploaden mislukt",description:error instanceof Error?error.message:"Probeer opnieuw.",variant:"error"});}
+                finally {setUploadingSource(false);}
               }}
             />
             {audioFile ? (
@@ -315,7 +338,10 @@ export function LipSyncGenerator({ socialPostId }: Props) {
           </div>
         </div>
 
-        <GenerateButton onClick={() => void handleGenerate()} disabled={isSubmitting} isLoading={isSubmitting}>
+        </StudioSection>
+        <StudioSection kind="result">
+        <CreditQuote pricing={pricing} />
+        <GenerateButton onClick={() => void handleGenerate()} disabled={!pricing.canGenerate || isSubmitting} isLoading={isSubmitting}>
           {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
           Genereer lip sync
         </GenerateButton>
@@ -365,6 +391,7 @@ export function LipSyncGenerator({ socialPostId }: Props) {
         {job.errorMessage ? (
           <p className="text-sm text-destructive" role="alert">{job.errorMessage}</p>
         ) : null}
+        </StudioSection>
       </GeneratorShell>
     </MuapiKeyGate>
   );

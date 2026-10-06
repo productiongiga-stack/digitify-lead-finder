@@ -12,7 +12,7 @@ export const OUTBOUND_SOURCE_MODULE_OPTIONS: Array<{
 }> = [
   { value: "all", label: "Alle modules" },
   { value: "campaign", label: "Campagneprofielen" },
-  { value: "outbound", label: "Outbound Center" },
+  { value: "outbound", label: "E-mail & Contacten" },
   { value: "quotes", label: "Offertes" },
   { value: "inbox", label: "Inbox" },
   { value: "reviews", label: "Reviews" },

@@ -1,4 +1,5 @@
 "use client";
+import { useSearchParams } from "next/navigation";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -7,16 +8,27 @@ import { useMutationGeneration } from "@/lib/use-mutation-generation";
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, EmptyState, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, Tabs, TabsContent, Textarea, TooltipProvider } from "@digitify/ui";
 import { BarChart3, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Eye, Layers, Megaphone, Languages, Image as ImageIcon, KeyRound, Loader2, PauseCircle, PencilLine, Plus, RefreshCcw, Save, Search, Send, Settings2, ShieldCheck, Sparkles, Target, Play, Trash2 } from "lucide-react";
 import { AdsStudioStatsStrip, adsStudioStatIcons } from "@/components/ads/ads-studio-stats-strip";
+import { AdsCopilotPanel } from "@/components/ads/ads-copilot-panel";
 import { AdsStudioTabsNav } from "@/components/ads/ads-studio-tabs-nav";
 import { useToast } from "@/components/feedback/toast-provider";
 import { AdsWorkflowPanel, PlanStatus, CampaignType, BuilderStep, MatchType, BiddingStrategy, GOOGLE_ADS_NAV_TABS, CURRENCY_OPTIONS, PmaxImageKind, BUILDER_STEP_ORDER, STEPS, BIDDING_OPTIONS, detectLocationPreset, eur, numberValue, budgetCentsOrNull, prettyDate, statusBadge, asRecord, linesToList, csvToList, listToLines, parseJson, explainGoogleError, ErrorHint, googleCampaignStatusLabel, googleCampaignIsEnabled, googleCampaignIsPaused, describeOperationalRequirement, HelpLabel, WizardSection, CopyAssetListEditor, AudienceSignalsEditor, SearchKeywordsEditor, GeoLocationEditor, LanguageTargetingEditor, ReviewRow, StepButton, CollapsibleCard, CheckRow, GoogleAiBriefingInput, GoogleAiBriefingAction, GoogleAiBriefingDialog, GoogleAdsSetupNotice, GoogleAdsPausedPublishNotice, GoogleAdsHeroStat, FieldCounter, PmaxVisualAssetsPanel, SearchPreview, PerformanceMaxPreview } from "./google-ads-studio-components";
 
 export function GoogleAdsPageInner() {
+  const creativeParams = useSearchParams();
+  const creativeJobId = creativeParams.get("creativeJob");
+  const leadId = creativeParams.get("leadId");
+  const seoContext = creativeParams.get("seoContext");
+  const seoTargetUrl = creativeParams.get("targetUrl");
+  const seoKeywords = creativeParams.get("seoKeywords");
+  const targetCreativePlanId = creativeParams.get("planId");
+  const [appliedCreativeJob, setAppliedCreativeJob] = useState<string | null>(null);
+
   const { showToast } = useToast();
   const utils = trpc.useUtils();
   const { beginGeneration, isCurrentGeneration } = useMutationGeneration();
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [loadedPlanId, setLoadedPlanId] = useState<string | null>(null);
+  const creativeJob = trpc.media.getJobStatus.useQuery({jobId:creativeJobId || ""}, {enabled:Boolean(creativeJobId) && (!targetCreativePlanId || loadedPlanId === targetCreativePlanId) && appliedCreativeJob !== creativeJobId});
   const [editingLiveCampaignId, setEditingLiveCampaignId] = useState<string | null>(null);
   const [editingLiveCampaignStatus, setEditingLiveCampaignStatus] = useState<string | null>(null);
   const [activeStep, setActiveStep] = useState<BuilderStep>("setup");
@@ -71,6 +83,34 @@ export function GoogleAdsPageInner() {
   const [advancedTargetingJson, setAdvancedTargetingJson] = useState("{}");
   const [uploadingAsset, setUploadingAsset] = useState<PmaxImageKind | null>(null);
   const [loginCustomerIdInput, setLoginCustomerIdInput] = useState("");
+  const leadContext = trpc.lead.getById.useQuery({ id: leadId || "" }, { enabled: Boolean(leadId), staleTime: 120_000 });
+  const [appliedLeadContext, setAppliedLeadContext] = useState<string | null>(null);
+  useEffect(() => {
+    if (!leadId || appliedLeadContext === leadId || !leadContext.data) return;
+    const lead = leadContext.data;
+    setProduct(lead.companyName || lead.industry || "");
+    setAudience([lead.industry, lead.city].filter(Boolean).join(" · "));
+    if (!name) setName(`${lead.companyName} campagne`);
+    if (!finalUrl && lead.website) setFinalUrl(lead.website);
+    setAppliedLeadContext(leadId);
+    showToast({ title: "Leadcontext geladen", description: "De advertentiedraft gebruikt deze lead als briefing." });
+  }, [leadId, appliedLeadContext, leadContext.data, name, finalUrl, showToast]);
+  useEffect(() => {
+    if (!seoContext) return;
+    setProduct((current) => current || seoContext);
+    setName((current) => current || `${seoContext} Search campagne`);
+    setFinalUrl((current) => current || seoTargetUrl || "");
+    setKeywordsText((current) => current || seoKeywords || seoContext);
+    setAdsTab("builder");
+  }, [seoContext, seoTargetUrl, seoKeywords]);
+  useEffect(() => {
+    if (!creativeJobId || appliedCreativeJob === creativeJobId || creativeJob.data?.type !== "IMAGE" || !creativeJob.data.blobUrl) return;
+    const assetUrl = creativeParams.get("creativeAssetUrl") || creativeJob.data.blobUrl;
+    if (creativeParams.get("creativeSlot") === "square") setSquareImageUrl(assetUrl); else setImageUrl(assetUrl);
+    setAppliedCreativeJob(creativeJobId); setCampaignType("PERFORMANCE_MAX"); setAdsTab("builder"); setActiveStep("creative");
+    showToast({title:"Creative Studio-afbeelding toegevoegd"});
+  }, [creativeJobId,appliedCreativeJob,creativeJob.data,creativeParams,showToast]);
+
 
   const connection = trpc.googleAds.connectionStatus.useQuery(undefined, { refetchInterval: 30_000 });
   const customers = trpc.googleAds.listCustomers.useQuery(undefined, { enabled: Boolean(connection.data?.connected) });
@@ -98,6 +138,7 @@ export function GoogleAdsPageInner() {
     [rows],
   );
   const filteredRows = approvalFilter === "ALL" ? rows : rows.filter((row: any) => row.status === approvalFilter);
+  useEffect(()=>{if(targetCreativePlanId && rows.some((row:{id:string})=>row.id === targetCreativePlanId)) {setSelectedPlanId(targetCreativePlanId);setAdsTab("builder");}},[targetCreativePlanId,rows]);
   const selectedPlan = rows.find((row: any) => row.id === selectedPlanId) || null;
   const totalSpend = useMemo(() => (insights.data || []).reduce((sum: number, row: any) => sum + Number(row.spend || 0), 0), [insights.data]);
   const totalClicks = useMemo(() => (insights.data || []).reduce((sum: number, row: any) => sum + Number(row.clicks || 0), 0), [insights.data]);
@@ -386,28 +427,28 @@ export function GoogleAdsPageInner() {
   const pauseCampaign = trpc.googleAds.pauseInGoogle.useMutation({
     onSuccess: async () => {
       await invalidate();
-      showToast({ title: "Campagne gepauzeerd in Google Ads" });
+      showToast({ title: "Pauzevoorstel aangemaakt", description: "Open Goedkeuring om dit naar Google Ads door te zetten." });
     },
     onError: (error) => showToast({ title: "Pauzeren mislukt", description: explainGoogleError(error.message)?.message || error.message, variant: "error" }),
   });
   const resumeCampaign = trpc.googleAds.resumeInGoogle.useMutation({
     onSuccess: async () => {
       await invalidate();
-      showToast({ title: "Campagne geactiveerd in Google Ads" });
+      showToast({ title: "Voorstel om te hervatten aangemaakt", description: "Open Goedkeuring om dit naar Google Ads door te zetten." });
     },
     onError: (error) => showToast({ title: "Activeren mislukt", description: explainGoogleError(error.message)?.message || error.message, variant: "error" }),
   });
   const removeCampaign = trpc.googleAds.removeCampaign.useMutation({
     onSuccess: async () => {
       await invalidate();
-      showToast({ title: "Campagne verwijderd in Google Ads" });
+      showToast({ title: "Verwijdervoorstel aangemaakt", description: "Open Goedkeuring om dit naar Google Ads door te zetten." });
     },
     onError: (error) => showToast({ title: "Verwijderen mislukt", description: explainGoogleError(error.message)?.message || error.message, variant: "error" }),
   });
   const updateCampaignName = trpc.googleAds.updateCampaignName.useMutation({
     onSuccess: async () => {
       await invalidate();
-      showToast({ title: "Campagnenaam bijgewerkt" });
+      showToast({ title: "Naamvoorstel aangemaakt", description: "Open Goedkeuring om dit naar Google Ads door te zetten." });
     },
     onError: (error) => showToast({ title: "Naam wijzigen mislukt", description: explainGoogleError(error.message)?.message || error.message, variant: "error" }),
   });
@@ -553,6 +594,7 @@ export function GoogleAdsPageInner() {
           audience: brief.audience.trim() || undefined,
           campaignType,
           tone: brief.tone,
+          leadId: leadId || undefined,
         },
         { onSuccess: guardSuccess(applySuggestionSuccess) },
       );
@@ -668,6 +710,7 @@ export function GoogleAdsPageInner() {
         ...advancedTargeting,
       },
       creatives: {
+        brandKitId: creativeParams.get("brandKitId") || undefined,
         finalUrl: finalUrl.trim(),
         headlines,
         longHeadlines,
@@ -826,6 +869,8 @@ export function GoogleAdsPageInner() {
           ) : null}
         </div>
       </section>
+
+      <AdsCopilotPanel provider="GOOGLE" campaignIds={editingLiveCampaignId ? [editingLiveCampaignId] : []} />
 
       {(!connection.data?.hasDeveloperToken || !connection.data?.autoadsEnabled) ? (
         <div className="space-y-2">

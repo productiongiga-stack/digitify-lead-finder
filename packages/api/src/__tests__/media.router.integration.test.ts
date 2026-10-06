@@ -18,6 +18,12 @@ vi.mock("../lib/creative-brand", () => ({
   })),
 }));
 
+vi.mock("@digitify/media-studio", async (importActual) => ({
+  ...await importActual<typeof import("@digitify/media-studio")>(),
+  fetchMuapiResultOnce: vi.fn().mockResolvedValue({status:"processing"}),
+}));
+import { fetchMuapiResultOnce } from "@digitify/media-studio";
+
 import * as muapiKey from "../lib/muapi-key";
 import { mediaRouter } from "../routers/media.router";
 
@@ -50,6 +56,7 @@ function makeCtx(db: Record<string, unknown> = {}) {
 
 describe("media router", () => {
   beforeEach(() => {
+    vi.stubEnv("CREATIVE_CREDITS_ENABLED", "false");
     vi.mocked(muapiKey.loadUserMuapiKey).mockResolvedValue("");
     vi.mocked(muapiKey.requireUserMuapiKey).mockResolvedValue("test-key");
   });
@@ -69,6 +76,19 @@ describe("media router", () => {
     expect(status.hasKey).toBe(true);
   });
 
+  it("polls a legacy job using its author's key, not the viewer's key",async()=>{
+    const findFirst=vi.fn().mockResolvedValue({id:"job_shared",workspaceId:TEST_USER_ID,userId:"original_author",requestId:"provider_request",status:"PROCESSING",metadata:{},type:"IMAGE",prompt:"test"});
+    const caller=mediaRouter.createCaller(makeCtx({mediaGeneration:{findFirst}}));
+    await caller.getJobStatus({jobId:"job_shared"});
+    expect(muapiKey.requireUserMuapiKey).toHaveBeenCalledWith(expect.anything(),"original_author");
+  });
+  it("keeps the job processing after a temporary polling failure",async()=>{
+    const update=vi.fn();
+    const findFirst=vi.fn().mockResolvedValue({id:"job_shared",workspaceId:TEST_USER_ID,userId:"original_author",requestId:"provider_request",status:"PROCESSING",metadata:{},type:"IMAGE",prompt:"test"});
+    vi.mocked(fetchMuapiResultOnce).mockRejectedValueOnce(new Error("Temporary network error"));
+    await expect(mediaRouter.createCaller(makeCtx({mediaGeneration:{findFirst,update}})).getJobStatus({jobId:"job_shared"})).rejects.toThrow("tijdelijk niet beschikbaar");
+    expect(update).not.toHaveBeenCalled();
+  });
   it("deleteGeneration removes workspace job", async () => {
     const deleteMock = vi.fn().mockResolvedValue({ id: "job_1" });
     const findFirst = vi.fn().mockResolvedValue({ id: "job_1", workspaceId: TEST_USER_ID });

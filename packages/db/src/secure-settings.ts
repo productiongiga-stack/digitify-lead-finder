@@ -22,6 +22,8 @@ const SECRET_SETTING_KEYS = new Set([
   "social.meta_page_access_token",
   "ads.google_oauth_access_token",
   "ads.google_oauth_refresh_token",
+  "files.google_drive_access_token",
+  "files.google_drive_refresh_token",
 ]);
 
 function normalizeKey(key: string) {

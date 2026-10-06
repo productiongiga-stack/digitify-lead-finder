@@ -66,6 +66,9 @@ export default function SeoSettingsPage() {
   const pathname = usePathname();
   const { data: settings, isLoading } = trpc.settings.getSeoSettings.useQuery(undefined, SETTINGS_PAGE_QUERY_OPTS);
   const { data: publicSeo } = trpc.settings.getPublicSeo.useQuery();
+  const { data: seoConnectors } = trpc.seo.connectorStatus.useQuery(undefined, { staleTime: 30_000 });
+  const searchConsoleProperties = trpc.seo.listSearchConsoleProperties.useQuery(undefined, { enabled: Boolean(seoConnectors?.searchConsole.connected) });
+  const selectSearchConsoleProperty = trpc.seo.selectSearchConsoleProperty.useMutation();
   const utils = trpc.useUtils();
   const { showToast } = useToast();
 
@@ -249,6 +252,25 @@ export default function SeoSettingsPage() {
       </div>
 
       <OpenClawPageAssist pathname={pathname} />
+
+      <Card className="app-surface border-primary/20">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Keyword research</CardTitle>
+          <CardDescription>Verbind Google Search Console voor echte zoekopdrachten en posities.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" asChild>
+            <Link href="/api/integrations/google-search-console/connect">Google Search Console koppelen</Link>
+          </Button>
+          {seoConnectors?.searchConsole.connected ? <select aria-label="Search Console-property" className="h-10 rounded-md border bg-background px-3 text-sm" value={seoConnectors.searchConsole.property || ""} onChange={(event) => { if (event.target.value) void selectSearchConsoleProperty.mutateAsync({ property: event.target.value }); }}>
+            <option value="">Kies property</option>
+            {(searchConsoleProperties.data || []).map((property) => <option key={property.siteUrl} value={property.siteUrl}>{property.siteUrl}</option>)}
+          </select> : null}
+          <Button variant="ghost" asChild>
+            <Link href="/seo?tab=research">Naar SEO research</Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card className="app-surface border-primary/20">
         <CardHeader className="pb-2">

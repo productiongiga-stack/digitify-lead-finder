@@ -1,5 +1,6 @@
 "use client";
 
+import { trpc } from "@/lib/trpc/client";
 import Link from "next/link";
 import { Button, Card, CardContent, Skeleton } from "@digitify/ui";
 import { KeyRound, Sparkles } from "lucide-react";
@@ -21,6 +22,8 @@ export function MuapiKeyGate({
   description = "Voeg je persoonlijke MuAPI-sleutel toe om te genereren.",
   children,
 }: Props) {
+  const keyStatus = trpc.media.getMuapiKeyStatus.useQuery(undefined, {staleTime:60000});
+  if (keyStatus.data?.central) return <>{children}</>;
   if (isLoading) {
     return (
       <Card className="overflow-hidden">

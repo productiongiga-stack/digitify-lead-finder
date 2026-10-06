@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { recordSecurityAuditEvent } from "@digitify/api/src/lib/security-audit";
 import { getCurrentUser } from "@/lib/auth/session";
+import { readLocalWorkspaceFile } from "@digitify/api/src/lib/file-storage";
 
 function safeDownloadName(name: string) {
   return name.replace(/[^a-zA-Z0-9._ -]+/g, "-").slice(0, 180) || "bestand";
@@ -14,7 +15,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Niet geauthenticeerd." }, { status: 401 });
   const { id } = await params;
-  const file = await prisma.workspaceFile.findFirst({ where: { id, createdById: user.workspaceId } });
+  const file = await prisma.workspaceFile.findFirst({ where: { id, createdById: user.workspaceId, deletedAt: null } });
   if (!file) return NextResponse.json({ error: "Bestand niet gevonden." }, { status: 404 });
 
   const headers = {
@@ -25,6 +26,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   };
 
   try {
+    if (file.storageProvider === "GOOGLE_DRIVE" && file.driveWebUrl) {
+      return NextResponse.redirect(file.driveWebUrl);
+    }
+    if (file.storageProvider === "LOCAL" && file.storageKey) {
+      const body = await readLocalWorkspaceFile(file.storageKey, user.workspaceId);
+      await recordSecurityAuditEvent(prisma, { workspaceId: user.workspaceId, actorUserId: user.actorUserId ?? user.id, targetUserId: user.id, action: "FILE_DOWNLOADED", resource: "WorkspaceFile", resourceId: file.id, result: "SUCCESS", requestId: _req.headers.get("x-request-id") ?? undefined });
+      return new NextResponse(body, { headers });
+    }
     const parsed = new URL(file.storageUrl);
     if (parsed.pathname.startsWith(`/uploads/workspaces/${user.workspaceId}/`)) {
       const relative = parsed.pathname.replace(/^\//, "");

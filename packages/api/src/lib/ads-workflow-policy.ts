@@ -20,7 +20,7 @@ export function fingerprint(value: unknown): string {
     : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort()
       .filter((k) => !["updated_time", "effective_status", "resources", "syncedAt"].includes(k))
       .map((k) => [k, canonical(v[k])])) : v;
-  return createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
+  return createHash("sha256").update(JSON.stringify(canonical(value)) ?? "undefined").digest("hex");
 }
 
 export function editablePath(provider: AdProvider, path: string): boolean {
@@ -29,14 +29,15 @@ export function editablePath(provider: AdProvider, path: string): boolean {
   return /^(campaign\.(name|daily_budget|lifetime_budget)|adsets\.\d+\.(name|daily_budget|lifetime_budget|targeting|bid_amount|start_time|end_time)|adsets\.\d+\.ads\.\d+\.(name|status)|adsets\.\d+\.ads\.\d+\.creative\.object_story_spec)$/.test(path);
 }
 
-export function applyPatches(provider: AdProvider, before: AdSnapshot, patches: Array<z.infer<typeof changePatchSchema>>): AdSnapshot {
+export function applyPatches(provider: AdProvider, before: AdSnapshot, patches: Array<z.infer<typeof changePatchSchema>>, options?: { allowCampaignStatus?: boolean }): AdSnapshot {
   const after = structuredClone(before);
   if (!patches.length || patches.length > 60) throw new Error("Kies 1 tot 60 wijzigingen.");
   const paths = new Set<string>();
   for (const patch of patches) {
-    if (!editablePath(provider, patch.path) || paths.has(patch.path)) throw new Error("Dit veld is alleen-lezen of komt dubbel voor: " + patch.path);
+    const isCampaignStatus = patch.path === "status" || patch.path === "campaign.status";
+    if ((!editablePath(provider, patch.path) && !(options?.allowCampaignStatus && isCampaignStatus)) || paths.has(patch.path)) throw new Error("Dit veld is alleen-lezen of komt dubbel voor: " + patch.path);
     paths.add(patch.path);
-    if (provider === "META" && patch.path.endsWith(".status")) z.enum(["ACTIVE", "PAUSED"]).parse(patch.value);
+    if (provider === "META" && patch.path.endsWith(".status")) z.enum(["ACTIVE", "PAUSED", "DELETED"]).parse(patch.value);
     if (provider === "GOOGLE" && before.campaignType === "PERFORMANCE_MAX" &&
       (/^targeting\.(?!campaignSettings\.)/.test(patch.path) || /^creatives\.(path[12]|headlinePin1|descriptionPin1)$/.test(patch.path))) {
       throw new Error("Dit veld wordt voor Performance Max nog niet ondersteund en blijft alleen-lezen.");
@@ -62,6 +63,7 @@ export function applyPatches(provider: AdProvider, before: AdSnapshot, patches: 
 export function validateSnapshot(provider: AdProvider, snapshot: AdSnapshot) {
   const positiveBudget = z.coerce.number().int().positive().max(100_000_000);
   if (provider === "GOOGLE") {
+    if (snapshot.status != null) z.enum(["ENABLED", "PAUSED", "REMOVED"]).parse(snapshot.status);
     z.object({ name: z.string().min(2).max(160), dailyBudgetCents: positiveBudget,
       creatives: z.object({
         finalUrl: z.string().url().refine((v) => /^https?:\/\//.test(v)),
@@ -82,7 +84,7 @@ export function validateSnapshot(provider: AdProvider, snapshot: AdSnapshot) {
     }).passthrough().parse(snapshot);
     if (snapshot.campaignType === "PERFORMANCE_MAX" && !snapshot.creatives.longHeadlines?.length) throw new Error("Performance Max vereist een lange headline.");
   } else {
-    z.object({ campaign: z.object({ id: z.string().min(1), name: z.string().min(2).max(160) }).passthrough(),
+    z.object({ campaign: z.object({ id: z.string().min(1), name: z.string().min(2).max(160), status: z.enum(["ACTIVE", "PAUSED", "DELETED"]).optional() }).passthrough(),
       adsets: z.array(z.object({ id: z.string().min(1), name: z.string().min(1).max(160),
         daily_budget: positiveBudget.optional(), lifetime_budget: positiveBudget.optional(),
         targeting: z.record(z.unknown()).optional(), ads: z.array(z.object({ id: z.string().min(1),
@@ -112,8 +114,8 @@ export function checkBudgetChange(provider: AdProvider, before: AdSnapshot, afte
 }
 
 export const AD_CAPABILITIES = {
-  GOOGLE: { editable: ["Campagnenaam", "Dagbudget", "Zoekwoorden", "Locaties en talen", "RSA-teksten en URL", "Tracking", "PMax teksten en beelden"],
+  GOOGLE: { editable: ["Campagnenaam", "Status via approval", "Dagbudget", "Zoekwoorden", "Locaties en talen", "RSA-teksten en URL", "Tracking", "PMax teksten en beelden"],
     readOnly: ["Campagnetype", "Conversiedoelen", "Biedstrategie", "Planning", "Video-assets", "Niet-ondersteunde campagnetypes"] },
-  META: { editable: ["Campagnenaam", "Budget", "Ad set-naam", "Targeting", "Biedbedrag", "Planning", "Advertentienaam", "Creative, links en CTA"],
-    readOnly: ["Campagnedoel", "Biedstrategie", "Conversie-event", "Bestaande creative-ID", "Activering"] },
+  META: { editable: ["Campagnenaam", "Status via approval", "Budget", "Ad set-naam", "Targeting", "Biedbedrag", "Planning", "Advertentienaam", "Creative, links en CTA"],
+    readOnly: ["Campagnedoel", "Biedstrategie", "Conversie-event", "Bestaande creative-ID", "Activering buiten approval"] },
 } as const;

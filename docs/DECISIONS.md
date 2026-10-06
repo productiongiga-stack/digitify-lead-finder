@@ -145,6 +145,13 @@ Authenticators behoren aan personen, niet aan workspaces. Ook workspacebeheerder
 
 ## Template voor nieuwe ADR
 
+## ADR-016: Recipient-first outbound drafts
+
+**Status:** Actief
+**Datum:** 2026-10-06
+**Beslissing:** Een `EmailDraft` is workspace-scoped en mag zonder `leadId` bestaan. Een geldig e-mailadres is voldoende voor concept, approval en verzending; een lead wordt alleen na een expliciete gebruikersactie aangemaakt of gekoppeld. Nieuwe berichten uit Compose en Inbox volgen dezelfde approvalflow; replies blijven direct replies.
+**Gevolgen:** RLS en API-queries gebruiken `EmailDraft.workspaceId`, bestaande leadrelaties blijven optioneel en behouden hun mailhistorie. Dashboard- en Outbound-overzichten kunnen nu ook recipient-only drafts tonen.
+
 ## Ads-achtergrondtaken: duurzame PostgreSQL-queue met veilige herstart
 
 **Datum:** 2026-10-02. **Status:** lokaal geïmplementeerd, scheduler niet automatisch actief.

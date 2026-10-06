@@ -61,6 +61,7 @@ type MetaCreativeVariant = {
   description?: string;
   linkUrl?: string;
   displayUrl?: string;
+  videoUrl?: string;
   imageUrl?: string;
   feedImageUrl?: string;
   squareImageUrl?: string;
@@ -829,7 +830,7 @@ function validateCreativeForPush(
   }
 
   const imageUrl = resolveCreativeVariantImageUrl(creative);
-  if (!imageUrl) {
+  if (!imageUrl && !optionalString(creative.videoUrl)) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "META_ASSET_RATIO_INVALID · Er ontbreekt een publiceerbare visual voor deze advertentievariant." });
   }
 
@@ -841,7 +842,7 @@ function validateCreativeForPush(
     placements.some((placement) => ["facebook_story", "facebook_reels", "instagram_story", "instagram_reels"].includes(placement)) ||
     facebookPositions.some((position) => ["story", "facebook_reels"].includes(position)) ||
     instagramPositions.some((position) => ["story", "reels"].includes(position));
-  if (hasStoryPlacement && !optionalString(creative.storyImageUrl) && String(creative.publishAsset || "").trim().toLowerCase() !== "story") {
+  if (hasStoryPlacement && !optionalString(creative.videoUrl) && !optionalString(creative.storyImageUrl) && String(creative.publishAsset || "").trim().toLowerCase() !== "story") {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: "META_ASSET_RATIO_INVALID · Stories/Reels zijn geselecteerd, maar er is geen aparte 9:16 story/reels asset ingesteld.",
@@ -866,6 +867,16 @@ function buildObjectStorySpec(config: MetaAdsWorkspaceConfig, creatives: unknown
   if (!linkUrl) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Creative linkUrl ontbreekt. Voeg een bestemmingslink toe." });
   }
+  if (optionalString(creative.videoId)) return {
+    page_id: config.pageId,
+    video_data: {
+      video_id: creative.videoId,
+      title: optionalString(creative.headline),
+      message: optionalString(creative.message) || optionalString(creative.primaryText),
+      image_url: optionalString(creative.videoThumbnailUrl) || resolveCreativeImageUrl(creative) || undefined,
+      call_to_action: { type: optionalString(creative.ctaType) || "LEARN_MORE", value: { link: linkUrl } },
+    },
+  };
   return {
     page_id: config.pageId,
     link_data: {
@@ -1007,6 +1018,19 @@ export async function pushPausedMetaAdPlan(params: {
       try {
         validateCreativeForPush(objective, definition.targeting, variant.creative, campaignSettings);
 
+        if (optionalString(variant.creative.videoUrl)) {
+          const videoUrl = String(variant.creative.videoUrl);
+          const parsedVideo = new URL(videoUrl);
+          if (parsedVideo.protocol !== "https:" || !parsedVideo.hostname.endsWith(".public.blob.vercel-storage.com")) throw new Error("Video moet eerst duurzaam in de Digitify-bibliotheek opgeslagen zijn.");
+          const uploaded = await metaPost(`${adAccountId}/advideos`, { access_token: config.accessToken, file_url: videoUrl }) as { id?: string };
+          if (!uploaded.id) throw new Error("Meta heeft nog geen video-ID teruggegeven.");
+          variant.creative.videoId = uploaded.id;
+          if (!resolveCreativeImageUrl(variant.creative)) {
+            const thumbs = await metaGet(`${uploaded.id}/thumbnails`, {access_token:config.accessToken, fields:"uri", limit:"1"}) as {data?:Array<{uri?:string}>};
+            if (!thumbs.data?.[0]?.uri) throw new Error("Meta verwerkt de video nog. Probeer de publicatie later opnieuw of voeg een poster toe.");
+            variant.creative.videoThumbnailUrl = thumbs.data[0].uri;
+          }
+        }
         const creativeBody: Record<string, string | undefined> = {
           access_token: config.accessToken,
           name: variant.name,

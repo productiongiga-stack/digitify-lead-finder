@@ -234,16 +234,16 @@ export function ContactsPageInner() {
       />
       <div className="app-page-header">
         <div className="app-page-heading">
-          <h1 className="app-page-title">Outbound Center</h1>
+          <h1 className="app-page-title">E-mail &amp; Contacten</h1>
           <p className="app-page-subtitle">
-            Concept → goedkeuren → verzenden. Goedkeuren stuurt nog niet; gebruik Verzenden voor SMTP.
+            Maak een mail voor een lead of rechtstreeks voor elk geldig e-mailadres. Concept → goedkeuren → verzenden.
           </p>
         </div>
         <div className="app-page-actions">
           <Link href="/contacts/compose">
             <Button size="sm">
               <PenSquare className="mr-2 h-4 w-4" />
-              Nieuwe E-mail
+              Nieuwe e-mail
             </Button>
           </Link>
           <Link href="/templates">
@@ -417,7 +417,19 @@ export function ContactsPageInner() {
             Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-xl" />)
           ) : (data?.items.length ?? 0) === 0 ? (
             <div className="rounded-xl border">
-              <EmptyState icon={<Mail />} title="Nog geen e-mail drafts" size="sm" />
+              <EmptyState
+                icon={<Mail />}
+                title="Nog geen e-maildrafts"
+                description="Start met een lead of losse ontvanger."
+                size="sm"
+                action={
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button asChild size="sm"><Link href="/contacts/compose">Nieuwe e-mail</Link></Button>
+                    <Button asChild size="sm" variant="outline"><Link href="/contacts/inbox">Inbox</Link></Button>
+                    <Button asChild size="sm" variant="outline"><Link href="/templates">Templates</Link></Button>
+                  </div>
+                }
+              />
             </div>
           ) : (
             (data?.items ?? []).map((draft: NonNullable<typeof data>["items"][number]) => (
@@ -543,7 +555,13 @@ export function ContactsPageInner() {
             ) : data?.items.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="h-32 text-center">
-                  <EmptyState icon={<Mail />} title="Nog geen e-mail drafts" size="sm" />
+                  <EmptyState
+                    icon={<Mail />}
+                    title="Nog geen e-maildrafts"
+                    description="Start met een lead of losse ontvanger."
+                    size="sm"
+                    action={<Button asChild size="sm"><Link href="/contacts/compose">Nieuwe e-mail</Link></Button>}
+                  />
                 </TableCell>
               </TableRow>
             ) : (

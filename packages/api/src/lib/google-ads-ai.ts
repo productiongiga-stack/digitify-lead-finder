@@ -1,9 +1,11 @@
 import type { PrismaClient } from "@digitify/db";
 import { getSettingString, settingsRowsToMap } from "./settings";
 import { loadWorkspaceSettingRows } from "./workspace-settings";
+import { businessProfileToContext, loadAiBusinessProfile } from "./ai-business-profile";
 import { extractJsonFromAiResponse } from "./meta-ads-ai";
 
 export async function loadGoogleAdsAiContext(db: PrismaClient, workspaceId: string) {
+  const profile = await loadAiBusinessProfile(db, workspaceId);
   const rows = await loadWorkspaceSettingRows(db, { workspaceId, memberId: workspaceId }, [
     "branding.company_name",
     "company.name",
@@ -15,33 +17,15 @@ export async function loadGoogleAdsAiContext(db: PrismaClient, workspaceId: stri
     "openclaw.business_context",
   ]);
   const settings = settingsRowsToMap(rows);
-  const companyName =
-    getSettingString(settings, "branding.company_name") ||
-    getSettingString(settings, "company.name", "Digitify");
-  const services = getSettingString(settings, "openclaw.business_context", "")
-    .split(/\r?\n|,/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 30);
-  const knowledgePages = getSettingString(settings, "chatbot.knowledge_pages", "")
-    .split(/\r?\n|,/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 20);
-
+  const companyName = profile.companyName;
   return {
     companyName,
     website: getSettingString(settings, "company.website", ""),
     responseStyle: getSettingString(settings, "chatbot.response_style", "professioneel"),
     trainingNotes: getSettingString(settings, "chatbot.training_notes", "").slice(0, 4000),
-    businessContext: {
-      companyDescription: getSettingString(settings, "chatbot.training_notes", "").slice(0, 2000),
-      services,
-      website: getSettingString(settings, "company.website", ""),
-      contactEmail: getSettingString(settings, "company.email", ""),
-      responseStyle: getSettingString(settings, "chatbot.response_style", "professioneel"),
-      knowledgePages,
-    },
+    businessContext: businessProfileToContext(profile),
+    profileHash: profile.hash,
+    profileVersion: profile.version,
   };
 }
 
@@ -52,12 +36,12 @@ export function buildGoogleCampaignSystemPrompt(input: {
   campaignType: "SEARCH" | "PERFORMANCE_MAX";
 }) {
   return (
-    `Je bent een Google Ads specialist voor Belgische KMO's (${input.companyName}). ` +
+    `Je bent een Google Ads specialist voor ${input.companyName}. ` +
     `Je schrijft drafts voor ${input.campaignType === "PERFORMANCE_MAX" ? "Performance Max" : "Search"} campagnes. ` +
     "Geef ALLEEN geldige JSON terug, zonder markdown of uitleg. " +
     "Headlines max 30 tekens (min 3, max 15). Descriptions max 90 tekens (min 2). " +
     "Long headlines max 90 tekens voor Performance Max. " +
-    "Keywords: relevante Nederlandse zoektermen voor België. " +
+    "Keywords: relevante zoektermen voor de opgegeven markt en doelgroep. " +
     "finalUrl moet https:// zijn. " +
     `Tone of voice: ${input.responseStyle}. ` +
     (input.trainingNotes.trim() ? `Chatbot / workspace training:\n${input.trainingNotes.trim()}\n` : "")
@@ -95,9 +79,9 @@ export function buildGoogleCampaignUserPrompt(input: {
     `  "imageBrief": string\n` +
     `}\n` +
     `Product/dienst: ${input.product}\n` +
-    `Doelgroep: ${input.audience || "Belgische KMO-eigenaars en zaakvoerders"}\n` +
+    `Doelgroep: ${input.audience || "niet opgegeven"}\n` +
     `Tone: ${input.tone || "professioneel"}\n` +
-    `Website: ${input.website || "https://leads.digitify.be"}`
+    `Website: ${input.website || "niet opgegeven"}`
   );
 }
 
@@ -124,7 +108,7 @@ export function normalizeGoogleCampaignSuggestion(
   const creatives = {
     ...fallbackCreatives,
     ...creativesRaw,
-    finalUrl: String(creativesRaw.finalUrl || creativesRaw.linkUrl || fallbackCreatives.finalUrl || "https://leads.digitify.be"),
+    finalUrl: String(creativesRaw.finalUrl || creativesRaw.linkUrl || fallbackCreatives.finalUrl || ""),
     headlines: asStringArray(creativesRaw.headlines || creativesRaw.headline, 15, 30),
     descriptions: asStringArray(creativesRaw.descriptions || creativesRaw.description, 5, 90),
     longHeadlines: asStringArray(creativesRaw.longHeadlines || creativesRaw.longHeadline, 5, 90),
@@ -180,7 +164,7 @@ export function buildAudienceSignalsSystemPrompt(input: {
   companyName: string;
 }) {
   return (
-    `Je bent een Google Ads Performance Max specialist voor Belgische en Nederlandse KMO's (${input.companyName}). ` +
+    `Je bent een Google Ads Performance Max specialist voor ${input.companyName}. ` +
     "Je stelt richtinggevende audience signals voor (rollen, interesses, sectoren). " +
     "Geef ALLEEN geldige JSON terug: { \"audienceSignals\": string[] }. " +
     "Elk signaal max 80 tekens, Nederlands, geen nummering. " +
@@ -200,7 +184,7 @@ export function buildAudienceSignalsUserPrompt(input: {
     `Genereer 6–10 nieuwe audience signals voor Performance Max.\n` +
     `JSON: { "audienceSignals": string[] }\n` +
     `Product/dienst: ${input.product}\n` +
-    `Doelgroep: ${input.audience || "Belgische KMO-eigenaars en marketingbeslissers"}\n` +
+    `Doelgroep: ${input.audience || "niet opgegeven"}\n` +
     `Tone: ${input.tone || "professioneel"}\n` +
     (existing.length
       ? `Bestaande signalen (niet herhalen): ${existing.join(", ")}\n`
@@ -215,7 +199,7 @@ export function buildSearchKeywordsSystemPrompt(input: {
   companyName: string;
 }) {
   return (
-    `Je bent een Google Ads Search specialist voor Belgische KMO's (${input.companyName}). ` +
+    `Je bent een Google Ads Search specialist voor ${input.companyName}. ` +
     "Je stelt zoekwoorden en uitsluitende termen voor in het Nederlands (België). " +
     'Geef ALLEEN geldige JSON: { "keywords": string[], "negativeKeywords": string[], "adGroupName": string }. ' +
     "Keywords: koopintentie, max 80 tekens. Negatieven: vermijd gratis-zoekers, vacatures, fraude. " +
@@ -235,7 +219,7 @@ export function buildSearchKeywordsUserPrompt(input: {
     `Genereer 8–15 zoekwoorden en 4–8 uitsluitende zoekwoorden voor een Search-campagne.\n` +
     `JSON: { "keywords": string[], "negativeKeywords": string[], "adGroupName": string }\n` +
     `Product: ${input.product}\n` +
-    `Doelgroep: ${input.audience || "Belgische KMO's"}\n` +
+    `Doelgroep: ${input.audience || "niet opgegeven"}\n` +
     (input.existingKeywords?.length
       ? `Bestaande keywords (niet herhalen): ${input.existingKeywords.join(", ")}\n`
       : "") +

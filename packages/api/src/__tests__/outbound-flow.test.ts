@@ -66,6 +66,42 @@ describe("outbound approval flow", () => {
     expect(emailDraftCreate).toHaveBeenCalled();
   });
 
+  it("creates a recipient-only draft without creating a lead", async () => {
+    const emailDraftCreate = vi.fn().mockResolvedValue({
+      id: "draft_recipient",
+      workspaceId: WORKSPACE_ID,
+      leadId: null,
+      toEmail: "person@example.com",
+      status: "DRAFT",
+    });
+    const activityCreate = vi.fn().mockResolvedValue({ id: "act_recipient" });
+    const caller = contactRouter.createCaller(
+      makeCtx(
+        {
+          lead: { findFirst: vi.fn() },
+          emailDraft: { create: emailDraftCreate, findFirst: vi.fn() },
+          activity: { create: activityCreate },
+        },
+        { id: MEMBER_ID, role: "MEMBER" },
+      ),
+    );
+
+    const draft = await caller.createDraft({
+      toEmail: " Person@Example.com ",
+      subject: "Hallo",
+      body: "Bericht",
+    });
+
+    expect(draft.leadId).toBeNull();
+    expect(emailDraftCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        workspaceId: WORKSPACE_ID,
+        leadId: undefined,
+        toEmail: "person@example.com",
+      }),
+    }));
+  });
+
   it("approve moves PENDING_APPROVAL to APPROVED without sending", async () => {
     const findFirst = vi
       .fn()

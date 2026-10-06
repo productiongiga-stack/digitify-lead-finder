@@ -134,9 +134,13 @@ export class OpenClawClient {
             type: "object",
             properties: {
               summary: { type: "string" },
+              fitScore: { type: "number" },
               opportunities: { type: "array", items: { type: "string" } },
               risks: { type: "array", items: { type: "string" } },
+              matchedServices: { type: "array", items: { type: "string" } },
               suggestedApproach: { type: "string" },
+              nextAction: { type: "string" },
+              evidence: { type: "array", items: { type: "string" } },
               confidence: { type: "number" },
             },
             required: ["summary", "opportunities", "risks", "suggestedApproach", "confidence"],
@@ -245,9 +249,13 @@ function parseEmailDraftResponse(
 
 const leadAnalysisSchema = z.object({
   summary: z.string().min(1).max(500),
+  fitScore: z.number().min(0).max(100).optional(),
   opportunities: z.array(z.string().min(1).max(200)).max(8).default([]),
   risks: z.array(z.string().min(1).max(200)).max(8).default([]),
+  matchedServices: z.array(z.string().min(1).max(200)).max(8).optional(),
   suggestedApproach: z.string().min(1).max(500).default("Gepersonaliseerde outreach"),
+  nextAction: z.string().max(300).optional(),
+  evidence: z.array(z.string().min(1).max(250)).max(8).optional(),
   confidence: z.number().min(0).max(100).default(50),
 });
 

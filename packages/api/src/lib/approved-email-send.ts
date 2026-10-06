@@ -9,7 +9,7 @@ const leadSelection = {
 
 async function loadDraft(db: PrismaClient, id: string, workspaceId: string) {
   return db.emailDraft.findFirst({
-    where: { id, lead: { createdById: workspaceId } },
+    where: { id, workspaceId },
     include: { lead: { select: leadSelection } },
   });
 }
@@ -35,7 +35,7 @@ export async function sendApprovedDraft(
   }
   if (options.drip) {
     const replied = draft.sequenceId && await db.emailDraft.findFirst({
-      where: { leadId: draft.leadId, sequenceId: draft.sequenceId, repliedAt: { not: null } },
+      where: { workspaceId, leadId: draft.leadId, sequenceId: draft.sequenceId, repliedAt: { not: null } },
       select: { id: true },
     });
     if (replied || ["RESPONDED", "QUALIFIED", "PROPOSAL_SENT", "WON", "LOST", "ARCHIVED"].includes(draft.lead?.status ?? "")) {
@@ -44,9 +44,9 @@ export async function sendApprovedDraft(
   }
   const claimed = await db.emailDraft.updateMany({
     where: {
-      id, status: draft.status, updatedAt: draft.updatedAt, sentAt: null,
+      id, workspaceId, status: draft.status, updatedAt: draft.updatedAt, sentAt: null,
       approvedAt: draft.approvedAt, approverId: draft.approverId,
-      lead: { createdById: workspaceId, ...(prospecting ? { doNotContact: false } : {}) },
+      ...(prospecting ? { OR: [{ leadId: null }, { lead: { doNotContact: false } }] } : {}),
     },
     data: { status: "SENDING", rejectionNote: null },
   });
@@ -64,7 +64,7 @@ export async function sendApprovedDraft(
       ? "Verzenden mislukt voordat de mail werd aangeboden. Controleer de e-mailinstellingen."
       : "Aflevering onzeker. Controleer de verzonden berichten bij je mailprovider voordat je opnieuw contact opneemt.";
     await db.emailDraft.updateMany({
-      where: { id, status: "SENDING", lead: { createdById: workspaceId } },
+      where: { id, workspaceId, status: "SENDING" },
       data: { status: result.delivery === "not_sent" ? "FAILED" : "DELIVERY_UNKNOWN", rejectionNote: message },
     });
     throw new TRPCError({ code: "PRECONDITION_FAILED", message });
@@ -73,18 +73,18 @@ export async function sendApprovedDraft(
   // Never turn an accepted email back into FAILED when bookkeeping fails.
   try {
     const finalized = await db.emailDraft.updateMany({
-      where: { id, status: "SENDING", lead: { createdById: workspaceId } },
+      where: { id, workspaceId, status: "SENDING" },
       data: { status: "SENT", sentAt: new Date(), messageId: result.messageId, rejectionNote: null },
     });
     if (finalized.count !== 1) throw new Error("Email draft was changed while finalizing delivery");
     return db.emailDraft.findFirst({
-      where: { id, lead: { createdById: workspaceId } },
+      where: { id, workspaceId },
       include: { lead: { select: leadSelection } },
     });
   } catch (error) {
     log.email.error("Email accepted; persistence requires reconciliation", { draftId: id, workspaceId, messageId: result.messageId }, error);
     await db.emailDraft.updateMany({
-      where: { id, status: "SENDING", lead: { createdById: workspaceId } },
+      where: { id, workspaceId, status: "SENDING" },
       data: { status: "DELIVERY_UNKNOWN", messageId: result.messageId, rejectionNote: "Mail geaccepteerd; verzendregistratie vereist controle." },
     }).catch(() => undefined);
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "De mailprovider heeft de mail geaccepteerd. De registratie vereist controle; verzend niet opnieuw." });

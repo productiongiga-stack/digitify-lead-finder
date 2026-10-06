@@ -54,13 +54,13 @@ export async function publishAdChanges(db: PrismaClient, workspaceId: string, pr
   if (!config.enabled) throw new Error("Schakel de advertentiemodule in voordat je publiceert.");
   if (config.google) {
     validateBudgetGuard(after, config.google.maxDailyBudgetCents);
-    const changedPaths = ["name", "dailyBudgetCents"].filter((key) => fingerprint(before[key]) !== fingerprint(after[key]));
+    const changedPaths = ["name", "status", "dailyBudgetCents"].filter((key) => fingerprint(before[key]) !== fingerprint(after[key]));
     for (const group of ["creatives", "targeting"]) for (const key of Object.keys(after[group] || {})) {
       if (key === "campaignSettings" && group === "targeting") {
         for (const field of ["trackingTemplate", "finalUrlSuffix"]) if (fingerprint(before.targeting?.campaignSettings?.[field] ?? null) !== fingerprint(after.targeting.campaignSettings[field] ?? null)) changedPaths.push("targeting.campaignSettings." + field);
       } else if (fingerprint(before[group]?.[key] ?? null) !== fingerprint(after[group][key])) changedPaths.push(group + "." + key);
     }
-    return updateGoogleCampaignFromPlan(config.google, campaignId, { ...after, name: after.name, campaignType: after.campaignType, changedPaths });
+    return updateGoogleCampaignFromPlan(config.google, campaignId, { ...after, name: after.name, campaignType: after.campaignType, publishStatus: changedPaths.includes("status") ? after.status : undefined, changedPaths });
   }
   const token = config.meta!.accessToken;
   const post = (id: string, fields: Record<string, string>) => metaPost(id, { ...fields, access_token: token });
@@ -79,7 +79,7 @@ export async function publishAdChanges(db: PrismaClient, workspaceId: string, pr
     const changedFields = (old: any, next: any, allowed: string[]) => Object.fromEntries(allowed
       .filter((key) => fingerprint(old[key] ?? null) !== fingerprint(next[key] ?? null))
       .map((key) => [key, typeof next[key] === "object" ? JSON.stringify(next[key]) : String(next[key])]));
-    const campaignFields = changedFields(before.campaign, after.campaign, ["name", "daily_budget", "lifetime_budget"]);
+    const campaignFields = changedFields(before.campaign, after.campaign, ["name", "status", "daily_budget", "lifetime_budget"]);
     if (Object.keys(campaignFields).length) {
       await post(campaignId, campaignFields);
       journal.push({ objectId: campaignId, action: "UPDATE_CAMPAIGN" });

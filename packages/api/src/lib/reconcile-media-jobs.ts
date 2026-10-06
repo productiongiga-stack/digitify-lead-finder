@@ -4,18 +4,19 @@ import {
   isTerminalFailure,
   isTerminalSuccess,
 } from "@digitify/media-studio";
+import { requireCentralCreativeKey, settleCreativeJob, settleTerminalCreativeJobs } from "./creative-credits";
 import { loadUserMuapiKey } from "./muapi-key";
 
 const STALE_AFTER_MS = 15 * 60 * 1000;
 const BATCH_SIZE = 25;
 
 export async function reconcileStaleMediaJobs(db: PrismaClient) {
+  await settleTerminalCreativeJobs();
   const cutoff = new Date(Date.now() - STALE_AFTER_MS);
   const staleJobs = await db.mediaGeneration.findMany({
     where: {
       status: { in: ["PENDING", "PROCESSING"] },
       updatedAt: { lt: cutoff },
-      requestId: { not: null },
     },
     orderBy: { updatedAt: "asc" },
     take: BATCH_SIZE,
@@ -27,11 +28,14 @@ export async function reconcileStaleMediaJobs(db: PrismaClient) {
 
   for (const job of staleJobs) {
     if (!job.requestId) {
-      skipped += 1;
+      await db.mediaGeneration.update({ where: {id:job.id}, data: {status:"FAILED",errorMessage:"De generatie kon niet worden gestart. Je credits worden vrijgegeven."} });
+      await settleCreativeJob(job.id,false);
+      failed += 1;
       continue;
     }
 
-    const apiKey = await loadUserMuapiKey(db, job.userId);
+    let apiKey:string;
+    try { apiKey = (job.metadata as Record<string, unknown> | null)?.provider === "central" ? requireCentralCreativeKey() : await loadUserMuapiKey(db, job.userId); } catch { skipped += 1; continue; }
     if (!apiKey) {
       skipped += 1;
       continue;
@@ -47,6 +51,7 @@ export async function reconcileStaleMediaJobs(db: PrismaClient) {
             errorMessage: result.error || "Generatie mislukt",
           },
         });
+        await settleCreativeJob(job.id, false);
         failed += 1;
         continue;
       }
@@ -58,6 +63,7 @@ export async function reconcileStaleMediaJobs(db: PrismaClient) {
             outputUrl: result.url,
           },
         });
+        await settleCreativeJob(job.id, true);
         completed += 1;
         continue;
       }

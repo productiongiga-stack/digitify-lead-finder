@@ -24,6 +24,7 @@ export const AI_SETTINGS_KEYS = [
   "openclaw.max_tokens",
   "openclaw.auto_suggest",
   "openclaw.business_context",
+  "ai.business_profile",
 ] as const;
 
 export const COMPANY_SETTINGS_KEYS = [

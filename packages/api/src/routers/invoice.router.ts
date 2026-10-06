@@ -405,6 +405,7 @@ export const invoiceRouter = router({
 
       const draft = await ctx.db.emailDraft.create({
         data: {
+          workspaceId: ctx.user.workspaceId!,
           leadId: invoice.leadId,
           subject: `Factuur ${invoice.invoiceNumber}`,
           body,

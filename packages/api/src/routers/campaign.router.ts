@@ -78,6 +78,7 @@ async function runScheduledSequence(params: {
   const dueDrafts = await db.emailDraft.findMany({
     where: {
       sequenceId,
+      workspaceId,
       status: "APPROVED",
       sequenceStep: { in: [1, 2, 3] },
       scheduledFor: { lte: now },
@@ -209,6 +210,7 @@ export async function runAllDueDripsWorker(
   const dueDraftRows = await db.emailDraft.findMany({
     where: {
       status: "APPROVED",
+      ...(options?.workspaceId ? { workspaceId: options.workspaceId } : {}),
       sequenceId: { not: null },
       sequenceStep: { in: [1, 2, 3] },
       scheduledFor: { lte: now },
@@ -801,6 +803,7 @@ export const campaignRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const mode = input.mode as DripMode;
+      const workspaceId = ctx.user.workspaceId!;
       const { client } = await getOpenClawClient(ctx.db, ctx.user.workspaceId!);
       if (mode === "lead" && !client) {
         throw new TRPCError({
@@ -883,6 +886,7 @@ export const campaignRouter = router({
 
             step1Draft = await ctx.db.emailDraft.create({
               data: {
+                workspaceId,
                 leadId: lead.id,
                 toEmail: lead.email,
                 subject,
@@ -904,6 +908,7 @@ export const campaignRouter = router({
               mode === "review" ? buildReviewStep(2) : buildLeadFollowUpStep(baseSubject, 2);
             await ctx.db.emailDraft.create({
               data: {
+                workspaceId,
                 leadId: lead.id,
                 toEmail: lead.email,
                 subject: step2.subject,
@@ -923,6 +928,7 @@ export const campaignRouter = router({
               mode === "review" ? buildReviewStep(3) : buildLeadFollowUpStep(baseSubject, 3);
             await ctx.db.emailDraft.create({
               data: {
+                workspaceId,
                 leadId: lead.id,
                 toEmail: lead.email,
                 subject: step3.subject,
@@ -960,6 +966,7 @@ export const campaignRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const mode = input.mode as DripMode;
+      const workspaceId = ctx.user.workspaceId!;
       const { client } = await getOpenClawClient(ctx.db, ctx.user.workspaceId!);
       if (mode === "lead" && !client) {
         throw new TRPCError({
@@ -1028,6 +1035,7 @@ export const campaignRouter = router({
 
           await ctx.db.emailDraft.create({
             data: {
+              workspaceId,
               leadId: lead.id,
               toEmail: lead.email,
               subject,
@@ -1071,6 +1079,7 @@ export const campaignRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const mode = input.mode as DripMode;
+      const workspaceId = ctx.user.workspaceId!;
       const { client } = await getOpenClawClient(ctx.db, ctx.user.workspaceId!);
 
       const campaign = await ctx.db.campaign.findFirst({
@@ -1168,6 +1177,7 @@ export const campaignRouter = router({
 
             step1Draft = await ctx.db.emailDraft.create({
               data: {
+                workspaceId,
                 leadId: lead.id,
                 toEmail: lead.email,
                 subject,
@@ -1194,6 +1204,7 @@ export const campaignRouter = router({
             mode === "review" ? buildReviewStep(2) : buildLeadFollowUpStep(baseSubject, 2);
           await ctx.db.emailDraft.create({
             data: {
+              workspaceId,
               leadId: lead.id,
               toEmail: lead.email,
               subject: step2.subject,
@@ -1213,6 +1224,7 @@ export const campaignRouter = router({
             mode === "review" ? buildReviewStep(3) : buildLeadFollowUpStep(baseSubject, 3);
           await ctx.db.emailDraft.create({
             data: {
+              workspaceId,
               leadId: lead.id,
               toEmail: lead.email,
               subject: step3.subject,

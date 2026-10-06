@@ -1231,7 +1231,7 @@ export function IntegrationsSettingsInner() {
           <p className="app-page-subtitle">
             {canManageWorkspaceIntegrations
               ? "Koppel externe diensten per integratie — elke API heeft een eigen tab."
-              : "Beheer je persoonlijke MuAPI-sleutel voor Creative Studio en Social Planner."}
+              : muapiKeyStatus.data?.central ? "AI voor Creative Studio wordt door Digitify beheerd." : "Beheer je persoonlijke MuAPI-sleutel voor Creative Studio en Social Planner."}
           </p>
         </div>
       </div>

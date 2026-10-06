@@ -605,6 +605,7 @@ export const quoteRouter = router({
         where: {
           type: "QUOTE",
           status: { in: ["PENDING_APPROVAL", "APPROVED"] },
+          workspaceId: ctx.user.workspaceId!,
           lead: { createdById: ctx.user.workspaceId! },
           body: { contains: `[[QUOTE_ID=${quote.id}]]` },
         },
@@ -623,6 +624,7 @@ export const quoteRouter = router({
       const { body: composedBody, attachmentName } = buildQuoteOutboundEmailBody(quote);
       const emailDraft = await ctx.db.emailDraft.create({
         data: {
+          workspaceId: ctx.user.workspaceId!,
           leadId: linkedLead.id,
           authorId: ctx.user.id,
           toEmail: quote.clientEmail,

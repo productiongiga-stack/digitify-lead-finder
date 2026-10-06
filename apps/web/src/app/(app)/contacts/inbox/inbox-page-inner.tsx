@@ -219,14 +219,14 @@ export function InboxPageInner() {
   });
   const sendEmail = trpc.inbox.send.useMutation({
     onSuccess: () => {
-      setComposeStatus("sent");
+      setComposeStatus("queued");
       setComposeError("");
-      setComposeBody("");
-      setComposeSubject("");
       if (typeof window !== "undefined") {
         window.localStorage.removeItem("digitify_inbox_compose_draft");
       }
       utils.inbox.list.invalidate();
+      utils.contact.getOverview.invalidate();
+      utils.contact.getOutboundStats.invalidate();
       if (composeLeadId) {
         utils.lead.getEmailTimeline.invalidate({ leadId: composeLeadId });
       }
@@ -246,18 +246,6 @@ export function InboxPageInner() {
     if (!message?.uid || !linkedFromMessage?.id) return;
     utils.lead.getEmailTimeline.invalidate({ leadId: linkedFromMessage.id });
   }, [message?.uid, linkedFromMessage?.id, utils.lead.getEmailTimeline]);
-
-  useEffect(() => {
-    if (!linkedFromMessage?.id) return;
-    setComposeLeadId(linkedFromMessage.id);
-    setComposeLeadSearch(linkedFromMessage.companyName || "");
-  }, [linkedFromMessage?.id, linkedFromMessage?.companyName]);
-
-  useEffect(() => {
-    if (!composerOpen || !linkedFromComposeTo?.id) return;
-    setComposeLeadId(linkedFromComposeTo.id);
-    setComposeLeadSearch(linkedFromComposeTo.companyName || "");
-  }, [composerOpen, linkedFromComposeTo?.id, linkedFromComposeTo?.companyName]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -592,7 +580,7 @@ export function InboxPageInner() {
             {composeStatus === "draft"
               ? "Draft"
               : composeStatus === "queued"
-                ? "Queued"
+                ? "Ter goedkeuring"
                 : composeStatus === "sent"
                   ? "Sent"
                   : composeStatus === "replied"
@@ -621,7 +609,7 @@ export function InboxPageInner() {
         </Card>
       )}
 
-      {!isConfigError && (
+      {(!isConfigError || composerOpen) && (
         <div className="space-y-2.5">
           <ScrollArea className="w-full whitespace-nowrap rounded-lg border">
             <div className="flex gap-1.5 p-1.5">
@@ -795,12 +783,32 @@ export function InboxPageInner() {
                             </Link>
                           </div>
                         ) : composeEmailValid ? (
-                          <p className="text-[11px] text-muted-foreground">
-                            Geen lead met dit e-mailadres — er wordt automatisch een lead aangemaakt bij verzenden.
-                          </p>
+                          linkedFromComposeTo ? (
+                            <div className="flex items-center justify-between gap-2 text-[11px]">
+                              <span className="text-muted-foreground">
+                                Lead gevonden: {linkedFromComposeTo.companyName || linkedFromComposeTo.email}. Koppel optioneel.
+                              </span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-[11px]"
+                                onClick={() => {
+                                  setComposeLeadId(linkedFromComposeTo.id);
+                                  setComposeLeadSearch(linkedFromComposeTo.companyName || "");
+                                }}
+                              >
+                                Koppelen
+                              </Button>
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-muted-foreground">
+                              Geen lead nodig — dit bericht blijft gekoppeld aan het e-mailadres.
+                            </p>
+                          )
                         ) : (
                           <p className="text-[11px] text-muted-foreground">
-                            Vul een ontvangeradres in om de lead automatisch te koppelen.
+                            Vul een ontvangeradres in; een lead koppelen blijft optioneel.
                           </p>
                         )}
                         <details className="text-[11px] text-muted-foreground">
@@ -914,7 +922,7 @@ export function InboxPageInner() {
                   </div>
                   <div className="space-y-2 border-t p-3">
                     <p className="text-xs text-muted-foreground">
-                      Draft blijft lokaal staan tot je verzendt via Inbox SMTP.
+                      Het bericht wordt na goedkeuring via SMTP verzonden.
                     </p>
                     {composeUnknownVariables.length > 0 ? (
                       <p className="text-xs text-destructive">
@@ -928,7 +936,7 @@ export function InboxPageInner() {
                         disabled={sendEmail.isPending || !composeReady}
                       >
                         <Send className={cn("mr-2 h-4 w-4", sendEmail.isPending && "animate-pulse")} />
-                        {sendEmail.isPending ? "Verzenden..." : "Verzend e-mail"}
+                        {sendEmail.isPending ? "Indienen..." : "Indienen ter goedkeuring"}
                       </Button>
                     </div>
                   </div>
@@ -993,7 +1001,7 @@ export function InboxPageInner() {
                     </div>
                   ) : isValidEmail(message.fromAddress) ? (
                     <p className="mt-2 text-[11px] text-muted-foreground">
-                      Geen lead met {message.fromAddress} — wordt bij verzenden automatisch aangemaakt.
+                      Geen lead met {message.fromAddress} — antwoorden kunnen zonder lead worden verzonden.
                     </p>
                   ) : null}
                   <div className="mt-2.5 flex flex-wrap gap-1.5">

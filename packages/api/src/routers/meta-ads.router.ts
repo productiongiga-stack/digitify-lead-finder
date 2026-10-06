@@ -38,7 +38,9 @@ import {
   META_ADS_REQUIRED_SCOPES,
 } from "../lib/meta-ads";
 import { upsertMetaSettings, workspaceScopeFromAuthenticatedUser } from "../lib/social-meta";
+import { loadAiBusinessProfile } from "../lib/ai-business-profile";
 import { findWorkspaceRecord } from "../lib/workspace-record";
+import { captureAdVersion, createAdChange } from "../lib/ads-workflow";
 
 const PLAN_STATUS = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "PUSHING", "PUSHED_PAUSED", "FAILED", "CANCELLED"] as const;
 const OBJECTIVES = [
@@ -231,7 +233,7 @@ async function createMetaAdsActivity(
 async function renderAdSuggestion(
   db: PrismaClient,
   workspaceId: string,
-  input: { product: string; audience?: string; tone?: string },
+  input: { product: string; audience?: string; tone?: string; leadId?: string },
 ) {
   const fallback = {
     name: `${input.product.trim()} campagne`,
@@ -257,17 +259,20 @@ async function renderAdSuggestion(
   if (!apiKey) return { ...fallback, provider: "fallback", model: "none" };
 
   const trainingNotes = await loadMetaAdsAiTrainingNotes(db, workspaceId);
+  const profile = await loadAiBusinessProfile(db, workspaceId);
+  const lead = input.leadId ? await db.lead.findFirst({ where: { id: input.leadId, createdById: workspaceId }, select: { companyName: true, industry: true, city: true, overallScore: true } }) : null;
+  if (input.leadId && !lead) throw new TRPCError({ code: "NOT_FOUND", message: "Lead niet gevonden in deze workspace." });
   const client = new OpenClawClient({ provider, model, apiKey, maxTokens: 900 });
   const response = await client.chat(
     [
       {
         role: "user",
-        content: `${buildMetaCampaignSystemPrompt(trainingNotes)}\n\n${buildMetaCampaignUserPrompt(input)}`,
+        content: `${buildMetaCampaignSystemPrompt(trainingNotes, profile.companyName, [profile.companyDescription, profile.idealCustomer, profile.primaryOffer, profile.differentiators.join(", ")].filter(Boolean).join("\n"))}\n\n${buildMetaCampaignUserPrompt(input)}${lead ? `\nLeadbrief: ${lead.companyName}; sector ${lead.industry || "onbekend"}; regio ${lead.city || "onbekend"}; score ${lead.overallScore ?? "onbekend"}/100.` : ""}`,
       },
     ],
     {
       currentPage: "/meta-ads",
-      settings: { aggressiveness: "balanced", tone: input.tone || "professioneel", language: "nl", companyName: "Digitify" },
+      settings: { aggressiveness: "balanced", tone: input.tone || profile.tone, language: "nl", companyName: profile.companyName },
     },
   );
 
@@ -292,7 +297,7 @@ async function renderAdSuggestion(
 async function renderVariantSuggestion(
   db: PrismaClient,
   workspaceId: string,
-  input: { product: string; audience?: string; tone?: string; angle?: string; landingUrl?: string; adsetName?: string },
+  input: { product: string; audience?: string; tone?: string; angle?: string; landingUrl?: string; adsetName?: string; leadId?: string },
 ) {
   const fallback = {
     adName: `${input.product.trim()} variant`,
@@ -309,17 +314,20 @@ async function renderVariantSuggestion(
   if (!apiKey) return { ...fallback, provider: "fallback", model: "none" };
 
   const trainingNotes = await loadMetaAdsAiTrainingNotes(db, workspaceId);
+  const profile = await loadAiBusinessProfile(db, workspaceId);
+  const lead = input.leadId ? await db.lead.findFirst({ where: { id: input.leadId, createdById: workspaceId }, select: { companyName: true, industry: true, city: true, overallScore: true } }) : null;
+  if (input.leadId && !lead) throw new TRPCError({ code: "NOT_FOUND", message: "Lead niet gevonden in deze workspace." });
   const client = new OpenClawClient({ provider, model, apiKey, maxTokens: 650 });
   const response = await client.chat(
     [
       {
         role: "user",
-        content: `${buildMetaVariantSystemPrompt(trainingNotes)}\n\n${buildMetaVariantUserPrompt(input)}`,
+        content: `${buildMetaVariantSystemPrompt(trainingNotes, profile.companyName, [profile.companyDescription, profile.idealCustomer, profile.primaryOffer, profile.differentiators.join(", ")].filter(Boolean).join("\n"))}\n\n${buildMetaVariantUserPrompt(input)}${lead ? `\nLeadbrief: ${lead.companyName}; sector ${lead.industry || "onbekend"}; regio ${lead.city || "onbekend"}; score ${lead.overallScore ?? "onbekend"}/100.` : ""}`,
       },
     ],
     {
       currentPage: "/meta-ads",
-      settings: { aggressiveness: "balanced", tone: input.tone || "professioneel", language: "nl", companyName: "Digitify" },
+      settings: { aggressiveness: "balanced", tone: input.tone || profile.tone, language: "nl", companyName: profile.companyName },
     },
   );
 
@@ -729,7 +737,7 @@ export const metaAdsRouter = router({
     }),
 
   generateSuggestion: aiRateLimitedProcedure
-    .input(z.object({ product: z.string().min(2).max(400), audience: z.string().max(400).optional(), tone: z.string().max(80).optional() }))
+    .input(z.object({ product: z.string().min(2).max(400), audience: z.string().max(400).optional(), tone: z.string().max(80).optional(), leadId: z.string().optional() }))
     .mutation(async ({ ctx, input }) => renderAdSuggestion(ctx.db, ctx.user.workspaceId!, input)),
 
   generateVariantSuggestion: aiRateLimitedProcedure
@@ -741,6 +749,7 @@ export const metaAdsRouter = router({
         angle: z.string().max(200).optional(),
         landingUrl: z.string().max(500).optional(),
         adsetName: z.string().max(160).optional(),
+        leadId: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => renderVariantSuggestion(ctx.db, ctx.user.workspaceId!, input)),
@@ -819,55 +828,15 @@ export const metaAdsRouter = router({
     }),
 
   pauseInMeta: adsAdminProcedure.input(z.object({ campaignId: z.string().min(1), draftId: z.string().optional() })).mutation(async ({ ctx, input }) => {
-    const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
-    const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
-    if (!config.accessToken) throw new TRPCError({ code: "BAD_REQUEST", message: "Meta is niet gekoppeld." });
-    await updateMetaCampaignStatus({ campaignId: input.campaignId, accessToken: config.accessToken, status: "PAUSED" });
-    if (input.draftId) {
-      const row = await ctx.db.metaAdPlan.findFirst({
-        where: { id: input.draftId, createdById: ctx.user.workspaceId! },
-      });
-      if (row) {
-        const externalIds = asRecord(row.externalIds);
-        await ctx.db.metaAdPlan.update({
-          where: { id: input.draftId },
-          data: {
-            externalIds: {
-              ...externalIds,
-              syncedAt: new Date().toISOString(),
-              metaState: { configuredStatus: "PAUSED", effectiveStatus: "PAUSED" },
-            },
-          },
-        });
-      }
-    }
-    return { ok: true };
+    const version = await captureAdVersion(ctx.db, ctx.user.workspaceId!, "META", input.campaignId);
+    const change = await createAdChange(ctx.db, ctx.user.workspaceId!, ctx.user.id, "META", version.id, [{ path: "campaign.status", value: "PAUSED" }], "Campagne pauzeren vanuit Meta Ads Studio.", "MANUAL", { allowCampaignStatus: true });
+    return { ok: true, status: "PENDING_APPROVAL", changeSetId: change.id };
   }),
 
   resumeInMeta: adsAdminProcedure.input(z.object({ campaignId: z.string().min(1), draftId: z.string().optional() })).mutation(async ({ ctx, input }) => {
-    const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
-    const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
-    if (!config.accessToken) throw new TRPCError({ code: "BAD_REQUEST", message: "Meta is niet gekoppeld." });
-    await updateMetaCampaignStatus({ campaignId: input.campaignId, accessToken: config.accessToken, status: "ACTIVE" });
-    if (input.draftId) {
-      const row = await ctx.db.metaAdPlan.findFirst({
-        where: { id: input.draftId, createdById: ctx.user.workspaceId! },
-      });
-      if (row) {
-        const externalIds = asRecord(row.externalIds);
-        await ctx.db.metaAdPlan.update({
-          where: { id: input.draftId },
-          data: {
-            externalIds: {
-              ...externalIds,
-              syncedAt: new Date().toISOString(),
-              metaState: { configuredStatus: "ACTIVE", effectiveStatus: "ACTIVE" },
-            },
-          },
-        });
-      }
-    }
-    return { ok: true };
+    const version = await captureAdVersion(ctx.db, ctx.user.workspaceId!, "META", input.campaignId);
+    const change = await createAdChange(ctx.db, ctx.user.workspaceId!, ctx.user.id, "META", version.id, [{ path: "campaign.status", value: "ACTIVE" }], "Campagne hervatten vanuit Meta Ads Studio.", "MANUAL", { allowCampaignStatus: true });
+    return { ok: true, status: "PENDING_APPROVAL", changeSetId: change.id };
   }),
 
   pushPausedToMeta: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToMeta(ctx, input.id)),

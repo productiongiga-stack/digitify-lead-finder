@@ -18,7 +18,7 @@ import {
   FileText, BarChart3, Lightbulb, Target, TrendingUp,
   User, Tag, Megaphone, X, Hash, Activity,
   Facebook, Instagram, Linkedin, Twitter, ChevronRight,
-  Eye, CircleDot, Receipt, CheckSquare, type LucideIcon,
+  Eye, CircleDot, Receipt, CheckSquare, ChevronDown, Paperclip, type LucideIcon,
 } from "lucide-react";
 import {
   cn, formatScore, getStatusBadgeVariant, formatDate, formatRelativeTime, safeExternalUrl,
@@ -139,6 +139,13 @@ export function LeadDetailInner() {
     { leadId },
     { enabled: Boolean(leadId), staleTime: 30_000 },
   );
+  const analysisStatusQuery = trpc.openclaw.leadAnalysisStatus.useQuery(
+    { leadId },
+    { enabled: Boolean(leadId), refetchInterval: (query) => {
+      const status = query.state.data?.run?.status;
+      return status === "PENDING" || status === "RUNNING" ? 5000 : false;
+    } },
+  );
   const explainValueQuery = trpc.lead.explainValue.useQuery(
     { leadId },
     { enabled: false, staleTime: 120_000 },
@@ -147,6 +154,7 @@ export function LeadDetailInner() {
   const { data: pipelineStages } = trpc.pipeline.getStages.useQuery();
   const [noteText, setNoteText] = useState("");
   const [lastAuditReportId, setLastAuditReportId] = useState<string | null>(null);
+  const [analysisDetailsOpen, setAnalysisDetailsOpen] = useState(false);
   const utils = trpc.useUtils();
   const { setOpenClawOpen } = useUIStore();
   const { showToast } = useToast();
@@ -184,11 +192,12 @@ export function LeadDetailInner() {
       await utils.lead.getWorkflowSummary.invalidate({ leadId });
     },
   });
-  const analyzeLead = trpc.openclaw.analyzeLead.useMutation({
-    onSuccess: async () => {
-      await utils.lead.getById.invalidate({ id: leadId });
-      await utils.lead.getWorkflowSummary.invalidate({ leadId });
+  const queueLeadAnalysis = trpc.openclaw.queueLeadAnalysis.useMutation({
+    onSuccess: () => {
+      void analysisStatusQuery.refetch();
+      showToast({ title: "AI-analyse ingepland", description: "De analyse wordt op de achtergrond uitgevoerd." });
     },
+    onError: (error) => showToast({ title: "AI-analyse kon niet starten", description: error.message, variant: "error" }),
   });
   const draftEmail = trpc.openclaw.draftEmail.useMutation({
     onSuccess: (data) => {
@@ -218,7 +227,7 @@ export function LeadDetailInner() {
   });
 
   /* loading skeleton */
-  if (isLoading || isFetching) {
+  if (isLoading) {
     return (
       <div className="space-y-5 p-1">
         <div className="flex items-center gap-4">
@@ -302,15 +311,21 @@ export function LeadDetailInner() {
   const openclawSuggestions = (lead.openclawSuggestions as OpenClawSuggestion[] | undefined) ?? [];
   const latestAnalysis = openclawSuggestions.find((s) => s.type === "OPPORTUNITY_ANALYSIS");
   const analysisMetadata = latestAnalysis?.metadata as Record<string, unknown> | undefined;
+  const analysisRun = analysisStatusQuery.data?.run;
+  const analysisRunResult = analysisRun?.result as Record<string, unknown> | null | undefined;
   const scoringActivity = lead.activities.find(
     (a: LeadActivity) => a.type === "LEAD_SCORED" && (a.metadata as ScoringMeta)?.bestNextAction
   );
   const scoringMeta = scoringActivity?.metadata as ScoringMeta | undefined;
   const suggestedServices = scoringMeta?.suggestedServices ?? [];
-  const confidence = readNumber(analysisMetadata?.confidence);
-  const opportunities = readStringArray(analysisMetadata?.opportunities);
-  const risks = readStringArray(analysisMetadata?.risks);
-  const suggestedApproach = readString(analysisMetadata?.suggestedApproach);
+  const confidenceRaw = readNumber(analysisMetadata?.confidence ?? analysisRunResult?.confidence);
+  const confidence = confidenceRaw != null && confidenceRaw <= 1 ? confidenceRaw * 100 : confidenceRaw;
+  const opportunities = readStringArray(analysisMetadata?.opportunities ?? analysisRunResult?.opportunities);
+  const risks = readStringArray(analysisMetadata?.risks ?? analysisRunResult?.risks);
+  const matchedServices = readStringArray(analysisMetadata?.matchedServices ?? analysisRunResult?.matchedServices);
+  const evidence = readStringArray(analysisMetadata?.evidence ?? analysisRunResult?.evidence);
+  const suggestedApproach = readString(analysisMetadata?.suggestedApproach ?? analysisRunResult?.suggestedApproach);
+  const nextAction = readString(analysisMetadata?.nextAction ?? analysisRunResult?.nextAction);
   const technologies = wa?.technologies ?? [];
 
   const leadTagIds = new Set(lead.tags.map((lt: LeadTag) => lt.tag.id));
@@ -407,11 +422,17 @@ export function LeadDetailInner() {
               </Button>
               <Button
                 variant="outline" size="sm"
-                onClick={() => analyzeLead.mutate({ leadId: id })}
-                disabled={analyzeLead.isPending}
+                onClick={() => queueLeadAnalysis.mutate({ leadId: id, force: true })}
+                disabled={queueLeadAnalysis.isPending || analysisStatusQuery.data?.run?.status === "RUNNING"}
               >
-                {analyzeLead.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Bot className="mr-1.5 h-3.5 w-3.5" />}
-                {analyzeLead.isPending ? "Analyseren..." : "AI Analyse"}
+                {queueLeadAnalysis.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Bot className="mr-1.5 h-3.5 w-3.5" />}
+                {queueLeadAnalysis.isPending ? "Inplannen..." : "AI Analyse opnieuw"}
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/meta-ads?leadId=${encodeURIComponent(id)}`}><Megaphone className="mr-1.5 h-3.5 w-3.5" /> Meta-draft</Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/google-ads?leadId=${encodeURIComponent(id)}`}><Megaphone className="mr-1.5 h-3.5 w-3.5" /> Google-draft</Link>
               </Button>
               <Button
                 variant="outline" size="sm"
@@ -535,6 +556,9 @@ export function LeadDetailInner() {
               </Button>
               <Button asChild variant="outline" size="sm">
                 <Link href={`/tasks?relatedType=LEAD&relatedId=${id}`}><CheckSquare className="mr-1.5 h-3.5 w-3.5" /> Taak toevoegen</Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/files?relatedType=LEAD&relatedId=${id}`}><Paperclip className="mr-1.5 h-3.5 w-3.5" /> Bestand toevoegen</Link>
               </Button>
               {lead.status === "WON" ? (
                 <Button asChild variant="outline" size="sm">
@@ -872,7 +896,7 @@ export function LeadDetailInner() {
             )}
 
             {/* --- AI Summary Card --- */}
-            {(openclawSuggestions.length > 0 || latestAnalysis) && (
+            {(openclawSuggestions.length > 0 || latestAnalysis || analysisRun) && (
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-base">
@@ -881,13 +905,23 @@ export function LeadDetailInner() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {analysisRun && analysisRun.status !== "COMPLETED" && (
+                    <div className="flex items-center justify-between rounded-lg border bg-muted/30 p-3 text-sm">
+                      <span>{analysisRun.status === "PENDING" ? "AI-analyse staat klaar" : analysisRun.status === "RUNNING" ? "AI-analyse wordt uitgevoerd" : analysisRun.status === "BLOCKED" ? "AI-analyse wacht op configuratie" : "AI-analyse mislukt"}</span>
+                      {(analysisRun.status === "FAILED" || analysisRun.status === "BLOCKED") && (
+                        <Button size="sm" variant="outline" onClick={() => queueLeadAnalysis.mutate({ leadId: id, force: true })} disabled={queueLeadAnalysis.isPending}>
+                          <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Opnieuw
+                        </Button>
+                      )}
+                    </div>
+                  )}
                   {latestAnalysis && (
                     <div className="space-y-3">
                       {confidence != null && (
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Betrouwbaarheid</span>
-                          <Badge variant={confidence >= 0.7 ? "success" : confidence >= 0.4 ? "warning" : "secondary"}>
-                            {Math.round(confidence * 100)}%
+                          <Badge variant={confidence >= 70 ? "success" : confidence >= 40 ? "warning" : "secondary"}>
+                            {Math.round(confidence)}%
                           </Badge>
                         </div>
                       )}
@@ -925,6 +959,18 @@ export function LeadDetailInner() {
                         <div className="rounded-lg border bg-muted/30 p-3">
                           <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Voorgestelde aanpak</p>
                           <p className="text-sm">{suggestedApproach}</p>
+                        </div>
+                      )}
+                      {nextAction && <div className="rounded-lg border border-primary/20 bg-primary/5 p-3"><p className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Eerstvolgende actie</p><p className="text-sm">{nextAction}</p></div>}
+                      {(matchedServices.length > 0 || evidence.length > 0 || risks.length > 0) && (
+                        <div>
+                          <Button type="button" variant="ghost" size="sm" className="px-0 text-xs" onClick={() => setAnalysisDetailsOpen((open) => !open)}>
+                            <ChevronDown className={`mr-1 h-3.5 w-3.5 transition-transform ${analysisDetailsOpen ? "rotate-180" : ""}`} /> Meer details
+                          </Button>
+                          {analysisDetailsOpen && <div className="mt-2 space-y-2 rounded-lg bg-muted/30 p-3 text-sm">
+                            {matchedServices.length > 0 && <p><strong>Passende diensten:</strong> {matchedServices.join(", ")}</p>}
+                            {evidence.length > 0 && <p><strong>Onderbouwing:</strong> {evidence.join(" · ")}</p>}
+                          </div>}
                         </div>
                       )}
                     </div>

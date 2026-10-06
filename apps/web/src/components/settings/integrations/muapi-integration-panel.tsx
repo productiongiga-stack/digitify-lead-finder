@@ -55,7 +55,7 @@ export function MuapiIntegrationPanel() {
       await utils.media.getBalance.invalidate();
       showToast({
         title: "MuAPI-key opgeslagen",
-        description: "Je kunt nu afbeeldingen en video's genereren in Creative Studio.",
+        description: keyStatus.data?.central ? "Je persoonlijke sleutel voor eerdere generaties is bijgewerkt." : "Je kunt nu afbeeldingen en video's genereren in Creative Studio.",
       });
     },
     onError: (error) =>
@@ -72,10 +72,12 @@ export function MuapiIntegrationPanel() {
       showToast({ title: "Verwijderen mislukt", description: error.message, variant: "error" }),
   });
 
-  const configured = Boolean(keyStatus.data?.hasKey);
+  const configured = Boolean(keyStatus.data?.hasPersonalKey ?? keyStatus.data?.hasKey);
 
   return (
     <div className="space-y-4">
+      {keyStatus.data?.central && <IntegrationPanel icon={Sparkles} iconClassName="bg-primary/10 text-primary" title="AI via Digitify" description="Je hebt geen eigen API-sleutel nodig. Nieuwe creaties gebruiken je persoonlijke credits." configured={keyStatus.data.hasKey} statusLabel={{active:"Beschikbaar",inactive:"Digitify moet AI nog activeren"}}><Button asChild><Link href="/creative-studio?tab=credits">Mijn credits</Link></Button></IntegrationPanel>}
+      <details open={!keyStatus.data?.central} className="rounded-lg border p-3"><summary className="cursor-pointer text-sm font-medium">Persoonlijke sleutel voor eerdere generaties</summary><div className="mt-3">
       <IntegrationPanel
         icon={Sparkles}
         iconClassName="bg-primary/10 text-primary"
@@ -182,6 +184,7 @@ export function MuapiIntegrationPanel() {
           ) : null}
         </IntegrationActionBar>
       </IntegrationPanel>
+      </div></details>
 
       <IntegrationPanel
         icon={Sparkles}

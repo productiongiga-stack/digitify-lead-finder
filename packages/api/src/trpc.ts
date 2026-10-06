@@ -37,6 +37,21 @@ export type Context = {
 
 export type AppRole = "OWNER" | "ADMIN" | "MODERATOR" | "MEMBER" | "TRIAL" | "TESTER" | "VIEWER";
 
+const GENERIC_INTERNAL_ERROR = "Er ging iets mis. Probeer het opnieuw of neem contact op met je beheerder.";
+
+function safeInternalErrorMessage(error: TRPCError) {
+  // Explicit TRPCError messages are written for the user by our routers. An
+  // unknown exception has a cause and must stay generic to avoid leaking SQL,
+  // provider responses, tokens or stack details to the browser.
+  if (error.cause) return GENERIC_INTERNAL_ERROR;
+  const message = error.message?.trim();
+  if (!message || /^internal server error$/i.test(message)) return GENERIC_INTERNAL_ERROR;
+  if (/(access[_-]?token|refresh[_-]?token|api[_-]?key|developer[_-]?token|bearer\s|password|secret|stack trace|prisma|database url)/i.test(message)) {
+    return GENERIC_INTERNAL_ERROR;
+  }
+  return message.slice(0, 500);
+}
+
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
   errorFormatter({ shape, error }) {
@@ -53,7 +68,7 @@ const t = initTRPC.context<Context>().create({
     if (error.code === "INTERNAL_SERVER_ERROR") {
       return {
         ...shape,
-        message: "Er ging iets mis. Probeer het opnieuw of neem contact op met je beheerder.",
+        message: safeInternalErrorMessage(error),
       };
     }
     return shape;

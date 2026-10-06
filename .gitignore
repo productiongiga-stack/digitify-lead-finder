@@ -26,6 +26,8 @@ playwright-report/
 
 # User-uploaded files (use object storage in production)
 apps/web/public/uploads/
+# Private local file storage (never commit user uploads or generated media)
+apps/web/storage/
 .env*
 !.env.example
 

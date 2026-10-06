@@ -40,6 +40,8 @@ import { MediaJobProgress } from "./media-job-progress";
 import { MuapiKeyGate } from "./muapi-key-gate";
 import { ReferencePicker } from "./reference-picker";
 import { BrandPromptPreview } from "./brand-prompt-preview";
+import { StudioContext, StudioSection, useStudioField, useCreativeQuote, CreditQuote } from "./studio-context";
+import { useContext, useRef } from "react";
 import { useMediaJob } from "./use-media-job";
 import { useRegeneratePrefill } from "./use-regenerate-prefill";
 
@@ -63,34 +65,38 @@ type Props = {
 
 export function VideoGenerator({ socialPostId }: Props) {
   const { showToast } = useToast();
+  const studio = useContext(StudioContext);
+  const requestKey = useRef<string | null>(null);
   const models = trpc.media.listModels.useQuery(undefined, MEDIA_MODELS_QUERY_OPTIONS);
   const keyStatus = trpc.media.getMuapiKeyStatus.useQuery(undefined, MUAPI_KEY_QUERY_OPTIONS);
-  const brandKit = trpc.media.getBrandKit.useQuery(undefined, MUAPI_KEY_QUERY_OPTIONS);
+  const brandKit = trpc.media.getCreativeBrand.useQuery({ brandKitId: studio?.state.brandKitId || undefined }, MUAPI_KEY_QUERY_OPTIONS);
 
   const allVideoModels = useMemo(
     () => (models.data ?? []) as ModelListItem[],
     [models.data],
   );
 
-  const [mode, setMode] = useState<VideoGeneratorMode>("T2V");
+  const [mode, setMode] = useStudioField<VideoGeneratorMode>("mode", "T2V");
+  const [uploadingSource,setUploadingSource] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState(VIDEO_MODE_DEFAULTS.T2V);
-  const [aspectRatio, setAspectRatio] = useState("9:16");
-  const [placementFormat, setPlacementFormat] = useState("STORY");
-  const [duration, setDuration] = useState("5");
-  const [resolution, setResolution] = useState<string>("");
-  const [quality, setQuality] = useState<string>("");
-  const [startframeUrls, setStartframeUrls] = useState<string[]>([]);
+  const [prompt, setPrompt] = useStudioField("prompt", "");
+  const [model, setModel] = useStudioField("model", VIDEO_MODE_DEFAULTS.T2V);
+  const [aspectRatio, setAspectRatio] = useStudioField("aspectRatio", "9:16");
+  const [placementFormat, setPlacementFormat] = useStudioField("placementFormat", "STORY");
+  const [duration, setDuration] = useStudioField("duration", "5");
+  const [resolution, setResolution] = useStudioField<string>("resolution", "");
+  const [quality, setQuality] = useStudioField<string>("quality", "");
+  const [startframeUrls, setStartframeUrls] = useStudioField<string[]>("startframeUrls", []);
   const [startframeFile, setStartframeFile] = useState<File | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [linkedSocialPostId, setLinkedSocialPostId] = useState<string | null>(socialPostId ?? null);
+  const [jobId, setJobId] = useStudioField<string | null>("jobId", null);
+  const [linkedSocialPostId, setLinkedSocialPostId] = useStudioField<string | null>("linkedSocialPostId", socialPostId ?? null);
 
   const modeModels = useMemo(
     () => filterModelsByMode(allVideoModels, mode),
     [allVideoModels, mode],
   );
 
+  const pricing = useCreativeQuote(model, { resolution: resolution || undefined, quality: quality || undefined, duration: Number(duration), aspectRatio: aspectRatio });
   const selectedModel = modeModels.find((item) => item.id === model) ?? allVideoModels.find((item) => item.id === model);
   const aspectOptions = selectedModel?.aspectRatios?.length
     ? selectedModel.aspectRatios
@@ -148,6 +154,7 @@ export function VideoGenerator({ socialPostId }: Props) {
   const startVideo = trpc.media.startVideoGeneration.useMutation({
     onSuccess: (result) => {
       setJobId(result.jobId);
+      requestKey.current = null;
       showToast({ title: "Videogeneratie gestart", description: "Dit kan enkele minuten duren." });
     },
     onError: (error) => showToast({ title: "Generatie mislukt", description: error.message, variant: "error" }),
@@ -167,7 +174,7 @@ export function VideoGenerator({ socialPostId }: Props) {
     onPollError: (message) => showToast({ title: "Status ophalen mislukt", description: message, variant: "error" }),
   });
 
-  const isSubmitting = startVideo.isPending || uploadReference.isPending || job.isPolling || job.isAutoImporting;
+  const isSubmitting = uploadingSource || startVideo.isPending || uploadReference.isPending || job.isPolling || job.isAutoImporting;
 
   function handleModeChange(nextMode: VideoGeneratorMode) {
     setMode(nextMode);
@@ -216,7 +223,12 @@ export function VideoGenerator({ socialPostId }: Props) {
         resolvedImageUrl = uploaded.url;
       }
 
+      if (resolvedImageUrl) setStartframeUrls([resolvedImageUrl]);
       startVideo.mutate({
+        requestKey: requestKey.current || (requestKey.current = crypto.randomUUID()),
+        expectedCredits: pricing.quote.data?.credits,
+        draftId: studio?.draftId,
+        brandKitId: studio?.state.brandKitId || undefined,
         prompt: trimmedPrompt || undefined,
         model,
         aspectRatio,
@@ -245,20 +257,21 @@ export function VideoGenerator({ socialPostId }: Props) {
         icon={Film}
         title="Video / Reel genereren"
         description="Tekst-naar-video of animeer een startframe voor reels en stories."
-        costLabel={selectedModel?.costLabel}
+        costLabel={keyStatus.data?.central ? undefined : selectedModel?.costLabel}
         brandActive={brandKit.data?.enabled}
       >
+        <StudioSection kind="content">
         <GeneratorModeToggle
           value={mode}
           onChange={handleModeChange}
           options={[
-            { value: "T2V", label: "Tekst → video", hint: "Vanaf prompt" },
-            { value: "I2V", label: "Startframe → video", hint: "Met afbeelding" },
+            { value: "T2V", label: "Nieuwe video" },
+            { value: "I2V", label: "Afbeelding animeren" },
           ]}
         />
 
         <div className="space-y-2">
-          <Label htmlFor="video-prompt">Prompt {mode === "I2V" ? "(optioneel)" : ""}</Label>
+          <Label htmlFor="video-prompt">Beschrijf je idee {mode === "I2V" ? "(optioneel)" : ""}</Label>
           <Textarea
             id="video-prompt"
             value={prompt}
@@ -274,6 +287,7 @@ export function VideoGenerator({ socialPostId }: Props) {
           />
         </div>
 
+        <StudioSection kind="advanced">
         <div className="grid gap-3 md:grid-cols-3">
           <div className="space-y-2 md:col-span-1">
             <Label>Model</Label>
@@ -348,6 +362,7 @@ export function VideoGenerator({ socialPostId }: Props) {
           </div>
         ) : null}
 
+        </StudioSection>
         {mode === "I2V" ? (
           <div className={studioSectionClass}>
             <ReferencePicker
@@ -366,14 +381,22 @@ export function VideoGenerator({ socialPostId }: Props) {
                 id="video-startframe-file"
                 type="file"
                 accept="image/*"
-                onChange={(event) => {
+                disabled={uploadingSource}
+                onChange={async (event) => {
                   const file = event.target.files?.[0] ?? null;
                   if (file && file.size > MAX_STARTFRAME_BYTES) {
                     showToast({ title: "Bestand te groot", description: "Maximaal 10MB.", variant: "error" });
                     return;
                   }
                   setStartframeFile(file);
-                  if (file) handleModeChange("I2V");
+                  if (!file) return;
+                  handleModeChange("I2V");
+                  setUploadingSource(true);
+                  try {
+                    const uploaded=await uploadReference.mutateAsync({filename:file.name,contentType:file.type,base64:await readFileAsBase64(file)});
+                    setStartframeUrls([uploaded.url]); setStartframeFile(null);
+                  } catch(error) {showToast({title:"Upload mislukt",description:error instanceof Error?error.message:"Probeer opnieuw.",variant:"error"});}
+                  finally {setUploadingSource(false);}
                 }}
               />
               {startframeFile ? (
@@ -383,9 +406,12 @@ export function VideoGenerator({ socialPostId }: Props) {
           </div>
         ) : null}
 
+        </StudioSection>
+        <StudioSection kind="result">
+        <CreditQuote pricing={pricing} />
         <GenerateButton
           onClick={() => void handleGenerate()}
-          disabled={(!prompt.trim() && !hasStartframe) || (mode === "I2V" && !hasStartframe) || isSubmitting}
+          disabled={!pricing.canGenerate || (!prompt.trim() && !hasStartframe) || (mode === "I2V" && !hasStartframe) || isSubmitting}
           isLoading={isSubmitting}
         >
           {isSubmitting ? (
@@ -439,6 +465,7 @@ export function VideoGenerator({ socialPostId }: Props) {
         {job.errorMessage ? (
           <p className="text-sm text-destructive" role="alert">{job.errorMessage}</p>
         ) : null}
+        </StudioSection>
       </GeneratorShell>
     </MuapiKeyGate>
   );

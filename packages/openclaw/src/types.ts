@@ -14,6 +14,12 @@ export interface OpenClawContext {
     niche?: string;
     responseStyle?: string;
     knowledgePages?: string[];
+    idealCustomer?: string;
+    primaryOffer?: string;
+    differentiators?: string[];
+    salesGoal?: string;
+    focusRegions?: string[];
+    profileVersion?: number;
   };
   leadData?: {
     companyName: string;
@@ -90,9 +96,13 @@ export interface EmailDraftSuggestion {
 
 export interface LeadAnalysis {
   summary: string;
+  fitScore?: number;
   opportunities: string[];
   risks: string[];
+  matchedServices?: string[];
   suggestedApproach: string;
+  nextAction?: string;
+  evidence?: string[];
   confidence: number;
 }
 

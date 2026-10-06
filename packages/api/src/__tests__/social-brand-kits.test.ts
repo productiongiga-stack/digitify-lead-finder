@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  listSocialBrandKits,
   mergeBrandKitWithWorkspace,
   upsertSocialBrandKit,
   type SocialBrandKit,
@@ -112,6 +113,9 @@ describe("upsertSocialBrandKit", () => {
       store.get(`workspace:${workspaceId}:social.brand_kits`) || "[]",
     ) as SocialBrandKit[];
     expect(stored).toHaveLength(2);
+    expect(stored.some(item=>item.id === existingKit.id)).toBe(true);
+    const reread = await listSocialBrandKits(db,workspaceId);
+    expect(reread.kits.map(item=>item.id)).toEqual(stored.map(item=>item.id));
     expect(stored.map((item) => item.name)).toEqual(expect.arrayContaining(["Hoofdmerk", "Klant B"]));
   });
 });

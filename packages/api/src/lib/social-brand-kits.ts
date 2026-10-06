@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import type { PrismaClient } from "@digitify/db";
 import type { CreativeBrandContext } from "@digitify/media-studio";
 import { getSettingString, settingsRowsToMap } from "./settings";
@@ -66,10 +67,10 @@ function emptyKitFields(): Omit<SocialBrandKit, "id" | "name" | "isDefault" | "c
   };
 }
 
-function parseBrandKits(raw: string | undefined): SocialBrandKit[] {
-  if (!raw?.trim()) return [];
+function parseBrandKits(raw: unknown): SocialBrandKit[] {
+  if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed = typeof raw === "string" ? JSON.parse(raw) as unknown : raw;
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter((item): item is SocialBrandKit => Boolean(item && typeof item === "object" && typeof (item as SocialBrandKit).id === "string"))
@@ -89,7 +90,7 @@ async function readBrandKitSettings(db: PrismaClient, workspaceId: string) {
   const scope = workspaceScope(workspaceId);
   const rows = await loadWorkspaceSettingRows(db, scope, [BRAND_KITS_KEY, DEFAULT_BRAND_KIT_KEY]);
   const settings = settingsRowsToMap(rows);
-  const kits = parseBrandKits(getSettingString(settings, BRAND_KITS_KEY));
+  const kits = parseBrandKits(settings[BRAND_KITS_KEY]);
   const defaultBrandKitId = getSettingString(settings, DEFAULT_BRAND_KIT_KEY) || "";
   return { kits, defaultBrandKitId };
 }
@@ -274,5 +275,6 @@ export async function loadCreativeBrandContextForKit(
 ): Promise<CreativeBrandContext> {
   const workspaceBrand = await loadCreativeBrandContext(db, workspaceId);
   const kit = await getSocialBrandKitById(db, workspaceId, brandKitId);
+  if (brandKitId && !kit) throw new TRPCError({ code: "NOT_FOUND", message: "Merkkit niet gevonden in deze workspace." });
   return mergeBrandKitWithWorkspace(workspaceBrand, kit);
 }

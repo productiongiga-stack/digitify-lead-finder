@@ -10,6 +10,7 @@ import { isMissingSchemaError } from "../lib/prisma-schema";
 import { serializeSavedSearch } from "../lib/saved-search-serializer";
 import { ensureTenantSchemaCompatibility } from "../lib/tenant-schema-compat";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
+import { enqueueLeadAnalysis } from "../lib/lead-analysis";
 
 const searchStringSchema = z
   .string()
@@ -274,7 +275,7 @@ export const searchRouter = router({
     }),
 
   checkExistingLeads: protectedProcedure
-    .input(z.object({ placeIds: z.array(z.string()) }))
+    .input(z.object({ placeIds: z.array(z.string().trim().min(1).max(300)).max(80) }))
     .query(async ({ ctx, input }) => {
       const existing = await ctx.db.lead.findMany({
         where: { gmbPlaceId: { in: input.placeIds }, createdById: ctx.user.workspaceId! },
@@ -317,7 +318,29 @@ export const searchRouter = router({
         ? input.primaryType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
         : undefined;
 
-      const imported = await importLeadRecords(ctx.db, ctx.user.workspaceId!, [{
+      const workspaceId = ctx.user.workspaceId!;
+      const existing = await ctx.db.lead.findFirst({
+        where: { createdById: workspaceId, gmbPlaceId: input.placeId },
+      });
+      if (existing) {
+        const update: Record<string, unknown> = {};
+        if (!existing.address && input.formattedAddress) update.address = input.formattedAddress;
+        if (!existing.city && city) update.city = city;
+        if (!existing.industry && industry) update.industry = industry;
+        if (!existing.website && input.websiteUri) update.website = input.websiteUri;
+        if (!existing.phone && input.nationalPhoneNumber) update.phone = input.nationalPhoneNumber;
+        if (existing.gmbRating == null && input.rating != null) update.gmbRating = input.rating;
+        if (existing.gmbReviewCount == null && input.userRatingCount != null) update.gmbReviewCount = input.userRatingCount;
+        if (!existing.gmbCategories?.length && input.types?.length) update.gmbCategories = input.types;
+        const lead = Object.keys(update).length
+          ? await ctx.db.lead.update({ where: { id: existing.id }, data: { ...update, lastEditedById: ctx.user.id } })
+          : existing;
+        await ctx.db.activity.create({ data: { leadId: lead.id, userId: ctx.user.id, type: "LEAD_UPDATED", title: `Lead "${lead.companyName}" hergebruikt vanuit Google Places`, metadata: { placeId: input.placeId, outcome: "reused" } } });
+        await enqueueLeadAnalysis(ctx.db, { workspaceId, leadId: lead.id, createdById: ctx.user.id }).catch(() => null);
+        return { lead, outcome: "reused" as const };
+      }
+
+      const imported = await importLeadRecords(ctx.db, workspaceId, [{
           companyName: input.displayName,
           address: input.formattedAddress,
           city,
@@ -330,12 +353,17 @@ export const searchRouter = router({
           gmbCategories: input.types ?? [],
           source: "google_places",
           sourceQuery: input.displayName,
-          createdById: ctx.user.workspaceId!,
+          createdById: workspaceId,
           savedById: ctx.user.id,
           lastEditedById: ctx.user.id,
       }]);
       const lead = imported.created[0];
-      if (!lead) throw new TRPCError({ code: "CONFLICT", message: "Dit bedrijf op deze locatie bestaat al als lead." });
+      if (!lead) {
+        const reused = await ctx.db.lead.findFirst({ where: { createdById: workspaceId, gmbPlaceId: input.placeId } });
+        if (!reused) throw new TRPCError({ code: "CONFLICT", message: "Dit bedrijf kon niet worden opgeslagen. Probeer opnieuw." });
+        await enqueueLeadAnalysis(ctx.db, { workspaceId, leadId: reused.id, createdById: ctx.user.id }).catch(() => null);
+        return { lead: reused, outcome: "reused" as const };
+      }
 
 
       await ctx.db.activity.create({
@@ -347,7 +375,7 @@ export const searchRouter = router({
           metadata: { placeId: input.placeId, source: "google_places" },
         },
       });
-
-      return lead;
+      await enqueueLeadAnalysis(ctx.db, { workspaceId, leadId: lead.id, createdById: ctx.user.id }).catch(() => null);
+      return { lead, outcome: "created" as const };
     }),
 });

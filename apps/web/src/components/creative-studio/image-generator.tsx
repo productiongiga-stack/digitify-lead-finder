@@ -40,6 +40,8 @@ import { MediaJobProgress } from "./media-job-progress";
 import { MuapiKeyGate } from "./muapi-key-gate";
 import { ReferencePicker } from "./reference-picker";
 import { BrandPromptPreview } from "./brand-prompt-preview";
+import { StudioContext, StudioSection, useStudioField, useCreativeQuote, CreditQuote } from "./studio-context";
+import { useContext, useRef } from "react";
 import { useMediaJob } from "./use-media-job";
 import { useRegeneratePrefill } from "./use-regenerate-prefill";
 
@@ -64,34 +66,38 @@ type Props = {
 
 export function ImageGenerator({ socialPostId }: Props) {
   const { showToast } = useToast();
+  const studio = useContext(StudioContext);
+  const requestKey = useRef<string | null>(null);
   const models = trpc.media.listModels.useQuery(undefined, MEDIA_MODELS_QUERY_OPTIONS);
   const keyStatus = trpc.media.getMuapiKeyStatus.useQuery(undefined, MUAPI_KEY_QUERY_OPTIONS);
-  const brandKit = trpc.media.getBrandKit.useQuery(undefined, MUAPI_KEY_QUERY_OPTIONS);
+  const brandKit = trpc.media.getCreativeBrand.useQuery({ brandKitId: studio?.state.brandKitId || undefined }, MUAPI_KEY_QUERY_OPTIONS);
 
   const allImageModels = useMemo(
     () => (models.data ?? []) as ModelListItem[],
     [models.data],
   );
 
-  const [mode, setMode] = useState<ImageGeneratorMode>("T2I");
+  const [mode, setMode] = useStudioField<ImageGeneratorMode>("mode", "T2I");
+  const [referenceUploading,setReferenceUploading] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState(IMAGE_MODE_DEFAULTS.T2I);
-  const [aspectRatio, setAspectRatio] = useState("1:1");
-  const [placementFormat, setPlacementFormat] = useState("NONE");
-  const [resolution, setResolution] = useState<string>("");
-  const [quality, setQuality] = useState<string>("");
-  const [referenceUrls, setReferenceUrls] = useState<string[]>([]);
+  const [prompt, setPrompt] = useStudioField("prompt", "");
+  const [model, setModel] = useStudioField("model", IMAGE_MODE_DEFAULTS.T2I);
+  const [aspectRatio, setAspectRatio] = useStudioField("aspectRatio", "1:1");
+  const [placementFormat, setPlacementFormat] = useStudioField("placementFormat", "NONE");
+  const [resolution, setResolution] = useStudioField<string>("resolution", "");
+  const [quality, setQuality] = useStudioField<string>("quality", "");
+  const [referenceUrls, setReferenceUrls] = useStudioField<string[]>("referenceUrls", []);
   const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
   const [referenceError, setReferenceError] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [linkedSocialPostId, setLinkedSocialPostId] = useState<string | null>(socialPostId ?? null);
+  const [jobId, setJobId] = useStudioField<string | null>("jobId", null);
+  const [linkedSocialPostId, setLinkedSocialPostId] = useStudioField<string | null>("linkedSocialPostId", socialPostId ?? null);
 
   const modeModels = useMemo(
     () => filterModelsByMode(allImageModels, mode),
     [allImageModels, mode],
   );
 
+  const pricing = useCreativeQuote(model, { resolution: resolution || undefined, quality: quality || undefined, duration: undefined, aspectRatio: aspectRatio });
   const selectedModel = modeModels.find((item) => item.id === model) ?? allImageModels.find((item) => item.id === model);
   const aspectOptions = selectedModel?.aspectRatios?.length
     ? selectedModel.aspectRatios
@@ -145,6 +151,7 @@ export function ImageGenerator({ socialPostId }: Props) {
   const startImage = trpc.media.startImageGeneration.useMutation({
     onSuccess: (result) => {
       setJobId(result.jobId);
+      requestKey.current = null;
       if (result.status === "COMPLETED" && result.outputUrl) {
         showToast({ title: "Afbeelding klaar" });
       } else {
@@ -168,7 +175,7 @@ export function ImageGenerator({ socialPostId }: Props) {
     onPollError: (message) => showToast({ title: "Status ophalen mislukt", description: message, variant: "error" }),
   });
 
-  const isSubmitting = startImage.isPending || uploadReference.isPending || job.isPolling || job.isAutoImporting;
+  const isSubmitting = referenceUploading || startImage.isPending || uploadReference.isPending || job.isPolling || job.isAutoImporting;
 
   function handleModeChange(nextMode: ImageGeneratorMode) {
     setMode(nextMode);
@@ -190,7 +197,7 @@ export function ImageGenerator({ socialPostId }: Props) {
     setQuality(nextModelDefinition?.qualities?.[0] ?? "");
   }
 
-  function handleReferenceFilesChange(files: FileList | null) {
+  async function handleReferenceFilesChange(files: FileList | null) {
     const nextFiles = Array.from(files ?? []);
     if (nextFiles.length > maxReferences) {
       setReferenceError(`Maximaal ${maxReferences} referentiebeelden per generatie.`);
@@ -209,7 +216,19 @@ export function ImageGenerator({ socialPostId }: Props) {
     }
     setReferenceError(null);
     setReferenceFiles(nextFiles);
-    if (nextFiles.length) handleModeChange("I2I");
+    if (!nextFiles.length) return;
+    handleModeChange("I2I");
+    setReferenceUploading(true);
+    try {
+      const uploaded:string[]=[];
+      for (const file of nextFiles) {
+        const result=await uploadReference.mutateAsync({filename:file.name,contentType:file.type,base64:await readFileAsBase64(file)});
+        uploaded.push(result.url);
+      }
+      setReferenceUrls(current=>Array.from(new Set([...current,...uploaded])).slice(0,maxReferences));
+      setReferenceFiles([]);
+    } catch(error) {setReferenceError(error instanceof Error ? error.message : "Upload mislukt. Probeer opnieuw.");}
+    finally {setReferenceUploading(false);}
   }
 
   async function handleGenerate() {
@@ -237,7 +256,12 @@ export function ImageGenerator({ socialPostId }: Props) {
         }),
       );
       const references = [...referenceUrls, ...uploadedUrls].slice(0, maxReferences);
+      setReferenceUrls(references);
       startImage.mutate({
+        requestKey: requestKey.current || (requestKey.current = crypto.randomUUID()),
+        expectedCredits: pricing.quote.data?.credits,
+        draftId: studio?.draftId,
+        brandKitId: studio?.state.brandKitId || undefined,
         prompt: trimmedPrompt,
         model,
         aspectRatio,
@@ -265,20 +289,21 @@ export function ImageGenerator({ socialPostId }: Props) {
         icon={ImageIcon}
         title="Afbeelding genereren"
         description="Tekst-naar-afbeelding of bewerk bestaande referenties voor social posts."
-        costLabel={selectedModel?.costLabel}
+        costLabel={keyStatus.data?.central ? undefined : selectedModel?.costLabel}
         brandActive={brandKit.data?.enabled}
       >
+        <StudioSection kind="content">
         <GeneratorModeToggle
           value={mode}
           onChange={handleModeChange}
           options={[
-            { value: "T2I", label: "Tekst → beeld", hint: "Nieuwe afbeelding" },
-            { value: "I2I", label: "Bewerken", hint: "Met referentie" },
+            { value: "T2I", label: "Nieuwe afbeelding" },
+            { value: "I2I", label: "Bestaand beeld aanpassen" },
           ]}
         />
 
         <div className="space-y-2">
-          <Label htmlFor="image-prompt">Prompt</Label>
+          <Label htmlFor="image-prompt">Beschrijf je idee</Label>
           <Textarea
             id="image-prompt"
             value={prompt}
@@ -294,6 +319,7 @@ export function ImageGenerator({ socialPostId }: Props) {
           />
         </div>
 
+        <StudioSection kind="advanced">
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-2">
             <Label>Model</Label>
@@ -357,6 +383,7 @@ export function ImageGenerator({ socialPostId }: Props) {
           </div>
         ) : null}
 
+        </StudioSection>
         {mode === "I2I" ? (
           <div className={studioSectionClass}>
             <ReferencePicker
@@ -389,7 +416,8 @@ export function ImageGenerator({ socialPostId }: Props) {
                 type="file"
                 accept="image/*"
                 multiple
-                onChange={(event) => handleReferenceFilesChange(event.target.files)}
+                disabled={referenceUploading}
+                onChange={(event) => void handleReferenceFilesChange(event.target.files)}
               />
               <p className="text-xs text-muted-foreground">
                 Tot {maxReferences} referenties · max 10MB per bestand
@@ -406,9 +434,12 @@ export function ImageGenerator({ socialPostId }: Props) {
           </div>
         ) : null}
 
+        </StudioSection>
+        <StudioSection kind="result">
+        <CreditQuote pricing={pricing} />
         <GenerateButton
           onClick={handleGenerate}
-          disabled={
+          disabled={!pricing.canGenerate ||
             !prompt.trim() ||
             Boolean(referenceError) ||
             (mode === "I2I" && !hasReferenceImages) ||
@@ -473,6 +504,7 @@ export function ImageGenerator({ socialPostId }: Props) {
         {job.errorMessage ? (
           <p className="text-sm text-destructive" role="alert">{job.errorMessage}</p>
         ) : null}
+        </StudioSection>
       </GeneratorShell>
     </MuapiKeyGate>
   );

@@ -157,7 +157,7 @@ export function LeadsPageInner() {
       status: statusFilter ? [statusFilter] : undefined,
       scorePriority: priorityFilter || undefined,
     },
-    sortBy,
+    sortBy: sortBy as "status" | "createdAt" | "updatedAt" | "companyName" | "city" | "overallScore" | "scorePriority",
     sortDir,
     page,
     pageSize,

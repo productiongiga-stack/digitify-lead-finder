@@ -51,6 +51,11 @@ export async function importRemoteMediaToBlob(params: {
   filename?: string;
 }): Promise<{ url: string; storage: "blob" | "local" }> {
   const { bytes, contentType } = await fetchRemoteAsset(params.sourceUrl);
+  return storeGeneratedAssetBytes({...params,bytes,contentType});
+}
+
+export async function storeGeneratedAssetBytes(params: { workspaceId:string; userId:string; filename?:string; bytes:Buffer; contentType:string }): Promise<{url:string;storage:"blob"|"local"}> {
+  const {bytes,contentType} = params;
   const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
   const ext = extensionForContentType(contentType, "bin");
   const pathname = `workspaces/${params.workspaceId}/media/${params.userId}/${Date.now()}-${sanitizeFilename(params.filename || "generated")}.${ext}`;

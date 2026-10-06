@@ -82,6 +82,7 @@ export type CreativeVariantDraft = {
   description: string;
   linkUrl: string;
   displayUrl: string;
+  videoUrl?: string;
   feedImageUrl: string;
   squareImageUrl: string;
   storyImageUrl: string;
@@ -636,6 +637,7 @@ export function mergeVariantWithBase(base: {
     feedImageUrl: next.feedImageUrl || (inheritAssets ? base.feedImageUrl : ""),
     squareImageUrl: next.squareImageUrl || (inheritAssets ? base.squareImageUrl : ""),
     storyImageUrl: next.storyImageUrl || (inheritAssets ? base.storyImageUrl : ""),
+    videoUrl: next.videoUrl || "",
     publishAsset: next.publishAsset || base.publishAsset,
     ctaType: next.ctaType || base.ctaType,
     ctaLabel: next.ctaLabel || (inheritCopy ? base.ctaLabel : ""),
@@ -855,7 +857,7 @@ export function explainMetaError(raw?: string | null): ErrorExplanation | null {
       code,
       message,
       actions: [
-        "Gebruik een volledige https URL, bijvoorbeeld https://leads.digitify.be.",
+        "Gebruik een volledige https URL, bijvoorbeeld https://jouwdomein.be.",
         "Test of de landingspagina publiek bereikbaar is.",
       ],
     };
@@ -1055,6 +1057,7 @@ export function buildMergedVariantPayload(
     feedImageUrl: merged.feedImageUrl.trim(),
     squareImageUrl: merged.squareImageUrl.trim(),
     storyImageUrl: merged.storyImageUrl.trim(),
+    videoUrl: merged.videoUrl.trim(),
     imageUrl: resolvePublishImage(merged.publishAsset, {
       feedImageUrl: merged.feedImageUrl.trim(),
       squareImageUrl: merged.squareImageUrl.trim(),
@@ -1700,8 +1703,8 @@ export function variantAssetIssues(
     squareImageUrl: merged.squareImageUrl,
     storyImageUrl: merged.storyImageUrl,
   });
-  if (!resolvedImage.trim()) issues.push("Upload minstens één beeld");
-  if (storyPlacementWarning && !merged.storyImageUrl.trim()) issues.push("Story/Reels-beeld (9:16) ontbreekt");
+  if (!resolvedImage.trim() && !merged.videoUrl) issues.push("Upload minstens één beeld");
+  if (storyPlacementWarning && !merged.storyImageUrl.trim() && !merged.videoUrl) issues.push("Story/Reels-beeld (9:16) ontbreekt");
   return issues;
 }
 
@@ -1735,6 +1738,7 @@ export function VariantCreativeForm({
 
   return (
     <div className="space-y-2">
+      {variant.videoUrl && <div className="space-y-2 rounded-lg border p-3"><p className="text-sm font-medium">Creative Studio-video</p><video src={variant.videoUrl} controls preload="metadata" className="max-h-64 w-full"/><Button size="sm" variant="outline" onClick={()=>onUpdate({videoUrl:""})}>Video verwijderen</Button><p className="text-xs text-muted-foreground">De afbeeldingen hieronder dienen als poster wanneer deze video wordt gebruikt.</p></div>}
       <VariantFormAccordionSection
         title="Basis"
         description="Naam, invalshoek, landingspagina en knop."

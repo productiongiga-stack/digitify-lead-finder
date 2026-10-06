@@ -35,6 +35,9 @@ import {
 import { clearUserMuapiKey, loadUserMuapiKey, requireUserMuapiKey, saveUserMuapiKey } from "../lib/muapi-key";
 import { importRemoteMediaToBlob } from "../lib/import-media-to-blob";
 
+import { creativeStudioProcedures } from "./creative-studio.procedures";
+import { centralCreativeEnabled, requireCentralCreativeKey, reserveCreativeJob, settleCreativeJob } from "../lib/creative-credits";
+
 const mediaTypeEnum = z.enum(["IMAGE", "VIDEO", "MARKETING_AD", "LIP_SYNC"]);
 const placementFormatEnum = z.enum(["SQUARE", "PORTRAIT", "LANDSCAPE", "STORY"]);
 const MAX_REFERENCE_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -97,6 +100,10 @@ const startLipSyncInput = z.object({
   videoUrl: remoteMediaUrl.optional(),
   audioUrl: remoteMediaUrl,
   socialPostId: z.string().optional(),
+  requestKey: z.string().uuid().optional(),
+  draftId: z.string().optional(),
+  expectedCredits: z.number().int().positive().optional(),
+  brandKitId: z.string().max(80).optional(),
 });
 
 const startImageInput = z.object({
@@ -109,6 +116,9 @@ const startImageInput = z.object({
   imageUrl: remoteMediaUrl.optional(),
   imagesList: z.array(remoteMediaUrl).max(14).optional(),
   socialPostId: z.string().optional(),
+  requestKey: z.string().uuid().optional(),
+  draftId: z.string().optional(),
+  expectedCredits: z.number().int().positive().optional(),
   brandKitId: z.string().max(80).optional(),
 });
 
@@ -122,6 +132,10 @@ const startVideoInput = z.object({
   quality: z.string().trim().optional(),
   imageUrl: remoteMediaUrl.optional(),
   socialPostId: z.string().optional(),
+  requestKey: z.string().uuid().optional(),
+  draftId: z.string().optional(),
+  expectedCredits: z.number().int().positive().optional(),
+  brandKitId: z.string().max(80).optional(),
 });
 
 const startMarketingAdInput = z.object({
@@ -133,6 +147,10 @@ const startMarketingAdInput = z.object({
   imagesList: z.array(remoteMediaUrl).min(1).max(8),
   videoFiles: z.array(remoteMediaUrl).max(2).optional(),
   socialPostId: z.string().optional(),
+  requestKey: z.string().uuid().optional(),
+  draftId: z.string().optional(),
+  expectedCredits: z.number().int().positive().optional(),
+  brandKitId: z.string().max(80).optional(),
 });
 
 function resolveAspectRatio(input: { aspectRatio?: string; placementFormat?: SocialPlacementFormat }) {
@@ -176,25 +194,33 @@ async function createGenerationJob(params: {
   prompt: string;
   metadata?: Record<string, unknown>;
   socialPostId?: string;
+  requestKey?: string;
+  draftId?: string;
 }) {
-  return params.db.mediaGeneration.create({
-    data: {
+  if (params.socialPostId && !await params.db.socialPost.findFirst({where:{id:params.socialPostId,createdById:params.workspaceId},select:{id:true}})) throw new TRPCError({code:"NOT_FOUND",message:"Social-concept niet gevonden in deze workspace."});
+  const data = {
       workspaceId: params.workspaceId,
       userId: params.userId,
       type: params.type,
       model: params.model,
       prompt: params.prompt,
-      status: "PENDING",
+      status: "PENDING" as const,
       metadata: toInputJsonObject(params.metadata),
       socialPostId: params.socialPostId,
-    },
-  });
+    };
+  if (centralCreativeEnabled()) {
+    if (!params.requestKey) throw new TRPCError({ code: "BAD_REQUEST", message: "Herlaad de pagina voordat je een generatie start." });
+    return reserveCreativeJob(data, params.requestKey, params.draftId);
+  }
+  return params.db.mediaGeneration.create({ data });
 }
 
 export const mediaRouter = router({
+  ...creativeStudioProcedures,
   getMuapiKeyStatus: protectedProcedure.query(async ({ ctx }) => {
-    const apiKey = await loadUserMuapiKey(ctx.db, ctx.user.id);
-    return { hasKey: Boolean(apiKey) };
+    const personalKey = await loadUserMuapiKey(ctx.db, ctx.user.id);
+    const apiKey = centralCreativeEnabled() ? process.env.CREATIVE_MUAPI_KEY : personalKey;
+    return { hasKey: Boolean(apiKey), central: centralCreativeEnabled(), hasPersonalKey:Boolean(personalKey) };
   }),
 
   setMuapiKey: mutationProcedure
@@ -215,7 +241,8 @@ export const mediaRouter = router({
   }),
 
   getBalance: protectedProcedure.query(async ({ ctx }) => {
-    const apiKey = await requireUserMuapiKey(ctx.db, ctx.user.id).catch((error) => {
+    if (centralCreativeEnabled()) return { balance: null };
+    const apiKey = await (centralCreativeEnabled() ? Promise.resolve(requireCentralCreativeKey()) : requireUserMuapiKey(ctx.db, ctx.user.id)).catch((error) => {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: error instanceof Error ? error.message : "MuAPI API-key ontbreekt.",
@@ -369,6 +396,8 @@ export const mediaRouter = router({
       z
         .object({
           type: mediaTypeEnum.optional(),
+          status: z.enum(["PENDING", "PROCESSING", "COMPLETED", "FAILED"]).optional(),
+          brandKitId: z.string().optional(),
           page: z.number().int().min(1).default(1),
           pageSize: z.number().int().min(1).max(50).default(20),
         })
@@ -380,6 +409,8 @@ export const mediaRouter = router({
       const where = {
         workspaceId: ctx.user.workspaceId!,
         ...(input?.type ? { type: input.type } : {}),
+        ...(input?.status ? { status: input.status } : {}),
+        ...(input?.brandKitId ? { metadata: { path: ["brandKitId"], equals: input.brandKitId } } : {}),
       };
       const [items, total] = await Promise.all([
         ctx.db.mediaGeneration.findMany({
@@ -394,7 +425,7 @@ export const mediaRouter = router({
     }),
 
   startImageGeneration: aiRateLimitedProcedure.input(startImageInput).mutation(async ({ ctx, input }) => {
-    const apiKey = await requireUserMuapiKey(ctx.db, ctx.user.id).catch((error) => {
+    const apiKey = await (centralCreativeEnabled() ? Promise.resolve(requireCentralCreativeKey()) : requireUserMuapiKey(ctx.db, ctx.user.id)).catch((error) => {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: error instanceof Error ? error.message : "MuAPI API-key ontbreekt.",
@@ -429,7 +460,11 @@ export const mediaRouter = router({
       model: input.model,
       prompt: input.prompt,
       socialPostId: input.socialPostId,
+      requestKey: input.requestKey,
+      draftId: input.draftId,
       metadata: {
+        expectedCredits: input.expectedCredits,
+        brandKitId: input.brandKitId,
         aspectRatio,
         resolution: input.resolution,
         quality: input.quality,
@@ -478,12 +513,13 @@ export const mediaRouter = router({
           errorMessage: error instanceof Error ? error.message : "Generatie mislukt",
         },
       });
+      await settleCreativeJob(job.id, false);
       mapMuapiAuthError(error);
     }
   }),
 
   startVideoGeneration: aiRateLimitedProcedure.input(startVideoInput).mutation(async ({ ctx, input }) => {
-    const apiKey = await requireUserMuapiKey(ctx.db, ctx.user.id).catch((error) => {
+    const apiKey = await (centralCreativeEnabled() ? Promise.resolve(requireCentralCreativeKey()) : requireUserMuapiKey(ctx.db, ctx.user.id)).catch((error) => {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: error instanceof Error ? error.message : "MuAPI API-key ontbreekt.",
@@ -496,7 +532,7 @@ export const mediaRouter = router({
     }
 
     const aspectRatio = resolveAspectRatio(input);
-    const brand = await loadCreativeBrandContext(ctx.db, ctx.user.workspaceId!);
+    const brand = await loadCreativeBrandContextForKit(ctx.db, ctx.user.workspaceId!, input.brandKitId);
     const enriched = enrichGenerationWithBrand(brand, {
       prompt: input.prompt?.trim() || "",
       modelType: model.type,
@@ -518,7 +554,11 @@ export const mediaRouter = router({
       model: input.model,
       prompt: input.prompt?.trim() || "",
       socialPostId: input.socialPostId,
+      requestKey: input.requestKey,
+      draftId: input.draftId,
       metadata: {
+        expectedCredits: input.expectedCredits,
+        brandKitId: input.brandKitId,
         aspectRatio,
         duration: input.duration,
         resolution: input.resolution,
@@ -567,7 +607,7 @@ export const mediaRouter = router({
   }),
 
   startMarketingAd: aiRateLimitedProcedure.input(startMarketingAdInput).mutation(async ({ ctx, input }) => {
-    const apiKey = await requireUserMuapiKey(ctx.db, ctx.user.id).catch((error) => {
+    const apiKey = await (centralCreativeEnabled() ? Promise.resolve(requireCentralCreativeKey()) : requireUserMuapiKey(ctx.db, ctx.user.id)).catch((error) => {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: error instanceof Error ? error.message : "MuAPI API-key ontbreekt.",
@@ -586,7 +626,7 @@ export const mediaRouter = router({
       endpoint = "sd-2-vip-omni-reference-1080p";
     }
 
-    const brand = await loadCreativeBrandContext(ctx.db, ctx.user.workspaceId!);
+    const brand = await loadCreativeBrandContextForKit(ctx.db, ctx.user.workspaceId!, input.brandKitId);
     const enriched = enrichGenerationWithBrand(brand, {
       prompt: input.prompt,
       modelType: "MARKETING_AD",
@@ -601,7 +641,11 @@ export const mediaRouter = router({
       model: modelId,
       prompt: input.prompt,
       socialPostId: input.socialPostId,
+      requestKey: input.requestKey,
+      draftId: input.draftId,
       metadata: {
+        expectedCredits: input.expectedCredits,
+        brandKitId: input.brandKitId,
         aspectRatio: input.aspectRatio,
         duration: input.duration,
         resolution,
@@ -653,19 +697,23 @@ export const mediaRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Generatie niet gevonden." });
       }
 
+      if (job.status === "COMPLETED" || job.status === "FAILED") await settleCreativeJob(job.id, job.status === "COMPLETED");
       if (job.status === "COMPLETED" || job.status === "FAILED" || !job.requestId) {
         return {
           id: job.id,
           status: job.status,
           type: job.type,
+          model: job.model,
           prompt: job.prompt,
+          metadata: job.metadata,
+          socialPostId: job.socialPostId,
           outputUrl: job.outputUrl,
           blobUrl: job.blobUrl,
           errorMessage: job.errorMessage,
         };
       }
 
-      const apiKey = await requireUserMuapiKey(ctx.db, ctx.user.id).catch((error) => {
+      const apiKey = await ((job.metadata as Record<string, unknown> | null)?.provider === "central" ? Promise.resolve(requireCentralCreativeKey()) : requireUserMuapiKey(ctx.db, job.userId)).catch((error) => {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: error instanceof Error ? error.message : "MuAPI API-key ontbreekt.",
@@ -682,11 +730,15 @@ export const mediaRouter = router({
               errorMessage: result.error || "Generatie mislukt",
             },
           });
+          await settleCreativeJob(job.id, false);
           return {
             id: failed.id,
             status: failed.status,
             type: failed.type,
+            model: failed.model,
             prompt: failed.prompt,
+            metadata: failed.metadata,
+            socialPostId: failed.socialPostId,
             outputUrl: failed.outputUrl,
             blobUrl: failed.blobUrl,
             errorMessage: failed.errorMessage,
@@ -697,12 +749,16 @@ export const mediaRouter = router({
             id: job.id,
             status: job.status,
             type: job.type,
+            model: job.model,
             prompt: job.prompt,
+            metadata: job.metadata,
+            socialPostId: job.socialPostId,
             outputUrl: job.outputUrl,
             blobUrl: job.blobUrl,
             errorMessage: job.errorMessage,
           };
         }
+        if (!result.url) throw new Error("Resultaat nog niet beschikbaar.");
         const updated = await ctx.db.mediaGeneration.update({
           where: { id: job.id },
           data: {
@@ -710,11 +766,15 @@ export const mediaRouter = router({
             outputUrl: result.url,
           },
         });
+        await settleCreativeJob(job.id, true);
         return {
           id: updated.id,
           status: updated.status,
           type: updated.type,
+          model: updated.model,
           prompt: updated.prompt,
+          metadata: updated.metadata,
+          socialPostId: updated.socialPostId,
           outputUrl: updated.outputUrl,
           blobUrl: updated.blobUrl,
           errorMessage: updated.errorMessage,
@@ -725,28 +785,16 @@ export const mediaRouter = router({
             id: job.id,
             status: job.status,
             type: job.type,
+            model: job.model,
             prompt: job.prompt,
+            metadata: job.metadata,
+            socialPostId: job.socialPostId,
             outputUrl: job.outputUrl,
             blobUrl: job.blobUrl,
             errorMessage: job.errorMessage,
           };
         }
-        const failed = await ctx.db.mediaGeneration.update({
-          where: { id: job.id },
-          data: {
-            status: "FAILED",
-            errorMessage: error instanceof Error ? error.message : "Generatie mislukt",
-          },
-        });
-        return {
-          id: failed.id,
-          status: failed.status,
-          type: failed.type,
-          prompt: failed.prompt,
-          outputUrl: failed.outputUrl,
-          blobUrl: failed.blobUrl,
-          errorMessage: failed.errorMessage,
-        };
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Status tijdelijk niet beschikbaar. Je generatie blijft bewaard." });
       }
     }),
 
@@ -805,7 +853,7 @@ export const mediaRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const apiKey = await requireUserMuapiKey(ctx.db, ctx.user.id).catch((error) => {
+      const apiKey = await (centralCreativeEnabled() ? Promise.resolve(requireCentralCreativeKey()) : requireUserMuapiKey(ctx.db, ctx.user.id)).catch((error) => {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: error instanceof Error ? error.message : "MuAPI API-key ontbreekt.",
@@ -846,7 +894,7 @@ export const mediaRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const apiKey = await requireUserMuapiKey(ctx.db, ctx.user.id).catch((error) => {
+      const apiKey = await (centralCreativeEnabled() ? Promise.resolve(requireCentralCreativeKey()) : requireUserMuapiKey(ctx.db, ctx.user.id)).catch((error) => {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: error instanceof Error ? error.message : "MuAPI API-key ontbreekt.",
@@ -873,7 +921,7 @@ export const mediaRouter = router({
     }),
 
   startLipSyncGeneration: aiRateLimitedProcedure.input(startLipSyncInput).mutation(async ({ ctx, input }) => {
-    const apiKey = await requireUserMuapiKey(ctx.db, ctx.user.id).catch((error) => {
+    const apiKey = await (centralCreativeEnabled() ? Promise.resolve(requireCentralCreativeKey()) : requireUserMuapiKey(ctx.db, ctx.user.id)).catch((error) => {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: error instanceof Error ? error.message : "MuAPI API-key ontbreekt.",
@@ -891,7 +939,7 @@ export const mediaRouter = router({
       throw new TRPCError({ code: "BAD_REQUEST", message: "Videobestand is verplicht voor dit model." });
     }
 
-    const brand = await loadCreativeBrandContext(ctx.db, ctx.user.workspaceId!);
+    const brand = await loadCreativeBrandContextForKit(ctx.db, ctx.user.workspaceId!, input.brandKitId);
     const enriched = enrichGenerationWithBrand(brand, {
       prompt: input.prompt?.trim() || "",
       modelType: "LIP_SYNC",
@@ -906,7 +954,11 @@ export const mediaRouter = router({
       model: input.model,
       prompt: input.prompt?.trim() || "",
       socialPostId: input.socialPostId,
+      requestKey: input.requestKey,
+      draftId: input.draftId,
       metadata: {
+        expectedCredits: input.expectedCredits,
+        brandKitId: input.brandKitId,
         resolution: input.resolution,
         imageUrl: enriched.imageUrl ?? input.imageUrl,
         videoUrl: input.videoUrl,

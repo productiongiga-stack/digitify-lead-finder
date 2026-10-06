@@ -1573,7 +1573,7 @@ export function GoogleAiBriefingDialog({
             <Input
               value={draftAudience}
               onChange={(e) => setDraftAudience(e.target.value)}
-              placeholder="Bijv. Belgische KMO-eigenaars en zaakvoerders"
+              placeholder="Bijv. beslissers die jouw dienst nodig hebben"
             />
           </div>
         </div>

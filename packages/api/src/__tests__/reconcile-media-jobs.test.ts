@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { reconcileStaleMediaJobs } from "../lib/reconcile-media-jobs";
 
+vi.mock("../lib/creative-credits", () => ({ requireCentralCreativeKey: vi.fn().mockReturnValue("central-key"), settleCreativeJob: vi.fn(), settleTerminalCreativeJobs: vi.fn() }));
+
 vi.mock("../lib/muapi-key", () => ({
   loadUserMuapiKey: vi.fn().mockResolvedValue("test-key"),
 }));

@@ -101,3 +101,11 @@ pnpm test:e2e        # optioneel
 ---
 
 *Sync met `docs/PHASES.md` bij grote planning-updates.*
+
+## Creative Studio — activatie na lokale implementatie
+
+- [ ] Centrale MuAPI-key en aangewezen Digitify-operators configureren.
+- [ ] Digitify Stripe-testaccount en webhooksecret koppelen; test Checkout met echte testcredentials.
+- [ ] Creditbundels en exacte model/instellingenprijzen vastleggen.
+- [ ] Generatie, opslag en planning met gekoppelde provideraccounts controleren.
+- [ ] Voor een latere productie-uitrol de migratie en hostingconfiguratie gecontroleerd toepassen. Live creditverkoop is nog niet ingeschakeld of beschikbaar.

@@ -53,7 +53,7 @@ describe.skipIf(!enabled)("audit database concurrency", () => {
     const scoped = createWorkspaceRlsClient(db, user.id);
     const lead = await scoped.lead.create({ data: { companyName: "Mail test", createdById: user.id } });
     const draft = await scoped.emailDraft.create({ data: {
-      leadId: lead.id, authorId: user.id, approverId: user.id, approvedAt: new Date(),
+      workspaceId: user.id, leadId: lead.id, authorId: user.id, approverId: user.id, approvedAt: new Date(),
       status: "APPROVED", toEmail: "recipient@example.test", subject: "Approved", body: "Approved body",
     } });
     const send = vi.fn().mockResolvedValue({ success: true, messageId: "captured-locally" });

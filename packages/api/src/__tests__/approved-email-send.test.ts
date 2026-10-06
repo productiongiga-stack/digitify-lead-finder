@@ -5,7 +5,7 @@ import { sendApprovedDraft } from "../lib/approved-email-send";
 function fixture(overrides: Record<string, unknown> = {}) {
   let status = "APPROVED";
   const draft = {
-    id: "draft", status, updatedAt: new Date(), approvedAt: new Date(), approverId: "owner",
+    id: "draft", workspaceId: "owner", status, updatedAt: new Date(), approvedAt: new Date(), approverId: "owner",
     sentAt: null, type: "LEAD_CONTACT", leadId: "lead", toEmail: "lead@example.test",
     lead: { id: "lead", createdById: "owner", companyName: "Lead", doNotContact: false, status: "NEW" },
     ...overrides,
@@ -34,6 +34,12 @@ describe("approved email delivery", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect(status()).toBe("SENT");
+  });
+  it("sends an approved recipient-only draft", async () => {
+    const { client } = fixture({ leadId: null, lead: null });
+    const send = vi.fn().mockResolvedValue({ success: true, messageId: "mail-recipient" });
+    await sendApprovedDraft(client, "draft", "owner", send);
+    expect(send).toHaveBeenCalledTimes(1);
   });
   it("never sends without approval or to a suppressed lead", async () => {
     for (const overrides of [{ approverId: null }, { approvedAt: null }, { sentAt: new Date() }, { lead: { doNotContact: true } }]) {
@@ -81,7 +87,7 @@ describe("approved email delivery", () => {
     db.emailDraft.findFirst.mockResolvedValue(null);
     const send = vi.fn();
     await expect(sendApprovedDraft(client, "draft", "other", send)).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(db.emailDraft.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "draft", lead: { createdById: "other" } } }));
+    expect(db.emailDraft.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "draft", workspaceId: "other" } }));
     expect(send).not.toHaveBeenCalled();
   });
 });

@@ -3,6 +3,26 @@
 Chronologisch logboek van significante wijzigingen (mens + AI).  
 **Formaat:** nieuwste entries bovenaan.
 
+## 2026-10-06 — Lokale migratie en bruikbare serverfouten
+
+- De openstaande Ads-Copilot-migratie `20261006120000_ads_copilot` is lokaal toegepast; de database rapporteert weer een volledig bijgewerkt schema.
+- De tRPC-foutformatter toont voortaan veilige, bewust geschreven gebruikersmeldingen van routers. Onverwachte exceptions blijven generiek en lekken geen SQL, tokens, providerpayloads of stackdetails.
+- `/google-ads`, `/seo`, `/files` en `/contacts` zijn na de migratie gecontroleerd; de relevante requests geven `200` en de lokale healthcheck meldt `db: ok` en `redis: ok`.
+
+## 2026-10-06 — Bestanden als Sales Workspace-bibliotheek
+
+- `/files` uitgebreid met per-gebruiker quota, private lokale opslag, checksum-idempotentie, zoekfilters, multi-upload, mappen en 30 dagen prullenbak.
+- Google Drive OAuth toegevoegd met beperkte `drive.file`-scope en expliciete lokale/Drive/beide-keuze.
+- Bestanden naar Sales Workspace verplaatst; bestaande `/api/files/:id`-downloads en workspace-isolatie blijven compatibel.
+
+## 2026-10-06 — Persoonlijke Lead Engine-analyse en idempotent lead opslaan
+
+- Workspace-profiel voor AI toegevoegd naast bestaande bedrijfs-, branding- en OpenClaw-instellingen. Revisual en Digitify krijgen hierdoor gescheiden doelgroep-, aanbod- en tone-context; generieke hardcoded Digitify-claims zijn uit de OpenClaw- en Meta-prompts gehaald.
+- Google Places-leads worden idempotent opgeslagen: bestaande leads worden hergebruikt en alleen ontbrekende bronvelden worden aangevuld. De zoekinterface ondersteunt parallel bulk opslaan, duidelijke resultaten en retry.
+- Tenant-scoped `LeadAnalysisRun` met profielhash, status, leases, retries en cronverwerking toegevoegd. Analyse start na opslag op de achtergrond en blijft handmatig opnieuw uitvoerbaar; een technische analysefout verwijdert of dupliceert de lead niet.
+- Lead-detail toont analyse-status, uitgebreide resultaten achter “Meer details”, correcte 0–100-confidence en directe Meta/Google-draftlinks met gecontroleerde leadcontext.
+- Lokale Prisma-migraties `20261006040000_lead_analysis_runs` en `20261006041000_lead_analysis_runs_rls` toegepast. OpenClaw-, API-, web-typechecks en gerichte tests uitgevoerd; bestaande Creative Studio-wijzigingen bleven behouden. Geen live advertentiepublicatie of productie-migratie uitgevoerd.
+
 ## 2026-10-02 — Persoonlijke authenticator-2FA en gecontroleerde releasevoorbereiding
 
 - Server-side tweestapslogin via gehashte HttpOnly-challenge; NextAuth accepteert geen rechtstreekse wachtwoordlogin meer. TOTP/recovery-code replaypreventie met accountlocks, duurzame limieten en server-issued JWT-factorbewijs.
@@ -1854,3 +1874,28 @@ Tests: `pnpm typecheck`, `git diff --check`.
 - Production build is geslaagd met een expliciete Node-heap van 4 GB. Zonder die instelling kan de lokale machine de build niet afronden door een heaplimiet; dit is geen compile- of typefout.
 
 **Open onderhoudspunt:** lint blijft groen met 109 bestaande waarschuwingen, voornamelijk ongebruikte imports en ontbrekende React-hook-dependencies. Deze zijn niet stilzwijgend aangepast omdat ze buiten de bevestigde moduletoegangfix vallen.
+
+## 2026-10-06 — Creative Studio wizards en credits
+
+- Doelgerichte start en vier wizardstappen, compacte hulp, gedeelde merkkits, bibliotheekfilters en serverconcepten per gebruiker/workspace.
+- Social-composer ingebed, eigen uploads, duurzame overdracht naar Social/Meta/Google; Meta-video als nieuwe variant met video_data.
+- Centrale provider en individuele wallets, atomische reserveringen/vereffeningen, beheersbare prijzen/bundels en ondertekende Stripe-testcheckout/webhooks. Live verkoop blijft uit.
+- Documentatie en lokale concurrency/isolatie/betaaltests: zie CREATIVE_STUDIO.md.
+
+- Aanvullende controles: stabiele merkkit- en referentie-JSON, bescherming van bestaande advertentieconcepten, serverkoppeling van lopende jobs aan concepten, en eenmalige afronding van creditreserveringen.
+
+## 2026-10-06 — Contacts recipient-first e-mailflow
+
+- `EmailDraft` heeft een expliciete workspace-scope en optionele idempotency-key; bestaande drafts zijn lokaal gemigreerd en RLS gebruikt nu de draft-workspace.
+- Compose en Inbox ondersteunen een geldig e-mailadres zonder lead. Nieuwe berichten gaan via concept en goedkeuring; replies blijven directe replies.
+- Contactoverzicht, approval-sender, dashboardtellingen en draftdetail tonen en verzenden recipient-only drafts. Een ontvanger kan alleen via een expliciete actie als lead worden opgeslagen.
+- Lokale verificatie: migratie geslaagd, Prisma-client gegenereerd, API-tests geslaagd en web-typecheck geslaagd.
+
+## 2026-10-06 — Meta/Google Ads gedeelde AI-Copilot
+
+- Workspace-scoped `AdResearchRun` en `AdResearchEvidence` toegevoegd met profielhash, bronmodus, lease/retry-status en RLS.
+- Nieuwe `adsCopilot`-router voor on-demand accountresearch, optionele configureerbare webresearch, evidence, polling, retry en approval-gebonden campagnevoorstellen.
+- Researchjobs draaien via de bestaande ads-background worker; voorstellen worden opgeslagen als `AdChangeSet` en publiceren nooit rechtstreeks.
+- Live naam/status-wijzigingen uit de studio gebruiken de versioned approvalflow waar de providerdata beschikbaar is.
+- AI-prompts gebruiken geen hardcoded Digitify/Belgische KMO-context meer; Google- en Meta-studio’s tonen een gedeelde Copilot-panel.
+- Lokale verificatie: Prisma-client gegenereerd; bestaande Meta/Google/workflow/background tests geslaagd; web-typecheck geslaagd. Database-migratie en live providerwrites zijn lokaal nog afhankelijk van configuratie.

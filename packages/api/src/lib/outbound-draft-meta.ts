@@ -73,7 +73,7 @@ export async function normalizeLegacyScheduledDrafts(db: PrismaClient, workspace
     where: {
       status: "SCHEDULED",
       sentAt: null,
-      lead: { createdById: workspaceId },
+      workspaceId,
     },
     data: { status: "DRAFT" },
   });

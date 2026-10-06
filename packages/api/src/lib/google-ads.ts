@@ -321,7 +321,7 @@ async function fetchImageAssetData(url: string) {
   return bytes;
 }
 
-async function createAdsClient(config: GoogleAdsWorkspaceConfig) {
+export async function createAdsClient(config: GoogleAdsWorkspaceConfig) {
   if (!config.clientId || !config.clientSecret) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Google OAuth client ontbreekt in Integraties." });
   }
@@ -589,7 +589,7 @@ type GoogleCampaignPlanInput = {
   dailyBudgetCents?: number | null;
   targeting?: unknown;
   creatives?: unknown;
-  publishStatus?: "ENABLED" | "PAUSED";
+  publishStatus?: "ENABLED" | "PAUSED" | "REMOVED";
 };
 
 function normalizeChannelType(value: unknown): "SEARCH" | "PERFORMANCE_MAX" {
@@ -1011,7 +1011,7 @@ async function updateGoogleSearchCampaignLive(params: {
   }
   if (plan.publishStatus) {
     campaignUpdate.status =
-      plan.publishStatus === "ENABLED" ? enums.CampaignStatus.ENABLED : enums.CampaignStatus.PAUSED;
+      plan.publishStatus === "ENABLED" ? enums.CampaignStatus.ENABLED : plan.publishStatus === "REMOVED" ? enums.CampaignStatus.REMOVED : enums.CampaignStatus.PAUSED;
   }
   if (Object.keys(campaignUpdate).length > 1) await customer.campaigns.update([campaignUpdate]);
 
@@ -1114,7 +1114,7 @@ async function updateGooglePerformanceMaxCampaignLive(params: {
   if (changed("targeting.campaignSettings.trackingTemplate")) campaignUpdate.tracking_url_template = String(campaignSettings.trackingTemplate || "");
   if (plan.publishStatus) {
     campaignUpdate.status =
-      plan.publishStatus === "ENABLED" ? enums.CampaignStatus.ENABLED : enums.CampaignStatus.PAUSED;
+      plan.publishStatus === "ENABLED" ? enums.CampaignStatus.ENABLED : plan.publishStatus === "REMOVED" ? enums.CampaignStatus.REMOVED : enums.CampaignStatus.PAUSED;
   }
   if (Object.keys(campaignUpdate).length > 1) await customer.campaigns.update([campaignUpdate]);
 

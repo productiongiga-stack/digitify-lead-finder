@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@digitify/db";
-import { getSettingString, settingsRowsToMap } from "./settings";
+import { settingsRowsToMap } from "./settings";
 import { invalidateWorkspaceSettingsCache, loadWorkspaceSettingRows, resolveSettingDbKey, type WorkspaceScope } from "./workspace-settings";
 
 const REFERENCE_SETTING_KEY = "creative.reference_library";
@@ -17,10 +17,10 @@ function workspaceScopeFromWorkspaceId(workspaceId: string): WorkspaceScope {
   return { workspaceId, memberId: workspaceId };
 }
 
-function parseReferenceLibrary(raw: string | undefined): ReferenceUpload[] {
-  if (!raw?.trim()) return [];
+function parseReferenceLibrary(raw: unknown): ReferenceUpload[] {
+  if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed = typeof raw === "string" ? JSON.parse(raw) as unknown : raw;
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter((item): item is ReferenceUpload => {
@@ -44,7 +44,7 @@ export async function loadReferenceLibrary(db: PrismaClient, workspaceId: string
   const scope = workspaceScopeFromWorkspaceId(workspaceId);
   const rows = await loadWorkspaceSettingRows(db, scope, [REFERENCE_SETTING_KEY]);
   const settings = settingsRowsToMap(rows);
-  return parseReferenceLibrary(getSettingString(settings, REFERENCE_SETTING_KEY));
+  return parseReferenceLibrary(settings[REFERENCE_SETTING_KEY]);
 }
 
 async function saveReferenceLibrary(db: PrismaClient, workspaceId: string, items: ReferenceUpload[]) {

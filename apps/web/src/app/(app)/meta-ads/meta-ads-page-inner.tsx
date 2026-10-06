@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { useMutationGeneration } from "@/lib/use-mutation-generation";
 import { useBranding } from "@/lib/branding";
 import { AdsStudioStatsStrip, adsStudioStatIcons } from "@/components/ads/ads-studio-stats-strip";
+import { AdsCopilotPanel } from "@/components/ads/ads-copilot-panel";
 import { AdsStudioTabsNav } from "@/components/ads/ads-studio-tabs-nav";
 import { MetaAdsDashboardOverview } from "@/components/ads/meta-ads-dashboard-overview";
 import { MetaAdsDraftsPanel } from "@/components/ads/meta-ads-drafts-panel";
@@ -80,14 +81,38 @@ export function MetaAdsPageInner() {
   const [advancedTargetingJson, setAdvancedTargetingJson] = useState("{}");
   const [uploadingVariantAsset, setUploadingVariantAsset] = useState<string | null>(null);
   const [aiTrainingNotes, setAiTrainingNotes] = useState("");
+  const leadId = searchParams.get("leadId");
+  const seoContext = searchParams.get("seoContext");
+  const seoTargetUrl = searchParams.get("targetUrl");
+  const leadContext = trpc.lead.getById.useQuery({ id: leadId || "" }, { enabled: Boolean(leadId), staleTime: 120_000 });
+  const [appliedLeadContext, setAppliedLeadContext] = useState<string | null>(null);
 
   const pendingAdJobId = searchParams.get("adJob");
+  const targetCreativePlanId = searchParams.get("planId");
   const [appliedAdJobId, setAppliedAdJobId] = useState<string | null>(null);
   const importCreativeAd = trpc.media.importToBlob.useMutation();
   const creativeAdJob = trpc.media.getJobStatus.useQuery(
     { jobId: pendingAdJobId || "" },
-    { enabled: Boolean(pendingAdJobId) && appliedAdJobId !== pendingAdJobId },
+    { enabled: Boolean(pendingAdJobId) && (!targetCreativePlanId || loadedPlanId === targetCreativePlanId) && appliedAdJobId !== pendingAdJobId },
   );
+
+  useEffect(() => {
+    if (!leadId || appliedLeadContext === leadId || !leadContext.data) return;
+    const lead = leadContext.data;
+    setProduct(lead.companyName || lead.industry || "");
+    setAudience([lead.industry, lead.city].filter(Boolean).join(" · "));
+    if (!name) setName(`${lead.companyName} campagne`);
+    if (!linkUrl && lead.website) setLinkUrl(lead.website);
+    setAppliedLeadContext(leadId);
+    showToast({ title: "Leadcontext geladen", description: "De advertentiedraft gebruikt deze lead als briefing." });
+  }, [leadId, appliedLeadContext, leadContext.data, name, linkUrl, showToast]);
+  useEffect(() => {
+    if (!seoContext) return;
+    setProduct((current) => current || seoContext);
+    setName((current) => current || `${seoContext} campagne`);
+    setLinkUrl((current) => current || seoTargetUrl || "");
+    setAdsTab("builder");
+  }, [seoContext, seoTargetUrl]);
 
   const connection = trpc.metaAds.connectionStatus.useQuery(undefined, { refetchInterval: 30_000 });
   const metaAdAccountName = (connection.data?.selectedAdAccountName ?? "").trim();
@@ -146,12 +171,11 @@ export function MetaAdsPageInner() {
         }
 
         if (cancelled) return;
-        if (status.prompt?.trim()) {
-          setPrimaryText(status.prompt.trim());
-          setProduct(status.prompt.trim().slice(0, 120));
-        }
-        setStoryImageUrl(mediaUrl);
-        setPublishAsset("story");
+        const metadata = status.metadata as Record<string, unknown> | null;
+        const poster = status.type === "IMAGE" ? mediaUrl : typeof metadata?.imageUrl === "string" ? metadata.imageUrl : Array.isArray(metadata?.imagesList) ? String(metadata.imagesList[0] || "") : "";
+        const variant = { ...createCreativeVariant("Creative Studio"), primaryText: status.prompt || "", videoUrl: status.type === "IMAGE" ? "" : mediaUrl, feedImageUrl: poster, squareImageUrl: poster, storyImageUrl: poster };
+        const fresh = { ...createAdset("Creative Studio"), variants: [variant] };
+        setAdsets(current => current.length ? current.map((adset,index) => index === 0 ? {...adset,variants:[...adset.variants,variant]} : adset) : [fresh]);
         setAdsTab("builder");
         setActiveStep("ads");
         setAppliedAdJobId(pendingAdJobId);
@@ -185,6 +209,7 @@ export function MetaAdsPageInner() {
     [rows],
   );
   const filteredRows = approvalFilter === "ALL" ? rows : rows.filter((row: any) => row.status === approvalFilter);
+  useEffect(()=>{if(targetCreativePlanId && rows.some((row:{id:string})=>row.id === targetCreativePlanId)) {setSelectedPlanId(targetCreativePlanId);setAdsTab("builder");}},[targetCreativePlanId,rows]);
   const selectedPlan = selectedPlanId ? rows.find((row: any) => row.id === selectedPlanId) || null : null;
   const totalSpend = useMemo(() => (insights.data || []).reduce((sum: number, row: any) => sum + Number(row.spend || 0), 0), [insights.data]);
   const totalClicks = useMemo(() => (insights.data || []).reduce((sum: number, row: any) => sum + Number(row.clicks || 0), 0), [insights.data]);
@@ -300,8 +325,8 @@ export function MetaAdsPageInner() {
             merged.primaryText.trim() &&
               merged.headline.trim() &&
               merged.linkUrl.trim().startsWith("https://") &&
-              resolvedImage.trim() &&
-              (!adsetNeedsStoryImage || merged.storyImageUrl.trim()),
+              (resolvedImage.trim() || merged.videoUrl) &&
+              (!adsetNeedsStoryImage || merged.storyImageUrl.trim() || merged.videoUrl),
           );
         }),
       ),
@@ -395,8 +420,8 @@ export function MetaAdsPageInner() {
             squareImageUrl: merged.squareImageUrl,
             storyImageUrl: merged.storyImageUrl,
           });
-          if (!image.trim()) adsTodos.push(`${prefix}: upload een publish-beeld.`);
-          if (needsStory && !merged.storyImageUrl.trim()) {
+          if (!image.trim() && !merged.videoUrl) adsTodos.push(`${prefix}: upload een publish-beeld.`);
+          if (needsStory && !merged.storyImageUrl.trim() && !merged.videoUrl) {
             adsTodos.push(`${prefix}: story/reels-plaatsing vereist 9:16-beeld.`);
           }
         });
@@ -691,6 +716,7 @@ export function MetaAdsPageInner() {
                   displayUrl: String(variantRecord.displayUrl || rootVariantFallback.displayUrl),
                   feedImageUrl: String(variantRecord.feedImageUrl || variantRecord.imageUrl || rootVariantFallback.feedImageUrl),
                   squareImageUrl: String(variantRecord.squareImageUrl || rootVariantFallback.squareImageUrl),
+                  videoUrl: String(variantRecord.videoUrl || ""),
                   storyImageUrl: String(variantRecord.storyImageUrl || rootVariantFallback.storyImageUrl),
                   publishAsset: (variantRecord.publishAsset || rootVariantFallback.publishAsset) as AssetSlot,
                   ctaType: String(variantRecord.ctaType || rootVariantFallback.ctaType),
@@ -898,6 +924,7 @@ export function MetaAdsPageInner() {
         product: trimmedProduct,
         audience: (brief?.audience ?? audience).trim() || undefined,
         tone: brief?.tone ?? aiTone,
+        leadId: leadId || undefined,
       },
       {
         onSuccess: (payload) => {
@@ -915,8 +942,8 @@ export function MetaAdsPageInner() {
   const duplicateDraft = trpc.metaAds.duplicateDraft.useMutation({ onSuccess: async (row: any) => { setSelectedPlanId(row.id); setLoadedPlanId(null); await invalidate(); showToast({ title: "Draft gedupliceerd" }); }, onError: (e) => showToast({ title: "Dupliceren mislukt", description: e.message, variant: "error" }) });
   const archiveDraft = trpc.metaAds.archiveDraft.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Archiveren mislukt", description: e.message, variant: "error" }) });
   const syncCampaigns = trpc.metaAds.syncMetaCampaigns.useMutation({ onSuccess: async () => { await invalidate(); showToast({ title: "Meta campagnes gesynchroniseerd" }); }, onError: (e) => showToast({ title: "Sync mislukt", description: e.message, variant: "error" }) });
-  const pauseCampaign = trpc.metaAds.pauseInMeta.useMutation({ onSuccess: async () => { await invalidate(); showToast({ title: "Campagne gepauzeerd in Meta" }); }, onError: (e) => showToast({ title: "Pauzeren mislukt", description: e.message, variant: "error" }) });
-  const resumeCampaign = trpc.metaAds.resumeInMeta.useMutation({ onSuccess: async () => { await invalidate(); showToast({ title: "Campagne hervat in Meta" }); }, onError: (e) => showToast({ title: "Hervatten mislukt", description: e.message, variant: "error" }) });
+  const pauseCampaign = trpc.metaAds.pauseInMeta.useMutation({ onSuccess: async () => { await invalidate(); showToast({ title: "Pauzevoorstel aangemaakt", description: "Open Goedkeuring om dit naar Meta door te zetten." }); }, onError: (e) => showToast({ title: "Pauzevoorstel mislukt", description: e.message, variant: "error" }) });
+  const resumeCampaign = trpc.metaAds.resumeInMeta.useMutation({ onSuccess: async () => { await invalidate(); showToast({ title: "Voorstel om te hervatten aangemaakt", description: "Open Goedkeuring om dit naar Meta door te zetten." }); }, onError: (e) => showToast({ title: "Hervatvoorstel mislukt", description: e.message, variant: "error" }) });
   const selectAdAccount = trpc.metaAds.selectAdAccount.useMutation({
     onSuccess: async () => {
       await invalidate();
@@ -1013,6 +1040,7 @@ export function MetaAdsPageInner() {
         angle: angle.trim() || `${adsetName} doelgroep met duidelijke hook`,
         landingUrl: linkUrl.trim() || undefined,
         adsetName,
+        leadId: leadId || undefined,
       });
       if (!isCurrentGeneration(gen)) return;
       const payload = asRecord(rawPayload);
@@ -1131,6 +1159,7 @@ export function MetaAdsPageInner() {
         ...advancedTargeting,
       },
       creatives: {
+        brandKitId: searchParams.get("brandKitId") || undefined,
         adName: String(firstCreative.adName || adName).trim(),
         pageName: facebookPublisherName,
         linkUrl: String(firstCreative.linkUrl || linkUrl).trim(),
@@ -1239,6 +1268,8 @@ export function MetaAdsPageInner() {
             </div>
           </div>
         </div>
+
+        <AdsCopilotPanel provider="META" campaignIds={selectedCampaignId ? [selectedCampaignId] : []} />
 
         {!connection.data?.autoadsEnabled ? (
           <AdsModuleSetupNotice

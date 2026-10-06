@@ -68,7 +68,7 @@ function isSecretNoopUpdate(key: string, value: unknown) {
   return normalized === "" || normalized === SECRET_REDACTION_MASK || normalized === null || normalized === undefined;
 }
 
-const ACCOUNT_VIEW_BLOCKED_SETTING_PREFIXES = ["api.", "openclaw.", "integrations.", "analytics.", "cache.", "seo.", "social."];
+const ACCOUNT_VIEW_BLOCKED_SETTING_PREFIXES = ["api.", "openclaw.", "ai.", "integrations.", "analytics.", "cache.", "seo.", "social."];
 const ACCOUNT_VIEW_BLOCKED_SETTING_KEYS = new Set([
   "bookings.google_calendar_timezone",
   "bookings.google_service_account_private_key",

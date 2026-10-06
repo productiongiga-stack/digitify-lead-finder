@@ -30,6 +30,8 @@ import { LIBRARY_SAVE_LABEL, MEDIA_MODELS_QUERY_OPTIONS, MUAPI_KEY_QUERY_OPTIONS
 import { MediaJobProgress } from "./media-job-progress";
 import { BrandPromptPreview } from "./brand-prompt-preview";
 import { MuapiKeyGate } from "./muapi-key-gate";
+import { StudioContext, StudioSection, useStudioField, useCreativeQuote, CreditQuote } from "./studio-context";
+import { useContext, useRef } from "react";
 import { useMediaJob } from "./use-media-job";
 
 const MAX_REFERENCE_UPLOAD_SIZE = 10 * 1024 * 1024;
@@ -47,8 +49,10 @@ async function fileToBase64(file: File): Promise<string> {
 
 export function MarketingAdGenerator() {
   const { showToast } = useToast();
+  const studio = useContext(StudioContext);
+  const requestKey = useRef<string | null>(null);
   const keyStatus = trpc.media.getMuapiKeyStatus.useQuery(undefined, MUAPI_KEY_QUERY_OPTIONS);
-  const brandKit = trpc.media.getBrandKit.useQuery(undefined, MUAPI_KEY_QUERY_OPTIONS);
+  const brandKit = trpc.media.getCreativeBrand.useQuery({ brandKitId: studio?.state.brandKitId || undefined }, MUAPI_KEY_QUERY_OPTIONS);
   const models = trpc.media.listModels.useQuery(undefined, MEDIA_MODELS_QUERY_OPTIONS);
   const uploadReference = trpc.media.uploadReference.useMutation();
 
@@ -57,16 +61,17 @@ export function MarketingAdGenerator() {
     [models.data],
   );
 
-  const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState("seedance-2-vip-omni-reference");
-  const [aspectRatio, setAspectRatio] = useState("9:16");
-  const [duration, setDuration] = useState("5");
-  const [resolution, setResolution] = useState<"720p" | "1080p">("720p");
-  const [productImageUrl, setProductImageUrl] = useState("");
-  const [avatarImageUrl, setAvatarImageUrl] = useState("");
-  const [referenceVideoUrl, setReferenceVideoUrl] = useState("");
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [prompt, setPrompt] = useStudioField("prompt", "");
+  const [model, setModel] = useStudioField("model", "seedance-2-vip-omni-reference");
+  const [aspectRatio, setAspectRatio] = useStudioField("aspectRatio", "9:16");
+  const [duration, setDuration] = useStudioField("duration", "5");
+  const [resolution, setResolution] = useStudioField<"720p" | "1080p">("resolution", "720p");
+  const [productImageUrl, setProductImageUrl] = useStudioField("productImageUrl", "");
+  const [avatarImageUrl, setAvatarImageUrl] = useStudioField("avatarImageUrl", "");
+  const [referenceVideoUrl, setReferenceVideoUrl] = useStudioField("referenceVideoUrl", "");
+  const [jobId, setJobId] = useStudioField<string | null>("jobId", null);
 
+  const pricing = useCreativeQuote(model, { resolution: resolution || undefined, quality: undefined, duration: Number(duration), aspectRatio: aspectRatio });
   const selectedModel = adModels.find((item) => item.id === model);
   const resolutionOptions = (selectedModel?.resolutions ?? ["720p"]) as Array<"720p" | "1080p">;
   const supports1080p = resolutionOptions.includes("1080p");
@@ -74,6 +79,7 @@ export function MarketingAdGenerator() {
   const startMarketingAd = trpc.media.startMarketingAd.useMutation({
     onSuccess: (result) => {
       setJobId(result.jobId);
+      requestKey.current = null;
       showToast({ title: "Advertentie-generatie gestart", description: "Dit kan enkele minuten duren." });
     },
     onError: (error) => showToast({ title: "Generatie mislukt", description: error.message, variant: "error" }),
@@ -142,9 +148,10 @@ export function MarketingAdGenerator() {
         icon={Megaphone}
         title="Marketing advertentie"
         description="Product + avatar + script naar een korte video-ad voor Meta en social."
-        costLabel={selectedModel?.costLabel}
+        costLabel={keyStatus.data?.central ? undefined : selectedModel?.costLabel}
         brandActive={brandKit.data?.enabled}
       >
+        <StudioSection kind="content">
           <div className="space-y-2">
             <Label htmlFor="ad-prompt">Ad-script</Label>
             <Textarea
@@ -158,6 +165,7 @@ export function MarketingAdGenerator() {
             <BrandPromptPreview brand={brandKit.data} prompt={prompt} modelType="MARKETING_AD" />
           </div>
 
+        <StudioSection kind="advanced">
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Model</Label>
@@ -212,6 +220,7 @@ export function MarketingAdGenerator() {
             </div>
           </div>
 
+        </StudioSection>
           <div className={cn(studioSectionClass, "grid gap-4 md:grid-cols-2")}>
             <div className="space-y-2">
               <Label>Productafbeelding</Label>
@@ -239,9 +248,16 @@ export function MarketingAdGenerator() {
             />
           </div>
 
-          <GenerateButton
+          </StudioSection>
+        <StudioSection kind="result">
+        <CreditQuote pricing={pricing} />
+        <GenerateButton
             onClick={() =>
               startMarketingAd.mutate({
+        requestKey: requestKey.current || (requestKey.current = crypto.randomUUID()),
+        expectedCredits: pricing.quote.data?.credits,
+        draftId: studio?.draftId,
+        brandKitId: studio?.state.brandKitId || undefined,
                 prompt: prompt.trim(),
                 model,
                 aspectRatio,
@@ -251,7 +267,7 @@ export function MarketingAdGenerator() {
                 videoFiles: referenceVideoUrl.trim() ? [referenceVideoUrl.trim()] : undefined,
               })
             }
-            disabled={!prompt.trim() || !productImageUrl || isSubmitting}
+            disabled={!pricing.canGenerate || !prompt.trim() || !productImageUrl || isSubmitting}
             isLoading={isSubmitting}
           >
             {isSubmitting ? (
@@ -299,6 +315,7 @@ export function MarketingAdGenerator() {
           {job.errorMessage ? (
             <p className="text-sm text-destructive" role="alert">{job.errorMessage}</p>
           ) : null}
+        </StudioSection>
       </GeneratorShell>
     </MuapiKeyGate>
   );

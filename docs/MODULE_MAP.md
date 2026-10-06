@@ -65,13 +65,14 @@ Beide bestaande advertentierouters gebruiken `packages/api/src/routers/ads-workf
 
 ## Communicatie
 
-### Outbound / Contacten 🔒 `contacts`
+### E-mail & Contacten 🔒 `contacts`
 
 | Laag | Pad |
 |------|-----|
 | Router | `packages/api/src/routers/contact.router.ts` |
 | Inbox router | `packages/api/src/routers/inbox.router.ts` |
 | E-mail send | `packages/api/src/lib/email-sender.ts` (één SMTP per workspace; ADR-015) |
+| Recipient-only scope | `EmailDraft.workspaceId` + optionele `leadId` |
 | Draft meta | `packages/api/src/lib/outbound-draft-meta.ts` |
 | UI center | `apps/web/src/app/(app)/contacts/contacts-page-inner.tsx` |
 | UI compose | `apps/web/src/app/(app)/contacts/compose/` |
@@ -161,6 +162,7 @@ Beide bestaande advertentierouters gebruiken `packages/api/src/routers/ads-workf
 |------|-----|
 | Router | `packages/api/src/routers/meta-ads.router.ts` |
 | Meta API | `packages/api/src/lib/meta-ads.ts`, `meta-ads-ai.ts` |
+| Shared Copilot | `packages/api/src/routers/ads-copilot.router.ts`, `packages/api/src/lib/ads-copilot.ts`, `ads-workflow.ts` |
 | OAuth | `apps/web/src/app/api/integrations/meta/` |
 | UI | `apps/web/src/app/(app)/meta-ads/meta-ads-page-inner.tsx` |
 | Components | `apps/web/src/components/ads/meta-ads-*.tsx` |
@@ -172,6 +174,7 @@ Beide bestaande advertentierouters gebruiken `packages/api/src/routers/ads-workf
 |------|-----|
 | Router | `packages/api/src/routers/google-ads.router.ts` |
 | Google API | `packages/api/src/lib/google-ads.ts`, `google-ads-ai.ts`, `google-ads-oauth.ts` |
+| Shared Copilot | `packages/api/src/routers/ads-copilot.router.ts`, `packages/api/src/lib/ads-copilot.ts`, `ads-workflow.ts` |
 | OAuth | `apps/web/src/app/api/integrations/google-ads/` |
 | UI | `apps/web/src/app/(app)/google-ads/google-ads-page-inner.tsx` |
 | Components | `apps/web/src/components/ads/google-ads-page-fallback.tsx`, `ads-studio-*` |
@@ -326,6 +329,7 @@ Beide bestaande advertentierouters gebruiken `packages/api/src/routers/ads-workf
 | Rate limits | `rate-limit*.ts` |
 | Env | `server-env.ts`, `instrumentation.ts` |
 | Uploads | `upload-storage.ts`, `upload/route.ts`, Vercel Blob |
+| Sales bestandenbibliotheek | `files/page.tsx`, `file.router.ts`, `file-quota.ts`, `file-storage.ts`, Google Drive OAuth-routes |
 | E-mail shell | `packages/email/`, `generate-email-shell.ts` |
 | Cron auth | `cron-auth.ts` |
 | Public tenant | `public-tenant.ts` |
@@ -337,15 +341,15 @@ Beide bestaande advertentierouters gebruiken `packages/api/src/routers/ads-workf
 
 | Module | Models |
 |--------|--------|
-| Leads | `Lead`, `LeadContact`, `Tag`, `LeadTag`, `EnrichmentData`, `LeadScoringFactor` |
+| Leads | `Lead`, `LeadContact`, `Tag`, `LeadTag`, `EnrichmentData`, `LeadScoringFactor`, `LeadAnalysisRun` |
 | Outbound | `EmailDraft`, `EmailTemplate`, `EmailSequence` |
 | Campaigns | `Campaign`, `CampaignLead` |
 | Quotes | `Quote`, `QuoteItem`, `ServiceCatalog` |
 | Invoices | `WorkspaceInvoice`, `WorkspaceInvoiceItem` |
 | Tasks | `WorkspaceTask` |
 | Social | `SocialPost` |
-| Meta Ads | `MetaAdAccount`, `MetaAdPlan` |
-| Google Ads | `GoogleAdAccount`, `GoogleAdPlan` |
+| Meta Ads | `MetaAdAccount`, `MetaAdPlan`, `AdResearchRun`, `AdResearchEvidence` |
+| Google Ads | `GoogleAdAccount`, `GoogleAdPlan`, `AdChangeSet` |
 | Media | `MediaGeneration` |
 | Bookings | `Booking`, `BookingEventType`, `BookingAvailabilityRule`, … |
 | Domains | `Domain` |
@@ -357,3 +361,7 @@ Beide bestaande advertentierouters gebruiken `packages/api/src/routers/ads-workf
 ---
 
 *Update dit bestand wanneer een nieuwe router, pagina of significant lib-module wordt toegevoegd.*
+
+### Creative Studio: wizards en credits
+
+Doelgerichte wizards en bibliotheek via Creative Studio; concept-, pricing-, checkout- en handoffprocedures worden in mediaRouter geregistreerd vanuit creative-studio.procedures.ts. Gedeelde merkkits: Social Planner. Financiële opslag: CreativeWallet/CreativeLedger/CreativeReservation/CreativePurchase. Setup en verificatie: [CREATIVE_STUDIO.md](CREATIVE_STUDIO.md).

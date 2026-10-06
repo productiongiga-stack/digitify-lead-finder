@@ -6,6 +6,9 @@ import { buildLeadEmailTimeline } from "../lib/lead-email-timeline";
 import { importLeadRecords } from "../lib/lead-import";
 import type { Prisma } from "@digitify/db";
 import { assertWorkspaceMember } from "../lib/workspace-members";
+import { enqueueLeadAnalysis } from "../lib/lead-analysis";
+
+const leadSortSchema = z.enum(["createdAt", "updatedAt", "companyName", "city", "status", "overallScore", "scorePriority"]);
 
 const DEMO_LEAD_NAMES = [
   "Bakkerij Van Damme",
@@ -108,7 +111,7 @@ export const leadRouter = router({
     .input(
       z.object({
         filters: leadFilterSchema.optional(),
-        sortBy: z.string().default("createdAt"),
+        sortBy: leadSortSchema.default("createdAt"),
         sortDir: z.enum(["asc", "desc"]).default("desc"),
         page: z.number().min(1).default(1),
         pageSize: z.number().min(1).max(100).default(25),
@@ -205,7 +208,7 @@ export const leadRouter = router({
     .input(
       z.object({
         filters: leadFilterSchema.optional(),
-        sortBy: z.string().default("createdAt"),
+        sortBy: leadSortSchema.default("createdAt"),
         sortDir: z.enum(["asc", "desc"]).default("desc"),
         page: z.number().min(1).default(1),
         pageSize: z.number().min(1).max(100).default(25),
@@ -493,7 +496,7 @@ export const leadRouter = router({
           include: { user: { select: { id: true, name: true } } },
         }),
         ctx.db.emailDraft.findMany({
-          where: { leadId: input.leadId },
+          where: { leadId: input.leadId, workspaceId: ctx.user.workspaceId! },
           orderBy: { createdAt: "desc" },
           take: 50,
           select: {
@@ -521,8 +524,8 @@ export const leadRouter = router({
         companyName: z.string().trim().min(1).max(300),
         address: z.string().trim().max(500).optional(),
         website: z.string().optional(),
-        phone: z.string().optional(),
-        email: z.string().email().optional(),
+        phone: z.string().trim().max(80).optional(),
+        email: z.string().trim().toLowerCase().email().optional(),
         industry: z.string().optional(),
         city: z.string().optional(),
         state: z.string().optional(),
@@ -550,6 +553,8 @@ export const leadRouter = router({
         },
       });
 
+      await enqueueLeadAnalysis(ctx.db, { workspaceId: ctx.user.workspaceId!, leadId: lead.id, createdById: ctx.user.id }).catch(() => null);
+
       return lead;
     }),
 
@@ -557,10 +562,10 @@ export const leadRouter = router({
     .input(
       z.object({
         id: z.string(),
-        companyName: z.string().optional(),
+        companyName: z.string().trim().min(1).max(300).optional(),
         website: z.string().nullable().optional(),
         phone: z.string().nullable().optional(),
-        email: z.string().nullable().optional(),
+        email: z.string().trim().toLowerCase().email().nullable().optional(),
         industry: z.string().nullable().optional(),
         address: z.string().nullable().optional(),
         city: z.string().nullable().optional(),
@@ -583,6 +588,10 @@ export const leadRouter = router({
       const { id, status, pipelineStageId, assignedToId, ...rest } = input;
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, id);
       const data: Record<string, unknown> = { ...rest };
+      if (typeof data.companyName === "string") data.companyName = data.companyName.trim();
+      if (typeof data.website === "string") data.website = data.website.trim() || null;
+      if (typeof data.phone === "string") data.phone = data.phone.trim() || null;
+      if (typeof data.email === "string") data.email = data.email.trim().toLowerCase() || null;
       if (status !== undefined) data.status = status;
       if (pipelineStageId !== undefined) {
         if (pipelineStageId) {
@@ -648,6 +657,7 @@ export const leadRouter = router({
         where: { id: { in: input.ids }, createdById: ctx.user.workspaceId! },
         data: { status: input.status, lastEditedById: ctx.user.id },
       });
+      await ctx.db.activity.createMany({ data: input.ids.map((leadId) => ({ leadId, userId: ctx.user.id, type: "LEAD_UPDATED" as const, title: `Status gewijzigd naar ${input.status}`, metadata: { status: input.status, bulk: true } })) }).catch(() => null);
       return { updated: result.count };
     }),
 
@@ -657,6 +667,7 @@ export const leadRouter = router({
       const result = await ctx.db.lead.deleteMany({
         where: { id: { in: input.ids }, createdById: ctx.user.workspaceId! },
       });
+      await ctx.db.activity.create({ data: { userId: ctx.user.id, type: "LEAD_UPDATED", title: `${result.count} leads verwijderd`, metadata: { bulk: true, action: "delete", leadIds: input.ids } } }).catch(() => null);
       return { deleted: result.count };
     }),
 

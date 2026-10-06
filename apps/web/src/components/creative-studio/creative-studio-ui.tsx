@@ -1,5 +1,6 @@
 "use client";
 
+import { StudioHelp } from "./studio-context";
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
@@ -189,7 +190,7 @@ export function GeneratorShell({
               </span>
               {title}
             </CardTitle>
-            <CardDescription className="max-w-2xl">{description}</CardDescription>
+            <StudioHelp label={`Uitleg over ${title}`}>{description}</StudioHelp>
           </div>
           <div className="flex flex-wrap gap-2">
             {costLabel ? (

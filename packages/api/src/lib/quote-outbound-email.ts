@@ -128,6 +128,7 @@ export async function syncQuoteOutboundDrafts(
   const result = await db.emailDraft.updateMany({
     where: {
       type: "QUOTE",
+      workspaceId,
       status: { in: ["DRAFT", "PENDING_APPROVAL", "APPROVED", "FAILED"] },
       body: { contains: `[[QUOTE_ID=${quoteId}]]` },
       lead: { createdById: workspaceId },

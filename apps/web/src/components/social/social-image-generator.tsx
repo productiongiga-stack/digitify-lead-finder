@@ -41,6 +41,9 @@ function placementFormat(feedFormat: FeedAspectFormat, placements: SocialPlaceme
   return "SQUARE";
 }
 
+import { useCreativeQuote, CreditQuote } from "@/components/creative-studio/studio-context";
+import { aspectRatioForPlacement } from "@digitify/media-studio";
+
 export function SocialImageGenerator({
   disabled,
   caption,
@@ -56,6 +59,7 @@ export function SocialImageGenerator({
   const keyStatus = trpc.media.getMuapiKeyStatus.useQuery(undefined, MUAPI_KEY_QUERY_OPTIONS);
   const models = trpc.media.listModels.useQuery(undefined, MEDIA_MODELS_QUERY_OPTIONS);
   const [model, setModel] = useState("flux-2-dev");
+  const pricing = useCreativeQuote(model, {aspectRatio:aspectRatioForPlacement(placementFormat(feedFormat,placements))});
   const [jobId, setJobId] = useState<string | null>(null);
 
   const startImage = trpc.media.startImageGeneration.useMutation({
@@ -127,7 +131,7 @@ export function SocialImageGenerator({
       defaultOpen={isGenerating || Boolean(job.outputUrl)}
       className="border-dashed"
     >
-      {!keyStatus.data?.hasKey ? (
+      {!(keyStatus.data?.hasKey || keyStatus.data?.central) ? (
         <Button size="sm" variant="outline" className="w-full" asChild>
           <Link href="/settings/integrations?tab=muapi">
             <Sparkles className="mr-2 h-3 w-3" />
@@ -152,13 +156,16 @@ export function SocialImageGenerator({
             </Select>
           </div>
 
+          <CreditQuote pricing={pricing}/>
           <Button
             size="sm"
             variant="outline"
             className="w-full"
-            disabled={disabled || !promptSource || isGenerating}
+            disabled={disabled || !promptSource || isGenerating || !pricing.canGenerate}
             onClick={() =>
               startImage.mutate({
+                requestKey: crypto.randomUUID(),
+                expectedCredits: pricing.quote.data?.credits,
                 prompt: promptSource,
                 model,
                 placementFormat: placementFormat(feedFormat, placements),

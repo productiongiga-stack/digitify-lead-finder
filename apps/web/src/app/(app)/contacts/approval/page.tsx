@@ -85,7 +85,7 @@ export default function ApprovalPage() {
       <div>
         <h1 className="text-xl font-bold tracking-tight">Goedkeuringswachtrij</h1>
         <p className="text-sm text-muted-foreground">
-          Keur inhoud goed — verzending gebeurt apart via Outbound Center
+          Keur inhoud goed — verzending gebeurt apart via E-mail &amp; Contacten
         </p>
       </div>
 

@@ -66,16 +66,17 @@ function normalizeCtaType(value: unknown, fallback: string) {
   return (VALID_CTA_TYPES as readonly string[]).includes(ctaType) ? ctaType : fallback;
 }
 
-export function buildMetaCampaignSystemPrompt(trainingNotes: string) {
+export function buildMetaCampaignSystemPrompt(trainingNotes: string, companyName = "het bedrijf", profileContext = "") {
   return (
-    "Je bent een Meta Ads specialist voor Belgische KMO's. " +
+    `Je bent een Meta Ads specialist voor ${companyName}. Gebruik de bedrijfscontext om de advertentie persoonlijk te maken. ` +
     "Je volgt strikt de Meta-hierarchie: Campagne (objective + budget) → Adset (doelgroep, plaatsingen, optimalisatie) → Advertentie (creative). " +
     "Geef ALLEEN geldige JSON terug, zonder markdown of uitleg. " +
     "Gebruik Nederlandse copy, max 125 tekens voor primaryText, max 40 voor headline, max 30 voor description. " +
     "Objective moet een van: OUTCOME_TRAFFIC, OUTCOME_LEADS, OUTCOME_SALES, OUTCOME_ENGAGEMENT, OUTCOME_AWARENESS. " +
     "ctaType moet een van: LEARN_MORE, SIGN_UP, CONTACT_US, BOOK_TRAVEL, SHOP_NOW, APPLY_NOW, GET_QUOTE. " +
     "linkUrl moet https:// zijn. " +
-    (trainingNotes.trim() ? `Workspace AI-training:\n${trainingNotes.trim()}\n` : "")
+    (trainingNotes.trim() ? `Workspace AI-training:\n${trainingNotes.trim()}\n` : "") +
+    (profileContext.trim() ? `Bedrijfsprofiel:\n${profileContext.trim()}\n` : "")
   );
 }
 
@@ -119,14 +120,15 @@ export function buildMetaCampaignUserPrompt(input: { product: string; audience?:
   );
 }
 
-export function buildMetaVariantSystemPrompt(trainingNotes: string) {
+export function buildMetaVariantSystemPrompt(trainingNotes: string, companyName = "het bedrijf", profileContext = "") {
   return (
-    "Je bent een Meta Ads copywriter voor Belgische KMO's. " +
+    `Je bent een Meta Ads copywriter voor ${companyName}. Gebruik de bedrijfscontext om de variant persoonlijk te maken. ` +
     "Schrijf één advertentie-variant (creative) binnen een bestaande adset. " +
     "Geef ALLEEN geldige JSON terug, zonder markdown. " +
     "primaryText max 125 tekens, headline max 40 tekens. linkUrl moet https:// zijn. " +
     "publishAsset moet feed, square of story zijn. " +
-    (trainingNotes.trim() ? `Workspace AI-training:\n${trainingNotes.trim()}\n` : "")
+    (trainingNotes.trim() ? `Workspace AI-training:\n${trainingNotes.trim()}\n` : "") +
+    (profileContext.trim() ? `Bedrijfsprofiel:\n${profileContext.trim()}\n` : "")
   );
 }
 

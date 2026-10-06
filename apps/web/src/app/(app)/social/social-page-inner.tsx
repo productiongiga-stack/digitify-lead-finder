@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useStudioField } from "@/components/creative-studio/studio-context";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffectiveAppRole } from "@/lib/use-effective-app-role";
 import { trpc } from "@/lib/trpc/client";
@@ -697,21 +698,30 @@ function InstagramPreview({
 const SOCIAL_TABS = ["composer", "agenda", "queue"] as const;
 type SocialTab = (typeof SOCIAL_TABS)[number];
 
-export function SocialPageInner() {
+export function SocialPageInner({ creative, onSaveConcept }: { creative?: { jobId?: string; assetUrl?: string; type: string; socialPostId?: string; brandKitId?: string; brief?: string }; onSaveConcept?: () => Promise<unknown> } = {}) {
   const { showToast } = useToast();
   const utils = trpc.useUtils();
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const routeParams = useSearchParams();
+  const searchParams = useMemo(() => {
+    if (!creative) return routeParams;
+    const params = new URLSearchParams();
+    if (creative.jobId) params.set(creative.type === "IMAGE" ? "imageJob" : "videoJob", creative.jobId);
+    params.set("tab", "composer");
+    if (creative.socialPostId) params.set("socialPostId",creative.socialPostId);
+    if (creative.brandKitId) params.set("brandKitId", creative.brandKitId);
+    return params;
+  }, [routeParams, creative]);
   const role = useEffectiveAppRole();
   const canSchedule = role === "OWNER" || role === "ADMIN";
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [caption, setCaption] = useState("");
-  const [template, setTemplate] = useState("");
-  const [tone, setTone] = useState<SocialTone>(DEFAULT_SOCIAL_TONE);
-  const [scheduledFor, setScheduledFor] = useState("");
-  const [targetFacebook, setTargetFacebook] = useState(true);
-  const [targetInstagram, setTargetInstagram] = useState(true);
+  const [selectedId, setSelectedId] = useStudioField<string | null>("social:selectedId", null);
+  const [caption, setCaption] = useStudioField("social:caption", "");
+  const [template, setTemplate] = useStudioField("social:template", creative?.brief || "");
+  const [tone, setTone] = useStudioField<SocialTone>("social:tone", DEFAULT_SOCIAL_TONE);
+  const [scheduledFor, setScheduledFor] = useStudioField("social:scheduledFor", "");
+  const [targetFacebook, setTargetFacebook] = useStudioField("social:targetFacebook", true);
+  const [targetInstagram, setTargetInstagram] = useStudioField("social:targetInstagram", true);
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [activeTab, setActiveTab] = useState<SocialTab>("composer");
 
@@ -728,31 +738,31 @@ export function SocialPageInner() {
       setActiveTab(tab as SocialTab);
       const params = new URLSearchParams(searchParams.toString());
       params.set("tab", tab);
-      router.replace(`/social?${params.toString()}`);
+      if (!creative) router.replace(`/social?${params.toString()}`);
     },
     [router, searchParams],
   );
-  const [headline, setHeadline] = useState("");
-  const [cta, setCta] = useState("");
-  const [hashtags, setHashtags] = useState("digitalegroei marketing belgie");
-  const [linkUrl, setLinkUrl] = useState("");
-  const [firstComment, setFirstComment] = useState("");
-  const [altText, setAltText] = useState("");
-  const [brandSignature, setBrandSignature] = useState("");
-  const [selectedBrandKitId, setSelectedBrandKitId] = useState("");
-  const [wizardStep, setWizardStep] = useState(0);
-  const [placements, setPlacements] = useState<SocialPlacement[]>(["FEED"]);
-  const [feedFormat, setFeedFormat] = useState<FeedAspectFormat>("SQUARE");
-  const [feedFormats, setFeedFormats] = useState<PlatformFeedFormats>({
+  const [headline, setHeadline] = useStudioField("social:headline", "");
+  const [cta, setCta] = useStudioField("social:cta", "");
+  const [hashtags, setHashtags] = useStudioField("social:hashtags", "digitalegroei marketing belgie");
+  const [linkUrl, setLinkUrl] = useStudioField("social:linkUrl", "");
+  const [firstComment, setFirstComment] = useStudioField("social:firstComment", "");
+  const [altText, setAltText] = useStudioField("social:altText", "");
+  const [brandSignature, setBrandSignature] = useStudioField("social:brandSignature", "");
+  const [selectedBrandKitId, setSelectedBrandKitId] = useStudioField("social:selectedBrandKitId", searchParams.get("brandKitId") || "");
+  const [wizardStep, setWizardStep] = useStudioField("social:wizardStep", creative ? 2 : 0);
+  const [placements, setPlacements] = useStudioField<SocialPlacement[]>("social:placements", ["FEED"]);
+  const [feedFormat, setFeedFormat] = useStudioField<FeedAspectFormat>("social:feedFormat", "SQUARE");
+  const [feedFormats, setFeedFormats] = useStudioField<PlatformFeedFormats>("social:feedFormats", {
     FACEBOOK: "LANDSCAPE",
     INSTAGRAM: "PORTRAIT",
   });
-  const [placementAssets, setPlacementAssets] = useState<PlacementAssets>({});
-  const [platformAssets, setPlatformAssets] = useState<PlatformAssets>({});
-  const [storyItems, setStoryItems] = useState<SocialStoryItem[]>([]);
-  const [carousel, setCarousel] = useState<SocialCarouselState>({ enabled: false, slides: [] });
+  const [placementAssets, setPlacementAssets] = useStudioField<PlacementAssets>("social:placementAssets", creative?.assetUrl ? { FEED: creative.type === "IMAGE" ? {imageUrl:creative.assetUrl} : {videoUrl:creative.assetUrl}, STORY:creative.type === "IMAGE" ? {imageUrl:creative.assetUrl} : {videoUrl:creative.assetUrl} } : {});
+  const [platformAssets, setPlatformAssets] = useStudioField<PlatformAssets>("social:platformAssets", {});
+  const [storyItems, setStoryItems] = useStudioField<SocialStoryItem[]>("social:storyItems", []);
+  const [carousel, setCarousel] = useStudioField<SocialCarouselState>("social:carousel", { enabled: false, slides: [] });
   const [previewSlideIndex, setPreviewSlideIndex] = useState(0);
-  const [selectedPageId, setSelectedPageId] = useState("");
+  const [selectedPageId, setSelectedPageId] = useStudioField("social:selectedPageId", "");
 
   const listQuery = trpc.social.list.useQuery(statusFilter === "ALL" ? undefined : { status: statusFilter as any }, {
     staleTime: 30_000,
@@ -1137,7 +1147,7 @@ export function SocialPageInner() {
   });
 
   useEffect(() => {
-    if (!canSchedule || !connectionStatus.data?.connected || dueSoonScheduledCount === 0) return;
+    if (creative || !canSchedule || !connectionStatus.data?.connected || dueSoonScheduledCount === 0) return;
     if (publishDuePosts.isPending || publishingPostsCount > 0) return;
 
     const timer = window.setInterval(() => {
@@ -1195,17 +1205,20 @@ export function SocialPageInner() {
   }
 
   const importCreativeImage = trpc.media.importToBlob.useMutation();
+  const sourcePostId = creative?.socialPostId || searchParams.get("socialPostId");
+  const [loadedSourcePostId,setLoadedSourcePostId] = useStudioField<string | null>("social:loadedSourcePostId",null);
+  const sourcePost = trpc.social.getById.useQuery({id:sourcePostId || ""}, {enabled:Boolean(sourcePostId) && loadedSourcePostId !== sourcePostId,retry:false});
   const pendingImageJobId = searchParams.get("imageJob");
   const pendingVideoJobId = searchParams.get("videoJob");
-  const [appliedImageJobId, setAppliedImageJobId] = useState<string | null>(null);
-  const [appliedVideoJobId, setAppliedVideoJobId] = useState<string | null>(null);
+  const [appliedImageJobId, setAppliedImageJobId] = useStudioField<string | null>("social:appliedImageJobId", null);
+  const [appliedVideoJobId, setAppliedVideoJobId] = useStudioField<string | null>("social:appliedVideoJobId", null);
   const creativeImageJob = trpc.media.getJobStatus.useQuery(
     { jobId: pendingImageJobId || "" },
-    { enabled: Boolean(pendingImageJobId) && appliedImageJobId !== pendingImageJobId },
+    { enabled: Boolean(pendingImageJobId) && (!sourcePostId || loadedSourcePostId === sourcePostId) && appliedImageJobId !== pendingImageJobId },
   );
   const creativeVideoJob = trpc.media.getJobStatus.useQuery(
     { jobId: pendingVideoJobId || "" },
-    { enabled: Boolean(pendingVideoJobId) && appliedVideoJobId !== pendingVideoJobId },
+    { enabled: Boolean(pendingVideoJobId) && (!sourcePostId || loadedSourcePostId === sourcePostId) && appliedVideoJobId !== pendingVideoJobId },
   );
 
   useEffect(() => {
@@ -1637,7 +1650,7 @@ export function SocialPageInner() {
     }
     const metadata = (source.metadata || {}) as SocialMetadata;
     setActiveTab("composer");
-    router.replace("/social?tab=composer");
+    if (!creative && !sourcePostId) router.replace("/social?tab=composer");
     setSelectedId(row.id);
     setCaption(source.caption || "");
     setPlacements(metadata.placements?.length ? metadata.placements : metadata.postFormat === "STORY" ? ["STORY"] : ["FEED"]);
@@ -1671,7 +1684,7 @@ export function SocialPageInner() {
     setAltText(metadata.altText || "");
     setBrandSignature(metadata.brandSignature || "");
     setSelectedBrandKitId(metadata.brandKitId || "");
-    setWizardStep(0);
+    setWizardStep(creative ? 2 : 0);
   }
 
   function resetEditor() {
@@ -1702,6 +1715,11 @@ export function SocialPageInner() {
     setCarousel({ enabled: false, slides: [] });
   }
 
+  useEffect(() => {
+    if (!sourcePost.data || !sourcePostId || loadedSourcePostId === sourcePostId) return;
+    void loadRow(sourcePost.data).then(()=>setLoadedSourcePostId(sourcePostId));
+  }, [sourcePost.data,sourcePostId,loadedSourcePostId,setLoadedSourcePostId]);
+
   const isBusy =
     createDraft.isPending ||
     updateDraft.isPending ||
@@ -1719,7 +1737,7 @@ export function SocialPageInner() {
 
   return (
     <div className="app-page space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className={cn("flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between", creative && "hidden")}>
         <div>
           <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Social Planner</h1>
           <p className="text-sm text-muted-foreground">Maak en plan posts voor Facebook & Instagram.</p>
@@ -1771,7 +1789,7 @@ export function SocialPageInner() {
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
         <TabsList
           aria-label="Social Planner secties"
-          className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-xl border bg-muted/40 p-1"
+          className={cn("flex h-auto w-full flex-wrap justify-start gap-1 rounded-xl border bg-muted/40 p-1",creative && "hidden")}
         >
           <TabsTrigger
             value="composer"
@@ -1851,20 +1869,20 @@ export function SocialPageInner() {
                 autoApplyDefaults={!selectedId}
               >
               <SocialComposerWizard
-                steps={SOCIAL_WIZARD_STEPS}
-                currentStep={wizardStep}
-                onStepChange={setWizardStep}
+                steps={creative ? SOCIAL_WIZARD_STEPS.slice(2) : SOCIAL_WIZARD_STEPS}
+                currentStep={creative ? Math.max(0,wizardStep-2) : wizardStep}
+                onStepChange={(index)=>setWizardStep(creative ? index+2 : index)}
                 canProceed={canProceedWizardStep(wizardStep)}
                 onNext={goToNextWizardStep}
-                onBack={() => setWizardStep((current) => Math.max(current - 1, 0))}
+                onBack={() => setWizardStep((current) => Math.max(current - 1, creative ? 2 : 0))}
                 disabled={!canEditSelected}
                 footer={
                   <div className="flex flex-wrap justify-end gap-2">
-                    <Button onClick={handleCreateOrUpdate} disabled={isBusy || !canEditSelected}>
+                    <Button onClick={creative && !selectedPageId ? ()=>void onSaveConcept?.() : handleCreateOrUpdate} disabled={isBusy || !canEditSelected}>
                       {isBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                      {selected ? "Draft opslaan" : "Draft aanmaken"}
+                      {creative && !selectedPageId ? "Concept bewaren" : selected ? "Concept opslaan" : "Concept aanmaken"}
                     </Button>
-                    {selected ? (
+                    {creative && !selectedPageId ? null : selected ? (
                       <Button variant="outline" disabled={isBusy || selected.status === "PENDING_APPROVAL"} onClick={handleSubmitForApproval}>
                         <Send className="mr-2 h-4 w-4" /> Ter goedkeuring
                       </Button>

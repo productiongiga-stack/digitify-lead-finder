@@ -138,6 +138,8 @@ model User {
   decidedAdApprovals   AdApprovalRequest[] @relation("AdApprovalActor")
   adSyncOperations     AdSyncOperation[]
   aiOptimizationRuns   AiOptimizationRun[]
+  adResearchRuns      AdResearchRun[] @relation("AdResearchRunCreatedBy")
+  adResearchEvidence  AdResearchEvidence[] @relation("AdResearchEvidenceCreatedBy")
   adBackgroundJobs     AdBackgroundJob[]
   authoredMediaGenerations MediaGeneration[] @relation("MediaGenerationAuthor")
   tenantMediaGenerations   MediaGeneration[] @relation("MediaGenerationWorkspace")
@@ -146,9 +148,14 @@ model User {
   workflows          Workflow[]
   workspaceFiles     WorkspaceFile[] @relation("WorkspaceFileWorkspace")
   uploadedFiles      WorkspaceFile[] @relation("WorkspaceFileUploader")
+  trashedFiles       WorkspaceFile[] @relation("WorkspaceFileTrashUser")
   knowledgeEntries   KnowledgeEntry[]
   seoKeywords        SeoKeyword[]
   seoCompetitors     SeoCompetitor[]
+  seoResearchRuns    SeoResearchRun[]
+  seoKeywordIdeas    SeoKeywordIdea[]
+  seoKeywordClusters SeoKeywordCluster[]
+  seoContentBriefs   SeoContentBrief[]
   projects           Project[]
   contracts          Contract[]
   passwordResetTokens PasswordResetToken[]
@@ -454,6 +461,7 @@ model Lead {
   enrichmentData  EnrichmentData[]
   contacts        LeadContact[]
   openclawSuggestions OpenClawSuggestion[]
+  leadAnalysisRuns LeadAnalysisRun[]
   bookings        Booking[]
   domains         Domain[]
   reviewRequests  ReviewRequest[]
@@ -787,10 +795,12 @@ model EmailTemplate {
 
 model EmailDraft {
   id           String      @id @default(cuid())
+  workspaceId  String
   leadId       String?
   templateId   String?
   authorId     String
   approverId   String?
+  idempotencyKey String?
 
   toEmail      String
   subject      String
@@ -823,12 +833,15 @@ model EmailDraft {
   sequence EmailSequence? @relation(fields: [sequenceId], references: [id])
 
   @@index([status])
+  @@index([workspaceId, status])
+  @@index([workspaceId, createdAt(sort: Desc)])
   @@index([leadId])
   @@index([scheduledFor])
   @@index([sequenceId, sequenceStep])
   @@index([authorId])
   @@index([approverId])
   @@index([type])
+  @@unique([workspaceId, idempotencyKey])
   @@map("email_drafts")
 }
 
@@ -912,19 +925,83 @@ model WorkspaceFile {
   name         String
   storageUrl   String
   storage      String   @default("local")
+  storageProvider String  @default("LOCAL")
+  storageKey   String?
   contentType  String
   size         Int
+  checksumSha256 String?
   relatedType  String?
   relatedId    String?
+  folderId     String?
+  deletedAt    DateTime?
+  trashedById   String?
+  driveFileId   String?
+  driveWebUrl   String?
+  driveEtag     String?
+  driveSyncStatus String?
+  lastError     String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   workspaceOwner User @relation("WorkspaceFileWorkspace", fields: [createdById], references: [id], onDelete: Cascade)
   uploadedBy     User @relation("WorkspaceFileUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  trashedBy      User? @relation("WorkspaceFileTrashUser", fields: [trashedById], references: [id], onDelete: SetNull)
 
   @@index([createdById, createdAt(sort: Desc)])
   @@index([createdById, relatedType, relatedId])
+  @@index([uploadedById, deletedAt, createdAt(sort: Desc)])
+  @@index([createdById, folderId, deletedAt, createdAt(sort: Desc)])
+  @@index([driveFileId])
   @@map("workspace_files")
+}
+
+model UserFileQuota {
+  id            String   @id @default(cuid())
+  userId        String
+  workspaceId   String
+  quotaBytes    BigInt   @default(1073741824)
+  usedBytes     BigInt   @default(0)
+  reservedBytes BigInt   @default(0)
+  version       Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId, userId])
+  @@map("user_file_quotas")
+}
+
+model FileStorageReservation {
+  id             String   @id @default(cuid())
+  userId         String
+  workspaceId    String
+  fileId         String?
+  idempotencyKey String   @unique
+  bytes          BigInt
+  status         String   @default("RESERVED")
+  expiresAt      DateTime
+  committedAt    DateTime?
+  releasedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([workspaceId, userId, status])
+  @@index([expiresAt, status])
+  @@map("file_storage_reservations")
+}
+
+model FileFolder {
+  id          String   @id @default(cuid())
+  workspaceId String
+  createdById String
+  name        String
+  parentId    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workspaceId, parentId, name])
+  @@index([workspaceId, parentId, createdAt(sort: Desc)])
+  @@map("file_folders")
 }
 
 enum KnowledgeEntryStatus {
@@ -989,12 +1066,153 @@ model SeoKeyword {
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
+  source        SeoKeywordSource @default(MANUAL)
+  intent        SeoKeywordIntent?
+  clusterId     String?
+
   createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  cluster   SeoKeywordCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
 
   @@unique([createdById, keywordKey])
   @@index([createdById, status, updatedAt(sort: Desc)])
   @@index([createdById, domainId])
   @@map("seo_keywords")
+}
+
+enum SeoKeywordSource {
+  MANUAL
+  GOOGLE_ADS
+  SEARCH_CONSOLE
+  AI
+}
+
+enum SeoKeywordIntent {
+  INFORMATIONAL
+  COMMERCIAL
+  TRANSACTIONAL
+  NAVIGATIONAL
+  LOCAL
+  UNKNOWN
+}
+
+enum SeoResearchStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  BLOCKED
+}
+
+enum SeoBriefStatus {
+  IDEA
+  IN_PROGRESS
+  PUBLISHED
+  STALE
+}
+
+model SeoResearchRun {
+  id              String           @id @default(cuid())
+  workspaceId     String
+  createdById     String
+  domainId        String?
+  status          SeoResearchStatus @default(PENDING)
+  provider        String
+  language        String
+  location        String
+  seeds           Json
+  options         Json?
+  results         Json?
+  attempts        Int              @default(0)
+  leaseUntil      DateTime?
+  idempotencyKey  String           @unique
+  error           String?          @db.Text
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  domain    Domain? @relation(fields: [domainId], references: [id], onDelete: SetNull)
+  ideas     SeoKeywordIdea[]
+
+  @@index([workspaceId, status, createdAt(sort: Desc)])
+  @@index([workspaceId, domainId, createdAt(sort: Desc)])
+  @@map("seo_research_runs")
+}
+
+model SeoKeywordIdea {
+  id                 String          @id @default(cuid())
+  workspaceId        String
+  createdById        String
+  researchRunId      String?
+  keyword            String
+  keywordKey         String
+  source             SeoKeywordSource
+  language           String
+  location           String
+  intent             SeoKeywordIntent @default(UNKNOWN)
+  searchVolume       Int?
+  competition        Float?
+  cpcCents           Int?
+  impressions        Int?
+  clicks             Int?
+  ctr                Float?
+  averagePosition    Float?
+  targetUrl          String?
+  evidence           Json?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  createdBy   User             @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  researchRun SeoResearchRun?  @relation(fields: [researchRunId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, keywordKey, language, location, source])
+  @@index([workspaceId, source, updatedAt(sort: Desc)])
+  @@index([workspaceId, intent, language, location])
+  @@map("seo_keyword_ideas")
+}
+
+model SeoKeywordCluster {
+  id          String   @id @default(cuid())
+  workspaceId String
+  createdById String
+  name        String
+  intent      SeoKeywordIntent @default(UNKNOWN)
+  targetUrl   String?
+  keywords    Json
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User             @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  tracked  SeoKeyword[]
+  briefs   SeoContentBrief[]
+
+  @@index([workspaceId, updatedAt(sort: Desc)])
+  @@map("seo_keyword_clusters")
+}
+
+model SeoContentBrief {
+  id            String        @id @default(cuid())
+  workspaceId   String
+  createdById   String
+  clusterId     String?
+  domainId      String?
+  status        SeoBriefStatus @default(IDEA)
+  title         String
+  targetUrl     String?
+  brief         Json
+  profileHash   String?
+  profileVersion Int?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  createdBy User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  cluster   SeoKeywordCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  domain    Domain?            @relation(fields: [domainId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status, updatedAt(sort: Desc)])
+  @@map("seo_content_briefs")
 }
 
 model SeoCompetitor {
@@ -1300,6 +1518,9 @@ model AdChangeSet {
   after       Json
   reason      String
   source      String   @default("MANUAL")
+  researchRunId String?
+  confidence  Float?
+  evidenceRefs Json?
   risk        String   @default("MEDIUM")
   checks      Json
   status      String   @default("PENDING_APPROVAL")
@@ -1308,10 +1529,65 @@ model AdChangeSet {
   createdBy   User @relation("AdChangeWorkspace", fields: [createdById], references: [id], onDelete: Cascade, onUpdate: NoAction)
   author      User @relation("AdChangeAuthor", fields: [authorId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   baseVersion AdVersion @relation(fields: [baseVersionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  researchRun AdResearchRun? @relation(fields: [researchRunId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   approval    AdApprovalRequest?
   operation   AdSyncOperation?
   @@index([createdById, provider, status])
   @@map("ad_change_sets")
+}
+
+model AdResearchRun {
+  id              String   @id @default(cuid())
+  createdById     String
+  provider        String
+  sourceMode      String   @default("ACCOUNT_DATA")
+  status          String   @default("PENDING")
+  objective       String?
+  campaignIds     Json?
+  input           Json
+  profileHash     String?
+  profileVersion  Int?
+  promptVersion   String
+  model           String?
+  result          Json?
+  attempts        Int      @default(0)
+  leaseToken      String?
+  leasedUntil     DateTime?
+  idempotencyKey  String
+  lastError       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  createdBy User @relation("AdResearchRunCreatedBy", fields: [createdById], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  evidence AdResearchEvidence[]
+  changes AdChangeSet[]
+
+  @@index([createdById, status, createdAt(sort: Desc)])
+  @@index([createdById, provider, createdAt(sort: Desc)])
+  @@unique([createdById, idempotencyKey])
+  @@map("ad_research_runs")
+}
+
+model AdResearchEvidence {
+  id           String   @id @default(cuid())
+  createdById  String
+  researchRunId String
+  kind         String
+  title        String?
+  url          String?
+  excerpt      String?  @db.Text
+  digest       String?
+  metadata     Json?
+  fetchedAt    DateTime @default(now())
+
+  createdBy User @relation("AdResearchEvidenceCreatedBy", fields: [createdById], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  researchRun AdResearchRun @relation(fields: [researchRunId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([createdById, researchRunId, fetchedAt(sort: Desc)])
+  @@index([createdById, kind, fetchedAt(sort: Desc)])
+  @@map("ad_research_evidence")
 }
 
 model AdApprovalRequest {
@@ -1453,6 +1729,43 @@ model OpenClawSuggestion {
 
   @@index([status, createdAt(sort: Desc)])
   @@map("openclaw_suggestions")
+}
+
+model LeadAnalysisRun {
+  id              String             @id @default(cuid())
+  workspaceId     String
+  leadId          String
+  createdById     String
+  status          LeadAnalysisRunStatus @default(PENDING)
+  attempts        Int                @default(0)
+  leaseUntil      DateTime?
+  profileHash     String
+  profileVersion  Int                @default(1)
+  model           String?
+  promptVersion   String             @default("lead-analysis-v2")
+  idempotencyKey  String             @unique
+  inputSnapshot   Json
+  result          Json?
+  error           String?            @db.Text
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  lead            Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status, createdAt(sort: Desc)])
+  @@index([workspaceId, leadId, createdAt(sort: Desc)])
+  @@index([leadId, profileHash])
+  @@map("lead_analysis_runs")
+}
+
+enum LeadAnalysisRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  BLOCKED
 }
 
 enum OpenClawSuggestionType {
@@ -1910,6 +2223,8 @@ model Domain {
   createdBy      User      @relation(fields: [createdById], references: [id])
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+  seoResearchRuns SeoResearchRun[]
+  seoContentBriefs SeoContentBrief[]
 
   @@unique([createdById, domainName])
   @@index([createdById])
@@ -2173,4 +2488,79 @@ model AseLicense {
   @@index([email])
   @@index([domain])
   @@map("ase_licenses")
+}
+
+// Server-only Creative Studio records; access is checked by authenticated routers.
+model CreativeDraft {
+  id String @id @default(cuid())
+  userId String
+  workspaceId String
+  goal String
+  step Int @default(0)
+  state Json
+  jobId String?
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([userId, workspaceId, updatedAt])
+  @@map("creative_drafts")
+}
+model CreativeWallet {
+  userId String @id
+  available Int @default(0)
+  reserved Int @default(0)
+  updatedAt DateTime @updatedAt
+  @@map("creative_wallets")
+}
+model CreativeLedger {
+  id String @id @default(cuid())
+  userId String
+  workspaceId String
+  kind String
+  amount Int
+  reference String @unique
+  createdAt DateTime @default(now())
+  @@index([userId, createdAt])
+  @@map("creative_ledger")
+}
+model CreativeReservation {
+  jobId String @id
+  userId String
+  workspaceId String
+  amount Int
+  status String @default("RESERVED")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("creative_reservations")
+}
+model CreativePrice {
+  key String @id
+  model String
+  settings Json
+  credits Int
+  enabled Boolean @default(false)
+  updatedAt DateTime @updatedAt
+  @@map("creative_prices")
+}
+model CreativeBundle {
+  id String @id @default(cuid())
+  name String
+  credits Int
+  priceCents Int
+  enabled Boolean @default(false)
+  updatedAt DateTime @updatedAt
+  @@map("creative_bundles")
+}
+model CreativePurchase {
+  id String @id @default(cuid())
+  userId String
+  workspaceId String
+  bundleId String
+  credits Int
+  priceCents Int
+  sessionId String? @unique
+  status String @default("PENDING")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("creative_purchases")
 }

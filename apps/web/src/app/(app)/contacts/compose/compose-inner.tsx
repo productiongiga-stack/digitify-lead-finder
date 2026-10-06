@@ -114,6 +114,7 @@ export function ComposeInner() {
   const [isSaving, setIsSaving] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [emailLayout, setEmailLayout] = useState<EmailLayout>("modern");
   const [previewWithPlaceholders, setPreviewWithPlaceholders] = useState(false);
   const [ctaText, setCtaText] = useState("");
@@ -162,9 +163,14 @@ export function ComposeInner() {
   } = useOutboundEmailSettings();
 
   const effectiveLeadId = selectedLeadId || leadIdFromQuery;
+  const hasValidEmail = isValidEmail(toEmail);
   const { data: selectedLead } = trpc.lead.getById.useQuery(
     { id: effectiveLeadId },
     { enabled: Boolean(effectiveLeadId) },
+  );
+  const { data: recipientMatch } = trpc.contact.resolveRecipient.useQuery(
+    { email: toEmail.trim() },
+    { enabled: hasValidEmail, refetchOnWindowFocus: false },
   );
 
   // Build placeholder context from selected lead
@@ -220,9 +226,7 @@ export function ComposeInner() {
         : [],
     [allUsedVariables, placeholderContext, selectedLead],
   );
-  const hasValidEmail = isValidEmail(toEmail);
   const isComposeReady =
-    Boolean(selectedLeadId) &&
     hasValidEmail &&
     Boolean(subject.trim()) &&
     Boolean(body.trim()) &&
@@ -293,6 +297,7 @@ export function ComposeInner() {
   });
 
   const draftEmail = trpc.openclaw.draftEmail.useMutation();
+  const rewriteInboxMessage = trpc.openclaw.rewriteInboxMessage.useMutation();
 
   // Insert placeholder at cursor position
   const insertPlaceholder = useCallback((key: string) => {
@@ -317,6 +322,10 @@ export function ComposeInner() {
 
   // Handle lead selection
   function handleLeadSelect(leadId: string) {
+    if (leadId === "__none") {
+      setSelectedLeadId("");
+      return;
+    }
     setSelectedLeadId(leadId);
     const lead = leadOptions.find((item) => item.id === leadId);
     if (lead?.email) {
@@ -347,18 +356,21 @@ export function ComposeInner() {
   async function handleSaveDraft() {
     if (!isComposeReady) return;
     setIsSaving(true);
+    setErrorMessage("");
     try {
       await createDraft.mutateAsync({
-        leadId: selectedLeadId,
+        ...(selectedLeadId ? { leadId: selectedLeadId } : {}),
         toEmail,
         subject,
         body: injectEmailTemplateMetadata(body, { ctaText, ctaUrl, layout: emailLayout, bodyFormat }),
         templateId: selectedTemplateId && selectedTemplateId !== "none" ? selectedTemplateId : undefined,
       });
-      setSuccessMessage("Draft opgeslagen!");
+      setSuccessMessage("Draft opgeslagen.");
       setTimeout(() => {
         router.push("/contacts");
       }, 1000);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Draft opslaan mislukt.");
     } finally {
       setIsSaving(false);
     }
@@ -368,19 +380,22 @@ export function ComposeInner() {
   async function handleSubmitForApproval() {
     if (!isComposeReady) return;
     setIsSaving(true);
+    setErrorMessage("");
     try {
       const draft = await createDraft.mutateAsync({
-        leadId: selectedLeadId,
+        ...(selectedLeadId ? { leadId: selectedLeadId } : {}),
         toEmail,
         subject,
         body: injectEmailTemplateMetadata(body, { ctaText, ctaUrl, layout: emailLayout, bodyFormat }),
         templateId: selectedTemplateId && selectedTemplateId !== "none" ? selectedTemplateId : undefined,
       });
       await submitForApproval.mutateAsync({ id: draft.id });
-      setSuccessMessage("Ingediend ter goedkeuring!");
+      setSuccessMessage("Ingediend ter goedkeuring.");
       setTimeout(() => {
         router.push("/contacts");
       }, 1000);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Indienen mislukt.");
     } finally {
       setIsSaving(false);
     }
@@ -388,29 +403,44 @@ export function ComposeInner() {
 
   // AI Generate
   async function handleAiGenerate() {
-    if (!selectedLeadId) return;
     setAiLoading(true);
+    setErrorMessage("");
     try {
-      const result = await draftEmail.mutateAsync({ leadId: selectedLeadId });
-      if (result.draft) {
-        setSubject(result.draft.subject);
-        const parsed = extractEmailTemplateMetadata(result.draft.body);
-        const applied = applyEmailTemplateSelection({
-          subject: result.draft.subject,
-          cleanBody: parsed.cleanBody,
-          ctaText: parsed.ctaText,
-          ctaUrl: parsed.ctaUrl,
-          layout: parsed.layout,
+      if (selectedLeadId) {
+        const result = await draftEmail.mutateAsync({ leadId: selectedLeadId });
+        if (result.draft) {
+          setSubject(result.draft.subject);
+          const parsed = extractEmailTemplateMetadata(result.draft.body);
+          const applied = applyEmailTemplateSelection({
+            subject: result.draft.subject,
+            cleanBody: parsed.cleanBody,
+            ctaText: parsed.ctaText,
+            ctaUrl: parsed.ctaUrl,
+            layout: parsed.layout,
+          });
+          setBody(applied.body);
+          setCtaText(applied.ctaText);
+          setCtaUrl(applied.ctaUrl);
+          if (parsed.layout) setEmailLayout(applied.layout);
+          setLayoutFromTemplate(false);
+          if (result.draft.toEmail) setToEmail(result.draft.toEmail);
+        }
+      } else {
+        const result = await rewriteInboxMessage.mutateAsync({
+          purpose: "compose",
+          style: "Professioneler",
+          subject: subject.trim() || undefined,
+          body: body.trim() || undefined,
+          recipientEmail: toEmail.trim() || undefined,
         });
-        setBody(applied.body);
-        setCtaText(applied.ctaText);
-        setCtaUrl(applied.ctaUrl);
-        if (parsed.layout) setEmailLayout(applied.layout);
-        setLayoutFromTemplate(false);
-        if (result.draft.toEmail) {
-          setToEmail(result.draft.toEmail);
+        if (result.error) throw new Error(result.error);
+        if (result.rewritten) {
+          setSubject(result.rewritten.subject);
+          setBody(result.rewritten.body);
         }
       }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "AI-generatie mislukt.");
     } finally {
       setAiLoading(false);
     }
@@ -439,8 +469,7 @@ export function ComposeInner() {
             <div className="compose-page-header-text">
               <h1 className="compose-page-header-title">Nieuwe e-mail</h1>
               <p className="compose-page-header-subtitle">
-                Concept opslaan of ter goedkeuring indienen — verzending gebeurt later via
-                Outbound Center.
+                Concept opslaan of ter goedkeuring indienen — verzending gebeurt later via E-mail &amp; Contacten.
               </p>
             </div>
           </div>
@@ -474,7 +503,7 @@ export function ComposeInner() {
                 <p className="compose-page-hint-message">
                   {isComposeReady
                     ? "Klaar om op te slaan of ter goedkeuring in te dienen."
-                    : "Vul lead, geldig e-mailadres en placeholders in voordat je opslaat."}
+                    : "Vul een geldig e-mailadres, onderwerp en bericht in voordat je opslaat."}
                 </p>
                 <p className="compose-page-hint-meta">
                   <CalendarClock className="h-3.5 w-3.5 shrink-0" />
@@ -484,7 +513,7 @@ export function ComposeInner() {
                   </span>
                   {!isComposeReady ? (
                     <span className="text-muted-foreground/80">
-                      · Verzending via Outbound Center
+                      · Verzending via E-mail &amp; Contacten
                     </span>
                   ) : null}
                 </p>
@@ -534,12 +563,13 @@ export function ComposeInner() {
               </div>
 
               <div className="space-y-2">
-                <Label>Lead selecteren</Label>
+                <Label>Lead koppelen (optioneel)</Label>
                 <Select value={selectedLeadId} onValueChange={handleLeadSelect}>
                   <SelectTrigger>
                     <SelectValue placeholder={leadsLoading ? "Laden..." : "Kies een lead"} />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__none">Alleen e-mailadres</SelectItem>
                     {leadOptions.map((lead) => (
                       <SelectItem key={lead.id} value={lead.id}>
                         {lead.companyName} {lead.email ? `(${lead.email})` : ""}
@@ -566,6 +596,13 @@ export function ComposeInner() {
                 />
                 {toEmail && !hasValidEmail ? (
                   <p className="text-xs text-destructive">Vul een geldig e-mailadres in.</p>
+                ) : null}
+                {hasValidEmail && !selectedLeadId ? (
+                  <p className="text-xs text-muted-foreground">
+                    {recipientMatch?.lead
+                      ? `Lead gevonden: ${recipientMatch.lead.companyName}. Koppel hem optioneel hierboven.`
+                      : "Geen lead nodig — deze mail kan rechtstreeks als ontvanger worden opgeslagen."}
+                  </p>
                 ) : null}
               </div>
             </CardContent>
@@ -741,8 +778,8 @@ export function ComposeInner() {
               <div className="grid gap-2 md:grid-cols-3">
                 <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs">
                   <p className="font-medium">Lead gekoppeld</p>
-                  <p className={selectedLeadId ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"}>
-                    {selectedLeadId ? "OK" : "Vereist"}
+                  <p className={selectedLeadId ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+                    {selectedLeadId ? "Optioneel gekoppeld" : "Niet nodig"}
                   </p>
                 </div>
                 <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs">
@@ -796,7 +833,8 @@ export function ComposeInner() {
               <Button
                 variant="secondary"
                 onClick={handleAiGenerate}
-                disabled={!selectedLeadId || aiLoading}
+                disabled={aiLoading}
+                title={selectedLeadId ? "Genereer een gepersonaliseerde mail voor deze lead" : "Laat AI een algemene mail opstellen"}
               >
                 <Sparkles className="mr-2 h-4 w-4" />
                 {aiLoading ? "AI genereert..." : "AI Genereren"}
@@ -834,6 +872,9 @@ export function ComposeInner() {
                 </DialogContent>
               </Dialog>
             </div>
+            {errorMessage ? (
+              <p className="mt-3 text-sm text-destructive" role="alert">{errorMessage}</p>
+            ) : null}
           </Card>
         </div>
 
@@ -941,7 +982,7 @@ export function ComposeInner() {
                 <strong>Placeholders:</strong> Klik op een placeholder-chip om deze in te voegen. Activeer &quot;Preview met Placeholders&quot; om het resultaat te zien.
               </p>
               <p>
-                <strong>AI Genereren:</strong> Selecteer eerst een lead, dan genereert OpenClaw een gepersonaliseerde e-mail op basis van de lead data.
+                <strong>AI Genereren:</strong> Zonder lead maakt AI een algemene mail; met een gekoppelde lead wordt de mail gepersonaliseerd.
               </p>
               <p>
                 <strong>Templates:</strong> Kies een template om snel te starten. Pas daarna aan waar nodig.

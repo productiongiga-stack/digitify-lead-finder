@@ -19,7 +19,7 @@ export const MODULE_HELP: ModuleHelpItem[] = [
   { id: "invoices", label: "Facturen", group: "Verkoop", summary: "Beheer facturen die aan je bestaande verkoopflow gekoppeld zijn.", firstStep: "Open een factuur vanuit een geldige offerte.", href: "/invoices" },
   { id: "payments", label: "Betalingen", group: "Verkoop", summary: "Bekijk betaalstatussen en de relatie met facturen.", firstStep: "Controleer eerst de gekoppelde factuur.", href: "/payments" },
   { id: "reports", label: "Rapportage", group: "Analyse", summary: "Bekijk leads, conversie, omzet en prestaties per periode.", firstStep: "Kies een periode en vergelijk de kerncijfers.", href: "/reports/overview" },
-  { id: "seo", label: "SEO", group: "Analyse", summary: "Volg zoekwoorden, domein-audits en technische verbeterpunten.", firstStep: "Koppel een domein en voeg een zoekwoord toe.", href: "/seo" },
+  { id: "seo", label: "SEO", group: "Analyse", summary: "Van keyword research naar pagina, contentbrief en Ads-draft.", firstStep: "Start keyword research met een seed-keyword.", href: "/seo" },
   { id: "metaAds", label: "Meta Ads", group: "Advertenties", summary: "Beheer Meta-campagnedrafts en resultaten wanneer de connector is ingesteld.", firstStep: "Controleer eerst de integratiestatus.", href: "/meta-ads" },
   { id: "googleAds", label: "Google Ads", group: "Advertenties", summary: "Werk met Google Ads-plannen en conversies in je workspace.", firstStep: "Controleer eerst de integratiestatus.", href: "/google-ads" },
   { id: "social", label: "Social Planner", group: "Marketing", summary: "Plan en beheer social posts vanuit één overzicht.", firstStep: "Maak een postdraft en kies een kanaal.", href: "/social" },

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
@@ -69,11 +70,17 @@ type Props = {
 
 export function GenerationHistory({ type, compact = false }: Props) {
   const { showToast } = useToast();
+  const router = useRouter();
+  const [filterType, setFilterType] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterBrand, setFilterBrand] = useState("");
+  const kits = trpc.social.listBrandKits.useQuery();
+  const handoff = trpc.media.prepareCreativeHandoff.useMutation({ onSuccess: ({href}) => router.push(href), onError: error => showToast({ title: "Overdracht mislukt", description: error.message, variant: "error" }) });
   const [page, setPage] = useState(1);
   const pageSize = compact ? 3 : 12;
 
   const history = trpc.media.listHistory.useQuery(
-    { type, page, pageSize },
+    { type: type || (filterType || undefined) as Props["type"], page, pageSize, status: (filterStatus || undefined) as "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | undefined, brandKitId: filterBrand || undefined },
     {
       ...HISTORY_QUERY_OPTIONS,
       refetchInterval: (query) => {
@@ -105,11 +112,12 @@ export function GenerationHistory({ type, compact = false }: Props) {
 
   const totalPages = useMemo(() => {
     if (!history.data?.total) return 1;
-    return Math.max(1, Math.ceil(history.data.total / pageSize));
+    return Math.max(1, Math.ceil((history.data?.total ?? 0) / pageSize));
   }, [history.data?.total, pageSize]);
 
   if (history.isLoading) {
     return (
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {Array.from({ length: compact ? 2 : 3 }).map((_, index) => (
           <Skeleton key={index} className="h-48 w-full rounded-xl" />
@@ -133,7 +141,7 @@ export function GenerationHistory({ type, compact = false }: Props) {
     );
   }
 
-  if (!history.data?.items.length) {
+  if (!history.data?.items.length && !filterType && !filterStatus && !filterBrand) {
     return (
       <>
         {compact ? <HistorySectionHeader href="/creative-studio?tab=history" /> : null}
@@ -153,17 +161,18 @@ export function GenerationHistory({ type, compact = false }: Props) {
       ) : (
         <div className="flex items-center justify-between rounded-xl border bg-muted/20 px-4 py-3">
           <div>
-            <h2 className="text-lg font-semibold tracking-tight">Historie</h2>
+            <h2 className="text-lg font-semibold tracking-tight">Bibliotheek</h2>
             <p className="text-sm text-muted-foreground">Al je AI-generaties op één plek</p>
           </div>
           <p className="text-sm font-medium text-muted-foreground">
-            {history.data.total} item{history.data.total === 1 ? "" : "s"}
+            {(history.data?.total ?? 0)} item{(history.data?.total ?? 0) === 1 ? "" : "s"}
           </p>
         </div>
       )}
 
+      {!compact && <div className="flex flex-wrap gap-3"><label className="text-sm">Type<select className="ml-2 rounded border bg-background p-2" value={filterType} onChange={e=>{setFilterType(e.target.value);setPage(1);}}><option value="">Alles</option>{["IMAGE","VIDEO","MARKETING_AD","LIP_SYNC"].map(value=><option key={value} value={value}>{typeLabel(value)}</option>)}</select></label><label className="text-sm">Status<select className="ml-2 rounded border bg-background p-2" value={filterStatus} onChange={e=>{setFilterStatus(e.target.value);setPage(1);}}><option value="">Alles</option>{["PENDING","PROCESSING","COMPLETED","FAILED"].map(value=><option key={value} value={value}>{statusLabel(value)}</option>)}</select></label><label className="text-sm">Merk<select className="ml-2 rounded border bg-background p-2" value={filterBrand} onChange={e=>{setFilterBrand(e.target.value);setPage(1);}}><option value="">Alle merken</option>{kits.data?.kits.map(kit=><option key={kit.id} value={kit.id}>{kit.name}</option>)}</select></label></div>}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {history.data.items.map((item) => {
+        {(history.data?.items ?? []).map((item) => {
           const Icon = typeIcon(item.type);
           const previewUrl = item.blobUrl || item.outputUrl;
           const itemType = item.type as string;
@@ -216,6 +225,7 @@ export function GenerationHistory({ type, compact = false }: Props) {
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-wrap gap-1.5 border-t border-border/50 bg-muted/10 p-3">
+                {item.type === "IMAGE" && item.status === "COMPLETED" && <Button size="sm" variant="outline" disabled={handoff.isPending} onClick={()=>handoff.mutate({jobId:item.id,destination:"google",slot:"square"})}>Gebruik in Google Ads</Button>}
                 {item.outputUrl && !item.blobUrl ? (
                   <Button
                     size="sm"
@@ -227,17 +237,10 @@ export function GenerationHistory({ type, compact = false }: Props) {
                   </Button>
                 ) : null}
                 {socialLink ? (
-                  <Button size="sm" asChild>
-                    <Link href={socialLink}>Gebruik in post</Link>
-                  </Button>
+                  <Button size="sm" disabled={handoff.isPending} onClick={()=>handoff.mutate({jobId:item.id,destination:"social"})}>Gebruik in post</Button>
                 ) : null}
                 {metaAdsLink ? (
-                  <Button size="sm" variant="outline" asChild>
-                    <Link href={metaAdsLink}>
-                      <Megaphone className="mr-2 h-3.5 w-3.5" />
-                      Naar Meta Ads
-                    </Link>
-                  </Button>
+                  <Button size="sm" variant="outline" disabled={handoff.isPending} onClick={()=>handoff.mutate({jobId:item.id,destination:"meta"})}>Naar Meta Ads</Button>
                 ) : null}
                 {previewUrl ? (
                   <>

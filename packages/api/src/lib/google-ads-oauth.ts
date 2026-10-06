@@ -5,6 +5,7 @@ import { loadGoogleOAuthClientConfig } from "./google-calendar";
 import { loadWorkspaceSettingRows, resolveSettingDbKey, type WorkspaceScope } from "./workspace-settings";
 
 export const GOOGLE_ADS_OAUTH_SCOPE = "https://www.googleapis.com/auth/adwords";
+export const GOOGLE_SEARCH_CONSOLE_OAUTH_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 
 export const GOOGLE_ADS_SETTING_KEYS = [
   "ads.google_oauth_access_token",

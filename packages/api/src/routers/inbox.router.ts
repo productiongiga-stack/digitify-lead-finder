@@ -421,7 +421,7 @@ async function sendInboxMessage(params: {
     }
   } else {
     linkedLead = await resolveLeadForEmail(params.db, workspaceId, params.input.to, {
-      createIfMissing: true,
+      createIfMissing: false,
       source: `inbox_${params.input.type}`,
     });
   }
@@ -455,6 +455,7 @@ async function sendInboxMessage(params: {
   const resolvedBody = replacePlaceholders(params.input.body.trim(), placeholderContext, { removeMissing: true }).trim();
   const draft = await params.db.emailDraft.create({
     data: {
+      workspaceId,
       leadId: linkedLead?.id ?? null,
       authorId: params.userId,
       toEmail: params.input.to,
@@ -545,6 +546,73 @@ async function sendInboxMessage(params: {
   });
 
   return { success: true, status: "sent" as const, messageId };
+}
+
+async function createInboxDraftForApproval(params: {
+  db: PrismaClient;
+  userId: string;
+  workspaceScope: WorkspaceScope;
+  input: {
+    to: string;
+    subject: string;
+    body: string;
+    type: "quote" | "lead_contact" | "reply" | "follow_up" | "general" | "booking_confirmation";
+    leadId?: string;
+    idempotencyKey?: string;
+  };
+}) {
+  const workspaceId = params.workspaceScope.workspaceId;
+  const toEmail = params.input.to.trim().toLowerCase();
+  let linkedLead = null as Awaited<ReturnType<typeof ensureLeadLink>>;
+  if (params.input.leadId) {
+    linkedLead = await ensureLeadLink({
+      db: params.db,
+      userId: params.userId,
+      workspaceId,
+      leadId: params.input.leadId,
+      email: toEmail,
+      source: "inbox_draft",
+    });
+    if (!linkedLead || linkedLead.id !== params.input.leadId) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Gekozen lead kon niet worden gekoppeld." });
+    }
+  } else {
+    linkedLead = await resolveLeadForEmail(params.db, workspaceId, toEmail, { createIfMissing: false });
+  }
+
+  if (params.input.idempotencyKey) {
+    const existing = await params.db.emailDraft.findFirst({
+      where: { workspaceId, idempotencyKey: params.input.idempotencyKey },
+    });
+    if (existing) return { draft: existing, status: existing.status, reused: true };
+  }
+
+  const draft = await params.db.emailDraft.create({
+    data: {
+      workspaceId,
+      leadId: linkedLead?.id ?? null,
+      authorId: params.userId,
+      toEmail,
+      subject: params.input.subject.trim(),
+      body: params.input.body.trim(),
+      status: "PENDING_APPROVAL",
+      type: mapInboxTypeToEmailType(params.input.type),
+      idempotencyKey: params.input.idempotencyKey,
+    },
+    include: { lead: { select: { id: true, companyName: true } } },
+  });
+
+  await params.db.activity.create({
+    data: {
+      leadId: linkedLead?.id ?? null,
+      userId: params.userId,
+      type: "EMAIL_DRAFTED",
+      title: "Inbox e-mail ingediend ter goedkeuring",
+      metadata: { draftId: draft.id, toEmail, source: "inbox.send" },
+    },
+  }).catch(() => null);
+
+  return { draft, status: "PENDING_APPROVAL" as const, reused: false };
 }
 
 /* ---------- router ---------- */
@@ -740,12 +808,13 @@ export const inboxRouter = router({
         body: z.string().min(1),
         type: z.enum(["quote", "lead_contact", "reply", "follow_up", "general", "booking_confirmation"]).default("general"),
         leadId: z.string().optional(),
+        idempotencyKey: z.string().trim().min(1).max(120).optional(),
         inReplyTo: z.string().optional(),
         references: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const result = await sendInboxMessage({
+      const result = await createInboxDraftForApproval({
         db: ctx.db,
         userId: ctx.user.id,
         workspaceScope: workspaceScopeFromUser(ctx.user),
@@ -754,7 +823,6 @@ export const inboxRouter = router({
           leadId: input.leadId?.trim() || undefined,
         },
       });
-      invalidateInboxListCacheForWorkspace(ctx.user.workspaceId!);
       return result;
     }),
 

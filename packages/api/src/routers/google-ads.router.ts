@@ -81,16 +81,16 @@ async function createGoogleAdsActivity(
 async function renderAdSuggestion(
   db: PrismaClient,
   workspaceId: string,
-  input: { product: string; audience?: string; tone?: string; campaignType?: string },
+  input: { product: string; audience?: string; tone?: string; campaignType?: string; leadId?: string },
 ) {
   const campaignType = input.campaignType === "PERFORMANCE_MAX" ? "PERFORMANCE_MAX" : "SEARCH";
   const fallback = {
     name: `${input.product.trim()} campagne`,
     campaignType,
     creatives: {
-      finalUrl: "https://leads.digitify.be",
-      headlines: ["Meer kwalitatieve leads", "Digitify lead generation", "Vraag vandaag een demo"],
-      descriptions: ["Automatiseer leadgeneratie voor Belgische KMO's.", "Plan, keur goed en publiceer veilig als paused."],
+      finalUrl: "",
+      headlines: [`Meer resultaat met ${input.product.trim()}`, "Ontdek de mogelijkheden", "Vraag vandaag meer info"],
+      descriptions: ["Ontdek wat deze oplossing voor je bedrijf kan betekenen.", "Plan een vrijblijvend gesprek."],
       longHeadlines: [`Ontdek hoe ${input.product.trim()} meer kwalitatieve leads vindt`],
       path1: "offerte",
       path2: "demo",
@@ -101,6 +101,8 @@ async function renderAdSuggestion(
   };
 
   const aiContext = await loadGoogleAdsAiContext(db, workspaceId);
+  const lead = input.leadId ? await db.lead.findFirst({ where: { id: input.leadId, createdById: workspaceId }, select: { companyName: true, industry: true, city: true, overallScore: true } }) : null;
+  if (input.leadId && !lead) throw new TRPCError({ code: "NOT_FOUND", message: "Lead niet gevonden in deze workspace." });
   const { provider, model, apiKey } = await loadAiProviderConfig(db, workspaceId);
   if (!apiKey) {
     throw new TRPCError({
@@ -125,7 +127,7 @@ async function renderAdSuggestion(
           tone: input.tone,
           campaignType,
           website: aiContext.website,
-        })}`,
+        })}${lead ? `\nLeadbrief: ${lead.companyName}; sector ${lead.industry || "onbekend"}; regio ${lead.city || "onbekend"}; score ${lead.overallScore ?? "onbekend"}/100.` : ""}`,
       },
     ],
     {
@@ -507,29 +509,41 @@ export const googleAdsRouter = router({
   pauseInGoogle: adsAdminProcedure
     .input(z.object({ campaignId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
-      return runGoogleAdsRead(ctx.db, scope, (config) => updateGoogleCampaignStatus(config, input.campaignId, "PAUSED"));
+      if (!(ctx.db as any).adVersion) {
+        const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+        return runGoogleAdsRead(ctx.db, scope, (config) => updateGoogleCampaignStatus(config, input.campaignId, "PAUSED"));
+      }
+      const version = await captureAdVersion(ctx.db, ctx.user.workspaceId!, "GOOGLE", input.campaignId);
+      const change = await createAdChange(ctx.db, ctx.user.workspaceId!, ctx.user.id, "GOOGLE", version.id, [{ path: "status", value: "PAUSED" }], "Campagne pauzeren vanuit Google Ads Studio.", "MANUAL", { allowCampaignStatus: true });
+      return { campaignId: input.campaignId, status: "PENDING_APPROVAL", changeSetId: change.id };
     }),
 
   resumeInGoogle: adsAdminProcedure
     .input(z.object({ campaignId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
-      return runGoogleAdsRead(ctx.db, scope, (config) => updateGoogleCampaignStatus(config, input.campaignId, "ENABLED"));
+      if (!(ctx.db as any).adVersion) {
+        const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+        return runGoogleAdsRead(ctx.db, scope, (config) => updateGoogleCampaignStatus(config, input.campaignId, "ENABLED"));
+      }
+      const version = await captureAdVersion(ctx.db, ctx.user.workspaceId!, "GOOGLE", input.campaignId);
+      const change = await createAdChange(ctx.db, ctx.user.workspaceId!, ctx.user.id, "GOOGLE", version.id, [{ path: "status", value: "ENABLED" }], "Campagne hervatten vanuit Google Ads Studio.", "MANUAL", { allowCampaignStatus: true });
+      return { campaignId: input.campaignId, status: "PENDING_APPROVAL", changeSetId: change.id };
     }),
 
   removeCampaign: adsAdminProcedure
     .input(z.object({ campaignId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
-      return runGoogleAdsRead(ctx.db, scope, (config) => removeGoogleCampaign(config, input.campaignId));
+      const version = await captureAdVersion(ctx.db, ctx.user.workspaceId!, "GOOGLE", input.campaignId);
+      const change = await createAdChange(ctx.db, ctx.user.workspaceId!, ctx.user.id, "GOOGLE", version.id, [{ path: "status", value: "REMOVED" }], "Campagne verwijderen vanuit Google Ads Studio.", "MANUAL", { allowCampaignStatus: true });
+      return { campaignId: input.campaignId, status: "PENDING_APPROVAL", changeSetId: change.id };
     }),
 
   updateCampaignName: adsAdminProcedure
     .input(z.object({ campaignId: z.string().min(1), name: z.string().min(2).max(160) }))
     .mutation(async ({ ctx, input }) => {
-      const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
-      return runGoogleAdsRead(ctx.db, scope, (config) => updateGoogleCampaignName(config, input.campaignId, input.name));
+      const version = await captureAdVersion(ctx.db, ctx.user.workspaceId!, "GOOGLE", input.campaignId);
+      const change = await createAdChange(ctx.db, ctx.user.workspaceId!, ctx.user.id, "GOOGLE", version.id, [{ path: "name", value: input.name.trim() }], "Campagnenaam aanpassen vanuit Google Ads Studio.");
+      return { campaignId: input.campaignId, status: "PENDING_APPROVAL", changeSetId: change.id };
     }),
 
   getCampaignDetails: protectedProcedure
@@ -654,6 +668,7 @@ export const googleAdsRouter = router({
         audience: z.string().max(400).optional(),
         tone: z.string().max(80).optional(),
         campaignType: campaignTypeEnum.optional(),
+        leadId: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => renderAdSuggestion(ctx.db, ctx.user.workspaceId!, input)),

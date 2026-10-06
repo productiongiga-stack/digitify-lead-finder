@@ -35,15 +35,18 @@ export async function captureAdVersion(db: PrismaClient, workspaceId: string, pr
 }
 
 export async function createAdChange(db: PrismaClient, workspaceId: string, authorId: string, provider: AdProvider,
-  versionId: string, patches: Array<z.infer<typeof changePatchSchema>>, reason: string, source = "MANUAL") {
+  versionId: string, patches: Array<z.infer<typeof changePatchSchema>>, reason: string, source = "MANUAL",
+  metadata?: { researchRunId?: string; confidence?: number; evidenceRefs?: string[]; allowCampaignStatus?: boolean }) {
   const version = await db.adVersion.findFirst({ where: { id: versionId, createdById: workspaceId, provider } });
   if (!version) throw new TRPCError({ code: "NOT_FOUND", message: "Campagneversie niet gevonden." });
   const before = version.snapshot as AdSnapshot;
-  if (patches.some((p) => p.path.endsWith(".status")) && source !== "REPLACEMENT_SWITCH") throw new Error("Activering vereist een afzonderlijk vervangingsvoorstel.");
-  const after = applyPatches(provider, before, patches);
+  if (patches.some((p) => p.path.endsWith(".status")) && source !== "REPLACEMENT_SWITCH" && !metadata?.allowCampaignStatus) {
+    throw new Error("Activering vereist een afzonderlijk vervangingsvoorstel.");
+  }
+  const after = applyPatches(provider, before, patches, { allowCampaignStatus: metadata?.allowCampaignStatus });
   validateSnapshot(provider, after);
   if (fingerprint(after) === version.fingerprint) throw new Error("Geen wijzigingen gevonden.");
-  if (source === "AI") {
+  if (source === "AI" || source === "RESEARCH") {
     const settings = await loadOptimizationSettings(db, workspaceId, provider);
     checkBudgetChange(provider, before, after, settings.maxBudgetChangePercent);
   }
@@ -52,6 +55,9 @@ export async function createAdChange(db: PrismaClient, workspaceId: string, auth
       createdById: workspaceId, authorId, provider, accountId: version.accountId, campaignId: version.campaignId,
       baseVersionId: version.id, beforeHash: version.fingerprint, afterHash: fingerprint(after),
       before: adJson(before), after: adJson(after), reason, source,
+      researchRunId: metadata?.researchRunId,
+      confidence: metadata?.confidence == null ? undefined : Math.max(0, Math.min(100, metadata.confidence)),
+      evidenceRefs: metadata?.evidenceRefs ? adJson(metadata.evidenceRefs) : undefined,
       risk: patches.some((p) => /budget|targeting|creative/i.test(p.path)) ? "HIGH" : "MEDIUM",
       checks: adJson({ validated: true, patches, requiresApproval: true, providerPolicyPending: true }),
     } });

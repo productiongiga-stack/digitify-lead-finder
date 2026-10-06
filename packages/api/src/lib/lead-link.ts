@@ -11,6 +11,7 @@ type EnsureLeadLinkInput = {
   leadId?: string;
   email?: string;
   companyName?: string;
+  website?: string;
   phone?: string;
   address?: string;
   source?: string;
@@ -130,6 +131,7 @@ export async function ensureLeadLink(input: EnsureLeadLinkInput): Promise<Linked
       companyName: companyName || deriveCompanyFromEmail(email),
       email: email || null,
       phone: input.phone?.trim() || null,
+      website: input.website?.trim() || null,
       address: input.address?.trim() || null,
       source: input.source || "manual_link",
     },

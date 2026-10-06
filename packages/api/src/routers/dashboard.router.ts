@@ -94,6 +94,7 @@ async function loadUnifiedReminders(ctx: WorkspaceCtx): Promise<UnifiedReminders
   const [drafts, pendingBookings, staleQuotes, leadFollowUps] = await Promise.all([
     ctx.db.emailDraft.findMany({
       where: {
+        workspaceId: ctx.user.workspaceId!,
         status: "SENT",
         sentAt: { lte: emailThreshold },
         lead: {
@@ -267,25 +268,25 @@ async function buildAttentionQueue(ctx: WorkspaceCtx): Promise<AttentionQueueRes
   ] = await Promise.all([
     loadUnifiedReminders(ctx),
     ctx.db.emailDraft.findMany({
-      where: { status: "PENDING_APPROVAL", lead: { createdById: wsId } },
+      where: { workspaceId: wsId, status: "PENDING_APPROVAL" },
       take: 20,
       orderBy: { createdAt: "desc" },
       include: draftInclude,
     }),
     ctx.db.emailDraft.findMany({
-      where: { status: "APPROVED", lead: { createdById: wsId } },
+      where: { workspaceId: wsId, status: "APPROVED" },
       take: 10,
       orderBy: { updatedAt: "desc" },
       include: draftInclude,
     }),
     ctx.db.emailDraft.findMany({
-      where: { status: "FAILED", lead: { createdById: wsId } },
+      where: { workspaceId: wsId, status: "FAILED" },
       take: 10,
       orderBy: { updatedAt: "desc" },
       include: draftInclude,
     }),
     ctx.db.emailDraft.findMany({
-      where: { status: "REJECTED", lead: { createdById: wsId } },
+      where: { workspaceId: wsId, status: "REJECTED" },
       take: 10,
       orderBy: { updatedAt: "desc" },
       include: draftInclude,
@@ -304,9 +305,9 @@ async function buildAttentionQueue(ctx: WorkspaceCtx): Promise<AttentionQueueRes
     ctx.db.chatSession.count({
       where: { ...ownedChatSessionWhere(wsId, ctx.user.id), isRead: false },
     }),
-    ctx.db.emailDraft.count({ where: { status: "APPROVED", lead: { createdById: wsId } } }),
-    ctx.db.emailDraft.count({ where: { status: "FAILED", lead: { createdById: wsId } } }),
-    ctx.db.emailDraft.count({ where: { status: "REJECTED", lead: { createdById: wsId } } }),
+    ctx.db.emailDraft.count({ where: { workspaceId: wsId, status: "APPROVED" } }),
+    ctx.db.emailDraft.count({ where: { workspaceId: wsId, status: "FAILED" } }),
+    ctx.db.emailDraft.count({ where: { workspaceId: wsId, status: "REJECTED" } }),
   ]);
 
   const items: AttentionItem[] = [];
@@ -465,7 +466,7 @@ async function loadAttentionCountOnly(ctx: WorkspaceCtx): Promise<number> {
   const [draftBuckets, pendingReviews, unreadChats, expiringDomainCount, unified] = await Promise.all([
     ctx.db.emailDraft.groupBy({
       by: ["status"],
-      where: { lead: { createdById: wsId } },
+      where: { workspaceId: wsId },
       _count: { _all: true },
     }),
     ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: wsId } }),
@@ -547,7 +548,7 @@ async function loadKpis(ctx: WorkspaceCtx): Promise<KpiResult> {
     ctx.db.campaign.count({ where: { createdById: ctx.user.workspaceId } }),
     ctx.db.emailDraft.groupBy({
       by: ["status"],
-      where: { lead: { createdById: ctx.user.workspaceId } },
+      where: { workspaceId: ctx.user.workspaceId },
       _count: { _all: true },
     }),
     ctx.db.lead.aggregate({

@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@digitify/db";
 import { adJson, loadOptimizationSettings, optimizeAds, safeAdError, syncAdAccount } from "./ads-workflow";
+import { processAdResearchRun } from "./ads-copilot";
 import { adProviderConfig, readAdAccount } from "./ads-workflow-providers";
 import { AD_CAPABILITIES, type AdProvider } from "./ads-workflow-policy";
 
-type JobKind = "SYNC" | "OPTIMIZE" | "REMINDERS" | "RECOVERY" | "PROVIDER_CHECK";
+type JobKind = "SYNC" | "OPTIMIZE" | "RESEARCH" | "REMINDERS" | "RECOVERY" | "PROVIDER_CHECK";
 export async function enqueueAdsJobs(db: PrismaClient, workspaceId: string, provider: AdProvider, now = new Date()) {
   const settings = await loadOptimizationSettings(db, workspaceId, provider);
   const hour = now.toISOString().slice(0, 13), day = hour.slice(0, 10);
@@ -46,6 +47,12 @@ async function executeJob(db: PrismaClient, workspaceId: string, provider: AdPro
     }
     const run = await optimizeAds(db, workspaceId, workspaceId, provider, job.dedupeKey);
     return { runId: run.id };
+  }
+  if (job.kind === "RESEARCH") {
+    const runId = job.dedupeKey.replace(/^RESEARCH:/, "");
+    const run = await processAdResearchRun(db, workspaceId, runId);
+    if (!run) throw new Error("Researchrun kon niet worden geladen.");
+    return { runId: run.id, status: run.status };
   }
   if (job.kind === "PROVIDER_CHECK") {
     const config = await adProviderConfig(db, workspaceId, provider);

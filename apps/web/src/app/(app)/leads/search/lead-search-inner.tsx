@@ -18,7 +18,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogFooter,
   Tabs,
   TabsContent,
@@ -171,6 +170,7 @@ export function LeadSearchInner() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [savedLeadIds, setSavedLeadIds] = useState<Map<string, string>>(new Map());
+  const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [hasSearched, setHasSearched] = useState(false);
   const [apiKeyMissing, setApiKeyMissing] = useState(false);
@@ -191,6 +191,7 @@ export function LeadSearchInner() {
   const [savedSearchName, setSavedSearchName] = useState("");
   const [showAllPopular, setShowAllPopular] = useState(false);
   const { showToast } = useToast();
+  const utils = trpc.useUtils();
 
   const searchCriteriaEmpty = !query.trim() && !niche.trim() && !city.trim();
 
@@ -283,9 +284,20 @@ export function LeadSearchInner() {
   });
 
   const saveMutation = trpc.search.saveSearchResult.useMutation({
-    onSuccess: (lead, variables) => {
+    onSuccess: (result, variables) => {
       setSavedIds((prev) => new Set(prev).add(variables.placeId));
-      setSavedLeadIds((prev) => new Map(prev).set(variables.placeId, lead.id));
+      setSavedLeadIds((prev) => new Map(prev).set(variables.placeId, result.lead.id));
+      setSavingIds((prev) => { const next = new Set(prev); next.delete(variables.placeId); return next; });
+      showToast({
+        title: result.outcome === "created" ? "Lead opgeslagen" : "Lead bestond al",
+        description: result.outcome === "created" ? "De lead staat klaar voor analyse." : "De bestaande lead werd opnieuw gebruikt.",
+      });
+      void utils.lead.listSummary.invalidate();
+      void existingLeadsQuery.refetch();
+    },
+    onError: (error, variables) => {
+      setSavingIds((prev) => { const next = new Set(prev); next.delete(variables.placeId); return next; });
+      showToast({ title: "Lead opslaan mislukt", description: error.message, variant: "error" });
     },
   });
 
@@ -411,6 +423,7 @@ export function LeadSearchInner() {
   }
 
   function handleSave(result: SearchResult) {
+    setSavingIds((prev) => new Set(prev).add(result.placeId));
     saveMutation.mutate(result);
   }
 
@@ -418,9 +431,16 @@ export function LeadSearchInner() {
     const toSave = results.filter(
       (r: SearchResult) => selectedIds.has(r.placeId) && !savedIds.has(r.placeId)
     );
-    for (const result of toSave) {
-      saveMutation.mutate(result);
-    }
+    if (!toSave.length) return;
+    setSavingIds((prev) => new Set([...prev, ...toSave.map((result) => result.placeId)]));
+    const settled = await Promise.allSettled(toSave.map((result) => saveMutation.mutateAsync(result)));
+    const failed = settled.filter((item) => item.status === "rejected").length;
+    showToast({
+      title: failed ? "Bulk opslaan gedeeltelijk gelukt" : "Leads opgeslagen",
+      description: failed ? `${toSave.length - failed} gelukt, ${failed} mislukt. Je kan mislukte leads opnieuw proberen.` : `${toSave.length} leads verwerkt.`,
+      ...(failed ? { variant: "error" as const } : {}),
+    });
+    setSavingIds(new Set());
   }
 
   function toggleSelect(placeId: string) {
@@ -830,9 +850,7 @@ export function LeadSearchInner() {
               <div className="grid gap-3 md:hidden">
                 {paginatedResults.map((result: SearchResult) => {
                   const isSaved = savedIds.has(result.placeId);
-                  const isSaving =
-                    saveMutation.isPending &&
-                    saveMutation.variables?.placeId === result.placeId;
+                  const isSaving = savingIds.has(result.placeId);
                   const existingLead = existingLeadsMap.get(result.placeId);
                   const leadId = savedLeadIds.get(result.placeId) || existingLead?.id;
                   const { score, priority } = calcPreviewScore(result);
@@ -955,9 +973,7 @@ export function LeadSearchInner() {
 
                 {paginatedResults.map((result: SearchResult) => {
                   const isSaved = savedIds.has(result.placeId);
-                  const isSaving =
-                    saveMutation.isPending &&
-                    saveMutation.variables?.placeId === result.placeId;
+                  const isSaving = savingIds.has(result.placeId);
                   const existingLead = existingLeadsMap.get(result.placeId);
                   const leadId = savedLeadIds.get(result.placeId) || existingLead?.id;
                   const { score, priority } = calcPreviewScore(result);

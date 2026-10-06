@@ -1,14 +1,15 @@
 import { z } from "zod";
-import { router, aiRateLimitedProcedure } from "../trpc";
-import { OpenClawClient, type LeadAnalysis, type OpenClawContext } from "@digitify/openclaw";
+import { router, aiRateLimitedProcedure, protectedProcedure } from "../trpc";
+import { OpenClawClient, type OpenClawContext } from "@digitify/openclaw";
 import { normalizeAiPlaceholderSyntax } from "../lib/email-utils";
 import { type PrismaClient, Prisma } from "@digitify/db";
-import { getSettingString, settingsRowsToMap } from "../lib/settings";
 import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
 import { assertLeadAccess } from "../lib/tenant";
 import { generateDraftAiRewrite, generateInboxAiMessage } from "../lib/inbox-ai-reply";
 import { extractEmailTemplateMetadata } from "../lib/email-content";
 import { loadAiProviderConfig } from "../lib/ai-provider-config";
+import { businessProfileToContext, loadAiBusinessProfile } from "../lib/ai-business-profile";
+import { enqueueLeadAnalysis } from "../lib/lead-analysis";
 
 async function getClient(db: PrismaClient, workspaceId: string): Promise<{ client: OpenClawClient | null; model: string }> {
   const { provider, model, apiKey } = await loadAiProviderConfig(db, workspaceId);
@@ -38,51 +39,34 @@ function readSettingValue(value: unknown, fallback = "") {
   return fallback;
 }
 
-function splitLines(value: string) {
-  return value
-    .split(/\r?\n|,/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 async function loadBusinessContext(db: PrismaClient, workspaceId: string) {
-  const rows = await loadWorkspaceSettingRows(db, { workspaceId, memberId: workspaceId }, [
-    "branding.company_name",
-    "company.name",
-    "company.niche",
-    "company.website",
-    "company.email",
-    "company.phone",
-    "chatbot.training_notes",
-    "chatbot.knowledge_pages",
-    "chatbot.response_style",
-    "openclaw.business_context",
-  ]);
-  const map = new Map(rows.map((row) => [row.key, row.value]));
-  const companyName =
-    readSettingValue(map.get("branding.company_name")) ||
-    readSettingValue(map.get("company.name")) ||
-    "Digitify";
-
-  const services = splitLines(readSettingValue(map.get("openclaw.business_context"))).slice(0, 30);
-  const knowledgePages = splitLines(readSettingValue(map.get("chatbot.knowledge_pages"))).slice(0, 20);
-
+  const profile = await loadAiBusinessProfile(db, workspaceId);
   return {
-    companyName,
-    businessContext: {
-      companyDescription: readSettingValue(map.get("chatbot.training_notes")).slice(0, 2000),
-      services,
-      website: readSettingValue(map.get("company.website")).slice(0, 200),
-      contactEmail: readSettingValue(map.get("company.email")).slice(0, 254),
-      contactPhone: readSettingValue(map.get("company.phone")).slice(0, 50),
-      niche: readSettingValue(map.get("company.niche")).slice(0, 200),
-      responseStyle: readSettingValue(map.get("chatbot.response_style")).slice(0, 500),
-      knowledgePages,
-    },
+    companyName: profile.companyName,
+    profile,
+    businessContext: businessProfileToContext(profile),
   };
 }
 
 export const openclawRouter = router({
+  leadAnalysisStatus: protectedProcedure
+    .input(z.object({ leadId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
+      const [run, suggestion] = await Promise.all([
+        ctx.db.leadAnalysisRun.findFirst({ where: { workspaceId: ctx.user.workspaceId!, leadId: input.leadId }, orderBy: { createdAt: "desc" } }),
+        ctx.db.openClawSuggestion.findFirst({ where: { leadId: input.leadId, type: "OPPORTUNITY_ANALYSIS" }, orderBy: { createdAt: "desc" } }),
+      ]);
+      return { run, suggestion };
+    }),
+
+  queueLeadAnalysis: aiRateLimitedProcedure
+    .input(z.object({ leadId: z.string(), force: z.boolean().default(false) }))
+    .mutation(async ({ ctx, input }) => {
+      await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
+      const run = await enqueueLeadAnalysis(ctx.db, { workspaceId: ctx.user.workspaceId!, leadId: input.leadId, createdById: ctx.user.id, force: input.force });
+      return { runId: run.id, status: run.status };
+    }),
   chat: aiRateLimitedProcedure
     .input(
       z.object({
@@ -274,6 +258,7 @@ export const openclawRouter = router({
       // Create the email draft with status DRAFT — NEVER sends
       const draft = await ctx.db.emailDraft.create({
         data: {
+          workspaceId: ctx.user.workspaceId!,
           leadId: input.leadId,
           toEmail: lead.email || "",
           subject: normalizedSuggestion.subject,
@@ -316,7 +301,7 @@ export const openclawRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const draft = await ctx.db.emailDraft.findFirst({
-        where: { id: input.draftId, lead: { createdById: ctx.user.workspaceId! } },
+        where: { id: input.draftId, workspaceId: ctx.user.workspaceId! },
         include: { lead: { select: { companyName: true, city: true, industry: true } } },
       });
       if (!draft) {
@@ -389,8 +374,9 @@ export const openclawRouter = router({
         .map((f) => f.scoringWeight?.label ?? "")
         .filter(Boolean);
 
+      const profileData = await loadBusinessContext(ctx.db, ctx.user.workspaceId!);
       const analysis = await client.analyzeLead({
-        businessContext: (await loadBusinessContext(ctx.db, ctx.user.workspaceId!)).businessContext,
+        businessContext: profileData.businessContext,
         leadData: {
           companyName: lead.companyName,
           website: lead.website,
@@ -405,18 +391,19 @@ export const openclawRouter = router({
         },
       });
 
+      const normalizedAnalysis = { ...analysis, confidence: analysis.confidence <= 1 ? analysis.confidence * 100 : analysis.confidence };
       await ctx.db.openClawSuggestion.create({
         data: {
           leadId: input.leadId,
           type: "OPPORTUNITY_ANALYSIS",
           title: `Analyse: ${lead.companyName}`,
           content: analysis.summary,
-          confidence: analysis.confidence,
+          confidence: normalizedAnalysis.confidence,
           status: "PENDING",
-          metadata: analysis as unknown as Prisma.InputJsonValue,
+          metadata: { ...normalizedAnalysis, profileHash: profileData.profile.hash, profileVersion: profileData.profile.version } as unknown as Prisma.InputJsonValue,
         },
       });
 
-      return { analysis };
+      return { analysis: normalizedAnalysis };
     }),
 });

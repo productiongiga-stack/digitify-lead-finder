@@ -72,6 +72,12 @@ export default function AISettingsPage() {
   const [maxTokens, setMaxTokens] = useState("2048");
   const [autoSuggest, setAutoSuggest] = useState(true);
   const [businessContext, setBusinessContext] = useState("");
+  const [idealCustomer, setIdealCustomer] = useState("");
+  const [primaryOffer, setPrimaryOffer] = useState("");
+  const [differentiators, setDifferentiators] = useState("");
+  const [salesGoal, setSalesGoal] = useState("");
+  const [focusRegions, setFocusRegions] = useState("");
+  const [profileVersion, setProfileVersion] = useState(1);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -96,6 +102,18 @@ export default function AISettingsPage() {
       setMaxTokens(get("openclaw.max_tokens", "2048"));
       setAutoSuggest(get("openclaw.auto_suggest", "true") === "true");
       setBusinessContext(get("openclaw.business_context", ""));
+      const rawProfile = settings["ai.business_profile"];
+      try {
+        const profile = (typeof rawProfile === "string" ? JSON.parse(rawProfile) : rawProfile || {}) as Record<string, unknown>;
+        setIdealCustomer(String(profile.idealCustomer || ""));
+        setPrimaryOffer(String(profile.primaryOffer || ""));
+        setDifferentiators(Array.isArray(profile.differentiators) ? profile.differentiators.join("\n") : String(profile.differentiators || ""));
+        setSalesGoal(String(profile.salesGoal || ""));
+        setFocusRegions(Array.isArray(profile.focusRegions) ? profile.focusRegions.join("\n") : String(profile.focusRegions || ""));
+        setProfileVersion(Number(profile.version) > 0 ? Number(profile.version) : 1);
+      } catch {
+        setProfileVersion(1);
+      }
       setLoaded(true);
     }
   }, [settings, loaded]);
@@ -135,7 +153,9 @@ export default function AISettingsPage() {
       { key: "openclaw.max_tokens", value: maxTokens },
       { key: "openclaw.auto_suggest", value: String(autoSuggest) },
       { key: "openclaw.business_context", value: businessContext.trim() },
+      { key: "ai.business_profile", value: JSON.stringify({ version: profileVersion + 1, idealCustomer: idealCustomer.trim(), primaryOffer: primaryOffer.trim(), differentiators: differentiators.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean), salesGoal: salesGoal.trim(), focusRegions: focusRegions.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean), tone }) },
     ]);
+    setProfileVersion((version) => version + 1);
     setSavedAiProvider(aiProvider);
   }
 
@@ -293,6 +313,20 @@ export default function AISettingsPage() {
                 Wordt gebruikt in AI-analyse, drafts en assistentantwoorden voor betere personalisatie.
               </p>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-sm">AI-profiel voor leads en advertenties</CardTitle>
+            <p className="text-xs text-muted-foreground">Deze korte context wordt per workspace gebruikt voor Revisual, Digitify of je eigen bedrijf.</p>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2"><Label>Ideale klant</Label><Textarea value={idealCustomer} onChange={(event) => setIdealCustomer(event.target.value)} rows={3} placeholder="Bijv. vastgoedkantoren met 5–50 medewerkers" /></div>
+            <div className="space-y-2"><Label>Belangrijkste aanbod</Label><Textarea value={primaryOffer} onChange={(event) => setPrimaryOffer(event.target.value)} rows={3} placeholder="Welke dienst of oplossing wil je vooral verkopen?" /></div>
+            <div className="space-y-2"><Label>Onderscheidende factoren</Label><Textarea value={differentiators} onChange={(event) => setDifferentiators(event.target.value)} rows={3} placeholder="Eén punt per regel" /></div>
+            <div className="space-y-2"><Label>Verkoopdoel</Label><Textarea value={salesGoal} onChange={(event) => setSalesGoal(event.target.value)} rows={3} placeholder="Bijv. demo's boeken met vastgoedbeslissers" /></div>
+            <div className="space-y-2 md:col-span-2"><Label>Focusregio's</Label><Input value={focusRegions} onChange={(event) => setFocusRegions(event.target.value)} placeholder="Bijv. Vlaanderen, Brussel" /></div>
           </CardContent>
         </Card>
 

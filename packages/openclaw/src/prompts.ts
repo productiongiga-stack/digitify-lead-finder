@@ -6,7 +6,7 @@ export function buildSystemPrompt(context: OpenClawContext): string {
 
   const companyName = context.settings?.companyName || "het bureau";
 
-  let prompt = `Je bent OpenClaw, de AI-assistent van ${companyName}. ${companyName} is een digitaal marketingbureau in België dat bedrijven helpt met webdesign, SEO, social media en online zichtbaarheid.
+  let prompt = `Je bent OpenClaw, de AI-assistent van ${companyName}. Gebruik uitsluitend de bedrijfscontext hieronder om het bedrijf en zijn aanbod te beschrijven. Verzin geen generieke bedrijfsomschrijving en schrijf nooit alsof elk bedrijf een marketingbureau is.
 
 Je rol:
 - Analyseer leads en hun online aanwezigheid
@@ -45,6 +45,11 @@ Belangrijke regels:
 - Niche: ${business.niche || "Niet ingevuld"}
 - Gewenste antwoordstijl: ${business.responseStyle || "Niet ingevuld"}
 - Kennispagina's: ${business.knowledgePages?.join(", ") || "Niet ingevuld"}`;
+    if (business.idealCustomer) prompt += `\n- Ideale klant: ${business.idealCustomer}`;
+    if (business.primaryOffer) prompt += `\n- Hoofdaanbod: ${business.primaryOffer}`;
+    if (business.differentiators?.length) prompt += `\n- Onderscheidende factoren: ${business.differentiators.join(", ")}`;
+    if (business.salesGoal) prompt += `\n- Verkoopdoel: ${business.salesGoal}`;
+    if (business.focusRegions?.length) prompt += `\n- Focusregio's: ${business.focusRegions.join(", ")}`;
   }
 
   if (context.leadData) {
@@ -124,9 +129,13 @@ REDENERING: [korte uitleg waarom je deze aanpak koos]`;
 export const LEAD_ANALYSIS_PROMPT = `Analyseer deze lead grondig en antwoord uitsluitend met geldig JSON in dit formaat:
 {
   "summary": "korte samenvatting (2-3 zinnen)",
+  "fitScore": 78,
   "opportunities": ["kans 1", "kans 2"],
   "risks": ["risico 1"],
+  "matchedServices": ["passende dienst"],
   "suggestedApproach": "concrete aanpak",
+  "nextAction": "één concrete eerstvolgende actie",
+  "evidence": ["feit uit de leadcontext"],
   "confidence": 75
 }
 

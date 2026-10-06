@@ -10,6 +10,7 @@ import { extractInvoiceIdFromDraftBody } from "../lib/invoice-outbound";
 import { getSettingString } from "../lib/settings";
 import { loadWorkspaceSettingRows, workspaceScopeFromUser } from "../lib/workspace-settings";
 import { assertLeadAccess } from "../lib/tenant";
+import { ensureLeadLink, findLeadByEmailInWorkspace } from "../lib/lead-link";
 import {
   buildOutboundSourceModuleWhere,
   EMAIL_TYPE_VALUES,
@@ -34,6 +35,14 @@ function enrichDraftRow<
   };
 }
 
+function draftWorkspaceWhere(workspaceId: string, extra: Record<string, unknown> = {}) {
+  return { workspaceId, ...extra };
+}
+
+function normalizeRecipientEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
 export const contactRouter = router({
   getOutboundStats: protectedProcedure.query(async ({ ctx }) => {
     const workspaceId = ctx.user.workspaceId!;
@@ -41,7 +50,7 @@ export const contactRouter = router({
 
     const buckets = await ctx.db.emailDraft.groupBy({
       by: ["status"],
-      where: { lead: { createdById: workspaceId } },
+      where: draftWorkspaceWhere(workspaceId),
       _count: { _all: true },
     });
 
@@ -78,10 +87,11 @@ export const contactRouter = router({
 
     const [pendingDrafts, followupLeads] = await Promise.all([
       ctx.db.emailDraft.count({
-        where: { status: "PENDING_APPROVAL", lead: { createdById: ctx.user.workspaceId! } },
+        where: { workspaceId: ctx.user.workspaceId!, status: "PENDING_APPROVAL" },
       }),
       ctx.db.emailDraft.findMany({
         where: {
+          workspaceId: ctx.user.workspaceId!,
           status: "SENT",
           sentAt: { lte: reminderThreshold },
           lead: {
@@ -125,9 +135,7 @@ export const contactRouter = router({
       );
       const reminderThreshold = new Date(Date.now() - followupDays * 24 * 60 * 60 * 1000);
 
-      const where: Record<string, unknown> = {
-        lead: { createdById: workspaceId },
-      };
+      const where: Record<string, unknown> = { workspaceId };
       if (input.status) {
         where.status = input.status === "DRAFT" ? { in: ["DRAFT", "SCHEDULED"] } : input.status;
       }
@@ -163,10 +171,11 @@ export const contactRouter = router({
         }),
         ctx.db.emailDraft.count({ where }),
         ctx.db.emailDraft.count({
-          where: { status: "PENDING_APPROVAL", lead: { createdById: workspaceId } },
+          where: { workspaceId, status: "PENDING_APPROVAL" },
         }),
         ctx.db.emailDraft.findMany({
           where: {
+            workspaceId,
             status: "SENT",
             sentAt: { lte: reminderThreshold },
             lead: {
@@ -180,6 +189,7 @@ export const contactRouter = router({
         }),
         ctx.db.emailDraft.findMany({
           where: {
+            workspaceId,
             status: "SENT",
             sentAt: { lte: reminderThreshold },
             lead: {
@@ -259,9 +269,7 @@ export const contactRouter = router({
       const workspaceId = ctx.user.workspaceId!;
       await normalizeLegacyScheduledDrafts(ctx.db, workspaceId);
 
-      const where: Record<string, unknown> = {
-        lead: { createdById: workspaceId },
-      };
+      const where: Record<string, unknown> = { workspaceId };
       if (input.status) {
         where.status = input.status === "DRAFT" ? { in: ["DRAFT", "SCHEDULED"] } : input.status;
       }
@@ -324,7 +332,7 @@ export const contactRouter = router({
       }
 
       const where: Record<string, unknown> = {
-        lead: { createdById: workspaceId },
+        workspaceId,
         scheduledFor: { gte: rangeStart, lte: rangeEnd },
       };
       if (input.type) where.type = input.type;
@@ -358,7 +366,7 @@ export const contactRouter = router({
     .mutation(async ({ ctx, input }) => {
       const workspaceId = ctx.user.workspaceId!;
       const draft = await ctx.db.emailDraft.findFirst({
-        where: { id: input.id, lead: { createdById: workspaceId } },
+        where: { id: input.id, workspaceId },
         select: { id: true, status: true, leadId: true, subject: true, authorId: true },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "E-mail niet gevonden." });
@@ -412,13 +420,13 @@ export const contactRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const draft = await ctx.db.emailDraft.findFirst({
-        where: { id: input.id, lead: { createdById: ctx.user.workspaceId! } },
+        where: { id: input.id, workspaceId: ctx.user.workspaceId! },
         select: { id: true, leadId: true, subject: true },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "E-mail niet gevonden." });
 
       const deleted = await ctx.db.emailDraft.deleteMany({
-        where: { id: draft.id, lead: { createdById: ctx.user.workspaceId! }, status: { notIn: ["SENDING", "DELIVERY_UNKNOWN"] } },
+        where: { id: draft.id, workspaceId: ctx.user.workspaceId!, status: { notIn: ["SENDING", "DELIVERY_UNKNOWN"] } },
       });
       if (deleted.count !== 1) {
         throw new TRPCError({ code: "CONFLICT", message: "Deze e-mail is intussen gewijzigd of wordt verwerkt." });
@@ -440,12 +448,18 @@ export const contactRouter = router({
     .input(z.object({ ids: z.array(z.string()).min(1).max(100) }))
     .mutation(async ({ ctx, input }) => {
       const drafts = await ctx.db.emailDraft.findMany({
-        where: { id: { in: input.ids }, lead: { createdById: ctx.user.workspaceId! } },
+        where: { id: { in: input.ids }, workspaceId: ctx.user.workspaceId! },
         select: { id: true },
       });
       const ids = drafts.map((draft) => draft.id);
       if (ids.length === 0) throw new TRPCError({ code: "NOT_FOUND", message: "Geen e-mails gevonden." });
-      const result = await ctx.db.emailDraft.deleteMany({ where: { id: { in: ids }, status: { notIn: ["SENDING", "DELIVERY_UNKNOWN"] } } });
+      const result = await ctx.db.emailDraft.deleteMany({
+        where: {
+          id: { in: ids },
+          workspaceId: ctx.user.workspaceId!,
+          status: { notIn: ["SENDING", "DELIVERY_UNKNOWN"] },
+        },
+      });
       return { success: true, deleted: result.count };
     }),
 
@@ -455,7 +469,7 @@ export const contactRouter = router({
       const drafts = await ctx.db.emailDraft.findMany({
         where: {
           id: { in: input.ids },
-          lead: { createdById: ctx.user.workspaceId! },
+          workspaceId: ctx.user.workspaceId!,
           status: { in: ["APPROVED", "FAILED"] },
         },
         select: { id: true },
@@ -502,6 +516,7 @@ export const contactRouter = router({
 
     const drafts = await ctx.db.emailDraft.findMany({
       where: {
+        workspaceId: ctx.user.workspaceId!,
         status: "SENT",
         sentAt: { lte: reminderThreshold },
         lead: {
@@ -549,34 +564,130 @@ export const contactRouter = router({
   createDraft: mutationProcedure
     .input(
       z.object({
-        leadId: z.string(),
-        toEmail: z.string().email(),
+        leadId: z.string().optional(),
+        toEmail: z.string().trim().email(),
         subject: z.string().min(1),
         body: z.string().min(1),
         templateId: z.string().optional(),
         type: z.enum(["LEAD_CONTACT", "QUOTE", "REPLY", "FOLLOW_UP", "REVIEW_REQUEST", "TRANSACTIONAL"]).optional(),
+        idempotencyKey: z.string().trim().min(1).max(120).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
-      const draft = await ctx.db.emailDraft.create({
-        data: {
-          ...input,
-          authorId: ctx.user.id,
-          status: "DRAFT",
-        },
-      });
+      const workspaceId = ctx.user.workspaceId!;
+      const toEmail = normalizeRecipientEmail(input.toEmail);
+      if (input.leadId) await assertLeadAccess(ctx.db, workspaceId, input.leadId);
+
+      if (input.idempotencyKey) {
+        const existing = await ctx.db.emailDraft.findFirst({
+          where: { workspaceId, idempotencyKey: input.idempotencyKey },
+        });
+        if (existing) return existing;
+      }
+
+      let draft;
+      try {
+        draft = await ctx.db.emailDraft.create({
+          data: {
+            workspaceId,
+            leadId: input.leadId,
+            toEmail,
+            subject: input.subject.trim(),
+            body: input.body.trim(),
+            templateId: input.templateId,
+            type: input.type,
+            idempotencyKey: input.idempotencyKey,
+            authorId: ctx.user.id,
+            status: "DRAFT",
+          },
+        });
+      } catch (error) {
+        if (input.idempotencyKey) {
+          const existing = await ctx.db.emailDraft.findFirst({
+            where: { workspaceId, idempotencyKey: input.idempotencyKey },
+          });
+          if (existing) return existing;
+        }
+        throw error;
+      }
 
       await ctx.db.activity.create({
         data: {
-          leadId: input.leadId,
+          leadId: input.leadId ?? null,
           userId: ctx.user.id,
           type: "EMAIL_DRAFTED",
           title: "E-mail draft aangemaakt",
+          metadata: { draftId: draft.id, toEmail, workspaceId },
         },
       });
 
       return draft;
+    }),
+
+  resolveRecipient: protectedProcedure
+    .input(z.object({ email: z.string().trim().email() }))
+    .query(async ({ ctx, input }) => {
+      const email = normalizeRecipientEmail(input.email);
+      const lead = await findLeadByEmailInWorkspace(ctx.db, ctx.user.workspaceId!, email);
+      return {
+        email,
+        lead: lead ? { id: lead.id, companyName: lead.companyName, email: lead.email } : null,
+      };
+    }),
+
+  saveRecipientAsLead: mutationProcedure
+    .input(z.object({
+      draftId: z.string(),
+      companyName: z.string().trim().max(200).optional(),
+      website: z.string().trim().max(500).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const workspaceId = ctx.user.workspaceId!;
+      const draft = await ctx.db.emailDraft.findFirst({
+        where: { id: input.draftId, workspaceId },
+        select: { id: true, leadId: true, toEmail: true },
+      });
+      if (!draft) throw new TRPCError({ code: "NOT_FOUND", message: "E-mail niet gevonden." });
+      if (draft.leadId) return { outcome: "reused" as const, leadId: draft.leadId };
+
+      const existingLead = await findLeadByEmailInWorkspace(ctx.db, workspaceId, draft.toEmail);
+      if (existingLead) {
+        await ctx.db.emailDraft.update({ where: { id: draft.id }, data: { leadId: existingLead.id } });
+        await ctx.db.activity.create({
+          data: {
+            leadId: existingLead.id,
+            userId: ctx.user.id,
+            type: "LEAD_UPDATED",
+            title: "Ontvanger aan bestaande lead gekoppeld",
+            metadata: { draftId: draft.id, source: "contact.saveRecipientAsLead", outcome: "reused" },
+          },
+        }).catch(() => null);
+        return { outcome: "reused" as const, leadId: existingLead.id };
+      }
+
+      const lead = await ensureLeadLink({
+        db: ctx.db,
+        userId: ctx.user.id,
+        workspaceId,
+        email: draft.toEmail,
+        companyName: input.companyName,
+        website: input.website,
+        source: "contact_recipient_save",
+        createIfMissing: true,
+      });
+      if (!lead) throw new TRPCError({ code: "BAD_REQUEST", message: "Ontvanger kon niet als lead worden opgeslagen." });
+
+      await ctx.db.emailDraft.update({ where: { id: draft.id }, data: { leadId: lead.id } });
+      await ctx.db.activity.create({
+        data: {
+          leadId: lead.id,
+          userId: ctx.user.id,
+          type: "LEAD_CREATED",
+          title: "Ontvanger als lead opgeslagen",
+          metadata: { draftId: draft.id, source: "contact.saveRecipientAsLead" },
+        },
+      }).catch(() => null);
+      return { outcome: "created" as const, leadId: lead.id };
     }),
 
   updateDraft: mutationProcedure
@@ -593,7 +704,7 @@ export const contactRouter = router({
       const draft = await ctx.db.emailDraft.findFirst({
         where: {
           id: input.id,
-          lead: { createdById: ctx.user.workspaceId! },
+          workspaceId: ctx.user.workspaceId!,
         },
         select: { id: true, status: true, authorId: true, updatedAt: true },
       });
@@ -607,12 +718,16 @@ export const contactRouter = router({
       }
 
       const { id, ...data } = input;
+      const normalizedData = {
+        ...data,
+        ...(data.toEmail ? { toEmail: normalizeRecipientEmail(data.toEmail) } : {}),
+      };
       const nextStatus = "DRAFT";
       const approvalReset = { approverId: null, approvedAt: null, rejectedAt: null, rejectionNote: null };
 
       return ctx.db.emailDraft.update({
         where: { id, status: draft.status, updatedAt: draft.updatedAt },
-        data: { ...data, status: nextStatus, ...approvalReset },
+        data: { ...normalizedData, status: nextStatus, ...approvalReset },
       });
     }),
 
@@ -620,10 +735,7 @@ export const contactRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const draft = await ctx.db.emailDraft.findFirst({
-        where: {
-          id: input.id,
-          lead: { createdById: ctx.user.workspaceId! },
-        },
+        where: { id: input.id, workspaceId: ctx.user.workspaceId! },
         select: { id: true, status: true, authorId: true, updatedAt: true },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
@@ -644,7 +756,7 @@ export const contactRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const draft = await ctx.db.emailDraft.findFirst({
-        where: { id: input.id, lead: { createdById: ctx.user.workspaceId! } },
+        where: { id: input.id, workspaceId: ctx.user.workspaceId! },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
       if (draft.status !== "PENDING_APPROVAL") {
@@ -676,14 +788,14 @@ export const contactRouter = router({
     .input(z.object({ id: z.string(), note: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       const draft = await ctx.db.emailDraft.findFirst({
-        where: { id: input.id, lead: { createdById: ctx.user.workspaceId! } },
+        where: { id: input.id, workspaceId: ctx.user.workspaceId! },
       });
       if (!draft) throw new TRPCError({ code: "NOT_FOUND" });
       if (draft.status !== "PENDING_APPROVAL") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen ingediende e-mails kunnen worden afgekeurd." });
       }
 
-      return ctx.db.emailDraft.update({
+      const updated = await ctx.db.emailDraft.update({
         where: { id: input.id, status: "PENDING_APPROVAL", updatedAt: draft.updatedAt },
         data: {
           status: "REJECTED",
@@ -692,6 +804,16 @@ export const contactRouter = router({
           rejectionNote: input.note,
         },
       });
+      await ctx.db.activity.create({
+        data: {
+          leadId: draft.leadId,
+          userId: ctx.user.id,
+          type: "LEAD_UPDATED",
+          title: "E-mail afgekeurd",
+          metadata: { draftId: draft.id, source: "contact.reject", note: input.note ?? null },
+        },
+      }).catch(() => null);
+      return updated;
     }),
 
   sendEmail: mutationProcedure
@@ -743,7 +865,7 @@ export const contactRouter = router({
       const draft = await ctx.db.emailDraft.findFirst({
         where: {
           id: input.id,
-          lead: { createdById: ctx.user.workspaceId! },
+          workspaceId: ctx.user.workspaceId!,
         },
         include: {
           lead: { select: { id: true, companyName: true, email: true, city: true, industry: true } },

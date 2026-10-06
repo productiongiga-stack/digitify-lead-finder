@@ -149,6 +149,12 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     },
   });
 
+  const saveRecipientAsLead = trpc.contact.saveRecipientAsLead.useMutation({
+    onSuccess: () => {
+      utils.contact.getDraftById.invalidate({ id });
+    },
+  });
+
   const rewriteDraft = trpc.openclaw.rewriteDraft.useMutation({
     onSuccess: (data) => {
       if (data.error) {
@@ -277,6 +283,21 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {!draft.lead && (
+            <Button
+              variant="outline"
+              disabled={saveRecipientAsLead.isPending}
+              onClick={() => saveRecipientAsLead.mutate({ draftId })}
+              title="Maak pas nu een leadrecord voor deze ontvanger"
+            >
+              {saveRecipientAsLead.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Building2 className="mr-2 h-4 w-4" />
+              )}
+              Opslaan als lead
+            </Button>
+          )}
           {linkedQuoteId ? (
             <Button asChild variant="outline">
               <Link href={getQuoteConfiguratorUrl(linkedQuoteId, `/contacts/drafts/${draftId}`)}>
