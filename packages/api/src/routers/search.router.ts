@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { PrismaClient } from "@digitify/db";
 import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { getSettingString, settingsRowsToMap } from "../lib/settings";
@@ -43,6 +44,18 @@ function extractCity(formattedAddress: string | undefined): string | undefined {
   if (parts.length >= 3) return parts[parts.length - 2]?.replace(/^\d+\s*/, "");
   if (parts.length >= 2) return parts[1];
   return undefined;
+}
+
+/**
+ * CRM rows keep `createdById` as a foreign key to users. A team workspace can
+ * have a separate cuid in `workspaces.id`, so resolve that id to its owner
+ * before querying or creating legacy lead rows.
+ */
+async function resolveLeadOwnerId(db: PrismaClient, workspaceId: string) {
+  const owner = await db.user.findUnique({ where: { id: workspaceId }, select: { id: true } });
+  if (owner) return owner.id;
+  const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { ownerUserId: true } });
+  return workspace?.ownerUserId ?? workspaceId;
 }
 
 export const searchRouter = router({
@@ -277,8 +290,9 @@ export const searchRouter = router({
   checkExistingLeads: protectedProcedure
     .input(z.object({ placeIds: z.array(z.string().trim().min(1).max(300)).max(80) }))
     .query(async ({ ctx, input }) => {
+      const ownerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const existing = await ctx.db.lead.findMany({
-        where: { gmbPlaceId: { in: input.placeIds }, createdById: ctx.user.workspaceId! },
+        where: { gmbPlaceId: { in: input.placeIds }, createdById: ownerId },
         select: { id: true, gmbPlaceId: true, companyName: true, overallScore: true, scorePriority: true },
       });
       return existing;
@@ -318,7 +332,7 @@ export const searchRouter = router({
         ? input.primaryType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
         : undefined;
 
-      const workspaceId = ctx.user.workspaceId!;
+      const workspaceId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const existing = await ctx.db.lead.findFirst({
         where: { createdById: workspaceId, gmbPlaceId: input.placeId },
       });
