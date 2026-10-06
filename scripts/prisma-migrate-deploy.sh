@@ -84,11 +84,18 @@ fi
 # schema objects, retry with the direct credentials on that pooler host. This
 # avoids requiring a public IPv4 route to the Supabase database hostname.
 if [[ "$migration_output" == *"permission denied for schema public"* && -n "$privileged_url" && -n "$application_url" ]]; then
-  pooler_url="$(PRIVILEGED_URL="$privileged_url" APPLICATION_URL="$application_url" node -e '
+  pooler_url="$(PRIVILEGED_URL="$privileged_url" APPLICATION_URL="$application_url" POSTGRES_HOST="${POSTGRES_HOST:-}" node -e '
     const privileged = new URL(process.env.PRIVILEGED_URL);
     const pooler = new URL(process.env.APPLICATION_URL);
     privileged.hostname = pooler.hostname;
     privileged.port = pooler.port;
+    // Supabase pooler authentication needs the project ref as the tenant
+    // suffix (postgres.<project-ref>), while the direct URL uses postgres.
+    const directHost = process.env.POSTGRES_HOST || "";
+    const projectRef = directHost.match(/^db\.([^.]+)\./)?.[1];
+    if (projectRef && !privileged.username.includes(".")) {
+      privileged.username = `${privileged.username}.${projectRef}`;
+    }
     process.stdout.write(privileged.toString());
   ')"
   if [[ -n "$pooler_url" ]]; then
@@ -114,11 +121,16 @@ fi
 if [[ "$migration_output" == *"P3005"* ]]; then
   echo "==> existing schema detected without Prisma history; baselining init migration"
   if [[ -n "$privileged_url" && -n "$application_url" ]]; then
-    pooler_url="$(PRIVILEGED_URL="$privileged_url" APPLICATION_URL="$application_url" node -e '
+    pooler_url="$(PRIVILEGED_URL="$privileged_url" APPLICATION_URL="$application_url" POSTGRES_HOST="${POSTGRES_HOST:-}" node -e '
       const privileged = new URL(process.env.PRIVILEGED_URL);
       const pooler = new URL(process.env.APPLICATION_URL);
       privileged.hostname = pooler.hostname;
       privileged.port = pooler.port;
+      const directHost = process.env.POSTGRES_HOST || "";
+      const projectRef = directHost.match(/^db\.([^.]+)\./)?.[1];
+      if (projectRef && !privileged.username.includes(".")) {
+        privileged.username = `${privileged.username}.${projectRef}`;
+      }
       process.stdout.write(privileged.toString());
     ')"
     if [[ -n "$pooler_url" ]]; then
