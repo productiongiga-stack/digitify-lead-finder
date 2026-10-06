@@ -125,7 +125,8 @@ async function probePage(url: string): Promise<{
   error?: string;
 }> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  // A broken internal link must not block a complete lead analysis.
+  const timeout = setTimeout(() => controller.abort(), 5000);
   try {
     const response = await fetch(url, {
       method: "GET",
@@ -154,13 +155,11 @@ async function probeInternalPages(homeUrl: string, html: string) {
     return { pageProbes: [] as { url: string; statusCode: number; ok: boolean; error?: string }[], pagesChecked: 0, pagesBroken: 0, internalLinkCount: 0 };
   }
 
-  const internalUrls = extractInternalUrls(html, base, 10);
+  const internalUrls = extractInternalUrls(html, base, 6);
   const toCheck = [base.toString(), ...internalUrls.filter((u) => u !== base.toString())].slice(0, 8);
-  const pageProbes: { url: string; statusCode: number; ok: boolean; error?: string }[] = [];
-
-  for (const pageUrl of toCheck) {
-    pageProbes.push(await probePage(pageUrl));
-  }
+  // Probe in parallel so slow internal links cannot make the serverless
+  // request exceed its function duration.
+  const pageProbes = await Promise.all(toCheck.map((pageUrl) => probePage(pageUrl)));
 
   const pagesBroken = pageProbes.filter((p) => !p.ok).length;
   return {
@@ -292,10 +291,13 @@ export async function analyzeWebsite(url: string): Promise<WebsiteAnalysis> {
       if (url.startsWith("https://")) {
         try {
           const httpUrl = await assertPublicHttpUrl(url.replace("https://", "http://"));
+          const fallbackController = new AbortController();
+          const fallbackTimeout = setTimeout(() => fallbackController.abort(), 10000);
           const fallbackResp = await fetch(httpUrl, {
+            signal: fallbackController.signal,
             headers: FETCH_HEADERS,
             redirect: "follow",
-          });
+          }).finally(() => clearTimeout(fallbackTimeout));
           html = await fallbackResp.text();
           statusCode = fallbackResp.status;
           hasSSL = false;

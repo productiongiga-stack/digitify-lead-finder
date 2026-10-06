@@ -135,6 +135,14 @@ export function LeadsPageInner() {
     (typeof LEAD_STATUS_OPTIONS)[number]["value"] | ""
   >("");
   const [bulkTagId, setBulkTagId] = useState<string>("");
+  const [scoreRefresh, setScoreRefresh] = useState<{
+    status: "idle" | "running" | "done" | "error";
+    processed: number;
+    total: number;
+    analyzed: number;
+    failed: number;
+    message?: string;
+  }>({ status: "idle", processed: 0, total: 0, analyzed: 0, failed: 0 });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pageSize = 25;
 
@@ -189,11 +197,7 @@ export function LeadsPageInner() {
     },
   });
 
-  const recomputeScores = trpc.scoring.recomputeScores.useMutation({
-    onSuccess: () => {
-      utils.lead.listSummary.invalidate();
-    },
-  });
+  const bulkEnrich = trpc.scoring.bulkEnrich.useMutation();
 
   const importCsv = trpc.lead.importCsv.useMutation({
     onSuccess: () => {
@@ -233,6 +237,67 @@ export function LeadsPageInner() {
     link.download = `leads-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function handleFetchScores() {
+    if (bulkEnrich.isPending || scoreRefresh.status === "running") return;
+
+    setScoreRefresh({ status: "running", processed: 0, total: 0, analyzed: 0, failed: 0 });
+    try {
+      const filters = {
+        search: search || undefined,
+        status: statusFilter ? [statusFilter] : undefined,
+        scorePriority: priorityFilter || undefined,
+      };
+      let allIds = Array.from(selectedIds);
+      if (allIds.length === 0) {
+        const firstPage = await utils.lead.listSummary.fetch({
+          filters,
+          sortBy: "createdAt",
+          sortDir: "desc",
+          page: 1,
+          pageSize: 100,
+        });
+        allIds = firstPage.items.map((lead) => lead.id);
+        for (let currentPage = 2; currentPage <= firstPage.totalPages; currentPage += 1) {
+          const nextPage = await utils.lead.listSummary.fetch({
+            filters,
+            sortBy: "createdAt",
+            sortDir: "desc",
+            page: currentPage,
+            pageSize: 100,
+          });
+          allIds.push(...nextPage.items.map((lead) => lead.id));
+        }
+      }
+
+      setScoreRefresh((current) => ({ ...current, total: allIds.length }));
+      if (allIds.length === 0) {
+        setScoreRefresh({ status: "done", processed: 0, total: 0, analyzed: 0, failed: 0 });
+        return;
+      }
+
+      let processed = 0;
+      let analyzed = 0;
+      let failed = 0;
+      // Keep each serverless request short while still covering every lead.
+      for (let offset = 0; offset < allIds.length; offset += 5) {
+        const result = await bulkEnrich.mutateAsync({ leadIds: allIds.slice(offset, offset + 5) });
+        processed += result.results.length;
+        analyzed += result.results.filter((item) => item.analyzed).length;
+        failed += result.results.filter((item) => Boolean(item.error)).length;
+        setScoreRefresh((current) => ({ ...current, processed, analyzed, failed }));
+      }
+
+      await utils.lead.listSummary.invalidate();
+      setScoreRefresh({ status: "done", processed, total: allIds.length, analyzed, failed });
+    } catch (error) {
+      setScoreRefresh((current) => ({
+        ...current,
+        status: "error",
+        message: error instanceof Error ? error.message : "Scores konden niet worden opgehaald.",
+      }));
+    }
   }
 
   function handleExportPdf() {
@@ -682,25 +747,27 @@ export function LeadsPageInner() {
                   variant="outline"
                   size="sm"
                   className="h-9 shrink-0 border-border/70 bg-background/80 shadow-none"
-                  onClick={() => recomputeScores.mutate({ onlyMissing: false, limit: 200 })}
-                  disabled={recomputeScores.isPending}
+                  onClick={handleFetchScores}
+                  disabled={bulkEnrich.isPending || scoreRefresh.status === "running"}
                 >
                   <RefreshCw
-                    className={cn("mr-1.5 h-3.5 w-3.5", recomputeScores.isPending && "animate-spin")}
+                    className={cn("mr-1.5 h-3.5 w-3.5", scoreRefresh.status === "running" && "animate-spin")}
                   />
-                  Scores ophalen
+                  {scoreRefresh.status === "running" ? "Websites analyseren…" : "Websites & scores ophalen"}
                 </Button>
               </div>
             </div>
 
-            {recomputeScores.data || importCsv.data ? (
+            {scoreRefresh.status !== "idle" || importCsv.data ? (
               <p className="border-t border-border/40 pt-2.5 text-xs text-muted-foreground">
-                {recomputeScores.data
-                  ? `${recomputeScores.data.updated}/${recomputeScores.data.total} scores bijgewerkt${
-                      recomputeScores.data.failed > 0 ? ` · ${recomputeScores.data.failed} fouten` : ""
-                    }`
+                {scoreRefresh.status !== "idle"
+                  ? scoreRefresh.status === "error"
+                    ? scoreRefresh.message || "Scores konden niet worden opgehaald."
+                    : `${scoreRefresh.processed}/${scoreRefresh.total} leads verwerkt · ${scoreRefresh.analyzed} websites geanalyseerd${
+                        scoreRefresh.failed > 0 ? ` · ${scoreRefresh.failed} fouten` : ""
+                      }${scoreRefresh.status === "done" ? " · klaar" : ""}`
                   : null}
-                {recomputeScores.data && importCsv.data ? " · " : null}
+                {scoreRefresh.status !== "idle" && importCsv.data ? " · " : null}
                 {importCsv.data
                   ? `CSV: ${importCsv.data.created} toegevoegd, ${importCsv.data.skipped} overgeslagen`
                   : null}

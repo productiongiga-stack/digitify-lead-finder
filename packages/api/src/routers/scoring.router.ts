@@ -352,7 +352,15 @@ export const scoringRouter = router({
     .input(z.object({ leadIds: z.array(z.string()).min(1).max(50) }))
     .mutation(async ({ ctx, input }) => {
       const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
-      const results: { leadId: string; score: number; priority: string; error?: string }[] = [];
+      const results: {
+        leadId: string;
+        score: number;
+        priority: string;
+        analyzed: boolean;
+        reportId?: string;
+        analysisErrors?: string[];
+        error?: string;
+      }[] = [];
 
       for (const leadId of input.leadIds) {
         try {
@@ -360,53 +368,62 @@ export const scoringRouter = router({
             where: { id: leadId, createdById: leadOwnerId },
           });
 
+          let analyzed = false;
+          let reportId: string | undefined;
+          let analysisErrors: string[] | undefined;
           if (lead.website) {
             const analysis = await analyzeWebsite(lead.website);
+            const enrichmentSnapshot = websiteAnalysisToEnrichment(analysis);
+            analysisErrors = analysis.errors.length > 0 ? analysis.errors : undefined;
+
+            const updates: Record<string, unknown> = { lastEnrichedAt: new Date() };
+            if (!lead.email && analysis.contactInfo.emails.length > 0) updates.email = analysis.contactInfo.emails[0];
+            if (!lead.phone && analysis.contactInfo.phones.length > 0) updates.phone = analysis.contactInfo.phones[0];
+            if (!lead.facebookUrl && analysis.socialLinks.facebook) updates.facebookUrl = analysis.socialLinks.facebook;
+            if (!lead.instagramUrl && analysis.socialLinks.instagram) updates.instagramUrl = analysis.socialLinks.instagram;
+            if (!lead.linkedinUrl && analysis.socialLinks.linkedin) updates.linkedinUrl = analysis.socialLinks.linkedin;
+            if (!lead.twitterUrl && analysis.socialLinks.twitter) updates.twitterUrl = analysis.socialLinks.twitter;
+            if (!lead.youtubeUrl && analysis.socialLinks.youtube) updates.youtubeUrl = analysis.socialLinks.youtube;
+            if (!lead.tiktokUrl && analysis.socialLinks.tiktok) updates.tiktokUrl = analysis.socialLinks.tiktok;
+
+            await ctx.db.lead.update({
+              where: { id: leadId, createdById: leadOwnerId },
+              data: updates,
+            });
 
             await ctx.db.enrichmentData.upsert({
               where: { leadId_source: { leadId, source: "website_analyzer" } },
               create: {
                 leadId,
                 source: "website_analyzer",
-                data: {
-                  website_analysis: {
-                    hasSSL: analysis.hasSSL,
-                    isMobileFriendly: analysis.isMobileFriendly,
-                    loadTimeMs: analysis.loadTimeMs,
-                    hasMetaTitle: analysis.hasMetaTitle,
-                    hasMetaDescription: analysis.hasMetaDescription,
-                    hasH1: analysis.hasH1,
-                    hasStructuredData: analysis.hasStructuredData,
-                    hasFavicon: analysis.hasFavicon,
-                    hasAnalytics: analysis.hasAnalytics,
-                    hasCTA: analysis.hasCTA,
-                    contentLength: analysis.contentLength,
-                    lastModified: analysis.lastModified,
-                    technologies: analysis.technologies,
-                  },
-                },
+                data: { website_analysis: enrichmentSnapshot },
               },
               update: {
-                data: {
-                  website_analysis: {
-                    hasSSL: analysis.hasSSL,
-                    isMobileFriendly: analysis.isMobileFriendly,
-                    loadTimeMs: analysis.loadTimeMs,
-                    hasMetaTitle: analysis.hasMetaTitle,
-                    hasMetaDescription: analysis.hasMetaDescription,
-                    hasH1: analysis.hasH1,
-                    hasStructuredData: analysis.hasStructuredData,
-                    hasFavicon: analysis.hasFavicon,
-                    hasAnalytics: analysis.hasAnalytics,
-                    hasCTA: analysis.hasCTA,
-                    contentLength: analysis.contentLength,
-                    lastModified: analysis.lastModified,
-                    technologies: analysis.technologies,
-                  },
-                },
+                data: { website_analysis: enrichmentSnapshot },
                 fetchedAt: new Date(),
               },
             });
+
+            const auditPayload = buildWebsiteAuditPayload(analysis, {
+              leadId: lead.id,
+              leadName: lead.companyName,
+              reviews: {
+                rating: lead.gmbRating ? Number(lead.gmbRating) : null,
+                reviewCount: lead.gmbReviewCount,
+                source: lead.gmbRating != null || lead.gmbReviewCount != null ? "lead" : "none",
+              },
+            });
+            const auditReport = await ctx.db.report.create({
+              data: {
+                title: `Website audit: ${lead.companyName}`,
+                type: "website_audit",
+                leadId: lead.id,
+                generatedById: leadOwnerId,
+                data: auditPayload,
+              },
+            });
+            analyzed = true;
+            reportId = auditReport.id;
           }
 
           // Compute score
@@ -420,9 +437,9 @@ export const scoringRouter = router({
 
           await persistLeadScore(ctx.db, leadId, scoreResult, scoreResult.factors, weights, upsertLeadScoringFactors);
 
-          results.push({ leadId, score: scoreResult.overallScore, priority: scoreResult.priority });
+          results.push({ leadId, score: scoreResult.overallScore, priority: scoreResult.priority, analyzed, reportId, analysisErrors });
         } catch (error: any) {
-          results.push({ leadId, score: 0, priority: "Low", error: error.message });
+          results.push({ leadId, score: 0, priority: "Low", analyzed: false, error: error.message });
         }
       }
 

@@ -186,6 +186,9 @@ export function websiteAnalysisToEnrichment(analysis: WebsiteAnalysis) {
     h1Text: analysis.h1Text,
     contactFormFound: analysis.uxAudit.formCount > 0,
     uxAudit: analysis.uxAudit,
+    socialLinks: analysis.socialLinks,
+    contactInfo: analysis.contactInfo,
+    errors: analysis.errors,
     url: analysis.url,
   };
 }
