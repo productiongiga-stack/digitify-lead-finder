@@ -62,8 +62,12 @@ export const authOptions: NextAuthOptions = {
           const user = await finishLogin(prisma, challenge, credentials?.code, credentials?.method === "recovery" ? "recovery" : "totp");
           const workspace = await resolveWorkspaceContext(prisma, user.id);
           return { id: user.id, email: user.email, name: user.name, role: user.role, workspaceId: workspace.workspaceId, workspaceRole: workspace.workspaceRole, isPersonalWorkspace: workspace.isPersonalWorkspace, sessionVersion: user.sessionVersion, twoFactorVerified: user.twoFactorEnabled };
-        } catch {
-          log.auth.warn("Login security challenge rejected");
+        } catch (error) {
+          // Keep the response deliberately generic, but retain the actual
+          // server failure in structured logs so an expired challenge,
+          // database problem, or encryption mismatch can be fixed without
+          // exposing security-sensitive details to the browser.
+          log.auth.warn("Login security challenge rejected", { route: "next-auth/credentials" }, error);
           return null;
         }
       },
