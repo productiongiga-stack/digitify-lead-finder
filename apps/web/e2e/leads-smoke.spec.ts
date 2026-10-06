@@ -18,8 +18,7 @@ test.describe("Leads list smoke", () => {
 
   test("leads list opens detail page", async ({ page }) => {
     await page.goto("/leads");
-    await expect(page.locator("table tbody tr, [role=row]").first()).toBeVisible({ timeout: 20_000 });
-    const detailRow = page.locator("table tbody tr").filter({ has: page.locator("td") }).first();
+    const detailRow = page.locator('table tbody tr[tabindex="0"]').first();
     await expect(detailRow).toBeVisible({ timeout: 20_000 });
     await detailRow.press("Enter");
     // The App Router uses a client-side transition here, so wait for the URL
