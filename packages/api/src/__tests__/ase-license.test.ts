@@ -40,7 +40,7 @@ describe("ase-license helpers", () => {
   });
 
   it("soft-fails schema ensure so callers are not opaque 500s", async () => {
-    vi.mocked(prisma.$executeRawUnsafe).mockRejectedValueOnce(
+    (vi.mocked(prisma.$executeRawUnsafe) as any).mockRejectedValueOnce(
       new Error("permission denied for schema public"),
     );
     const { ensureAseLicensesSchema } = await import("../lib/ase-license");
@@ -150,7 +150,7 @@ describe("issueLicense", () => {
       issuedAt: null,
       email: "a@b.be",
     } as never);
-    vi.mocked(prisma.aseLicense.update).mockImplementation(async ({ data }) => ({
+    (vi.mocked(prisma.aseLicense.update) as any).mockImplementation(async ({ data }: { data: { status: string; keyPrefix: string } }) => ({
       id: "lic_1",
       email: "a@b.be",
       status: (data as { status: string }).status,

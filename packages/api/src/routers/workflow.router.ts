@@ -19,7 +19,7 @@ function assertNotViewingAs(ctx: { user: { isViewingAs?: boolean } }) {
 export const workflowRouter = router({
   list: protectedProcedure.query(async ({ ctx }) =>
     ctx.db.workflow.findMany({
-      where: { createdById: ctx.user.workspaceId! },
+      where: { createdById: ctx.user.ownerUserId! },
       orderBy: { createdAt: "desc" },
       select: { id: true, name: true, description: true, status: true, trigger: true, actions: true, updatedAt: true, _count: { select: { runs: true } } },
     }),
@@ -30,7 +30,7 @@ export const workflowRouter = router({
     .mutation(async ({ ctx, input }) => {
       assertNotViewingAs(ctx);
       return ctx.db.workflow.create({
-        data: { createdById: ctx.user.workspaceId!, name: input.name, description: input.description || null, trigger: input.trigger, conditions: input.conditions as Prisma.InputJsonValue, actions: input.actions as Prisma.InputJsonValue },
+        data: { createdById: ctx.user.ownerUserId!, name: input.name, description: input.description || null, trigger: input.trigger, conditions: input.conditions as Prisma.InputJsonValue, actions: input.actions as Prisma.InputJsonValue },
         select: { id: true, name: true, status: true },
       });
     }),
@@ -39,7 +39,7 @@ export const workflowRouter = router({
     .input(z.object({ id: z.string(), status: z.enum(["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"]) }))
     .mutation(async ({ ctx, input }) => {
       assertNotViewingAs(ctx);
-      const workflow = await ctx.db.workflow.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! }, select: { id: true } });
+      const workflow = await ctx.db.workflow.findFirst({ where: { id: input.id, createdById: ctx.user.ownerUserId! }, select: { id: true } });
       if (!workflow) throw new TRPCError({ code: "NOT_FOUND", message: "Workflow niet gevonden" });
       return ctx.db.workflow.update({ where: { id: workflow.id }, data: { status: input.status }, select: { id: true, status: true } });
     }),
@@ -47,7 +47,7 @@ export const workflowRouter = router({
   dryRun: mutationProcedure
     .input(z.object({ workflowId: z.string(), idempotencyKey: z.string().trim().min(8).max(120), triggerData: z.record(z.string(), z.unknown()).default({}) }))
     .mutation(async ({ ctx, input }) => {
-      const workflow = await ctx.db.workflow.findFirst({ where: { id: input.workflowId, createdById: ctx.user.workspaceId! }, select: { id: true, status: true, actions: true } });
+      const workflow = await ctx.db.workflow.findFirst({ where: { id: input.workflowId, createdById: ctx.user.ownerUserId! }, select: { id: true, status: true, actions: true } });
       if (!workflow) throw new TRPCError({ code: "NOT_FOUND", message: "Workflow niet gevonden" });
       const actions = Array.isArray(workflow.actions) ? workflow.actions as Array<{ type: string; title: string }> : [];
       try {
@@ -61,7 +61,7 @@ export const workflowRouter = router({
   run: mutationProcedure
     .input(z.object({ workflowId: z.string(), idempotencyKey: z.string().trim().min(8).max(120), triggerData: z.record(z.string(), z.unknown()).default({}) }))
     .mutation(async ({ ctx, input }) => {
-      const workflow = await ctx.db.workflow.findFirst({ where: { id: input.workflowId, createdById: ctx.user.workspaceId!, status: "ACTIVE" }, select: { id: true, actions: true } });
+      const workflow = await ctx.db.workflow.findFirst({ where: { id: input.workflowId, createdById: ctx.user.ownerUserId!, status: "ACTIVE" }, select: { id: true, actions: true } });
       if (!workflow) throw new TRPCError({ code: "NOT_FOUND", message: "Actieve workflow niet gevonden" });
       let run;
       try {
@@ -80,7 +80,7 @@ export const workflowRouter = router({
       try {
         for (const action of actions) {
           if (action.type === "SEND_EMAIL") { blockedActions.push(action.title); continue; }
-          const task = await ctx.db.workspaceTask.create({ data: { createdById: ctx.user.workspaceId!, title: action.title, relatedType: lead ? "LEAD" : undefined, relatedId: lead?.id } });
+          const task = await ctx.db.workspaceTask.create({ data: { createdById: ctx.user.ownerUserId!, title: action.title, relatedType: lead ? "LEAD" : undefined, relatedId: lead?.id } });
           createdTaskIds.push(task.id);
         }
         if (lead) await ctx.db.activity.create({ data: { leadId: lead.id, userId: ctx.user.id, type: "NOTE_ADDED", title: `Workflow uitgevoerd voor ${lead.companyName}`, metadata: { workflowId: workflow.id, runId: run.idempotencyKey, createdTaskIds, blockedActions } } });
@@ -93,7 +93,7 @@ export const workflowRouter = router({
   runs: protectedProcedure
     .input(z.object({ workflowId: z.string() }))
     .query(async ({ ctx, input }) => {
-      const workflow = await ctx.db.workflow.findFirst({ where: { id: input.workflowId, createdById: ctx.user.workspaceId! }, select: { id: true } });
+      const workflow = await ctx.db.workflow.findFirst({ where: { id: input.workflowId, createdById: ctx.user.ownerUserId! }, select: { id: true } });
       if (!workflow) throw new TRPCError({ code: "NOT_FOUND", message: "Workflow niet gevonden" });
       return ctx.db.workflowRun.findMany({ where: { workflowId: workflow.id }, orderBy: { createdAt: "desc" }, take: 50 });
     }),

@@ -29,7 +29,8 @@
     "db:reset-local-accounts": "bash scripts/reset-local-test-accounts.sh",
     "test:redis": "pnpm --filter @digitify/api test:redis",
     "test:e2e": "pnpm --filter @digitify/web test:e2e",
-    "test:e2e:smoke": "pnpm --filter @digitify/web test:e2e:smoke"
+    "test:e2e:smoke": "pnpm --filter @digitify/web test:e2e:smoke",
+    "db:migrate-account-tenancy": "bash scripts/with-local-env.sh pnpm --filter @digitify/db db:migrate-account-tenancy"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

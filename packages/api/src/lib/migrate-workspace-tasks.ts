@@ -26,7 +26,7 @@ async function importRows(
   scope: WorkspaceScope,
 ): Promise<{ imported: number }> {
   const existing = await db.workspaceTask.count({
-    where: { createdById: scope.workspaceId },
+    where: { createdById: scope.ownerUserId ?? scope.workspaceId },
   });
   if (existing > 0) return { imported: 0 };
 
@@ -42,7 +42,7 @@ async function importRows(
     .slice(0, 3000)
     .map((task) => ({
       id: task.id,
-      createdById: scope.workspaceId,
+      createdById: scope.ownerUserId ?? scope.workspaceId,
       title: task.title.trim(),
       description: task.description?.trim() || "",
       status: task.status,

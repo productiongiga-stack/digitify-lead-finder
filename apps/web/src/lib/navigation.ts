@@ -36,6 +36,7 @@ import {
   FileText,
   SearchCheck,
   HelpCircle,
+  ShieldCheck,
 } from "lucide-react";
 import { canAccessSettingsPath } from "@/lib/permissions";
 
@@ -232,12 +233,16 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/display", title: "Weergave", description: "UI dichtheid en mail/PDF typografie", icon: SlidersHorizontal },
   { href: "/settings/performance", title: "Prestaties & cache", description: "API-metrics, cache-TTL en flush (owner)", icon: Activity },
   { href: "/settings/audit", title: "Security auditlog", description: "Rechten, view-as en gevoelige acties", icon: Activity },
+  { href: "/settings/platform", title: "Platformbeheer", description: "Klantbedrijven, accountstatus en module-entitlements", icon: ShieldCheck },
   { href: "/settings/chatbot", title: "Chatbotwidget", description: "Widgetgedrag en trainingsinstellingen", icon: MessageSquare },
   { href: "/settings/feedback", title: "Feedback", description: "Bekijk en behandel feedback uit de app", icon: MessageSquareWarning },
 ];
 
-export function filterSettingsSections(role: string | null | undefined) {
-  return SETTINGS_SECTIONS.filter((section) => canAccessSettingsPath(role, section.href));
+export function filterSettingsSections(role: string | null | undefined, platformRole?: string | null, accountClass?: string | null) {
+  return SETTINGS_SECTIONS.filter((section) => {
+    if (section.href === "/settings/platform") return platformRole === "OWNER" || accountClass === "PLATFORM_OWNER";
+    return canAccessSettingsPath(role, section.href);
+  });
 }
 
 type PageTitleRoute = { path: string; title: string };
@@ -299,6 +304,7 @@ const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
   { path: "/settings/display", title: "Weergave" },
   { path: "/settings/performance", title: "Prestaties" },
   { path: "/settings/audit", title: "Security auditlog" },
+  { path: "/settings/platform", title: "Platformbeheer" },
   { path: "/settings", title: "Instellingen" },
 ];
 

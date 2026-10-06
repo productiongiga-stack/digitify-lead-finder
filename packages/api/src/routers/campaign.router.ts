@@ -397,7 +397,7 @@ export const campaignRouter = router({
     .query(async ({ ctx, input }) => {
       const page = input?.page ?? 1;
       const pageSize = input?.pageSize ?? 50;
-      const where = { createdById: ctx.user.workspaceId! };
+      const where = { createdById: ctx.user.ownerUserId! };
 
       const [items, total] = await Promise.all([
         ctx.db.campaign.findMany({
@@ -433,7 +433,7 @@ export const campaignRouter = router({
     .query(async ({ ctx, input }) => {
       const { leadsPage, leadsPageSize } = input;
       const campaign = await ctx.db.campaign.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: ctx.user.ownerUserId! },
         include: {
           createdBy: { select: { id: true, name: true } },
           templates: true,
@@ -548,7 +548,7 @@ export const campaignRouter = router({
             goal: trimOptional(input.goal),
             idealScore: input.idealScore ?? null,
             desiredServices: input.desiredServices ?? [],
-            createdById: workspaceId,
+            createdById: ctx.user.ownerUserId!,
           },
         });
 
@@ -599,7 +599,7 @@ export const campaignRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
-      const existing = await ctx.db.campaign.findFirst({ where: { id, createdById: ctx.user.workspaceId! }, select: { id: true } });
+      const existing = await ctx.db.campaign.findFirst({ where: { id, createdById: ctx.user.ownerUserId! }, select: { id: true } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
       return ctx.db.campaign.update({ where: { id }, data: data as any });
     }),
@@ -607,7 +607,7 @@ export const campaignRouter = router({
   delete: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const existing = await ctx.db.campaign.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! }, select: { id: true } });
+      const existing = await ctx.db.campaign.findFirst({ where: { id: input.id, createdById: ctx.user.ownerUserId! }, select: { id: true } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
       await ctx.db.campaign.delete({ where: { id: input.id } });
       return { success: true };
@@ -616,10 +616,10 @@ export const campaignRouter = router({
   addLeads: mutationProcedure
     .input(z.object({ campaignId: z.string(), leadIds: z.array(z.string()) }))
     .mutation(async ({ ctx, input }) => {
-      const campaign = await ctx.db.campaign.findFirst({ where: { id: input.campaignId, createdById: ctx.user.workspaceId! }, select: { id: true } });
+      const campaign = await ctx.db.campaign.findFirst({ where: { id: input.campaignId, createdById: ctx.user.ownerUserId! }, select: { id: true } });
       if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });
       const ownedLeads = await ctx.db.lead.findMany({
-        where: { id: { in: input.leadIds }, createdById: ctx.user.workspaceId! },
+        where: { id: { in: input.leadIds }, createdById: ctx.user.ownerUserId! },
         select: { id: true },
       });
       const ownedLeadIds = ownedLeads.map((lead) => lead.id);
@@ -640,7 +640,7 @@ export const campaignRouter = router({
         where: {
           campaignId: input.campaignId,
           leadId: { in: input.leadIds },
-          campaign: { createdById: ctx.user.workspaceId! },
+          campaign: { createdById: ctx.user.ownerUserId! },
         },
       });
       return { removed: deleted.count };
@@ -650,7 +650,7 @@ export const campaignRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const campaign = await ctx.db.campaign.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: ctx.user.ownerUserId! },
         include: {
           campaignLeads: {
             include: {
@@ -734,7 +734,7 @@ export const campaignRouter = router({
     .query(async ({ ctx, input }) => {
       const mode = input.mode as DripMode;
       const campaign = await ctx.db.campaign.findFirst({
-        where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
+        where: { id: input.campaignId, createdById: ctx.user.ownerUserId! },
         select: { id: true, name: true, status: true },
       });
       if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });
@@ -777,7 +777,7 @@ export const campaignRouter = router({
     .mutation(async ({ ctx, input }) => {
       const mode = input.mode as DripMode;
       const campaign = await ctx.db.campaign.findFirst({
-        where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
+        where: { id: input.campaignId, createdById: ctx.user.ownerUserId! },
         select: { id: true, name: true },
       });
       if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });
@@ -816,7 +816,7 @@ export const campaignRouter = router({
       }
 
       const campaign = await ctx.db.campaign.findFirst({
-        where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
+        where: { id: input.campaignId, createdById: ctx.user.ownerUserId! },
         include: {
           campaignLeads: {
             include: {
@@ -979,7 +979,7 @@ export const campaignRouter = router({
       }
 
       const campaign = await ctx.db.campaign.findFirst({
-        where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
+        where: { id: input.campaignId, createdById: ctx.user.ownerUserId! },
         include: {
           campaignLeads: {
             include: {
@@ -1086,7 +1086,7 @@ export const campaignRouter = router({
       const { client } = await getOpenClawClient(ctx.db, ctx.user.workspaceId!);
 
       const campaign = await ctx.db.campaign.findFirst({
-        where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
+        where: { id: input.campaignId, createdById: ctx.user.ownerUserId! },
         include: {
           campaignLeads: {
             include: {
@@ -1288,7 +1288,7 @@ export const campaignRouter = router({
     .mutation(async ({ ctx, input }) => {
       const mode = input.mode as DripMode;
       const campaign = await ctx.db.campaign.findFirst({
-        where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
+        where: { id: input.campaignId, createdById: ctx.user.ownerUserId! },
         select: { id: true, name: true },
       });
       if (!campaign) throw new TRPCError({ code: "NOT_FOUND" });

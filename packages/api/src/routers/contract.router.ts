@@ -12,14 +12,14 @@ const contractInput = z.object({
   quoteId: z.string().optional(),
 });
 
-async function validateSource(ctx: { db: any; user: { workspaceId?: string } }, input: { projectId?: string; quoteId?: string }) {
+async function validateSource(ctx: { db: any; user: { workspaceId?: string; ownerUserId?: string } }, input: { projectId?: string; quoteId?: string }) {
   const workspaceId = ctx.user.workspaceId!;
   if (input.projectId) {
-    const project = await ctx.db.project.findFirst({ where: { id: input.projectId, createdById: workspaceId }, select: { id: true } });
+    const project = await ctx.db.project.findFirst({ where: { id: input.projectId, createdById: ctx.user.ownerUserId! }, select: { id: true } });
     if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "Project niet gevonden in deze werkruimte." });
   }
   if (input.quoteId) {
-    const quote = await ctx.db.quote.findFirst({ where: { id: input.quoteId, createdById: workspaceId, status: "ACCEPTED" }, select: { id: true } });
+    const quote = await ctx.db.quote.findFirst({ where: { id: input.quoteId, createdById: ctx.user.ownerUserId!, status: "ACCEPTED" }, select: { id: true } });
     if (!quote) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Een contract kan alleen aan een geaccepteerde offerte worden gekoppeld." });
   }
 }
@@ -28,23 +28,23 @@ export const contractRouter = router({
   sources: protectedProcedure.query(async ({ ctx }) => {
     const workspaceId = ctx.user.workspaceId!;
     const [projects, quotes] = await Promise.all([
-      ctx.db.project.findMany({ where: { createdById: workspaceId, status: { not: "ARCHIVED" } }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, name: true, clientName: true } }),
-      ctx.db.quote.findMany({ where: { createdById: workspaceId, status: "ACCEPTED" }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, quoteNumber: true, clientName: true, clientEmail: true } }),
+      ctx.db.project.findMany({ where: { createdById: ctx.user.ownerUserId!, status: { not: "ARCHIVED" } }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, name: true, clientName: true } }),
+      ctx.db.quote.findMany({ where: { createdById: ctx.user.ownerUserId!, status: "ACCEPTED" }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, quoteNumber: true, clientName: true, clientEmail: true } }),
     ]);
     return { projects, quotes };
   }),
 
-  list: protectedProcedure.query(async ({ ctx }) => ctx.db.contract.findMany({ where: { createdById: ctx.user.workspaceId! }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, name: true, clientName: true, clientEmail: true, content: true, version: true, status: true, projectId: true, quoteId: true, sentAt: true, viewedAt: true, signedAt: true, declinedAt: true, updatedAt: true } })),
+  list: protectedProcedure.query(async ({ ctx }) => ctx.db.contract.findMany({ where: { createdById: ctx.user.ownerUserId! }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, name: true, clientName: true, clientEmail: true, content: true, version: true, status: true, projectId: true, quoteId: true, sentAt: true, viewedAt: true, signedAt: true, declinedAt: true, updatedAt: true } })),
 
   create: adminProcedure.input(contractInput).mutation(async ({ ctx, input }) => {
     await validateSource(ctx, input);
-    const contract = await ctx.db.contract.create({ data: { createdById: ctx.user.workspaceId!, name: input.name.trim(), clientName: input.clientName.trim(), clientEmail: input.clientEmail?.trim().toLowerCase(), content: input.content.trim(), projectId: input.projectId, quoteId: input.quoteId }, select: { id: true, name: true, status: true } });
+    const contract = await ctx.db.contract.create({ data: { createdById: ctx.user.ownerUserId!, name: input.name.trim(), clientName: input.clientName.trim(), clientEmail: input.clientEmail?.trim().toLowerCase(), content: input.content.trim(), projectId: input.projectId, quoteId: input.quoteId }, select: { id: true, name: true, status: true } });
     await recordSecurityAuditEvent(ctx.db, { workspaceId: ctx.user.workspaceId, actorUserId: ctx.user.actorUserId ?? ctx.user.id, targetUserId: ctx.user.id, action: "CONTRACT_CREATED", resource: "Contract", resourceId: contract.id, result: "SUCCESS", requestId: ctx.requestId, metadata: { name: contract.name } });
     return contract;
   }),
 
   updateStatus: mutationProcedure.input(z.object({ id: z.string(), status: z.enum(["SENT", "VIEWED", "SIGNED", "DECLINED", "EXPIRED"]) })).mutation(async ({ ctx, input }) => {
-    const contract = await ctx.db.contract.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! }, select: { id: true, status: true, name: true } });
+    const contract = await ctx.db.contract.findFirst({ where: { id: input.id, createdById: ctx.user.ownerUserId! }, select: { id: true, status: true, name: true } });
     if (!contract) throw new TRPCError({ code: "NOT_FOUND", message: "Contract niet gevonden." });
     const allowed: Record<string, string[]> = { DRAFT: ["SENT", "EXPIRED"], SENT: ["VIEWED", "DECLINED", "EXPIRED"], VIEWED: ["SIGNED", "DECLINED", "EXPIRED"] };
     if (!allowed[contract.status]?.includes(input.status)) throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Statusovergang van ${contract.status} naar ${input.status} is niet toegestaan.` });
@@ -55,7 +55,7 @@ export const contractRouter = router({
   }),
 
   delete: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-    const contract = await ctx.db.contract.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! }, select: { id: true } });
+    const contract = await ctx.db.contract.findFirst({ where: { id: input.id, createdById: ctx.user.ownerUserId! }, select: { id: true } });
     if (!contract) throw new TRPCError({ code: "NOT_FOUND", message: "Contract niet gevonden." });
     return ctx.db.contract.delete({ where: { id: contract.id }, select: { id: true } });
   }),

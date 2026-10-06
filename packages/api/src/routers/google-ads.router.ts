@@ -299,7 +299,7 @@ async function pushPlanToGoogle(
   validateBudgetGuard(plan, config.maxDailyBudgetCents);
 
   const claimed = await ctx.db.googleAdPlan.updateMany({
-    where: { id, createdById: ctx.user.workspaceId!, status: plan.status, updatedAt: plan.updatedAt },
+    where: { id, createdById: ctx.user.ownerUserId!, status: plan.status, updatedAt: plan.updatedAt },
     data: { status: "PUSHING", lastError: null },
   });
   if (!claimed.count) throw new TRPCError({ code: "CONFLICT", message: "Deze draft is gewijzigd of wordt al gepubliceerd." });
@@ -385,7 +385,7 @@ export const googleAdsRouter = router({
       ? await ctx.db.googleAdAccount
           .findFirst({
             where: {
-              createdById: ctx.user.workspaceId!,
+              createdById: ctx.user.ownerUserId!,
               externalCustomerId: normalizeGoogleCustomerId(config.customerId),
             },
           })
@@ -452,12 +452,12 @@ export const googleAdsRouter = router({
       }
       await upsertGoogleAdsSettings(ctx.db, scope, settings);
       await ctx.db.googleAdAccount.updateMany({
-        where: { createdById: ctx.user.workspaceId! },
+        where: { createdById: ctx.user.ownerUserId! },
         data: { isSelected: false },
       });
       return ctx.db.googleAdAccount.upsert({
         where: {
-          createdById_externalCustomerId: { createdById: ctx.user.workspaceId!, externalCustomerId: customerId },
+          createdById_externalCustomerId: { createdById: ctx.user.ownerUserId!, externalCustomerId: customerId },
         },
         update: {
           name: input.name || customerId,
@@ -467,7 +467,7 @@ export const googleAdsRouter = router({
           lastSyncedAt: new Date(),
         },
         create: {
-          createdById: ctx.user.workspaceId!,
+          createdById: ctx.user.ownerUserId!,
           externalCustomerId: customerId,
           name: input.name || customerId,
           currency: input.currency || "EUR",
@@ -607,7 +607,7 @@ export const googleAdsRouter = router({
   listDrafts: protectedProcedure
     .input(z.object({ status: planStatusEnum.optional() }).optional())
     .query(async ({ ctx, input }) => {
-      const where: Record<string, unknown> = { createdById: ctx.user.workspaceId! };
+      const where: Record<string, unknown> = { createdById: ctx.user.ownerUserId! };
       if (input?.status) where.status = input.status;
       return ctx.db.googleAdPlan.findMany({ where, orderBy: { updatedAt: "desc" }, take: 100 });
     }),
@@ -615,7 +615,7 @@ export const googleAdsRouter = router({
   createDraft: mutationProcedure.input(draftInputSchema).mutation(async ({ ctx, input }) => {
     const row = await ctx.db.googleAdPlan.create({
       data: {
-        createdById: ctx.user.workspaceId!,
+        createdById: ctx.user.ownerUserId!,
         name: input.name.trim(),
         campaignType: input.campaignType,
         dailyBudgetCents: input.dailyBudgetCents || null,

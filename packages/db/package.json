@@ -18,7 +18,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:rls-smoke": "tsx prisma/rls-staging-smoke.ts",
     "db:encrypt-secrets": "tsx prisma/encrypt-secret-settings.ts",
-    "studio": "prisma studio"
+    "studio": "prisma studio",
+    "db:migrate-account-tenancy": "tsx prisma/migrate-account-tenancy.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.0"

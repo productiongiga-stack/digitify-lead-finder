@@ -61,7 +61,7 @@ export const authOptions: NextAuthOptions = {
           await authRateLimit(prisma, "login-finish-ip:" + ip, 30);
           const user = await finishLogin(prisma, challenge, credentials?.code, credentials?.method === "recovery" ? "recovery" : "totp");
           const workspace = await resolveWorkspaceContext(prisma, user.id);
-          return { id: user.id, email: user.email, name: user.name, role: user.role, workspaceId: workspace.workspaceId, workspaceRole: workspace.workspaceRole, isPersonalWorkspace: workspace.isPersonalWorkspace, sessionVersion: user.sessionVersion, twoFactorVerified: user.twoFactorEnabled };
+          return { id: user.id, email: user.email, name: user.name, role: user.role, accountClass: user.accountClass, accountStatus: user.accountStatus, platformRole: user.platformRole, trialEndsAt: user.trialEndsAt, workspaceId: workspace.workspaceId, workspaceRole: workspace.workspaceRole, isPersonalWorkspace: workspace.isPersonalWorkspace, sessionVersion: user.sessionVersion, twoFactorVerified: user.twoFactorEnabled };
         } catch (error) {
           // Keep the response deliberately generic, but retain the actual
           // server failure in structured logs so an expired challenge,
@@ -85,6 +85,10 @@ export const authOptions: NextAuthOptions = {
         token.isPersonalWorkspace = (user as { isPersonalWorkspace?: boolean }).isPersonalWorkspace;
         token.sessionVersion = (user as { sessionVersion?: number }).sessionVersion;
         token.twoFactorVerified = (user as { twoFactorVerified?: boolean }).twoFactorVerified === true;
+        token.accountClass = (user as { accountClass?: string }).accountClass;
+        token.accountStatus = (user as { accountStatus?: string }).accountStatus;
+        token.platformRole = (user as { platformRole?: string | null }).platformRole;
+        token.trialEndsAt = (user as { trialEndsAt?: Date | null }).trialEndsAt;
         return token;
       }
 
@@ -104,6 +108,10 @@ export const authOptions: NextAuthOptions = {
           workspaceRole?: string;
           isPersonalWorkspace?: boolean;
           disabledModules?: string[];
+          accountClass?: string;
+          accountStatus?: string;
+          platformRole?: string | null;
+          trialEndsAt?: Date | null;
         };
         sessionUser.id = token.sub;
         sessionUser.disabledModules = Array.isArray(token.disabledModules) ? token.disabledModules as string[] : [];
@@ -114,6 +122,10 @@ export const authOptions: NextAuthOptions = {
           typeof token.workspaceRole === "string" ? token.workspaceRole : undefined;
         sessionUser.isPersonalWorkspace =
           typeof token.isPersonalWorkspace === "boolean" ? token.isPersonalWorkspace : undefined;
+        sessionUser.accountClass = typeof token.accountClass === "string" ? token.accountClass : undefined;
+        sessionUser.accountStatus = typeof token.accountStatus === "string" ? token.accountStatus : undefined;
+        sessionUser.platformRole = typeof token.platformRole === "string" ? token.platformRole : null;
+        sessionUser.trialEndsAt = token.trialEndsAt ? new Date(String(token.trialEndsAt)) : null;
       }
       return session;
     },

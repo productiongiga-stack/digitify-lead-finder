@@ -43,7 +43,8 @@ describe("advertentie-wijzigingsbeleid", () => {
     vi.mocked(providers.readAdCampaign).mockResolvedValue({ accountId: "account", snapshot });
     const proposal = await prepareMetaReplacementSwitch(db, "owner", "admin", "published");
     expect(proposal.source).toBe("REPLACEMENT_SWITCH");
-    expect(proposal.after.adsets[0].ads.map((ad: any) => ad.status)).toEqual(["PAUSED", "ACTIVE"]);
+    const proposalAfter = proposal.after as { adsets: Array<{ ads: Array<{ status: string }> }> };
+    expect(proposalAfter.adsets[0]!.ads.map((ad) => ad.status)).toEqual(["PAUSED", "ACTIVE"]);
     expect(db.adApprovalRequest.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ versionHash: proposal.afterHash }) }));
     expect(providers.publishAdChanges).not.toHaveBeenCalled();
   });
@@ -91,7 +92,7 @@ describe("versiegebonden goedkeuring en publicatie", () => {
     vi.clearAllMocks();
     vi.mocked(providers.readAdCampaign).mockResolvedValue({ accountId: "account", snapshot: before });
     vi.mocked(providers.adProviderConfig).mockResolvedValue({ accountId: "account", enabled: true } as any);
-    vi.mocked(providers.publishAdChanges).mockResolvedValue({ campaignId: "123" });
+    vi.mocked(providers.publishAdChanges).mockResolvedValue({ campaignId: "123" } as any);
   });
   it("slaat voorstel en bijbehorende goedkeuring atomair op", async () => {
     const db = dbMock();

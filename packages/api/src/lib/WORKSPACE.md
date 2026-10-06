@@ -1,6 +1,6 @@
 # Workspace data policy
 
-`ctx.user.workspaceId` is the **workspace owner user id** (OWNER uses own id; team members use `workspaceOwnerId`).
+`ctx.user.workspaceId` is the technical workspace/tenant id. `ctx.user.ownerUserId` is the company owner user id and must be used for legacy tables whose `createdById` points to `User`.
 
 ## Shared (workspace scope)
 
@@ -39,7 +39,7 @@ exceptions above and member preferences.
 
 ## Database rows
 
-Resources use `createdById = workspaceId` (leads, quotes, bookings, templates, …).
+Legacy resources use `createdById = ownerUserId` (leads, quotes, bookings, templates, …). Tables with a real workspace relation use `workspaceId`.
 
 ## Activity / audit
 
@@ -47,7 +47,7 @@ Resources use `createdById = workspaceId` (leads, quotes, bookings, templates, �
 
 ## Chat sessions
 
-`ownedChatSessionWhere(workspaceId, memberId)` — workspace leads + assigned member + `tenant:{workspaceId}` tag.
+`ownedChatSessionWhere(workspaceId, memberId, ownerUserId)` — workspace leads + assigned member + `tenant:{workspaceId}` tag.
 
 ## Data migration (legacy `user:{ownerId}:*` → `workspace:{ownerId}:*`)
 

@@ -7,8 +7,9 @@ import { patchRequestContext, recordRouteMetric } from "@digitify/db";
 import { enforceRateLimit } from "./lib/rate-limit";
 import { invalidateDashboardCacheForUser } from "./lib/dashboard-cache";
 import { log } from "./lib/logger";
-import { resolveWorkspaceContext } from "./lib/workspace-registry";
-import { effectiveWorkspaceRole } from "./lib/effective-role";
+import { resolveTenantContext } from "./lib/tenant-context";
+import { assertModuleEntitlement } from "./lib/module-entitlements";
+import { isPlatformOwner } from "./lib/platform-admin";
 
 export { effectiveWorkspaceRole } from "./lib/effective-role";
 
@@ -29,6 +30,14 @@ export type Context = {
     actorUserId?: string;
     viewAsSessionId?: string;
     viewAsTargetName?: string | null;
+    viewAsMode?: "VIEW" | "ACT_AS";
+    viewAsConfirmExternalActions?: boolean;
+    ownerUserId?: string;
+    memberId?: string;
+    accountClass?: string;
+    accountStatus?: string;
+    platformRole?: string | null;
+    trialEndsAt?: Date | null;
   } | null;
   requestId: string;
   /** Client IP from reverse proxy headers (public endpoints). */
@@ -178,30 +187,21 @@ const withRateLimit = t.middleware(async ({ ctx, next }) => {
 // --- Auth middleware ---
 const withWorkspace = t.middleware(async ({ ctx, next }) => {
   if (!ctx.user) return next();
-
-  if (ctx.user.workspaceId) {
-    return next({
-      ctx: {
-        ...ctx,
-        user: {
-          ...ctx.user,
-          workspaceRole: ctx.user.workspaceRole ?? ctx.user.role,
-          isPersonalWorkspace:
-            ctx.user.isPersonalWorkspace ?? ctx.user.workspaceId === ctx.user.id,
-        },
-      },
-    });
-  }
-
-  const workspace = await resolveWorkspaceContext(ctx.db, ctx.user.id);
+  const tenant = await resolveTenantContext(ctx.db, ctx.user);
   return next({
     ctx: {
       ...ctx,
       user: {
         ...ctx.user,
-        workspaceId: workspace.workspaceId,
-        workspaceRole: workspace.workspaceRole,
-        isPersonalWorkspace: workspace.isPersonalWorkspace,
+        workspaceId: tenant.workspaceId,
+        workspaceRole: tenant.workspaceRole,
+        isPersonalWorkspace: tenant.isPersonalWorkspace,
+        ownerUserId: tenant.ownerUserId,
+        memberId: tenant.memberId,
+        accountClass: tenant.accountClass,
+        accountStatus: tenant.accountStatus,
+        platformRole: tenant.platformRole,
+        trialEndsAt: tenant.trialEndsAt,
       },
     },
   });
@@ -226,20 +226,11 @@ const isAuthenticated = t.middleware(({ ctx, next }) => {
 });
 
 const enforceTrialAccess = t.middleware(async ({ ctx, next }) => {
-  if (!ctx.user || effectiveWorkspaceRole(ctx) !== "TRIAL") return next();
-  const user = await ctx.db.user.findUnique({
-    where: { id: ctx.user.id },
-    select: { createdAt: true },
-  });
-  if (!user) {
-    throw new TRPCError({ code: "UNAUTHORIZED", message: "Account niet gevonden." });
-  }
-  const trialDays = 7;
-  const expiresAt = user.createdAt.getTime() + trialDays * 24 * 60 * 60 * 1000;
-  if (Date.now() > expiresAt) {
+  if (!ctx.user || ctx.user.accountClass !== "TRIAL") return next();
+  if (ctx.user.trialEndsAt && Date.now() >= ctx.user.trialEndsAt.getTime()) {
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: "Je Trial (7 dagen) is verlopen. Contacteer een eigenaar of admin om je rol te upgraden.",
+      message: "Je proefperiode van 14 dagen is verlopen. Je account is nu alleen-lezen.",
     });
   }
   return next();
@@ -252,11 +243,12 @@ const ROUTER_MODULES: Record<string, string> = {
   media: "creativeStudio", booking: "bookings", domain: "domains", review: "reviews", chatbot: "chatbot", form: "forms", workflow: "automations", file: "files", activity: "activityLog", knowledge: "knowledge", payment: "payments",
 };
 
-const enforceModuleAccess = t.middleware(({ ctx, path, next }) => {
+const enforceModuleAccess = t.middleware(async ({ ctx, path, next }) => {
   const moduleId = ROUTER_MODULES[path.split(".")[0]!];
   if (moduleId && ctx.user?.disabledModules?.includes(moduleId)) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Je hebt geen toegang tot deze module." });
   }
+  if (moduleId && ctx.user?.workspaceId) await assertModuleEntitlement(ctx.db, ctx.user.workspaceId, moduleId);
   return next();
 });
 
@@ -284,7 +276,13 @@ const enforceMutationRole = t.middleware(({ ctx, path, next }) => {
       message: "Je rol heeft geen rechten om wijzigingen door te voeren.",
     });
   }
-  if (ctx.user.isViewingAs && /(^|\.)(send|approve|export|delete|remove|disconnect|publish|payment|billing|invite|updateRole|setUserModule)/i.test(path)) {
+  if (ctx.user.accountStatus && ctx.user.accountStatus !== "ACTIVE") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Dit account is tijdelijk geblokkeerd en kan geen wijzigingen uitvoeren." });
+  }
+  if (ctx.user.accountClass === "TESTER" || (ctx.user.accountClass === "TRIAL" && ctx.user.trialEndsAt && Date.now() >= ctx.user.trialEndsAt.getTime())) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Dit account is alleen-lezen." });
+  }
+  if (ctx.user.isViewingAs && (ctx.user.viewAsMode !== "ACT_AS" || ctx.user.viewAsConfirmExternalActions !== true) && /(^|\.)(send|approve|export|delete|remove|disconnect|publish|payment|billing|invite|updateRole|setUserModule)/i.test(path)) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "Deze gevoelige actie is niet beschikbaar tijdens het bekijken van een account.",
@@ -376,6 +374,19 @@ export const sensitiveOwnerProcedure = ownerProcedure.use(
         code: "FORBIDDEN",
         message: "Deze gevoelige instelling is niet beschikbaar tijdens het bekijken van een account.",
       });
+    }
+    return next();
+  }),
+);
+
+/** Platform administration is separate from a customer's workspace role. */
+export const platformProcedure = protectedProcedure.use(
+  t.middleware(({ ctx, next }) => {
+    if (!isPlatformOwner(ctx.user)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Alleen platformbeheer heeft toegang." });
+    }
+    if (ctx.user?.isViewingAs) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Verlaat supportmodus voordat je platformbeheer gebruikt." });
     }
     return next();
   }),

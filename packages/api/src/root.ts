@@ -42,6 +42,8 @@ import { paymentRouter } from "./routers/payment.router";
 import { passwordResetRouter } from "./routers/password-reset.router";
 import { aseLicenseRouter } from "./routers/ase-license.router";
 import { adsCopilotRouter } from "./routers/ads-copilot.router";
+import { platformRouter } from "./routers/platform.router";
+import { tenantRouter } from "./routers/tenant.router";
 
 export const appRouter = router({
   dashboard: dashboardRouter,
@@ -87,6 +89,8 @@ export const appRouter = router({
   passwordReset: passwordResetRouter,
   aseLicense: aseLicenseRouter,
   adsCopilot: adsCopilotRouter,
+  platform: platformRouter,
+  tenant: tenantRouter,
 });
 
 export type AppRouter = typeof appRouter;

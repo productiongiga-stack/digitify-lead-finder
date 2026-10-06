@@ -14,9 +14,11 @@ export async function resolveSessionIdentity(
       id: true, email: true, name: true, role: true, emailVerified: true,
       sessionVersion: true, activeWorkspaceId: true, workspaceOwnerId: true,
       twoFactorEnabled: true, twoFactorRecoveryRequired: true,
+      accountClass: true, accountStatus: true, platformRole: true, trialEndsAt: true,
     },
   });
   if (!user || !user.emailVerified || user.sessionVersion !== sessionVersion) return null;
+  if (user.accountStatus && user.accountStatus !== "ACTIVE") return null;
   if (user.twoFactorRecoveryRequired || (user.twoFactorEnabled && twoFactorVerified !== true)) return null;
   const workspaceId = user.activeWorkspaceId || user.workspaceOwnerId || user.id;
   const membership = await db.workspaceMembership.findUnique({
@@ -35,5 +37,9 @@ export async function resolveSessionIdentity(
     workspaceId,
     workspaceRole: workspaceId === user.id ? "OWNER" : membership!.role,
     isPersonalWorkspace: workspaceId === user.id,
+    accountClass: user.accountClass,
+    accountStatus: user.accountStatus,
+    platformRole: user.platformRole,
+    trialEndsAt: user.trialEndsAt,
   };
 }

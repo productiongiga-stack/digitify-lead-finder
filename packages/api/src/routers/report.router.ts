@@ -30,17 +30,17 @@ export const reportRouter = router({
             _avg: { overallScore: true },
           }),
           ctx.db.quote.aggregate({
-            where: { createdById: workspaceId, createdAt: range },
+            where: { createdById: ctx.user.ownerUserId!, createdAt: range },
             _count: { _all: true },
             _sum: { total: true },
           }),
           ctx.db.workspaceInvoice.aggregate({
-            where: { createdById: workspaceId, issueDate: range },
+            where: { createdById: ctx.user.ownerUserId!, issueDate: range },
             _count: { _all: true },
             _sum: { total: true },
           }),
-          ctx.db.campaign.count({ where: { createdById: workspaceId, createdAt: range } }),
-          ctx.db.campaign.count({ where: { createdById: workspaceId, createdAt: range, status: "ACTIVE" } }),
+          ctx.db.campaign.count({ where: { createdById: ctx.user.ownerUserId!, createdAt: range } }),
+          ctx.db.campaign.count({ where: { createdById: ctx.user.ownerUserId!, createdAt: range, status: "ACTIVE" } }),
         ]);
 
       return {
@@ -134,7 +134,7 @@ export const reportRouter = router({
 
       if (campaignId) {
         const campaign = await ctx.db.campaign.findFirst({
-          where: { id: campaignId, createdById: ctx.user.workspaceId! },
+          where: { id: campaignId, createdById: ctx.user.ownerUserId! },
           include: {
             campaignLeads: {
               include: {

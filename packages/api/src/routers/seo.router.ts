@@ -28,9 +28,9 @@ function assertNotViewingAs(ctx: { user: { isViewingAs?: boolean } }) {
   }
 }
 
-async function assertDomain(ctx: { db: any; user: { workspaceId?: string } }, domainId?: string) {
+async function assertDomain(ctx: { db: any; user: { workspaceId?: string; ownerUserId?: string } }, domainId?: string) {
   if (!domainId) return;
-  const domain = await ctx.db.domain.findFirst({ where: { id: domainId, createdById: ctx.user.workspaceId! }, select: { id: true } });
+  const domain = await ctx.db.domain.findFirst({ where: { id: domainId, createdById: ctx.user.ownerUserId! }, select: { id: true } });
   if (!domain) throw new TRPCError({ code: "NOT_FOUND", message: "Domein niet gevonden in deze werkruimte." });
 }
 
@@ -53,9 +53,9 @@ export const seoRouter = router({
   overview: protectedProcedure.query(async ({ ctx }) => {
     const workspaceId = ctx.user.workspaceId!;
     const [keywords, competitors, domains, researchRuns, clusters, briefs] = await Promise.all([
-      ctx.db.seoKeyword.findMany({ where: { createdById: workspaceId }, orderBy: { updatedAt: "desc" }, take: 200, select: { id: true, keyword: true, currentRank: true, previousRank: true, status: true, source: true, intent: true, clusterId: true, domainId: true, location: true, language: true, targetUrl: true, updatedAt: true } }),
-      ctx.db.seoCompetitor.findMany({ where: { createdById: workspaceId }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, name: true, url: true, notes: true, domainId: true, updatedAt: true } }),
-      ctx.db.domain.findMany({ where: { createdById: workspaceId }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, domainName: true, healthScore: true, lastAnalyzedAt: true, analysisData: true, status: true } }),
+      ctx.db.seoKeyword.findMany({ where: { createdById: ctx.user.ownerUserId! }, orderBy: { updatedAt: "desc" }, take: 200, select: { id: true, keyword: true, currentRank: true, previousRank: true, status: true, source: true, intent: true, clusterId: true, domainId: true, location: true, language: true, targetUrl: true, updatedAt: true } }),
+      ctx.db.seoCompetitor.findMany({ where: { createdById: ctx.user.ownerUserId! }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, name: true, url: true, notes: true, domainId: true, updatedAt: true } }),
+      ctx.db.domain.findMany({ where: { createdById: ctx.user.ownerUserId! }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, domainName: true, healthScore: true, lastAnalyzedAt: true, analysisData: true, status: true } }),
       ctx.db.seoResearchRun.findMany({ where: { workspaceId }, orderBy: { createdAt: "desc" }, take: 20, select: { id: true, status: true, provider: true, language: true, location: true, seeds: true, results: true, error: true, createdAt: true, completedAt: true } }),
       ctx.db.seoKeywordCluster.findMany({ where: { workspaceId }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, name: true, intent: true, targetUrl: true, keywords: true, notes: true, updatedAt: true } }),
       ctx.db.seoContentBrief.findMany({ where: { workspaceId }, orderBy: { updatedAt: "desc" }, take: 100, select: { id: true, title: true, status: true, targetUrl: true, clusterId: true, domainId: true, brief: true, profileHash: true, profileVersion: true, updatedAt: true } }),
@@ -84,29 +84,29 @@ export const seoRouter = router({
   createKeyword: adminProcedure.input(keywordInput).mutation(async ({ ctx, input }) => {
     assertNotViewingAs(ctx);
     await assertDomain(ctx, input.domainId);
-    const existing = await ctx.db.seoKeyword.findFirst({ where: { createdById: ctx.user.workspaceId!, keywordKey: keywordKey(input.keyword, input.location) }, select: { id: true, keyword: true, currentRank: true, status: true } });
+    const existing = await ctx.db.seoKeyword.findFirst({ where: { createdById: ctx.user.ownerUserId!, keywordKey: keywordKey(input.keyword, input.location) }, select: { id: true, keyword: true, currentRank: true, status: true } });
     if (existing) return { ...existing, outcome: "reused" as const };
-    const created = await ctx.db.seoKeyword.create({ data: { createdById: ctx.user.workspaceId!, domainId: input.domainId, keyword: input.keyword.trim(), keywordKey: keywordKey(input.keyword, input.location), location: input.location?.trim() || null, language: input.language?.trim() || null, targetUrl: input.targetUrl, currentRank: input.currentRank, previousRank: input.previousRank, lastCheckedAt: input.currentRank ? new Date() : null, source: "MANUAL" }, select: { id: true, keyword: true, currentRank: true, status: true } });
+    const created = await ctx.db.seoKeyword.create({ data: { createdById: ctx.user.ownerUserId!, domainId: input.domainId, keyword: input.keyword.trim(), keywordKey: keywordKey(input.keyword, input.location), location: input.location?.trim() || null, language: input.language?.trim() || null, targetUrl: input.targetUrl, currentRank: input.currentRank, previousRank: input.previousRank, lastCheckedAt: input.currentRank ? new Date() : null, source: "MANUAL" }, select: { id: true, keyword: true, currentRank: true, status: true } });
     await recordSecurityAuditEvent(ctx.db, { workspaceId: ctx.user.workspaceId, actorUserId: ctx.user.actorUserId ?? ctx.user.id, targetUserId: ctx.user.id, action: "SEO_KEYWORD_CREATED", resource: "SeoKeyword", resourceId: created.id, result: "SUCCESS", requestId: ctx.requestId, metadata: { keyword: created.keyword } });
     return { ...created, outcome: "created" as const };
   }),
 
   updateKeyword: adminProcedure.input(z.object({ id: z.string(), keyword: keywordInput.shape.keyword, domainId: z.string().optional(), location: z.string().trim().max(120).optional(), language: z.string().trim().max(20).optional(), targetUrl: z.string().url().max(500).optional(), currentRank: z.number().int().min(1).max(1000).nullable().optional(), previousRank: z.number().int().min(1).max(1000).nullable().optional(), status: z.enum(["TRACKING", "PAUSED"]).optional() })).mutation(async ({ ctx, input }) => {
     assertNotViewingAs(ctx);
-    const existing = await ctx.db.seoKeyword.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! }, select: { id: true } });
+    const existing = await ctx.db.seoKeyword.findFirst({ where: { id: input.id, createdById: ctx.user.ownerUserId! }, select: { id: true } });
     if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Zoekwoord niet gevonden." });
     await assertDomain(ctx, input.domainId);
     return ctx.db.seoKeyword.update({ where: { id: input.id }, data: { keyword: input.keyword.trim(), keywordKey: keywordKey(input.keyword, input.location), domainId: input.domainId, location: input.location?.trim() || null, language: input.language?.trim() || null, targetUrl: input.targetUrl, currentRank: input.currentRank, previousRank: input.previousRank, status: input.status, lastCheckedAt: input.currentRank ? new Date() : undefined }, select: { id: true, keyword: true, currentRank: true, previousRank: true, status: true } });
   }),
 
   setKeywordStatus: mutationProcedure.input(z.object({ id: z.string(), status: z.enum(["TRACKING", "PAUSED"]) })).mutation(async ({ ctx, input }) => {
-    const keyword = await ctx.db.seoKeyword.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! }, select: { id: true } });
+    const keyword = await ctx.db.seoKeyword.findFirst({ where: { id: input.id, createdById: ctx.user.ownerUserId! }, select: { id: true } });
     if (!keyword) throw new TRPCError({ code: "NOT_FOUND", message: "Zoekwoord niet gevonden." });
     return ctx.db.seoKeyword.update({ where: { id: keyword.id }, data: { status: input.status }, select: { id: true, status: true } });
   }),
 
   deleteKeyword: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-    const keyword = await ctx.db.seoKeyword.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! }, select: { id: true } });
+    const keyword = await ctx.db.seoKeyword.findFirst({ where: { id: input.id, createdById: ctx.user.ownerUserId! }, select: { id: true } });
     if (!keyword) throw new TRPCError({ code: "NOT_FOUND", message: "Zoekwoord niet gevonden." });
     return ctx.db.seoKeyword.delete({ where: { id: keyword.id }, select: { id: true } });
   }),
@@ -114,11 +114,11 @@ export const seoRouter = router({
   createCompetitor: adminProcedure.input(z.object({ name: z.string().trim().min(2).max(160), url: z.string().url().max(500), domainId: z.string().optional(), notes: z.string().trim().max(2000).optional() })).mutation(async ({ ctx, input }) => {
     assertNotViewingAs(ctx);
     await assertDomain(ctx, input.domainId);
-    return ctx.db.seoCompetitor.create({ data: { createdById: ctx.user.workspaceId!, domainId: input.domainId, name: input.name.trim(), url: input.url, notes: input.notes?.trim() || null }, select: { id: true, name: true, url: true, notes: true } });
+    return ctx.db.seoCompetitor.create({ data: { createdById: ctx.user.ownerUserId!, domainId: input.domainId, name: input.name.trim(), url: input.url, notes: input.notes?.trim() || null }, select: { id: true, name: true, url: true, notes: true } });
   }),
 
   deleteCompetitor: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
-    const competitor = await ctx.db.seoCompetitor.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! }, select: { id: true } });
+    const competitor = await ctx.db.seoCompetitor.findFirst({ where: { id: input.id, createdById: ctx.user.ownerUserId! }, select: { id: true } });
     if (!competitor) throw new TRPCError({ code: "NOT_FOUND", message: "Concurrent niet gevonden." });
     return ctx.db.seoCompetitor.delete({ where: { id: competitor.id }, select: { id: true } });
   }),
@@ -178,9 +178,9 @@ export const seoRouter = router({
     const idea = await ctx.db.seoKeywordIdea.findFirst({ where: { id: input.ideaId, workspaceId: ctx.user.workspaceId! } });
     if (!idea) throw new TRPCError({ code: "NOT_FOUND", message: "Keywordresultaat niet gevonden." });
     await assertDomain(ctx, input.domainId);
-    const existing = await ctx.db.seoKeyword.findFirst({ where: { createdById: ctx.user.workspaceId!, keywordKey: keywordKey(idea.keyword, idea.location) } });
+    const existing = await ctx.db.seoKeyword.findFirst({ where: { createdById: ctx.user.ownerUserId!, keywordKey: keywordKey(idea.keyword, idea.location) } });
     if (existing) return { lead: existing, outcome: "reused" as const };
-    const created = await ctx.db.seoKeyword.create({ data: { createdById: ctx.user.workspaceId!, domainId: input.domainId, keyword: idea.keyword, keywordKey: keywordKey(idea.keyword, idea.location), location: idea.location, language: idea.language, targetUrl: input.targetUrl || idea.targetUrl, source: idea.source, intent: idea.intent, currentRank: idea.averagePosition ? Math.round(idea.averagePosition) : null, lastCheckedAt: idea.averagePosition ? new Date() : null } });
+    const created = await ctx.db.seoKeyword.create({ data: { createdById: ctx.user.ownerUserId!, domainId: input.domainId, keyword: idea.keyword, keywordKey: keywordKey(idea.keyword, idea.location), location: idea.location, language: idea.language, targetUrl: input.targetUrl || idea.targetUrl, source: idea.source, intent: idea.intent, currentRank: idea.averagePosition ? Math.round(idea.averagePosition) : null, lastCheckedAt: idea.averagePosition ? new Date() : null } });
     return { lead: created, outcome: "created" as const };
   }),
 
@@ -188,8 +188,8 @@ export const seoRouter = router({
     assertNotViewingAs(ctx);
     const ideas = input.keywordIds.length ? await ctx.db.seoKeywordIdea.findMany({ where: { id: { in: input.keywordIds }, workspaceId: ctx.user.workspaceId! }, select: { id: true, keyword: true } }) : [];
     if (ideas.length !== input.keywordIds.length) throw new TRPCError({ code: "NOT_FOUND", message: "Een of meer keywords horen niet bij deze workspace." });
-    const cluster = await ctx.db.seoKeywordCluster.create({ data: { workspaceId: ctx.user.workspaceId!, createdById: ctx.user.id, name: input.name, intent: input.intent, targetUrl: input.targetUrl, keywords: jsonValue(ideas.map((idea) => idea.keyword)), notes: input.notes || null } });
-    if (input.keywordIds.length) await ctx.db.seoKeyword.updateMany({ where: { id: { in: input.keywordIds }, createdById: ctx.user.workspaceId! }, data: { clusterId: cluster.id } });
+    const cluster = await ctx.db.seoKeywordCluster.create({ data: { workspaceId: ctx.user.ownerUserId!, createdById: ctx.user.id, name: input.name, intent: input.intent, targetUrl: input.targetUrl, keywords: jsonValue(ideas.map((idea) => idea.keyword)), notes: input.notes || null } });
+    if (input.keywordIds.length) await ctx.db.seoKeyword.updateMany({ where: { id: { in: input.keywordIds }, createdById: ctx.user.ownerUserId! }, data: { clusterId: cluster.id } });
     return cluster;
   }),
 
@@ -201,7 +201,7 @@ export const seoRouter = router({
     const profile = await loadAiBusinessProfile(ctx.db, ctx.user.workspaceId!);
     const keywords = Array.isArray(cluster.keywords) ? cluster.keywords.map(String).slice(0, 50) : [];
     const brief = { summary: `Content rond ${cluster.name}`, primaryKeyword: keywords[0] || cluster.name, secondaryKeywords: keywords.slice(1), suggestedTitle: `${cluster.name} | ${profile.companyName}`, suggestedMetaDescription: `Ontdek ${cluster.name} en hoe ${profile.companyName} kan helpen.`, outline: ["Introductie", "Belangrijkste voordelen", "Praktische aanpak", "Veelgestelde vragen", "Volgende stap"], internalLinkIdeas: [], cta: profile.salesGoal || "Plan een gesprek", generatedBy: "SEO-template-v1" };
-    return ctx.db.seoContentBrief.create({ data: { workspaceId: ctx.user.workspaceId!, createdById: ctx.user.id, clusterId: cluster.id, domainId: input.domainId, title: cluster.name, targetUrl: input.targetUrl || cluster.targetUrl, brief: jsonValue(brief), profileHash: profile.hash, profileVersion: profile.version } });
+    return ctx.db.seoContentBrief.create({ data: { workspaceId: ctx.user.ownerUserId!, createdById: ctx.user.id, clusterId: cluster.id, domainId: input.domainId, title: cluster.name, targetUrl: input.targetUrl || cluster.targetUrl, brief: jsonValue(brief), profileHash: profile.hash, profileVersion: profile.version } });
   }),
 
   handoffToAds: mutationProcedure.input(z.object({ destination: z.enum(["GOOGLE", "META"]), clusterId: z.string(), targetUrl: z.string().url().max(500).optional(), campaignContext: z.string().trim().max(1000).optional() })).mutation(async ({ ctx, input }) => {

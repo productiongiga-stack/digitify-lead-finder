@@ -95,7 +95,7 @@ export const contactRouter = router({
           status: "SENT",
           sentAt: { lte: reminderThreshold },
           lead: {
-            createdById: ctx.user.workspaceId!,
+            createdById: ctx.user.ownerUserId!,
             status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
           },
         },
@@ -152,7 +152,7 @@ export const contactRouter = router({
         where.OR = [
           { subject: { contains: search, mode: "insensitive" } },
           { toEmail: { contains: search, mode: "insensitive" } },
-          { lead: { companyName: { contains: search, mode: "insensitive" }, createdById: workspaceId } },
+          { lead: { companyName: { contains: search, mode: "insensitive" }, createdById: ctx.user.ownerUserId! } },
         ];
       }
 
@@ -179,7 +179,7 @@ export const contactRouter = router({
             status: "SENT",
             sentAt: { lte: reminderThreshold },
             lead: {
-              createdById: workspaceId,
+              createdById: ctx.user.ownerUserId!,
               status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
             },
           },
@@ -193,7 +193,7 @@ export const contactRouter = router({
             status: "SENT",
             sentAt: { lte: reminderThreshold },
             lead: {
-              createdById: workspaceId,
+              createdById: ctx.user.ownerUserId!,
               status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
             },
           },
@@ -286,7 +286,7 @@ export const contactRouter = router({
         where.OR = [
           { subject: { contains: search, mode: "insensitive" } },
           { toEmail: { contains: search, mode: "insensitive" } },
-          { lead: { companyName: { contains: search, mode: "insensitive" }, createdById: workspaceId } },
+          { lead: { companyName: { contains: search, mode: "insensitive" }, createdById: ctx.user.ownerUserId! } },
         ];
       }
 
@@ -520,7 +520,7 @@ export const contactRouter = router({
         status: "SENT",
         sentAt: { lte: reminderThreshold },
         lead: {
-          createdById: ctx.user.workspaceId!,
+          createdById: ctx.user.ownerUserId!,
           status: { notIn: ["RESPONDED", "QUALIFIED", "WON", "LOST", "ARCHIVED"] },
         },
       },
@@ -836,7 +836,7 @@ export const contactRouter = router({
         const invoiceId = extractInvoiceIdFromDraftBody(updated.body);
         if (invoiceId) {
           await ctx.db.workspaceInvoice.updateMany({
-            where: { id: invoiceId, createdById: ctx.user.workspaceId!, status: "DRAFT" },
+            where: { id: invoiceId, createdById: ctx.user.ownerUserId!, status: "DRAFT" },
             data: { status: "SENT" },
           });
         }

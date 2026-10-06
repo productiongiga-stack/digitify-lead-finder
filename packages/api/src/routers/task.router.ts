@@ -14,6 +14,7 @@ import {
 async function resolveRelatedLabels(
   db: any,
   workspaceId: string,
+  ownerUserId: string,
   tasks: Array<{
     relatedType: string | null;
     relatedId: string | null;
@@ -42,13 +43,13 @@ async function resolveRelatedLabels(
       : Promise.resolve([]),
     quoteIds.size > 0
       ? db.quote.findMany({
-          where: { id: { in: Array.from(quoteIds) }, createdById: workspaceId },
+          where: { id: { in: Array.from(quoteIds) }, createdById: ownerUserId },
           select: { id: true, quoteNumber: true, clientCompany: true, clientName: true },
         })
       : Promise.resolve([]),
     bookingIds.size > 0
       ? db.booking.findMany({
-          where: { id: { in: Array.from(bookingIds) }, createdById: workspaceId },
+          where: { id: { in: Array.from(bookingIds) }, createdById: ownerUserId },
           select: { id: true, clientName: true, date: true },
         })
       : Promise.resolve([]),
@@ -135,7 +136,7 @@ export const taskRouter = router({
       const scope = workspaceScopeFromUser(ctx.user);
 
       const baseWhere = {
-        createdById: scope.workspaceId,
+        createdById: scope.ownerUserId ?? scope.workspaceId,
         ...(input.relatedType ? { relatedType: input.relatedType } : {}),
       };
       const listWhere = {
@@ -195,7 +196,7 @@ export const taskRouter = router({
         }
       }
 
-      const labelFor = await resolveRelatedLabels(ctx.db, scope.workspaceId, rows);
+      const labelFor = await resolveRelatedLabels(ctx.db, scope.workspaceId, ctx.user.ownerUserId!, rows);
       const items = rows.map((row) => ({
         ...serializeTask(row),
         relatedLabel: labelFor(row),
@@ -244,14 +245,14 @@ export const taskRouter = router({
       }
       if (input.relatedType === "QUOTE" && input.relatedId) {
         const quote = await ctx.db.quote.findFirst({
-          where: { id: input.relatedId, createdById: ctx.user.workspaceId! },
+          where: { id: input.relatedId, createdById: ctx.user.ownerUserId! },
           select: { id: true },
         });
         if (!quote) throw new TRPCError({ code: "NOT_FOUND", message: "Offerte niet gevonden." });
       }
       if (input.relatedType === "BOOKING" && input.relatedId) {
         const booking = await ctx.db.booking.findFirst({
-          where: { id: input.relatedId, createdById: ctx.user.workspaceId! },
+          where: { id: input.relatedId, createdById: ctx.user.ownerUserId! },
           select: { id: true },
         });
         if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Boeking niet gevonden." });
@@ -259,7 +260,7 @@ export const taskRouter = router({
 
       const row = await ctx.db.workspaceTask.create({
         data: {
-          createdById: ctx.user.workspaceId!,
+          createdById: ctx.user.ownerUserId!,
           title: input.title.trim(),
           description: upsertGoogleEventIdInNotes(input.description?.trim() || "", null) || "",
           priority: input.priority,
@@ -303,7 +304,7 @@ export const taskRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.workspaceTask.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: ctx.user.ownerUserId! },
       });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Taak niet gevonden." });
 
@@ -359,7 +360,7 @@ export const taskRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.workspaceTask.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: ctx.user.ownerUserId! },
       });
       if (!existing) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Taak niet gevonden." });
@@ -369,7 +370,7 @@ export const taskRouter = router({
         await deleteGoogleTaskEvent(ctx.db, eventId, ctx.user.id).catch(() => undefined);
       }
       const result = await ctx.db.workspaceTask.deleteMany({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: ctx.user.ownerUserId! },
       });
       if (result.count === 0) throw new TRPCError({ code: "NOT_FOUND", message: "Taak niet gevonden." });
       return { success: true };

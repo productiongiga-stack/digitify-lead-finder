@@ -298,7 +298,7 @@ describe.skipIf(!run)(
         amount_total: 500,
         currency: "eur",
         metadata: { creativePurchaseId: purchase.id },
-      } as Stripe.Checkout.Session;
+      } as unknown as Stripe.Checkout.Session;
       await fulfillCreativeCheckout({ ...session, payment_status: "unpaid" });
       await fulfillCreativeCheckout({ ...session, livemode: true });
       expect(

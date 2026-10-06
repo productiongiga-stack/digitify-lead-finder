@@ -95,7 +95,7 @@ function metaPlanStatusLabel(status: string) {
 }
 
 async function findMetaCampaignNameConflict(
-  ctx: { db: PrismaClient; user: { id: string; workspaceId?: string } },
+  ctx: { db: PrismaClient; user: { id: string; workspaceId?: string; ownerUserId?: string } },
   input: { name: string; excludePlanId?: string; excludeLiveCampaignId?: string },
 ) {
   const normalized = normalizeMetaCampaignName(input.name);
@@ -103,7 +103,7 @@ async function findMetaCampaignNameConflict(
 
   const plans = await ctx.db.metaAdPlan
     .findMany({
-      where: { createdById: ctx.user.workspaceId!, status: { not: "CANCELLED" } },
+      where: { createdById: ctx.user.ownerUserId!, status: { not: "CANCELLED" } },
       select: { id: true, name: true, status: true },
       take: 500,
     })
@@ -143,7 +143,7 @@ async function findMetaCampaignNameConflict(
 }
 
 async function assertUniqueMetaCampaignName(
-  ctx: { db: PrismaClient; user: { id: string; workspaceId?: string } },
+  ctx: { db: PrismaClient; user: { id: string; workspaceId?: string; ownerUserId?: string } },
   input: { name: string; excludePlanId?: string; excludeLiveCampaignId?: string },
 ) {
   const conflict = await findMetaCampaignNameConflict(ctx, input);
@@ -163,13 +163,13 @@ async function assertUniqueMetaCampaignName(
 }
 
 async function collectReservedMetaCampaignNames(
-  ctx: { db: PrismaClient; user: { id: string; workspaceId?: string } },
+  ctx: { db: PrismaClient; user: { id: string; workspaceId?: string; ownerUserId?: string } },
   input: { excludePlanId?: string; excludeLiveCampaignId?: string } = {},
 ) {
   const reserved = new Set<string>();
   const plans = await ctx.db.metaAdPlan
     .findMany({
-      where: { createdById: ctx.user.workspaceId!, status: { not: "CANCELLED" } },
+      where: { createdById: ctx.user.ownerUserId!, status: { not: "CANCELLED" } },
       select: { id: true, name: true },
       take: 500,
     })
@@ -364,7 +364,7 @@ async function pushPlanToMeta(ctx: Pick<Context, "db" | "user"> & { user: NonNul
   });
 
   const claimed = await ctx.db.metaAdPlan.updateMany({
-    where: { id, createdById: ctx.user.workspaceId!, status: plan.status, updatedAt: plan.updatedAt },
+    where: { id, createdById: ctx.user.ownerUserId!, status: plan.status, updatedAt: plan.updatedAt },
     data: { status: "PUSHING", lastError: null },
   });
   if (!claimed.count) throw new TRPCError({ code: "CONFLICT", message: "Deze draft is gewijzigd of wordt al gepubliceerd." });
@@ -423,7 +423,7 @@ export const metaAdsRouter = router({
     const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
     const selected = config.adAccountId
       ? await ctx.db.metaAdAccount.findFirst({
-          where: { createdById: ctx.user.workspaceId!, externalAccountId: normalizeAdAccountId(config.adAccountId) },
+          where: { createdById: ctx.user.ownerUserId!, externalAccountId: normalizeAdAccountId(config.adAccountId) },
         }).catch(() => null)
       : null;
 
@@ -491,9 +491,9 @@ export const metaAdsRouter = router({
         { key: "ads.meta_ad_account_id", value: accountId },
         { key: "ads.meta_business_id", value: input.businessId || "" },
       ]);
-      await ctx.db.metaAdAccount.updateMany({ where: { createdById: ctx.user.workspaceId! }, data: { isSelected: false } });
+      await ctx.db.metaAdAccount.updateMany({ where: { createdById: ctx.user.ownerUserId! }, data: { isSelected: false } });
       const row = await ctx.db.metaAdAccount.upsert({
-        where: { createdById_externalAccountId: { createdById: ctx.user.workspaceId!, externalAccountId: accountId } },
+        where: { createdById_externalAccountId: { createdById: ctx.user.ownerUserId!, externalAccountId: accountId } },
         update: {
           name: input.name || accountId,
           currency: input.currency || "EUR",
@@ -503,7 +503,7 @@ export const metaAdsRouter = router({
           lastSyncedAt: new Date(),
         },
         create: {
-          createdById: ctx.user.workspaceId!,
+          createdById: ctx.user.ownerUserId!,
           externalAccountId: accountId,
           name: input.name || accountId,
           currency: input.currency || "EUR",
@@ -539,12 +539,12 @@ export const metaAdsRouter = router({
     }
     const result = await syncMetaCampaigns({ adAccountId: config.adAccountId, accessToken: config.accessToken });
     await ctx.db.metaAdAccount.updateMany({
-      where: { createdById: ctx.user.workspaceId!, externalAccountId: normalizeAdAccountId(config.adAccountId) },
+      where: { createdById: ctx.user.ownerUserId!, externalAccountId: normalizeAdAccountId(config.adAccountId) },
       data: { lastSyncedAt: new Date(result.syncedAt) },
     }).catch(() => null);
 
     const plans = await ctx.db.metaAdPlan.findMany({
-      where: { createdById: ctx.user.workspaceId!, status: { in: ["APPROVED", "PUSHED_PAUSED", "FAILED"] } },
+      where: { createdById: ctx.user.ownerUserId!, status: { in: ["APPROVED", "PUSHED_PAUSED", "FAILED"] } },
       take: 100,
     }).catch(() => []);
 
@@ -612,7 +612,7 @@ export const metaAdsRouter = router({
   listDrafts: protectedProcedure
     .input(z.object({ status: planStatusEnum.optional() }).optional())
     .query(async ({ ctx, input }) => {
-      const where: Record<string, unknown> = { createdById: ctx.user.workspaceId! };
+      const where: Record<string, unknown> = { createdById: ctx.user.ownerUserId! };
       if (input?.status) where.status = input.status;
       return ctx.db.metaAdPlan.findMany({ where, orderBy: { updatedAt: "desc" }, take: 100 });
     }),
@@ -627,7 +627,7 @@ export const metaAdsRouter = router({
     await assertUniqueMetaCampaignName(ctx, { name: input.name });
     const row = await ctx.db.metaAdPlan.create({
       data: {
-        createdById: ctx.user.workspaceId!,
+        createdById: ctx.user.ownerUserId!,
         name: input.name.trim(),
         objective: input.objective,
         dailyBudgetCents: input.dailyBudgetCents || null,
@@ -687,7 +687,7 @@ export const metaAdsRouter = router({
     const copyName = pickAvailableCopyName(row.name, reserved);
     return ctx.db.metaAdPlan.create({
       data: {
-        createdById: ctx.user.workspaceId!,
+        createdById: ctx.user.ownerUserId!,
         name: copyName,
         objective: row.objective,
         dailyBudgetCents: row.dailyBudgetCents,

@@ -13,6 +13,7 @@ import {
 import { passwordPolicySchema } from "../lib/password-policy";
 import { notifyWorkspaceAdmins } from "../lib/workspace-members";
 import { log } from "../lib/logger";
+import { ensureDefaultModuleEntitlements } from "../lib/module-entitlements";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -26,32 +27,6 @@ function appUrl() {
     process.env.NEXTAUTH_URL ||
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
   ).replace(/\/$/, "");
-}
-
-async function notifyRegistrationAdmins(
-  db: any,
-  placeholderContext: Record<string, string | number | undefined>,
-) {
-  const workspaceId = process.env.REGISTRATION_NOTIFY_WORKSPACE_ID?.trim();
-  if (!workspaceId) return;
-
-  await notifyWorkspaceAdmins(
-    db,
-    workspaceId,
-    String(placeholderContext.feedbackSubject || "Nieuwe registratieaanvraag"),
-    String(placeholderContext.feedbackBody || ""),
-    (args) =>
-      sendTemplatedEmail(db, workspaceId, {
-        templateKey: "system.registration_admin",
-        toEmail: args.toEmail,
-        placeholderContext: {
-          ...placeholderContext,
-          contactName: placeholderContext.contactName || args.toEmail,
-          clientEmail: placeholderContext.clientEmail || args.toEmail,
-        },
-        userId: workspaceId,
-      }),
-  );
 }
 
 function canReviewGlobalRegistrations(workspaceId: string) {
@@ -94,6 +69,7 @@ async function activateTargetedInvitation(
 ) {
   const workspaceId = resolveInviteWorkspaceId(request);
   if (!workspaceId) return null;
+  const invitedAccountClass = request.requestedRole === "TESTER" ? "TESTER" : request.requestedRole === "TRIAL" ? "TRIAL" : "CLIENT_MEMBER";
 
   const existingUser = await ctx.db.user.findUnique({
     where: { email: request.email },
@@ -113,7 +89,7 @@ async function activateTargetedInvitation(
       workspaceId,
       invitedById: request.invitedById || workspaceId,
       userId: existingUser.id,
-      role: request.requestedRole as "MEMBER",
+      role: request.requestedRole as "TESTER" | "TRIAL" | "MEMBER" | "ADMIN" | "MODERATOR" | "VIEWER",
     });
 
     const user = await ctx.db.user.update({
@@ -121,6 +97,9 @@ async function activateTargetedInvitation(
       data: {
         emailVerified: request.emailVerifiedAt || new Date(),
         name: existingUser.name || request.name,
+        accountClass: invitedAccountClass,
+        role: request.requestedRole as "TESTER" | "TRIAL" | "MEMBER" | "ADMIN" | "MODERATOR" | "VIEWER",
+        trialEndsAt: invitedAccountClass === "TRIAL" ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) : null,
       },
     });
 
@@ -137,7 +116,9 @@ async function activateTargetedInvitation(
       name: request.name,
       email: request.email,
       passwordHash: request.passwordHash,
-      role: "MEMBER",
+      role: request.requestedRole as "TESTER" | "TRIAL" | "MEMBER" | "ADMIN" | "MODERATOR" | "VIEWER",
+      accountClass: invitedAccountClass,
+      trialEndsAt: invitedAccountClass === "TRIAL" ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) : null,
       emailVerified: request.emailVerifiedAt || new Date(),
     },
   });
@@ -147,7 +128,7 @@ async function activateTargetedInvitation(
     workspaceId,
     invitedById: request.invitedById || workspaceId,
     userId: user.id,
-    role: request.requestedRole as "MEMBER",
+    role: request.requestedRole as "TESTER" | "TRIAL" | "MEMBER" | "ADMIN" | "MODERATOR" | "VIEWER",
   });
 
   await ctx.db.registrationRequest.update({
@@ -155,6 +136,28 @@ async function activateTargetedInvitation(
     data: { status: "APPROVED", reviewedAt: new Date() },
   });
 
+  return user;
+}
+
+async function activateSelfRegistration(ctx: { db: any }, request: any) {
+  const user = await ctx.db.user.create({
+    data: {
+      name: request.name,
+      email: request.email,
+      passwordHash: request.passwordHash,
+      role: "OWNER",
+      accountClass: "TRIAL",
+      accountStatus: "ACTIVE",
+      trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      emailVerified: request.emailVerifiedAt || new Date(),
+    },
+  });
+  await ensurePersonalWorkspace(ctx.db, user.id, request.name);
+  await ensureDefaultModuleEntitlements(ctx.db, user.id);
+  await ctx.db.registrationRequest.update({
+    where: { id: request.id },
+    data: { status: "APPROVED", reviewedAt: new Date() },
+  });
   return user;
 }
 
@@ -259,13 +262,17 @@ export const registrationRouter = router({
         return { success: true, status: "INVITED" };
       }
 
-      await notifyRegistrationAdmins(ctx.db, {
-        contactName: updated.name,
-        clientEmail: updated.email,
-        companyName: updated.company || "-",
+      const user = await activateSelfRegistration(ctx, updated);
+      await sendTemplatedEmail(ctx.db, user.id, {
+        templateKey: "auth.approved",
+        toEmail: updated.email,
+        placeholderContext: {
+          contactName: updated.name,
+          loginUrl: `${appUrl()}/login`,
+        },
+        userId: user.id,
       });
-
-      return { success: true, status: updated.status };
+      return { success: true, status: "ACTIVE", accountClass: "TRIAL" };
     }),
 
   listRequests: sensitiveOwnerProcedure.query(({ ctx }) => {
@@ -323,6 +330,7 @@ export const registrationRouter = router({
           email: request.email,
           passwordHash: request.passwordHash,
           role: workspaceId ? "MEMBER" : "OWNER",
+          accountClass: workspaceId ? "CLIENT_MEMBER" : "CLIENT_OWNER",
           emailVerified: request.emailVerifiedAt || new Date(),
         },
       });
@@ -337,6 +345,7 @@ export const registrationRouter = router({
       } else {
         await ensureUserWorkspace(ctx.db, user.id, request.name);
       }
+      await ensureDefaultModuleEntitlements(ctx.db, workspaceId || user.id);
 
       await ctx.db.registrationRequest.update({
         where: { id: request.id },

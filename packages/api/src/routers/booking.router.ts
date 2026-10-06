@@ -384,7 +384,7 @@ export const bookingRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const { status, search, eventTypeId, hostUserId, dateFrom, dateTo, page = 1, pageSize = 25 } = input ?? {};
-      const where: Record<string, unknown> = { createdById: ctx.user.workspaceId! };
+      const where: Record<string, unknown> = { createdById: ctx.user.ownerUserId! };
       if (status) where.status = status;
       if (eventTypeId) where.eventTypeId = eventTypeId;
       if (hostUserId) where.hostUserId = hostUserId;
@@ -426,7 +426,7 @@ export const bookingRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const booking = await ctx.db.booking.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: ctx.user.ownerUserId! },
         include: {
           lead: { select: { id: true, companyName: true, email: true, phone: true } },
           hostUser: { select: { id: true, name: true, email: true } },
@@ -440,14 +440,14 @@ export const bookingRouter = router({
 
   getStats: protectedProcedure.query(async ({ ctx }) => {
     const [total, pending, scheduled, confirmed, completed, cancelled, rejected, noShow] = await Promise.all([
-      ctx.db.booking.count({ where: { createdById: ctx.user.workspaceId! } }),
-      ctx.db.booking.count({ where: { status: "PENDING", createdById: ctx.user.workspaceId! } }),
-      ctx.db.booking.count({ where: { status: "SCHEDULED", createdById: ctx.user.workspaceId! } }),
-      ctx.db.booking.count({ where: { status: "CONFIRMED", createdById: ctx.user.workspaceId! } }),
-      ctx.db.booking.count({ where: { status: "COMPLETED", createdById: ctx.user.workspaceId! } }),
-      ctx.db.booking.count({ where: { status: "CANCELLED", createdById: ctx.user.workspaceId! } }),
-      ctx.db.booking.count({ where: { status: "REJECTED", createdById: ctx.user.workspaceId! } }),
-      ctx.db.booking.count({ where: { status: "NO_SHOW", createdById: ctx.user.workspaceId! } }),
+      ctx.db.booking.count({ where: { createdById: ctx.user.ownerUserId! } }),
+      ctx.db.booking.count({ where: { status: "PENDING", createdById: ctx.user.ownerUserId! } }),
+      ctx.db.booking.count({ where: { status: "SCHEDULED", createdById: ctx.user.ownerUserId! } }),
+      ctx.db.booking.count({ where: { status: "CONFIRMED", createdById: ctx.user.ownerUserId! } }),
+      ctx.db.booking.count({ where: { status: "COMPLETED", createdById: ctx.user.ownerUserId! } }),
+      ctx.db.booking.count({ where: { status: "CANCELLED", createdById: ctx.user.ownerUserId! } }),
+      ctx.db.booking.count({ where: { status: "REJECTED", createdById: ctx.user.ownerUserId! } }),
+      ctx.db.booking.count({ where: { status: "NO_SHOW", createdById: ctx.user.ownerUserId! } }),
     ]);
     return { total, pending, scheduled, confirmed, completed, cancelled, rejected, noShow };
   }),
@@ -485,7 +485,7 @@ export const bookingRouter = router({
       }
       const bookingEnd = new Date(bookingDate.getTime() + input.duration * 60 * 1000);
       const eventType = input.eventTypeId
-        ? await ctx.db.bookingEventType.findFirst({ where: { id: input.eventTypeId, createdById: ctx.user.workspaceId! } })
+        ? await ctx.db.bookingEventType.findFirst({ where: { id: input.eventTypeId, createdById: ctx.user.ownerUserId! } })
         : await ensureDefaultBookingEventType(ctx.db, ctx.user.workspaceId!);
       if (input.eventTypeId && !eventType) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Bookingtype niet gevonden" });
@@ -528,7 +528,7 @@ export const bookingRouter = router({
           cancelTokenHash: hashPublicToken(cancelToken),
           rescheduleTokenHash: hashPublicToken(rescheduleToken),
           leadId: input.leadId || null,
-          createdById: ctx.user.workspaceId!,
+          createdById: ctx.user.ownerUserId!,
         },
       });
       const emailCfg = await loadEmailSettings(ctx.db, {
@@ -638,7 +638,7 @@ export const bookingRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
-      const existing = await ctx.db.booking.findFirst({ where: { id, createdById: ctx.user.workspaceId! } });
+      const existing = await ctx.db.booking.findFirst({ where: { id, createdById: ctx.user.ownerUserId! } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Boeking niet gevonden" });
       const updateData: Record<string, unknown> = {};
       if (data.clientName !== undefined) updateData.clientName = data.clientName;
@@ -657,7 +657,7 @@ export const bookingRouter = router({
       if (data.hostUserId !== undefined) updateData.hostUserId = data.hostUserId || ctx.user.id;
       if (data.eventTypeId !== undefined) {
         const eventType = data.eventTypeId
-          ? await ctx.db.bookingEventType.findFirst({ where: { id: data.eventTypeId, createdById: ctx.user.workspaceId! } })
+          ? await ctx.db.bookingEventType.findFirst({ where: { id: data.eventTypeId, createdById: ctx.user.ownerUserId! } })
           : null;
         if (data.eventTypeId && !eventType) throw new TRPCError({ code: "NOT_FOUND", message: "Bookingtype niet gevonden" });
         updateData.eventTypeId = data.eventTypeId || null;
@@ -672,7 +672,7 @@ export const bookingRouter = router({
       const nextHostUserId = data.hostUserId !== undefined ? data.hostUserId || ctx.user.id : existing.hostUserId || ctx.user.id;
       const nextEventTypeId = data.eventTypeId !== undefined ? data.eventTypeId || null : existing.eventTypeId || null;
       const nextEventType = nextEventTypeId
-        ? await ctx.db.bookingEventType.findFirst({ where: { id: nextEventTypeId, createdById: ctx.user.workspaceId! } })
+        ? await ctx.db.bookingEventType.findFirst({ where: { id: nextEventTypeId, createdById: ctx.user.ownerUserId! } })
         : null;
       const localOverlap = await hasBookingOverlap(ctx.db, {
         ownerUserId: ctx.user.workspaceId!,
@@ -747,7 +747,7 @@ export const bookingRouter = router({
       location: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const booking = await ctx.db.booking.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! } });
+      const booking = await ctx.db.booking.findFirst({ where: { id: input.id, createdById: ctx.user.ownerUserId! } });
       if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Boeking niet gevonden" });
       if (booking.status === "CANCELLED" || booking.status === "REJECTED") {
         throw new TRPCError({
@@ -803,7 +803,7 @@ export const bookingRouter = router({
       reason: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const booking = await ctx.db.booking.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! } });
+      const booking = await ctx.db.booking.findFirst({ where: { id: input.id, createdById: ctx.user.ownerUserId! } });
       if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Boeking niet gevonden" });
       if (booking.status === "COMPLETED") {
         throw new TRPCError({
@@ -857,7 +857,7 @@ export const bookingRouter = router({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const booking = await ctx.db.booking.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: ctx.user.ownerUserId! },
         include: {
           lead: { select: { id: true, companyName: true } },
         },
@@ -922,7 +922,7 @@ export const bookingRouter = router({
   listEventTypes: protectedProcedure.query(async ({ ctx }) => {
     const defaults = await ensureDefaultBookingEventType(ctx.db, ctx.user.workspaceId!);
     const items = await ctx.db.bookingEventType.findMany({
-      where: { createdById: ctx.user.workspaceId! },
+      where: { createdById: ctx.user.ownerUserId! },
       orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
       include: {
         availabilityRules: { orderBy: [{ weekday: "asc" }, { startTime: "asc" }] },
@@ -1013,14 +1013,14 @@ export const bookingRouter = router({
       };
 
       const existingEventType = input.id
-        ? await ctx.db.bookingEventType.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! } })
+        ? await ctx.db.bookingEventType.findFirst({ where: { id: input.id, createdById: ctx.user.ownerUserId! } })
         : null;
       if (input.id && !existingEventType) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Bookingtype niet gevonden" });
       }
       const eventType = existingEventType
         ? await ctx.db.bookingEventType.update({ where: { id: existingEventType.id }, data })
-        : await ctx.db.bookingEventType.create({ data: { ...data, createdById: ctx.user.workspaceId!, isDefault: false } });
+        : await ctx.db.bookingEventType.create({ data: { ...data, createdById: ctx.user.ownerUserId!, isDefault: false } });
 
       if (input.availabilityRules) {
         await ctx.db.bookingAvailabilityRule.deleteMany({ where: { eventTypeId: eventType.id } });
@@ -1051,7 +1051,7 @@ export const bookingRouter = router({
       }
 
       return ctx.db.bookingEventType.findFirst({
-        where: { id: eventType.id, createdById: ctx.user.workspaceId! },
+        where: { id: eventType.id, createdById: ctx.user.ownerUserId! },
         include: {
           availabilityRules: { orderBy: [{ weekday: "asc" }, { startTime: "asc" }] },
           questions: { orderBy: { sortOrder: "asc" } },
@@ -1063,7 +1063,7 @@ export const bookingRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const eventType = await ctx.db.bookingEventType.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: ctx.user.ownerUserId! },
       });
       if (!eventType) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Bookingtype niet gevonden" });
@@ -1096,13 +1096,13 @@ export const bookingRouter = router({
       const [analyticsEvents, bookingsInWindow, prevCount, confirmed, noShow] = await Promise.all([
         // Analytics events for conversion/confirmation rates
         ctx.db.bookingAnalyticsEvent.findMany({
-          where: { createdById: ctx.user.workspaceId!, createdAt: { gte: since } },
+          where: { createdById: ctx.user.ownerUserId!, createdAt: { gte: since } },
           include: { eventType: { select: { id: true, name: true } } },
           take: 1000,
         }),
         // All bookings in current window (for grouping in JS)
         ctx.db.booking.findMany({
-          where: { createdById: ctx.user.workspaceId!, createdAt: { gte: since } },
+          where: { createdById: ctx.user.ownerUserId!, createdAt: { gte: since } },
           select: {
             date: true,
             status: true,
@@ -1113,15 +1113,15 @@ export const bookingRouter = router({
         }),
         // Previous window count for trend
         ctx.db.booking.count({
-          where: { createdById: ctx.user.workspaceId!, createdAt: { gte: prevStart, lt: since } },
+          where: { createdById: ctx.user.ownerUserId!, createdAt: { gte: prevStart, lt: since } },
         }),
         // Confirmed count in current window
         ctx.db.booking.count({
-          where: { createdById: ctx.user.workspaceId!, status: "CONFIRMED", createdAt: { gte: since } },
+          where: { createdById: ctx.user.ownerUserId!, status: "CONFIRMED", createdAt: { gte: since } },
         }),
         // No-show count in current window
         ctx.db.booking.count({
-          where: { createdById: ctx.user.workspaceId!, status: "NO_SHOW", createdAt: { gte: since } },
+          where: { createdById: ctx.user.ownerUserId!, status: "NO_SHOW", createdAt: { gte: since } },
         }),
       ]);
 
@@ -1241,7 +1241,7 @@ export const bookingRouter = router({
       const [bookings, google] = await Promise.all([
         ctx.db.booking.findMany({
           where: {
-            createdById: workspaceId,
+            createdById: ctx.user.ownerUserId!,
             date: { gte: from, lte: to },
             status: { notIn: ["REJECTED", "CANCELLED"] },
           },
@@ -1309,7 +1309,7 @@ export const bookingRouter = router({
   delete: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const existing = await ctx.db.booking.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! } });
+      const existing = await ctx.db.booking.findFirst({ where: { id: input.id, createdById: ctx.user.ownerUserId! } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Boeking niet gevonden" });
       const eventId = getStoredGoogleEventId(existing);
       if (eventId) {

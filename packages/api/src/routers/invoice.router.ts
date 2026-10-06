@@ -8,7 +8,7 @@ import { workspaceScopeFromUser, type WorkspaceScope } from "../lib/workspace-se
 
 /** Quotes may use workspace id or legacy owner user id as createdById. */
 function workspaceQuoteWhere(scope: WorkspaceScope) {
-  return { createdById: scope.workspaceId };
+  return { createdById: scope.ownerUserId ?? scope.workspaceId };
 }
 
 const invoiceInclude = { items: { orderBy: { sortOrder: "asc" as const } } };
@@ -53,7 +53,7 @@ export const invoiceRouter = router({
     .query(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
 
-      const workspaceWhere = { createdById: scope.workspaceId };
+      const workspaceWhere = { createdById: scope.ownerUserId ?? scope.workspaceId };
       const listWhere = {
         ...workspaceWhere,
         ...(input.status ? { status: input.status } : {}),
@@ -117,7 +117,7 @@ export const invoiceRouter = router({
     const scope = workspaceScopeFromUser(ctx.user);
 
     const invoicedRows = await ctx.db.workspaceInvoice.findMany({
-      where: { createdById: scope.workspaceId, quoteId: { not: null } },
+      where: { createdById: scope.ownerUserId ?? scope.workspaceId, quoteId: { not: null } },
       select: { quoteId: true },
     });
     const invoicedQuoteIds = invoicedRows
@@ -150,7 +150,7 @@ export const invoiceRouter = router({
       const scope = workspaceScopeFromUser(ctx.user);
 
       const row = await ctx.db.workspaceInvoice.findFirst({
-        where: { id: input.id, createdById: scope.workspaceId },
+        where: { id: input.id, createdById: scope.ownerUserId ?? scope.workspaceId },
         include: invoiceInclude,
       });
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
@@ -188,7 +188,7 @@ export const invoiceRouter = router({
       }
 
       const existing = await tx.workspaceInvoice.findFirst({
-        where: { createdById: scope.workspaceId, quoteId: quote.id },
+        where: { createdById: scope.ownerUserId ?? scope.workspaceId, quoteId: quote.id },
         include: invoiceInclude,
       });
       if (existing) return serializeInvoice(existing);
@@ -200,7 +200,7 @@ export const invoiceRouter = router({
 
       const row = await tx.workspaceInvoice.create({
         data: {
-          createdById: scope.workspaceId,
+          createdById: scope.ownerUserId ?? scope.workspaceId,
           invoiceNumber: await nextInvoiceNumber(tx, scope.workspaceId),
           quoteId: quote.id,
           leadId: quote.leadId,
@@ -266,7 +266,7 @@ export const invoiceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
       const row = await ctx.db.workspaceInvoice.findFirst({
-        where: { id: input.id, createdById: scope.workspaceId },
+        where: { id: input.id, createdById: scope.ownerUserId ?? scope.workspaceId },
         include: invoiceInclude,
       });
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
@@ -301,7 +301,7 @@ export const invoiceRouter = router({
         }
 
         const changed = await tx.workspaceInvoice.updateMany({
-          where: { id: row.id, createdById: scope.workspaceId, updatedAt: row.updatedAt, status: row.status },
+          where: { id: row.id, createdById: scope.ownerUserId ?? scope.workspaceId, updatedAt: row.updatedAt, status: row.status },
           data: {
             clientName: input.clientName ?? row.clientName,
             clientEmail:
@@ -323,7 +323,7 @@ export const invoiceRouter = router({
           throw new TRPCError({ code: "CONFLICT", message: "De factuur is intussen gewijzigd. Herlaad de factuur en probeer opnieuw." });
         }
         return tx.workspaceInvoice.findFirst({
-          where: { id: row.id, createdById: scope.workspaceId },
+          where: { id: row.id, createdById: scope.ownerUserId ?? scope.workspaceId },
           include: invoiceInclude,
         });
       });
@@ -344,7 +344,7 @@ export const invoiceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
       const row = await ctx.db.workspaceInvoice.findFirst({
-        where: { id: input.id, createdById: scope.workspaceId },
+        where: { id: input.id, createdById: scope.ownerUserId ?? scope.workspaceId },
       });
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
 
@@ -364,7 +364,7 @@ export const invoiceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
       const invoice = await ctx.db.workspaceInvoice.findFirst({
-        where: { id: input.invoiceId, createdById: scope.workspaceId },
+        where: { id: input.invoiceId, createdById: scope.ownerUserId ?? scope.workspaceId },
       });
       if (!invoice) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
       if (!invoice.leadId) {
@@ -433,7 +433,7 @@ export const invoiceRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const row = await ctx.db.workspaceInvoice.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: ctx.user.ownerUserId! },
         include: invoiceInclude,
       });
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });
@@ -493,7 +493,7 @@ export const invoiceRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const result = await ctx.db.workspaceInvoice.deleteMany({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: ctx.user.ownerUserId! },
       });
       if (result.count === 0) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Factuur niet gevonden." });

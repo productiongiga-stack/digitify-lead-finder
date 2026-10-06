@@ -8,6 +8,7 @@ import { loadAiProviderConfig } from "./ai-provider-config";
 import { extractJsonFromAiResponse } from "./meta-ads-ai";
 import { adJson, createAdChange, safeAdError } from "./ads-workflow";
 import { fingerprint, changePatchSchema, type AdProvider } from "./ads-workflow-policy";
+import { resolveLeadOwnerId } from "./tenant";
 
 export const adCopilotProviderSchema = z.enum(["META", "GOOGLE", "BOTH"]);
 export const adCopilotSourceModeSchema = z.enum(["ACCOUNT_DATA", "ACCOUNT_AND_WEB"]);
@@ -55,8 +56,6 @@ export const adResearchResultSchema = z.object({
   evidence: z.array(evidenceSchema).max(40).default([]),
 }).passthrough();
 
-type AdResearchResult = z.infer<typeof adResearchResultSchema>;
-
 function runKey(workspaceId: string, input: AdResearchInput, profileHash: string) {
   const payload = {
     workspaceId,
@@ -75,7 +74,13 @@ function runKey(workspaceId: string, input: AdResearchInput, profileHash: string
 }
 
 function safeText(value: unknown, max = 2000) {
-  return String(value || "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim().slice(0, max);
+  let cleaned = "";
+  for (const character of String(value || "")) {
+    const code = character.charCodeAt(0);
+    if ((code >= 0 && code <= 8) || code === 11 || code === 12 || (code >= 14 && code <= 31)) continue;
+    cleaned += character;
+  }
+  return cleaned.trim().slice(0, max);
 }
 
 function providerForJob(provider: string): "META" | "GOOGLE" {
@@ -154,10 +159,11 @@ function promptInput(run: { provider: string; sourceMode: string; objective: str
   };
 }
 
-export async function startAdResearch(db: PrismaClient, workspaceId: string, input: AdResearchInput) {
+export async function startAdResearch(db: PrismaClient, workspaceId: string, input: AdResearchInput, ownerUserId?: string) {
+  const legacyOwnerId = ownerUserId ?? await resolveLeadOwnerId(db, workspaceId);
   const profile = await loadAiBusinessProfile(db, workspaceId);
   const idempotencyKey = runKey(workspaceId, input, profile.hash);
-  const existing = await db.adResearchRun.findFirst({ where: { createdById: workspaceId, idempotencyKey } });
+  const existing = await db.adResearchRun.findFirst({ where: { createdById: legacyOwnerId, idempotencyKey } });
   if (existing) return existing;
   const accountData = await gatherAccountEvidence(db, workspaceId, input);
   const { contactEmail: _contactEmail, contactPhone: _contactPhone, ...profileContext } = businessProfileToContext(profile);
@@ -165,7 +171,7 @@ export async function startAdResearch(db: PrismaClient, workspaceId: string, inp
   try {
     run = await db.adResearchRun.create({
       data: {
-        createdById: workspaceId,
+        createdById: legacyOwnerId,
         provider: input.provider,
         sourceMode: input.sourceMode,
         objective: input.objective,
@@ -179,19 +185,21 @@ export async function startAdResearch(db: PrismaClient, workspaceId: string, inp
     });
   } catch (error) {
     if ((error as { code?: string }).code !== "P2002") throw error;
-    const concurrent = await db.adResearchRun.findFirst({ where: { createdById: workspaceId, idempotencyKey } });
+    const concurrent = await db.adResearchRun.findFirst({ where: { createdById: legacyOwnerId, idempotencyKey } });
     if (!concurrent) throw error;
     return concurrent;
   }
   await db.adBackgroundJob.upsert({
     where: { dedupeKey: `RESEARCH:${run.id}` },
     update: {},
-    create: { createdById: workspaceId, provider: providerForJob(input.provider), kind: "RESEARCH", dedupeKey: `RESEARCH:${run.id}` },
+    create: { createdById: legacyOwnerId, provider: providerForJob(input.provider), kind: "RESEARCH", dedupeKey: `RESEARCH:${run.id}` },
   });
   return run;
 }
 
 export async function processAdResearchRun(db: PrismaClient, workspaceId: string, runId: string) {
+  const workspaceRecord = await db.workspace.findFirst({ where: { ownerUserId: workspaceId }, select: { id: true } });
+  const technicalWorkspaceId = workspaceRecord?.id ?? workspaceId;
   const now = new Date();
   const leaseToken = randomUUID();
   const claimed = await db.adResearchRun.updateMany({
@@ -213,8 +221,8 @@ export async function processAdResearchRun(db: PrismaClient, workspaceId: string
   const run = await db.adResearchRun.findFirst({ where: { id: runId, createdById: workspaceId, status: "RUNNING", leaseToken } });
   if (!run) throw new TRPCError({ code: "NOT_FOUND", message: "Researchrun niet gevonden." });
   try {
-    const profile = await loadAiBusinessProfile(db, workspaceId);
-    const config = await loadAiProviderConfig(db, workspaceId);
+    const profile = await loadAiBusinessProfile(db, technicalWorkspaceId);
+    const config = await loadAiProviderConfig(db, technicalWorkspaceId);
     if (!config.apiKey) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Koppel eerst een AI-provider via Integraties." });
     const accountData = (run.input as Record<string, unknown>)?.accountData || {};
     const savedProfileContext = (run.input as Record<string, unknown>)?.profileContext;

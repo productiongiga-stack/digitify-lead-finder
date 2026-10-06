@@ -80,6 +80,33 @@ describe("workspace-aware account view", () => {
     }));
   });
 
+  it("allows an explicit platform owner even when the customer workspace role is not OWNER", async () => {
+    delete process.env.PLATFORM_OWNER_EMAILS;
+    const db = {
+      workspace: { findUnique: vi.fn().mockResolvedValue({ ownerUserId: "workspace-owner" }) },
+      workspaceMembership: { findUnique: vi.fn().mockResolvedValue({ role: "MEMBER", status: "ACTIVE" }) },
+      accountViewSession: { create: vi.fn().mockResolvedValue({ id: "view_act_as", expiresAt: new Date("2030-01-01") }) },
+      securityAuditEvent: { create: vi.fn().mockResolvedValue({ id: "audit_act_as" }) },
+    } as any;
+
+    const result = await startAccountView(
+      db,
+      { id: "platform-owner", email: "platform@example.com", role: "MEMBER", workspaceRole: "MEMBER", workspaceId: "personal", accountClass: "PLATFORM_OWNER", platformRole: "OWNER" },
+      "target-user",
+      "target-workspace",
+      "request-act-as",
+      { mode: "ACT_AS", reason: "QA supportcontrole", confirmExternalActions: true },
+    );
+
+    expect(result.sessionId).toBe("view_act_as");
+    expect(db.accountViewSession.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        workspaceId: "target-workspace",
+        metadata: expect.objectContaining({ mode: "ACT_AS", confirmExternalActions: true }),
+      }),
+    }));
+  });
+
   it("keeps an ordinary owner inside the active workspace", async () => {
     const db = { workspace: { findUnique: vi.fn() }, workspaceMembership: { findUnique: vi.fn() } } as any;
 

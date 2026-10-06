@@ -13,13 +13,14 @@ function hashToken(token: string) {
 
 export async function startAccountView(
   db: PrismaClient,
-  actor: { id: string; email: string; role: string; workspaceId?: string; workspaceRole?: string },
+  actor: { id: string; email: string; role: string; workspaceId?: string; workspaceRole?: string; accountClass?: string; platformRole?: string | null },
   targetUserId: string,
   targetWorkspaceId?: string,
   requestId?: string,
+  options?: { mode?: "VIEW" | "ACT_AS"; reason?: string; confirmExternalActions?: boolean },
 ) {
   const platformOwner = isPlatformOwner(actor);
-  if (actor.workspaceRole !== "OWNER" || actor.id === targetUserId) {
+  if ((!platformOwner && actor.workspaceRole !== "OWNER") || actor.id === targetUserId) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Alleen een workspace-owner kan een ander account bekijken." });
   }
   const workspaceId = platformOwner ? targetWorkspaceId : actor.workspaceId;
@@ -42,21 +43,21 @@ export async function startAccountView(
     data: {
       tokenHash: hashToken(token), actorUserId: actor.id, targetUserId,
       workspaceId, expiresAt: new Date(Date.now() + VIEW_TTL_MS),
-      metadata: { requestId },
+      metadata: { requestId, mode: options?.mode ?? "VIEW", reason: options?.reason ?? null, confirmExternalActions: options?.confirmExternalActions === true },
     },
     select: { id: true, expiresAt: true },
   });
   await recordSecurityAuditEvent(db, {
     workspaceId, actorUserId: actor.id, targetUserId,
     action: "ACCOUNT_VIEW_STARTED", resource: "account_view_session", resourceId: view.id,
-    result: "SUCCESS", requestId, metadata: { platformOwner, targetWorkspaceId: workspaceId },
+    result: "SUCCESS", requestId, reason: options?.reason, metadata: { platformOwner, targetWorkspaceId: workspaceId, mode: options?.mode ?? "VIEW" },
   });
   return { token, sessionId: view.id, expiresAt: view.expiresAt };
 }
 
 export async function resolveAccountView(
   db: PrismaClient,
-  actor: { id: string; email: string; role: string; workspaceId?: string; workspaceRole?: string },
+  actor: { id: string; email: string; role: string; workspaceId?: string; workspaceRole?: string; accountClass?: string; platformRole?: string | null },
   token: string,
   requestId?: string,
 ) {
@@ -67,7 +68,7 @@ export async function resolveAccountView(
   const [workspace, membership, target] = await Promise.all([
     db.workspace.findUnique({ where: { id: view.workspaceId }, select: { ownerUserId: true } }),
     db.workspaceMembership.findUnique({ where: { workspaceId_userId: { workspaceId: view.workspaceId, userId: view.targetUserId } }, select: { role: true, status: true } }),
-    db.user.findUnique({ where: { id: view.targetUserId }, select: { id: true, email: true, name: true, role: true } }),
+    db.user.findUnique({ where: { id: view.targetUserId }, select: { id: true, email: true, name: true, role: true, accountClass: true, accountStatus: true, platformRole: true, trialEndsAt: true } }),
   ]);
   if (!workspace || (!platformOwner && workspace.ownerUserId !== actor.id) || membership?.status !== "ACTIVE" || !target) {
     await db.accountViewSession.update({ where: { id: view.id }, data: { endedAt: new Date() } });
@@ -85,11 +86,16 @@ export async function resolveAccountView(
   }
   const modules = await db.setting.findUnique({ where: { key: `user:${target.id}:modules.disabled` }, select: { value: true } });
   const disabledModules = typeof modules?.value === "string" ? modules.value.split(",").map((id) => id.trim()).filter(Boolean) : [];
+  const viewMetadata = view.metadata && typeof view.metadata === "object" ? view.metadata as Record<string, unknown> : {};
   return {
     ...actor, id: target.id, email: target.email, name: target.name, role: target.role,
     workspaceRole: membership.role, workspaceId: view.workspaceId, isPersonalWorkspace: false,
     disabledModules, isViewingAs: true, actorUserId: actor.id, viewAsSessionId: view.id,
     viewAsTargetName: target.name || target.email,
+    accountClass: target.accountClass, accountStatus: target.accountStatus,
+    platformRole: target.platformRole, trialEndsAt: target.trialEndsAt,
+    viewAsMode: (viewMetadata.mode === "ACT_AS" ? "ACT_AS" : "VIEW") as "VIEW" | "ACT_AS",
+    viewAsConfirmExternalActions: viewMetadata.confirmExternalActions === true,
   };
 }
 

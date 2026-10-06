@@ -5,7 +5,7 @@ export const paymentRouter = router({
   overview: protectedProcedure.query(async ({ ctx }) => {
     const scope = workspaceScopeFromUser(ctx.user);
 
-    const where = { createdById: scope.workspaceId };
+    const where = { createdById: scope.ownerUserId ?? scope.workspaceId };
     const soon = new Date();
     soon.setDate(soon.getDate() + 14);
 

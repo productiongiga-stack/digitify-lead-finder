@@ -87,6 +87,10 @@ model User {
   image          String?
   emailVerified  DateTime?
   role           UserRole  @default(MEMBER)
+  accountClass   AccountClass @default(CLIENT_OWNER)
+  accountStatus  AccountStatus @default(ACTIVE)
+  platformRole   PlatformRole?
+  trialEndsAt    DateTime?
   workspaceOwnerId String?
   activeWorkspaceId String?
   createdAt      DateTime  @default(now())
@@ -237,6 +241,26 @@ enum WorkspaceType {
   TEAM
 }
 
+enum AccountClass {
+  PLATFORM_OWNER
+  PLATFORM_SUPPORT
+  CLIENT_OWNER
+  CLIENT_MEMBER
+  TESTER
+  TRIAL
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum PlatformRole {
+  OWNER
+  SUPPORT
+}
+
 enum WorkspaceMembershipStatus {
   ACTIVE
   INVITED
@@ -253,9 +277,28 @@ model Workspace {
 
   owner       User                  @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   memberships WorkspaceMembership[]
+  moduleEntitlements WorkspaceModuleEntitlement[]
 
   @@index([ownerUserId])
   @@map("workspaces")
+}
+
+model WorkspaceModuleEntitlement {
+  id          String   @id @default(cuid())
+  workspaceId String
+  moduleId    String
+  status      String   @default("ACTIVE")
+  source      String   @default("FREE")
+  startsAt    DateTime @default(now())
+  endsAt      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, moduleId])
+  @@index([workspaceId, status])
+  @@map("workspace_module_entitlements")
 }
 
 model WorkspaceMembership {

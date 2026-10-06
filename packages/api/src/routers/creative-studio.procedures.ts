@@ -346,7 +346,7 @@ export const creativeStudioProcedures = {
       if (input.targetPlanId) {
         const where = {
           id: input.targetPlanId,
-          createdById: ctx.user.workspaceId!,
+          createdById: ctx.user.ownerUserId!,
         };
         const target =
           input.destination === "meta"

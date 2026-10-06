@@ -66,10 +66,10 @@ const domainOverviewSelect = {
   },
 } satisfies Prisma.DomainSelect;
 
-async function loadPortfolioDomains(db: Parameters<typeof assertLeadAccess>[0], workspaceId: string) {
+async function loadPortfolioDomains(db: Parameters<typeof assertLeadAccess>[0], workspaceId: string, ownerUserId: string) {
   await syncWorkspaceDomainExpiry(db, workspaceId);
   return db.domain.findMany({
-    where: { createdById: workspaceId },
+    where: { createdById: ownerUserId },
     orderBy: { updatedAt: "desc" },
     select: domainOverviewSelect,
   });
@@ -189,12 +189,13 @@ function buildPortfolioAttention(domains: ReturnType<typeof enrichDomainRecord>[
 async function assertDomainNameAvailable(
   db: Parameters<typeof assertLeadAccess>[0],
   workspaceId: string,
+  ownerUserId: string,
   domainName: string,
   excludeId?: string,
 ) {
   const existing = await db.domain.findFirst({
     where: {
-      createdById: workspaceId,
+      createdById: ownerUserId,
       domainName,
       ...(excludeId ? { NOT: { id: excludeId } } : {}),
     },
@@ -222,11 +223,12 @@ function mapDomainWriteError(error: unknown, domainName: string): never {
 async function resolveDomainForWorkspace(
   db: Parameters<typeof assertLeadAccess>[0],
   workspaceId: string,
+  ownerUserId: string,
   input: { id?: string; domainName?: string },
 ) {
   if (input.id) {
     const domain = await db.domain.findFirst({
-      where: { id: input.id, createdById: workspaceId },
+      where: { id: input.id, createdById: ownerUserId },
       select: { id: true, domainName: true, leadId: true },
     });
     if (!domain) throw new TRPCError({ code: "NOT_FOUND", message: "Domein niet gevonden" });
@@ -234,7 +236,7 @@ async function resolveDomainForWorkspace(
   }
   if (input.domainName) {
     const domain = await db.domain.findFirst({
-      where: { domainName: input.domainName, createdById: workspaceId },
+      where: { domainName: input.domainName, createdById: ownerUserId },
       select: { id: true, domainName: true, leadId: true },
     });
     if (!domain) throw new TRPCError({ code: "NOT_FOUND", message: "Domein niet gevonden" });
@@ -270,7 +272,7 @@ export const domainRouter = router({
         pageSize = 24,
       } = input ?? {};
 
-      const where: Prisma.DomainWhereInput = { createdById: workspaceId };
+      const where: Prisma.DomainWhereInput = { createdById: ctx.user.ownerUserId! };
       if (status) where.status = status;
       if (search) {
         where.OR = [
@@ -314,13 +316,13 @@ export const domainRouter = router({
 
   getPortfolioStats: protectedProcedure.query(async ({ ctx }) => {
     const workspaceId = ctx.user.workspaceId!;
-    const domains = await loadPortfolioDomains(ctx.db, workspaceId);
+    const domains = await loadPortfolioDomains(ctx.db, workspaceId, ctx.user.ownerUserId!);
     return buildPortfolioStats(domains.map((domain) => enrichDomainRecord(domain)));
   }),
 
   getPortfolioOverview: protectedProcedure.query(async ({ ctx }) => {
     const workspaceId = ctx.user.workspaceId!;
-    const domains = await loadPortfolioDomains(ctx.db, workspaceId);
+    const domains = await loadPortfolioDomains(ctx.db, workspaceId, ctx.user.ownerUserId!);
     const enriched = domains.map((domain) => enrichDomainRecord(domain));
     const latest = domains.reduce<Date | null>((current, domain) => {
       const candidate = domain.updatedAt;
@@ -337,7 +339,7 @@ export const domainRouter = router({
 
   getById: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
     const domain = await ctx.db.domain.findFirst({
-      where: { id: input.id, createdById: ctx.user.workspaceId! },
+      where: { id: input.id, createdById: ctx.user.ownerUserId! },
       include: domainInclude,
     });
 
@@ -362,7 +364,7 @@ export const domainRouter = router({
     .mutation(async ({ ctx, input }) => {
       const workspaceId = ctx.user.workspaceId!;
       if (input.leadId) await assertLeadAccess(ctx.db, workspaceId, input.leadId);
-      await assertDomainNameAvailable(ctx.db, workspaceId, input.domainName);
+      await assertDomainNameAvailable(ctx.db, workspaceId, ctx.user.ownerUserId!, input.domainName);
 
       const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
       const status = deriveExpiryStatus(expiresAt);
@@ -377,7 +379,7 @@ export const domainRouter = router({
             status,
             notes: input.notes || null,
             leadId: input.leadId || null,
-            createdById: workspaceId,
+            createdById: ctx.user.ownerUserId!,
           },
         });
       } catch (error) {
@@ -409,7 +411,7 @@ export const domainRouter = router({
       }
 
       const existing = await ctx.db.domain.findFirst({
-        where: { createdById: workspaceId, domainName: hostname },
+        where: { createdById: ctx.user.ownerUserId!, domainName: hostname },
       });
       if (existing) {
         if (!existing.leadId) {
@@ -425,7 +427,7 @@ export const domainRouter = router({
         data: {
           domainName: hostname,
           leadId: input.leadId,
-          createdById: workspaceId,
+          createdById: ctx.user.ownerUserId!,
           status: "ACTIVE",
         },
       });
@@ -448,14 +450,14 @@ export const domainRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
       const existing = await ctx.db.domain.findFirst({
-        where: { id, createdById: ctx.user.workspaceId! },
+        where: { id, createdById: ctx.user.ownerUserId! },
         select: { id: true, status: true },
       });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Domein niet gevonden" });
       const workspaceId = ctx.user.workspaceId!;
       if (data.leadId) await assertLeadAccess(ctx.db, workspaceId, data.leadId);
       if (data.domainName !== undefined) {
-        await assertDomainNameAvailable(ctx.db, workspaceId, data.domainName, id);
+        await assertDomainNameAvailable(ctx.db, workspaceId, ctx.user.ownerUserId!, data.domainName, id);
       }
 
       const updateData: Prisma.DomainUpdateInput = {};
@@ -490,7 +492,7 @@ export const domainRouter = router({
 
   delete: mutationProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const existing = await ctx.db.domain.findFirst({
-      where: { id: input.id, createdById: ctx.user.workspaceId! },
+      where: { id: input.id, createdById: ctx.user.ownerUserId! },
       select: { id: true },
     });
     if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Domein niet gevonden" });
@@ -510,7 +512,7 @@ export const domainRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const workspaceId = ctx.user.workspaceId!;
-      const domain = await resolveDomainForWorkspace(ctx.db, workspaceId, input);
+      const domain = await resolveDomainForWorkspace(ctx.db, workspaceId, ctx.user.ownerUserId!, input);
       const analysis = await analyzeWebsite(domain.domainName);
       const persisted = await persistDomainAnalysis(ctx.db, {
         domainId: domain.id,
@@ -527,7 +529,7 @@ export const domainRouter = router({
       const workspaceId = ctx.user.workspaceId!;
       const domains = await ctx.db.domain.findMany({
         where: {
-          createdById: workspaceId,
+          createdById: ctx.user.ownerUserId!,
           ...(input?.ids?.length ? { id: { in: input.ids } } : { status: { in: ["ACTIVE", "EXPIRING"] } }),
         },
         select: { id: true, domainName: true, leadId: true },
@@ -577,8 +579,8 @@ export const domainRouter = router({
       const workspaceId = ctx.user.workspaceId!;
       const domain = await ctx.db.domain.findFirst({
         where: input.id
-          ? { id: input.id, createdById: workspaceId }
-          : { domainName: input.domainName, createdById: workspaceId },
+          ? { id: input.id, createdById: ctx.user.ownerUserId! }
+          : { domainName: input.domainName, createdById: ctx.user.ownerUserId! },
         include: domainInclude,
       });
       if (!domain) return null;

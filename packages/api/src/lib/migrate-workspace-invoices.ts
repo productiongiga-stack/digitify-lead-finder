@@ -47,7 +47,7 @@ async function importRows(
   scope: WorkspaceScope,
 ): Promise<{ imported: number }> {
   const existing = await db.workspaceInvoice.count({
-    where: { createdById: scope.workspaceId },
+    where: { createdById: scope.ownerUserId ?? scope.workspaceId },
   });
   if (existing > 0) return { imported: 0 };
 
@@ -62,7 +62,7 @@ async function importRows(
     if (typeof inv.id !== "string" || !inv.invoiceNumber || !inv.clientName) continue;
 
     const exists = await db.workspaceInvoice.findFirst({
-      where: { id: inv.id, createdById: scope.workspaceId },
+      where: { id: inv.id, createdById: scope.ownerUserId ?? scope.workspaceId },
       select: { id: true },
     });
     if (exists) continue;
@@ -70,7 +70,7 @@ async function importRows(
     await db.workspaceInvoice.create({
       data: {
         id: inv.id,
-        createdById: scope.workspaceId,
+        createdById: scope.ownerUserId ?? scope.workspaceId,
         invoiceNumber: inv.invoiceNumber,
         quoteId: inv.quoteId,
         leadId: inv.leadId,
