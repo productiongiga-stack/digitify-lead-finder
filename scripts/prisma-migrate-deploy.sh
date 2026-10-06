@@ -6,7 +6,9 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root/packages/db"
 
 # Migrations must use a direct (non-pooler) connection — Supabase pooler rejects DDL.
-migrate_url="${DIRECT_URL:-${POSTGRES_URL_NON_POOLING:-${POSTGRES_URL:-}}}"
+# Vercel's Supabase integration may expose the direct connection under the
+# lowercase `database` key; prefer it when the explicit aliases are absent.
+migrate_url="${DIRECT_URL:-${POSTGRES_URL_NON_POOLING:-${database:-${POSTGRES_URL:-}}}}"
 if [[ "$migrate_url" == *"pooler"* ]]; then
   migrate_url="${POSTGRES_URL_NON_POOLING:-}"
 fi
