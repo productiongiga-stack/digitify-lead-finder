@@ -7,6 +7,7 @@ import {
   type SystemEmailTemplateDef,
 } from "./email-template-starter-pack";
 import type { EmailAttachment } from "@digitify/email";
+import type { EmailSettingsScope } from "./email-sender";
 
 export type SendTemplatedEmailParams = {
   templateKey: string;
@@ -14,7 +15,8 @@ export type SendTemplatedEmailParams = {
   placeholderContext?: Record<string, string | number | undefined>;
   attachments?: EmailAttachment[];
   trackingDraftId?: string;
-  userId?: string;
+  /** Workspace scope for shared mail settings. A string remains supported for legacy callers. */
+  userId?: EmailSettingsScope;
   leadId?: string;
   recipientCompany?: string;
   unsubscribeUrl?: string;

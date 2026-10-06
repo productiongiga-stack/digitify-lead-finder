@@ -246,6 +246,7 @@ async function loadUnifiedReminders(ctx: WorkspaceCtx): Promise<UnifiedReminders
 
 async function buildAttentionQueue(ctx: WorkspaceCtx): Promise<AttentionQueueResult> {
   const wsId = ctx.user.workspaceId!;
+  const leadOwnerId = await resolveLeadOwnerId(ctx.db, wsId);
   const now = new Date();
   const thirtyDaysFromNow = new Date();
   thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
@@ -302,7 +303,7 @@ async function buildAttentionQueue(ctx: WorkspaceCtx): Promise<AttentionQueueRes
       take: 10,
       select: { id: true, domainName: true, expiresAt: true },
     }),
-    ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: wsId } }),
+    ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: leadOwnerId } }),
     ctx.db.chatSession.count({
       where: { ...ownedChatSessionWhere(wsId, ctx.user.id), isRead: false },
     }),
@@ -460,6 +461,7 @@ async function buildAttentionQueue(ctx: WorkspaceCtx): Promise<AttentionQueueRes
 /** Count-only path for topbar badge (avoids loading draft rows). */
 async function loadAttentionCountOnly(ctx: WorkspaceCtx): Promise<number> {
   const wsId = ctx.user.workspaceId;
+  const leadOwnerId = await resolveLeadOwnerId(ctx.db, wsId);
   const now = new Date();
   const thirtyDaysFromNow = new Date();
   thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
@@ -470,7 +472,7 @@ async function loadAttentionCountOnly(ctx: WorkspaceCtx): Promise<number> {
       where: { workspaceId: wsId },
       _count: { _all: true },
     }),
-    ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: wsId } }),
+    ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: leadOwnerId } }),
     ctx.db.chatSession.count({
       where: { ...ownedChatSessionWhere(wsId, ctx.user.id), isRead: false },
     }),
@@ -571,7 +573,7 @@ async function loadKpis(ctx: WorkspaceCtx): Promise<KpiResult> {
         },
       },
     }),
-    ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.workspaceId } }),
+    ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: leadOwnerId } }),
     ctx.db.quote.groupBy({
       by: ["status"],
       where: { createdById: ctx.user.workspaceId },
@@ -1108,10 +1110,11 @@ export const dashboardRouter = router({
   }),
 
   getReviewStats: protectedProcedure.query(async ({ ctx }) => {
+    const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
     const [pendingCount, sentCount, reviewedCount] = await Promise.all([
-      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.workspaceId! } }),
-      ctx.db.reviewRequest.count({ where: { status: "SENT", createdById: ctx.user.workspaceId! } }),
-      ctx.db.reviewRequest.count({ where: { status: "REVIEWED", createdById: ctx.user.workspaceId! } }),
+      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: leadOwnerId } }),
+      ctx.db.reviewRequest.count({ where: { status: "SENT", createdById: leadOwnerId } }),
+      ctx.db.reviewRequest.count({ where: { status: "REVIEWED", createdById: leadOwnerId } }),
     ]);
 
     return { pendingCount, sentCount, reviewedCount };

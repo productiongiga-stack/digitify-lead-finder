@@ -145,11 +145,6 @@ export function ReviewsPageInner() {
     onSuccess: () => {
       utils.review.list.invalidate();
       utils.review.getStats.invalidate();
-      setCreateOpen(false);
-      showToast({
-        title: "Reviewverzoek opgeslagen",
-        description: "De reviewaanvraag is aangemaakt.",
-      });
     },
     onError: (error) =>
       showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
@@ -182,17 +177,39 @@ export function ReviewsPageInner() {
       showToast({ title: "Verwijderen mislukt", description: error.message, variant: "error" }),
   });
 
-  function handleCreate(e: React.FormEvent<HTMLFormElement>) {
+  async function handleCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     const reviewUrl = form.get("reviewUrl") as string;
-    createMutation.mutate({
+    const values = {
       clientName: form.get("clientName") as string,
       clientEmail: form.get("clientEmail") as string,
       platform,
       reviewUrl: reviewUrl || undefined,
       leadId: createLeadId && createLeadId !== "__none" ? createLeadId : undefined,
-    });
+    };
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const sendAfterCreate = submitter?.value === "send";
+
+    try {
+      const created = await createMutation.mutateAsync(values);
+      if (sendAfterCreate) {
+        try {
+          await sendMutation.mutateAsync({ id: created.id });
+        } catch {
+          setCreateOpen(false);
+          return;
+        }
+      } else {
+        showToast({
+          title: "Reviewverzoek opgeslagen",
+          description: "De aanvraag staat klaar om te verzenden.",
+        });
+      }
+      setCreateOpen(false);
+    } catch {
+      // The mutation already exposes a concise error toast.
+    }
   }
 
   const filterTabs: Array<{ key: ReviewStatus | undefined; label: string; count: number | undefined }> =
@@ -566,8 +583,22 @@ export function ReviewsPageInner() {
             <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
               Annuleren
             </Button>
-            <Button type="submit" disabled={createMutation.isPending}>
-              {createMutation.isPending ? "Bezig..." : "Aanvraag Aanmaken"}
+            <Button
+              type="submit"
+              name="action"
+              value="save"
+              variant="outline"
+              disabled={createMutation.isPending || sendMutation.isPending}
+            >
+              {createMutation.isPending ? "Bezig..." : "Opslaan"}
+            </Button>
+            <Button
+              type="submit"
+              name="action"
+              value="send"
+              disabled={createMutation.isPending || sendMutation.isPending}
+            >
+              {createMutation.isPending || sendMutation.isPending ? "Bezig..." : "Opslaan & versturen"}
             </Button>
           </div>
         </form>
