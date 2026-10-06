@@ -191,7 +191,7 @@ for attempt in $(seq 1 80); do
     repair_sql='UPDATE "media_generations" m SET "workspaceId" = m."userId" WHERE NOT EXISTS (SELECT 1 FROM "users" u WHERE u."id" = m."workspaceId") AND EXISTS (SELECT 1 FROM "users" u WHERE u."id" = m."userId");
 UPDATE "workspace_analytics_events" e SET "workspaceId" = e."userId" WHERE e."userId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "users" u WHERE u."id" = e."workspaceId") AND EXISTS (SELECT 1 FROM "users" u WHERE u."id" = e."userId");
 DELETE FROM "workspace_analytics_events" e WHERE NOT EXISTS (SELECT 1 FROM "users" u WHERE u."id" = e."workspaceId");'
-    printf '%s\n' "$repair_sql" | pnpm exec prisma db execute --stdin
+    printf '%s\n' "$repair_sql" | pnpm exec prisma db execute --stdin --url "$DATABASE_URL"
     continue
   fi
 
@@ -205,7 +205,7 @@ DELETE FROM "workspace_analytics_events" e WHERE NOT EXISTS (SELECT 1 FROM "user
     repair_sql='UPDATE "media_generations" m SET "workspaceId" = m."userId" WHERE NOT EXISTS (SELECT 1 FROM "users" u WHERE u."id" = m."workspaceId") AND EXISTS (SELECT 1 FROM "users" u WHERE u."id" = m."userId");
 UPDATE "workspace_analytics_events" e SET "workspaceId" = e."userId" WHERE e."userId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "users" u WHERE u."id" = e."workspaceId") AND EXISTS (SELECT 1 FROM "users" u WHERE u."id" = e."userId");
 DELETE FROM "workspace_analytics_events" e WHERE NOT EXISTS (SELECT 1 FROM "users" u WHERE u."id" = e."workspaceId");'
-    printf '%s\n' "$repair_sql" | pnpm exec prisma db execute --stdin
+    printf '%s\n' "$repair_sql" | pnpm exec prisma db execute --stdin --url "$DATABASE_URL"
     continue
   fi
 
