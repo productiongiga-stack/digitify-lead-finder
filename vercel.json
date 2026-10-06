@@ -28,7 +28,7 @@
     },
     {
       "path": "/api/cron/lead-analysis",
-      "schedule": "*/5 * * * *"
+      "schedule": "30 10 * * *"
     }
   ]
 }
