@@ -8,7 +8,11 @@ cd "$root/packages/db"
 # Keep the application URL as a fallback. Some Supabase projects expose a
 # direct hostname that is IPv6-only from Vercel build machines, while the
 # session pooler used by the app remains reachable.
-application_url="${DATABASE_URL:-${POSTGRES_PRISMA_URL:-${POSTGRES_URL:-}}}"
+# Use the session-mode pooler for migration fallback. `POSTGRES_PRISMA_URL`
+# is the transaction-mode URL intended for the serverless runtime and Prisma
+# migrations can hang or fail against it. Runtime code still prefers that
+# transaction URL when `DATABASE_URL` is absent.
+application_url="${DATABASE_URL:-${POSTGRES_URL:-${POSTGRES_PRISMA_URL:-}}}"
 
 # Migrations must use a direct (non-pooler) connection — Supabase pooler rejects DDL.
 # Vercel's Supabase integration may expose the direct connection under the
