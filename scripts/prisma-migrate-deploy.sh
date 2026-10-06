@@ -27,6 +27,12 @@ if [[ -z "$migrate_url" && -n "${POSTGRES_HOST:-}" && -n "${POSTGRES_USER:-}" &&
   migrate_url="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:5432/${db_name}"
 fi
 
+# Keep the privileged direct URL around. On Supabase the direct hostname can
+# be unreachable from Vercel while the same credentials are reachable through
+# the session pooler. The application URL may be a restricted role, so it
+# cannot create Prisma's metadata table.
+privileged_url="$migrate_url"
+
 if [[ -n "$migrate_url" ]]; then
   export DATABASE_URL="$migrate_url"
   export DIRECT_URL="$migrate_url"
@@ -72,6 +78,30 @@ if [[ "$migration_output" == *"P1001"* && -n "$application_url" && "$application
   migration_status=$?
   set -e
   printf '%s\n' "$migration_output"
+fi
+
+# If the application pooler is reachable but intentionally cannot create
+# schema objects, retry with the direct credentials on that pooler host. This
+# avoids requiring a public IPv4 route to the Supabase database hostname.
+if [[ "$migration_output" == *"permission denied for schema public"* && -n "$privileged_url" && -n "$application_url" ]]; then
+  pooler_url="$(PRIVILEGED_URL="$privileged_url" APPLICATION_URL="$application_url" node -e '
+    const privileged = new URL(process.env.PRIVILEGED_URL);
+    const pooler = new URL(process.env.APPLICATION_URL);
+    privileged.hostname = pooler.hostname;
+    privileged.port = pooler.port;
+    process.stdout.write(privileged.toString());
+  ')"
+  if [[ -n "$pooler_url" ]]; then
+    echo "==> application role cannot migrate; retrying with direct credentials through the reachable pooler"
+    export DATABASE_URL="$pooler_url"
+    export DIRECT_URL="$pooler_url"
+    export PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK="1"
+    set +e
+    migration_output="$(pnpm exec prisma migrate deploy 2>&1)"
+    migration_status=$?
+    set -e
+    printf '%s\n' "$migration_output"
+  fi
 fi
 
 # Some early production databases were created from idempotent catch-up SQL
