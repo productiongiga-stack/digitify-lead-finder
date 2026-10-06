@@ -225,12 +225,12 @@ export default function CreativeStudioPage() {
     setState({ ...restored, fields });
     setSaved(true);
   }, [draft.data]);
-  const save = useCallback(async () => {
-    if (saving.current || !latest.current.goal) return;
+  const save = useCallback(async (): Promise<boolean> => {
+    if (saving.current || !latest.current.goal) return false;
     const snapshot = JSON.stringify(latest.current);
     if (snapshot === savedSnapshot.current) {
       setSaved(true);
-      return;
+      return true;
     }
     saving.current = true;
     try {
@@ -256,8 +256,10 @@ export default function CreativeStudioPage() {
       savedSnapshot.current = snapshot;
       setSaved(true);
       setSaveError("");
+      return true;
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Opslaan mislukt.");
+      return false;
     } finally {
       saving.current = false;
     }
@@ -271,10 +273,13 @@ export default function CreativeStudioPage() {
   // An edit made while a save was running is saved by the next interval.
   useEffect(() => {
     const timer = setInterval(() => {
-      if (!saveError) void save();
+      // Autosave retries after a transient API/database error. The error stays
+      // visible so the user knows what happened, while the next attempt can
+      // recover without requiring a full page refresh.
+      if (!saving.current) void save();
     }, 2000);
     return () => clearInterval(timer);
-  }, [save, saveError]);
+  }, [save]);
   function changeMediaType(next: string) {
     setSocialReady(false);
     setState((previous) => {
@@ -900,7 +905,6 @@ export default function CreativeStudioPage() {
                   {step < 3 && (
                     <Button
                       disabled={
-                        Boolean(saveError) ||
                         brandMissing ||
                         (step === 2 && !ready)
                       }
