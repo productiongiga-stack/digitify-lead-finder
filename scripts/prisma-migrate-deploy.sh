@@ -14,10 +14,13 @@ application_url="${DATABASE_URL:-${POSTGRES_PRISMA_URL:-${POSTGRES_URL:-}}}"
 # Vercel's Supabase integration may expose the direct connection under the
 # lowercase `database` key; prefer it when the explicit aliases are absent.
 migrate_url="${DIRECT_URL:-${POSTGRES_URL_NON_POOLING:-${database:-${POSTGRES_URL:-}}}}"
-if [[ "$migrate_url" == *"pooler"* ]]; then
+# An explicit DIRECT_URL is authoritative. Supabase's session pooler is a
+# supported migration endpoint when it is configured by the operator; only
+# reject poolers discovered indirectly through a generic alias.
+if [[ -z "${DIRECT_URL:-}" && "$migrate_url" == *"pooler"* ]]; then
   migrate_url="${POSTGRES_URL_NON_POOLING:-}"
 fi
-if [[ "$migrate_url" == *"pooler"* || "$migrate_url" == *"localhost"* || "$migrate_url" == *"127.0.0.1"* ]]; then
+if [[ "$migrate_url" == *"localhost"* || "$migrate_url" == *"127.0.0.1"* || ( -z "${DIRECT_URL:-}" && "$migrate_url" == *"pooler"* ) ]]; then
   migrate_url=""
 fi
 
