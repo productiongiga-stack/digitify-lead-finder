@@ -27,6 +27,14 @@ test.describe("Leads list smoke", () => {
     await page.getByLabel("Wachtwoord").fill(password);
     await page.getByRole("button", { name: "Inloggen" }).click();
     await expect(page).not.toHaveURL(/\/login(?:$|\?)/, { timeout: 30_000 });
+    page.on("response", async (response) => {
+      if (!response.url().includes("lead.listSummary")) return;
+      try {
+        console.log("LEADS_SMOKE_RESPONSE", response.status(), (await response.text()).slice(0, 2000));
+      } catch {
+        // The response may already have been consumed by Playwright.
+      }
+    });
     await page.goto("/leads");
     // The table keeps the row itself keyboard-focusable, but the action
     // button is the stable affordance across desktop/tablet responsive
