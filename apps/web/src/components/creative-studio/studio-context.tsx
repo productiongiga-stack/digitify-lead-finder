@@ -199,7 +199,7 @@ export function CreditQuote({
   if (!pricing.wallet.data.providerReady)
     return (
       <p role="alert" className="text-sm">
-        ! Digitify moet AI-generatie nog activeren. Je concept wordt bewaard.
+        ! Centrale AI is nog niet geconfigureerd. Je concept blijft bewaard; een beheerder moet de provider activeren via Platformbeheer → AI & media.
       </p>
     );
   return (

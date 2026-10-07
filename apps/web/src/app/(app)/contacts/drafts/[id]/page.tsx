@@ -53,6 +53,7 @@ import {
   getQuoteConfiguratorUrl,
 } from "@/lib/quote-outbound";
 import { useShellEmailPreviewProps } from "@/lib/outbound-email-settings";
+import { userFacingError } from "@/lib/user-facing-error";
 import { OutboundDraftTimeline } from "@/components/outbound/outbound-draft-timeline";
 import {
   OutboundDraftStatusBanner,
@@ -168,7 +169,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       }
     },
     onError: (error) => {
-      setRewriteError(error.message);
+      setRewriteError(userFacingError(error, "Herschrijven mislukt. Probeer opnieuw."));
       setRewriteResult(null);
     },
   });
@@ -728,18 +729,24 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       </div>
 
       {/* Mutation error display */}
-      {(updateDraft.error || submitForApproval.error || approve.error || reject.error || sendEmail.error) && (
+      {(updateDraft.error || submitForApproval.error || approve.error || reject.error || sendEmail.error || saveRecipientAsLead.error) && (
         <Card className="border-destructive/50 bg-destructive/5">
           <CardContent className="flex items-start gap-3 p-4">
             <AlertTriangle className="mt-0.5 h-5 w-5 text-destructive" />
             <div>
               <p className="text-sm font-medium text-destructive">Fout</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                {updateDraft.error?.message ||
-                  submitForApproval.error?.message ||
-                  approve.error?.message ||
-                  reject.error?.message ||
-                  sendEmail.error?.message}
+                {updateDraft.error
+                  ? userFacingError(updateDraft.error, "Opslaan mislukt. Probeer opnieuw.")
+                  : submitForApproval.error
+                    ? userFacingError(submitForApproval.error, "Indienen mislukt. Controleer de inhoud.")
+                    : approve.error
+                      ? userFacingError(approve.error, "Goedkeuren mislukt. Probeer opnieuw.")
+                      : reject.error
+                        ? userFacingError(reject.error, "Afkeuren mislukt. Probeer opnieuw.")
+                        : sendEmail.error
+                          ? userFacingError(sendEmail.error, "Verzenden mislukt. Controleer SMTP en probeer opnieuw.")
+                          : userFacingError(saveRecipientAsLead.error, "Opslaan als lead mislukt. Probeer opnieuw.")}
               </p>
             </div>
           </CardContent>

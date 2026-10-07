@@ -107,7 +107,7 @@ export const MARKETING_BUNDLES: MarketingBundleDefinition[] = [
     monthly: 119,
     chipClass: "border-[#10b981]/25 bg-[#10b981]/10 text-[#0f7f5b]",
     included: ["Social Planner", "Creative Studio", "Meta Ads en Google Ads", "White-label branding"],
-    technicalModuleIds: ["social", "creativeStudio", "metaAds", "googleAds"],
+    technicalModuleIds: ["social", "creativeStudio", "metaAds", "googleAds", "presentations"],
     routes: ["/social", "/creative-studio", "/meta-ads", "/google-ads", "/settings/branding"],
     legacySolutionSlugs: ["white-label"],
     detailIntro: "Marketing Studio brengt merkassets, contentplanning en advertentievoorbereiding samen zonder je commerciële context te verliezen.",

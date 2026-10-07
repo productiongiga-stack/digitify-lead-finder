@@ -37,6 +37,7 @@ import {
   SearchCheck,
   HelpCircle,
   ShieldCheck,
+  Presentation,
 } from "lucide-react";
 import { canAccessSettingsPath } from "@/lib/permissions";
 
@@ -131,6 +132,7 @@ export const SIDEBAR_NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/social", label: "Social Planner", icon: Megaphone, moduleId: "social" },
       { href: "/creative-studio", label: "Creative Studio", icon: Sparkles, moduleId: "creativeStudio" },
+      { href: "/presentations", label: "Presentation Studio", icon: Presentation, moduleId: "presentations" },
       ...ADS_NAV_ITEMS,
     ],
   },
@@ -177,6 +179,7 @@ export const ALL_MODULES = [
   { id: "campaigns", label: "Campagnes" },
   { id: "social", label: "Social Planner" },
   { id: "creativeStudio", label: "Creative Studio" },
+  { id: "presentations", label: "Presentation Studio" },
   { id: "metaAds", label: "Meta Ads" },
   { id: "googleAds", label: "Google Ads" },
   { id: "contacts", label: "E-mail & Contacten" },
@@ -257,6 +260,7 @@ const PAGE_TITLE_ROUTES: PageTitleRoute[] = [
   { path: "/campaigns", title: "Campagneprofielen" },
   { path: "/social", title: "Social Planner" },
   { path: "/creative-studio", title: "Creative Studio" },
+  { path: "/presentations", title: "Presentation Studio" },
   { path: "/settings/creative-studio", title: "Creative Studio instellingen" },
   { path: "/meta-ads", title: "Meta Ads" },
   { path: "/google-ads", title: "Google Ads" },

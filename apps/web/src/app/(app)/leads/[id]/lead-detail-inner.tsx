@@ -30,6 +30,7 @@ import {
 import { useUIStore } from "@/stores/ui-store";
 import { useToast } from "@/components/feedback/toast-provider";
 import { LeadEmailTimeline } from "@/components/leads/lead-email-timeline";
+import { userFacingError } from "@/lib/user-facing-error";
 
 /* ---------- helpers ---------- */
 
@@ -181,7 +182,7 @@ export function LeadDetailInner() {
     onError: (error) => {
       showToast({
         title: "Analyse mislukt",
-        description: error.message,
+        description: userFacingError(error, "De website kon niet worden geanalyseerd. Controleer de URL en probeer opnieuw."),
         variant: "error",
       });
     },
@@ -197,7 +198,7 @@ export function LeadDetailInner() {
       void analysisStatusQuery.refetch();
       showToast({ title: "AI-analyse ingepland", description: "De analyse wordt op de achtergrond uitgevoerd." });
     },
-    onError: (error) => showToast({ title: "AI-analyse kon niet starten", description: error.message, variant: "error" }),
+    onError: (error) => showToast({ title: "AI-analyse kon niet starten", description: userFacingError(error, "Controleer je AI-provider en probeer opnieuw."), variant: "error" }),
   });
   const draftEmail = trpc.openclaw.draftEmail.useMutation({
     onSuccess: (data) => {

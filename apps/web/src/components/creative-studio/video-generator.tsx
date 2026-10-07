@@ -27,6 +27,7 @@ import {
 } from "./creative-studio-ui";
 import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/components/feedback/toast-provider";
+import { userFacingError } from "@/lib/user-facing-error";
 import { LIBRARY_SAVE_LABEL, MEDIA_MODELS_QUERY_OPTIONS, MUAPI_KEY_QUERY_OPTIONS } from "./constants";
 import {
   filterModelsByMode,
@@ -157,12 +158,12 @@ export function VideoGenerator({ socialPostId }: Props) {
       requestKey.current = null;
       showToast({ title: "Videogeneratie gestart", description: "Dit kan enkele minuten duren." });
     },
-    onError: (error) => showToast({ title: "Generatie mislukt", description: error.message, variant: "error" }),
+    onError: (error) => showToast({ title: "Generatie mislukt", description: userFacingError(error, "Controleer je AI-provider, credits en invoer."), variant: "error" }),
   });
 
   const importToBlob = trpc.media.importToBlob.useMutation({
     onSuccess: () => showToast({ title: "Video opgeslagen in bibliotheek" }),
-    onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
+    onError: (error) => showToast({ title: "Opslaan mislukt", description: userFacingError(error, "Het resultaat blijft beschikbaar. Probeer opnieuw op te slaan."), variant: "error" }),
   });
 
   const uploadReference = trpc.media.uploadReference.useMutation();

@@ -44,6 +44,7 @@ import { aseLicenseRouter } from "./routers/ase-license.router";
 import { adsCopilotRouter } from "./routers/ads-copilot.router";
 import { platformRouter } from "./routers/platform.router";
 import { tenantRouter } from "./routers/tenant.router";
+import { presentationRouter } from "./routers/presentation.router";
 
 export const appRouter = router({
   dashboard: dashboardRouter,
@@ -91,6 +92,7 @@ export const appRouter = router({
   adsCopilot: adsCopilotRouter,
   platform: platformRouter,
   tenant: tenantRouter,
+  presentation: presentationRouter,
 });
 
 export type AppRouter = typeof appRouter;

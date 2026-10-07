@@ -64,7 +64,11 @@ export const fileRouter = router({
   folders: protectedProcedure.query(({ ctx }) => ctx.db.fileFolder.findMany({ where: { workspaceId: ctx.user.workspaceId! }, orderBy: { name: "asc" } })),
 
   createFolder: mutationProcedure.input(z.object({ name: z.string().trim().min(1).max(120), parentId: z.string().nullable().optional() })).mutation(async ({ ctx, input }) => {
-    return ctx.db.fileFolder.create({ data: { workspaceId: ctx.user.ownerUserId!, createdById: ctx.user.id, name: input.name, parentId: input.parentId ?? null } });
+    if (input.parentId) {
+      const parent = await ctx.db.fileFolder.findFirst({ where: { id: input.parentId, workspaceId: ctx.user.workspaceId! }, select: { id: true } });
+      if (!parent) throw new TRPCError({ code: "NOT_FOUND", message: "Bovenliggende map niet gevonden." });
+    }
+    return ctx.db.fileFolder.create({ data: { workspaceId: ctx.user.workspaceId!, createdById: ctx.user.id, name: input.name, parentId: input.parentId ?? null } });
   }),
 
   updateMetadata: mutationProcedure.input(z.object({ id: z.string(), name: z.string().trim().min(1).max(240).optional(), folderId: z.string().nullable().optional() })).mutation(async ({ ctx, input }) => {

@@ -31,9 +31,7 @@ function ReviewEmbedContent() {
 
   const color = params.get("color") || "#f59e0b";
   const title = params.get("title") || "Hoe was uw ervaring?";
-  const description =
-    params.get("description") ||
-    "Geef eerst intern uw score. Bij 4 of 5 sterren kunt u meteen door naar het reviewplatform van uw keuze.";
+  const description = params.get("description") || "Deel kort hoe je onze service hebt ervaren.";
   const company = params.get("company") || "Onze service";
   const tenant = params.get("tenant") || "";
   const configurationMissing = !tenant;
@@ -109,8 +107,7 @@ function ReviewEmbedContent() {
     setStatus(null);
     try {
       await saveInternalFeedback({ platform });
-      window.open(url, "_blank", "noopener,noreferrer");
-      setStatus(getText("reviews.embed_platform_opened", { platformLabel: platform }));
+      window.location.assign(url);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Reviewflow opslaan mislukt.");
     } finally {
@@ -123,7 +120,12 @@ function ReviewEmbedContent() {
     setSelectionLocked(true);
     setStatus(null);
     if (rating >= 4) {
-      setStep("platforms");
+      const firstLink = links[0];
+      if (firstLink?.url) {
+        void handlePlatformClick(firstLink.url, firstLink.label);
+      } else {
+        setStep("platforms");
+      }
       return;
     }
     setStep("feedback");
@@ -192,9 +194,6 @@ function ReviewEmbedContent() {
                 ? getText("reviews.embed_hint_positive")
                 : getText("reviews.embed_hint_negative")}
           </p>
-          <p className="mt-2 text-center text-xs text-slate-400">
-            1 tot 3 sterren: interne feedback. 4 of 5 sterren: publieke review.
-          </p>
         </div>
 
         {step === "rating" && rating > 0 ? (
@@ -205,11 +204,11 @@ function ReviewEmbedContent() {
                   ? getText("reviews.embed_continue_positive_title")
                   : getText("reviews.embed_continue_negative_title")}
               </p>
-              <p className="mt-2 text-sm text-slate-600">
-                {positiveFlow
-                  ? getText("reviews.embed_continue_positive_body")
-                  : getText("reviews.embed_continue_negative_body")}
-              </p>
+              {!positiveFlow ? (
+                <p className="mt-2 text-sm text-slate-600">
+                  {getText("reviews.embed_continue_negative_body")}
+                </p>
+              ) : null}
               <button
                 type="button"
                 onClick={handleContinue}
@@ -217,7 +216,7 @@ function ReviewEmbedContent() {
                 className="mt-5 h-12 rounded-full px-6 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50"
                 style={{ backgroundColor: color }}
               >
-                {submitting ? "Bezig..." : getText("reviews.embed_continue_button")}
+                {submitting ? "Bezig..." : positiveFlow ? "Naar review" : getText("reviews.embed_continue_button")}
               </button>
             </div>
           </div>
@@ -272,6 +271,17 @@ function ReviewEmbedContent() {
               style={{ backgroundColor: color }}
             >
               {submitting ? "Bezig..." : getText("reviews.embed_feedback_submit")}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStep("rating");
+                setSelectionLocked(false);
+                setStatus(null);
+              }}
+              className="h-10 w-full rounded-full border border-slate-200 px-5 text-sm font-medium text-slate-700"
+            >
+              Terug naar sterren
             </button>
           </div>
         ) : null}

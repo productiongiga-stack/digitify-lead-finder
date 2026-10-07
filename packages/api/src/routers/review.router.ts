@@ -5,7 +5,7 @@ import { loadEmailSettings } from "../lib/email-sender";
 import { sendTemplatedEmail } from "../lib/send-templated-email";
 import { assertLeadAccess, resolveLeadOwnerId } from "../lib/tenant";
 
-const REVIEW_STATUSES = ["PENDING", "SENT", "OPENED", "REVIEWED", "FEEDBACK"] as const;
+const REVIEW_STATUSES = ["PENDING", "SENDING", "SENT", "OPENED", "REVIEWED", "FEEDBACK"] as const;
 const reviewStatusEnum = z.enum(REVIEW_STATUSES);
 
 function getAppUrl() {
@@ -152,41 +152,56 @@ export const reviewRouter = router({
         include: { lead: { select: { id: true, companyName: true } } },
       });
       if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "Review request niet gevonden" });
-      if (review.status === "SENT" || review.status === "REVIEWED") {
+      if (review.status === "SENDING" || review.status === "SENT" || review.status === "REVIEWED") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Review request is al verzonden" });
       }
 
-      const cfg = await loadEmailSettings(ctx.db, {
-        workspaceId: ctx.user.workspaceId!,
-        memberId: ctx.user.id,
+      // Claim before talking to SMTP so double clicks or two browser tabs
+      // cannot send the same review request twice.
+      const claimed = await ctx.db.reviewRequest.updateMany({
+        where: { id: review.id, createdById: leadOwnerId, status: { in: ["PENDING", "OPENED"] } },
+        data: { status: "SENDING" },
       });
+      if (claimed.count !== 1) {
+        throw new TRPCError({ code: "CONFLICT", message: "Deze review wordt al verwerkt. Vernieuw de pagina." });
+      }
+
       const platformLabel = getPlatformLabel(review.platform);
-      const reviewGateUrl = getReviewGateUrl(review.id);
-
-      const reviewBody = [
-        `Bedankt voor uw vertrouwen in ${cfg.companyName}! We hopen dat u tevreden bent met onze samenwerking.`,
-        ``,
-        `Mag ik u vragen om eerst kort uw ervaring met ons te beoordelen?`,
-        ``,
-        `Als u 4 of 5 sterren geeft, sturen we u meteen door naar ${platformLabel}. Bij een lagere score kunnen we uw feedback intern oppakken en verbeteren.`,
-      ].join("\n");
-
-      const result = await sendTemplatedEmail(ctx.db, ctx.user.workspaceId!, {
-        templateKey: "review.request",
-        toEmail: review.clientEmail,
-        subjectOverride: `${review.clientName}, hoe was uw ervaring met ${cfg.companyName}?`,
-        placeholderContext: {
-          contactName: review.clientName,
-          senderCompany: cfg.companyName,
-          reviewBody,
-          reviewLink: reviewGateUrl,
-        },
-        recipientCompany: review.lead?.companyName ?? review.clientName,
-        leadId: review.leadId || undefined,
-        userId: { workspaceId: ctx.user.workspaceId!, memberId: ctx.user.id },
-      });
+      let result: Awaited<ReturnType<typeof sendTemplatedEmail>>;
+      try {
+        const cfg = await loadEmailSettings(ctx.db, {
+          workspaceId: ctx.user.workspaceId!,
+          memberId: ctx.user.id,
+        });
+        const reviewGateUrl = getReviewGateUrl(review.id);
+        const reviewBody = [
+          `Bedankt voor uw vertrouwen in ${cfg.companyName}! We hopen dat u tevreden bent met onze samenwerking.`,
+          ``,
+          `Mag ik u vragen om eerst kort uw ervaring met ons te beoordelen?`,
+          ``,
+          `Als u 4 of 5 sterren geeft, sturen we u meteen door naar ${platformLabel}. Bij een lagere score kunnen we uw feedback intern oppakken en verbeteren.`,
+        ].join("\n");
+        result = await sendTemplatedEmail(ctx.db, ctx.user.workspaceId!, {
+          templateKey: "review.request",
+          toEmail: review.clientEmail,
+          subjectOverride: `${review.clientName}, hoe was uw ervaring met ${cfg.companyName}?`,
+          placeholderContext: {
+            contactName: review.clientName,
+            senderCompany: cfg.companyName,
+            reviewBody,
+            reviewLink: reviewGateUrl,
+          },
+          recipientCompany: review.lead?.companyName ?? review.clientName,
+          leadId: review.leadId || undefined,
+          userId: { workspaceId: ctx.user.workspaceId!, memberId: ctx.user.id },
+        });
+      } catch (error) {
+        await ctx.db.reviewRequest.updateMany({ where: { id: review.id, createdById: leadOwnerId, status: "SENDING" }, data: { status: "PENDING" } });
+        throw error;
+      }
 
       if (!result.success) {
+        await ctx.db.reviewRequest.updateMany({ where: { id: review.id, createdById: leadOwnerId, status: "SENDING" }, data: { status: "PENDING" } });
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: result.error || "Review e-mail verzenden mislukt",
@@ -208,7 +223,7 @@ export const reviewRouter = router({
             type: "EMAIL_SENT",
             title: `Review verzoek verzonden naar ${review.clientEmail} (${platformLabel})`,
           },
-        });
+        }).catch(() => null);
       }
 
       return updated;
@@ -224,9 +239,7 @@ export const reviewRouter = router({
       });
 
       // Filter to only sendable reviews (PENDING status)
-      const sendable = reviews.filter(
-        (r) => r.status !== "SENT" && r.status !== "REVIEWED"
-      );
+      const sendable = reviews.filter((r) => r.status === "PENDING" || r.status === "OPENED");
 
       if (sendable.length === 0) {
         throw new TRPCError({
@@ -242,6 +255,14 @@ export const reviewRouter = router({
       const results: { id: string; success: boolean; error?: string }[] = [];
 
       for (const review of sendable) {
+        const claimed = await ctx.db.reviewRequest.updateMany({
+          where: { id: review.id, createdById: leadOwnerId, status: { in: ["PENDING", "OPENED"] } },
+          data: { status: "SENDING" },
+        });
+        if (claimed.count !== 1) {
+          results.push({ id: review.id, success: false, error: "Deze review wordt al verwerkt." });
+          continue;
+        }
         try {
           const platformLabel = getPlatformLabel(review.platform);
           const reviewGateUrl = getReviewGateUrl(review.id);
@@ -283,14 +304,16 @@ export const reviewRouter = router({
                   type: "EMAIL_SENT",
                   title: `Review verzoek verzonden naar ${review.clientEmail} (${platformLabel})`,
                 },
-              });
+              }).catch(() => null);
             }
 
             results.push({ id: review.id, success: true });
           } else {
+            await ctx.db.reviewRequest.updateMany({ where: { id: review.id, createdById: leadOwnerId, status: "SENDING" }, data: { status: "PENDING" } });
             results.push({ id: review.id, success: false, error: result.error });
           }
         } catch (err: any) {
+          await ctx.db.reviewRequest.updateMany({ where: { id: review.id, createdById: leadOwnerId, status: "SENDING" }, data: { status: "PENDING" } });
           results.push({ id: review.id, success: false, error: err.message });
         }
       }

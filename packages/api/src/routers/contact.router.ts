@@ -619,6 +619,8 @@ export const contactRouter = router({
           title: "E-mail draft aangemaakt",
           metadata: { draftId: draft.id, toEmail, workspaceId },
         },
+      }).catch((error) => {
+        log.email.warn("Draft audit logging failed", { draftId: draft.id, workspaceId }, error);
       });
 
       return draft;
@@ -779,6 +781,8 @@ export const contactRouter = router({
           type: "EMAIL_APPROVED",
           title: "E-mail goedgekeurd",
         },
+      }).catch((error) => {
+        log.email.warn("Approval audit logging failed", { draftId: draft.id, workspaceId: ctx.user.workspaceId! }, error);
       });
 
       return updated;

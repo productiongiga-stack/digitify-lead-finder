@@ -6,6 +6,7 @@ import { prisma } from "@digitify/db";
 import { recordSecurityAuditEvent } from "@digitify/api/src/lib/security-audit";
 import { getCurrentUser } from "@/lib/auth/session";
 import { readLocalWorkspaceFile } from "@digitify/api/src/lib/file-storage";
+import { resolveLeadOwnerId } from "@digitify/api/src/lib/tenant";
 
 function safeDownloadName(name: string) {
   return name.replace(/[^a-zA-Z0-9._ -]+/g, "-").slice(0, 180) || "bestand";
@@ -15,7 +16,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Niet geauthenticeerd." }, { status: 401 });
   const { id } = await params;
-  const file = await prisma.workspaceFile.findFirst({ where: { id, createdById: user.workspaceId, deletedAt: null } });
+  const ownerUserId = await resolveLeadOwnerId(prisma, user.workspaceId);
+  const file = await prisma.workspaceFile.findFirst({ where: { id, createdById: ownerUserId, deletedAt: null } });
   if (!file) return NextResponse.json({ error: "Bestand niet gevonden." }, { status: 404 });
 
   const headers = {

@@ -24,6 +24,7 @@ import {
 } from "./creative-studio-ui";
 import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/components/feedback/toast-provider";
+import { userFacingError } from "@/lib/user-facing-error";
 import { LIBRARY_SAVE_LABEL, MEDIA_MODELS_QUERY_OPTIONS, MUAPI_KEY_QUERY_OPTIONS } from "./constants";
 import { type ModelListItem } from "./generator-utils";
 import { MediaJobProgress } from "./media-job-progress";
@@ -136,7 +137,7 @@ export function LipSyncGenerator({ socialPostId }: Props) {
 
   const importToBlob = trpc.media.importToBlob.useMutation({
     onSuccess: () => showToast({ title: "Video opgeslagen in bibliotheek" }),
-    onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
+    onError: (error) => showToast({ title: "Opslaan mislukt", description: userFacingError(error, "Het resultaat blijft beschikbaar. Probeer opnieuw op te slaan."), variant: "error" }),
   });
 
   const uploadMedia = trpc.media.uploadMediaFile.useMutation();

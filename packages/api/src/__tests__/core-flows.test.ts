@@ -9,16 +9,22 @@ import { taskRouter } from "../routers/task.router";
 
 const TEST_USER_ID = "user_abcd1234";
 
-function makeCtx(db: Record<string, unknown>) {
-  const userFindUnique = vi.fn().mockResolvedValue({
+function makeCtx(db: Record<string, unknown>, options: { workspaceId?: string; ownerUserId?: string } = {}) {
+  const workspaceId = options.workspaceId ?? TEST_USER_ID;
+  const ownerUserId = options.ownerUserId ?? TEST_USER_ID;
+  const userFindUnique = vi.fn().mockImplementation(async ({ where }: { where?: { id?: string } } = {}) => {
+    if (where?.id === workspaceId && workspaceId !== TEST_USER_ID) return null;
+    return {
     id: TEST_USER_ID,
     role: "OWNER",
     workspaceOwnerId: null,
+    };
   });
   const userFindFirst = vi.fn().mockResolvedValue(null);
 
   const database = {
       user: { findUnique: userFindUnique, findFirst: userFindFirst },
+      workspace: { findUnique: vi.fn().mockResolvedValue({ ownerUserId }) },
       ...db,
   } as any;
   database.$transaction = vi.fn(async (run: (tx: any) => unknown) => run(database));
@@ -38,7 +44,8 @@ function makeCtx(db: Record<string, unknown>) {
       email: "owner@example.com",
       name: "Owner",
       role: "OWNER",
-      workspaceId: TEST_USER_ID,
+      workspaceId,
+      ownerUserId,
     },
     requestId: "req_test",
   };
@@ -110,6 +117,42 @@ describe("lead flow", () => {
     expect(leadFindFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: "lead_workflow", createdById: TEST_USER_ID }),
     }));
+  });
+
+  it("uses the workspace owner for legacy lead workflow data", async () => {
+    const leadFindFirst = vi.fn().mockResolvedValue({
+      id: "lead_team",
+      status: "NEW",
+      pipelineStage: null,
+      overallScore: null,
+      scorePriority: null,
+      email: null,
+      doNotContact: false,
+      contacts: [],
+      emailDrafts: [],
+    });
+    const quoteFindMany = vi.fn().mockResolvedValue([]);
+    const invoiceFindMany = vi.fn().mockResolvedValue([]);
+    const taskFindMany = vi.fn().mockResolvedValue([]);
+    const caller = leadRouter.createCaller(
+      makeCtx(
+        {
+          lead: { findFirst: leadFindFirst },
+          activity: { findMany: vi.fn().mockResolvedValue([]) },
+          quote: { findMany: quoteFindMany },
+          workspaceInvoice: { findMany: invoiceFindMany },
+          workspaceTask: { findMany: taskFindMany },
+        },
+        { workspaceId: "workspace_team", ownerUserId: "owner_team" },
+      ),
+    );
+
+    await caller.getWorkflowSummary({ leadId: "lead_team" });
+
+    expect(leadFindFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "lead_team", createdById: "owner_team" } }));
+    expect(quoteFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { createdById: "owner_team", leadId: "lead_team" } }));
+    expect(invoiceFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { createdById: "owner_team", leadId: "lead_team" } }));
+    expect(taskFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ createdById: "owner_team", relatedId: "lead_team" }) }));
   });
 });
 

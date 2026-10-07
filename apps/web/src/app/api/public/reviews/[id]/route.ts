@@ -126,7 +126,6 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
     leadCompanyName: review.lead?.companyName || "",
     status: review.status,
     rating: review.rating,
-    feedback: review.feedback,
     texts: Object.fromEntries(
       REVIEW_PUBLIC_TEXT_FIELDS.map((field) => [
         field.key,

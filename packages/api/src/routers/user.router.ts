@@ -28,6 +28,7 @@ const MANAGEABLE_MODULE_IDS = [
   "campaigns",
   "social",
   "creativeStudio",
+  "presentations",
   "metaAds",
   "googleAds",
   "contacts",
