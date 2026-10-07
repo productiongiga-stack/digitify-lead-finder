@@ -41,7 +41,7 @@ Begrenzingen: maximaal 20 ondersteunde campagnes per sync en 10 recente campagne
 
 ## Configuratie en validatie vóór livegebruik
 
-- Google: OAuth, refresh token, developer token, klantaccount en eventueel manager-ID. Meta: app-configuratie, token, advertentieaccount, vereiste marketingpermissions en business-/page-toegang.
+- Google: OAuth, refresh token, Google Cloud project API access, klantaccount en eventueel manager-ID. Een legacy developer token blijft alleen nodig voor oudere providerconfiguraties. Meta: app-configuratie, token, advertentieaccount, vereiste marketingpermissions en business-/page-toegang.
 - AI: bestaande providerkey en model per workspace. Tokens blijven in de bestaande beveiligde settingslaag; nieuwe workflowtabellen bewaren geen OAuth-tokenvelden.
 - Pas de vier nieuwe Prisma-migraties toe op het bedoelde doelaccount. Deze sessie heeft ze uitsluitend op de bestaande lokale PostgreSQL-database toegepast, zonder reset van gegevens. Herstart de lokale devserver na Prisma-generatie zodat hij het nieuwe model gebruikt.
 - Verifieer met echte testaccounts de permissions, RSA field masks, PMax-minimumassets, Meta replacement en gedeeltelijke fouten. Live credential-/scope-/tokenrefreshgedrag is niet lokaal bewezen.

@@ -166,8 +166,8 @@ The release check also runs `db:check-role`; it must pass against the same datab
 3. **Authorized redirect URI** (Production + local):
    - `https://leads.digitify.be/api/integrations/google-ads/callback`
    - `http://localhost:3000/api/integrations/google-ads/callback`
-4. **Google Ads API Center** — create a **developer token** (Test for dev; Basic/Standard for production).
-5. **Vercel env** — `GOOGLE_ADS_DEVELOPER_TOKEN` (required). Optional `GOOGLE_ADS_LOGIN_CUSTOMER_ID` if using an MCC.
+4. **Google Ads API access** — grant API access to the Google Cloud project behind the OAuth client in Google Cloud Console → Google Ads API → API access. The legacy developer-token env is retained only for compatibility and is no longer required for new projects. Optional `GOOGLE_ADS_LOGIN_CUSTOMER_ID` is used when working through an MCC.
+5. **Vercel env** — keep `GOOGLE_ADS_DEVELOPER_TOKEN` only when an older provider account still exposes one; it is not the primary access gate for the current client.
 6. **Integraties** → Google Ads → koppelen → selecteer customer ID op `/google-ads` → Instellingen.
 7. **Supabase** — if tables are missing after deploy, run `packages/db/prisma/manual/google-ads-only.sql` in SQL Editor (do not rely on `db:migrate` during Vercel build).
 

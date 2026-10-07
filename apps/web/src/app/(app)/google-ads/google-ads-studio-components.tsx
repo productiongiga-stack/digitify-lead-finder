@@ -399,7 +399,7 @@ export function explainGoogleError(raw?: string | null): ErrorExplanation | null
     label: "Google Ads API fout",
     code,
     message,
-    actions: ["Controleer customer, OAuth, developer token en billing status.", "Als de fout een veldpad bevat, pas dat veld in de builder of advanced JSON aan."],
+    actions: ["Controleer customer, OAuth, Google Cloud API access en billing status.", "Als de fout een veldpad bevat, pas dat veld in de builder of advanced JSON aan."],
   };
 }
 
