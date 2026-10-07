@@ -7,6 +7,7 @@ import { recordSecurityAuditEvent } from "@digitify/api/src/lib/security-audit";
 import { getCurrentUser } from "@/lib/auth/session";
 import { readLocalWorkspaceFile } from "@digitify/api/src/lib/file-storage";
 import { resolveLeadOwnerId } from "@digitify/api/src/lib/tenant";
+import { getBlobToken } from "@digitify/api/src/lib/blob-storage";
 
 function safeDownloadName(name: string) {
   return name.replace(/[^a-zA-Z0-9._ -]+/g, "-").slice(0, 180) || "bestand";
@@ -50,7 +51,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       if (!parsed.pathname.includes(`/workspaces/${user.workspaceId}/`)) {
         return NextResponse.json({ error: "Bestand niet gevonden." }, { status: 404 });
       }
-      const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+      const token = getBlobToken("private");
       if (!token) return NextResponse.json({ error: "Bestand kan niet worden geladen." }, { status: 503 });
       const blob = await getBlob(file.storageUrl, { access: "private", token, useCache: false });
       if (!blob?.stream) return NextResponse.json({ error: "Bestand kan niet worden geladen." }, { status: 404 });

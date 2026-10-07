@@ -8,6 +8,7 @@ import { readLocalWorkspaceFile, removeLocalWorkspaceFile } from "../lib/file-st
 import { loadWorkspaceSettingRows } from "../lib/workspace-settings";
 import { getGoogleDriveFileMetadata, uploadGoogleDriveFile } from "../lib/google-drive";
 import { workspaceScopeFromUser } from "../lib/workspace-settings";
+import { isBlobConfigured } from "../lib/blob-storage";
 
 const relatedTypeSchema = z.enum(["LEAD", "QUOTE", "CUSTOMER", "PROJECT"]).optional();
 const sortSchema = z.enum(["createdAt", "name", "size"]).default("createdAt");
@@ -58,7 +59,7 @@ export const fileRouter = router({
       ctx.db.workspaceFile.aggregate({ where: { createdById: ctx.user.ownerUserId!, uploadedById: ctx.user.id, deletedAt: null, storageProvider: { in: ["LOCAL", "BLOB"] } }, _sum: { size: true }, _count: { _all: true } }),
       ctx.db.workspaceFile.count({ where: { createdById: ctx.user.ownerUserId!, uploadedById: ctx.user.id, deletedAt: null, storageProvider: "GOOGLE_DRIVE" } }),
     ]);
-    return { quota: asQuotaResponse(quota), localBytes: localBytes._sum.size ?? 0, localFileCount: localBytes._count._all, driveFileCount: driveCount, persistentLocal: process.env.NODE_ENV !== "production" || Boolean(process.env.FILES_LOCAL_ROOT?.trim()) };
+    return { quota: asQuotaResponse(quota), localBytes: localBytes._sum.size ?? 0, localFileCount: localBytes._count._all, driveFileCount: driveCount, persistentLocal: process.env.NODE_ENV !== "production" || Boolean(process.env.FILES_LOCAL_ROOT?.trim()), privateBlobConfigured: isBlobConfigured("private"), publicBlobConfigured: isBlobConfigured("public") };
   }),
 
   folders: protectedProcedure.query(({ ctx }) => ctx.db.fileFolder.findMany({ where: { workspaceId: ctx.user.workspaceId! }, orderBy: { name: "asc" } })),

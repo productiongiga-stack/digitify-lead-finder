@@ -61,7 +61,7 @@ async function parseUploadResponse(response: Response) {
       text.toLowerCase().includes("body exceeded");
     throw new Error(
       isPayloadTooLarge
-        ? "Bestand is te groot voor een directe server-upload. Gebruik Vercel Blob (BLOB_READ_WRITE_TOKEN), comprimeer de video, of plak een publieke MP4-URL."
+        ? "Bestand is te groot voor een directe server-upload. Controleer publieke Blob-opslag, comprimeer de video, of plak een publieke MP4-URL."
         : text.slice(0, 200) || "Upload mislukt",
     );
   }
@@ -89,7 +89,7 @@ export async function uploadClientAsset(file: File) {
       }
       throw error instanceof Error
         ? error
-        : new Error("Video-upload mislukt. Controleer BLOB_READ_WRITE_TOKEN of gebruik een publieke MP4-URL.");
+        : new Error("Video-upload mislukt. Controleer de publieke Blob-opslag of gebruik een publieke MP4-URL.");
     }
 
     if (file.size <= SERVER_UPLOAD_SAFE_BYTES) {
@@ -98,7 +98,7 @@ export async function uploadClientAsset(file: File) {
 
     throw new Error(
       VIDEO_TYPES.has(file.type)
-        ? "Video-upload vereist Vercel Blob voor bestanden groter dan 4MB. Stel BLOB_READ_WRITE_TOKEN in op Vercel, comprimeer de video, of plak een publieke MP4-URL."
+        ? "Video-upload vereist publieke Blob-opslag voor bestanden groter dan 4MB. Configureer dit in Vercel, comprimeer de video, of plak een publieke MP4-URL."
         : "Bestand is te groot voor een directe server-upload. Comprimeer het bestand of stel Vercel Blob in.",
     );
   }

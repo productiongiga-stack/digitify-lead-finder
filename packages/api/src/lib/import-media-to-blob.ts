@@ -1,5 +1,6 @@
 import { put } from "@vercel/blob";
 import { fetchRemoteAsset } from "@digitify/media-studio";
+import { blobConfigurationMessage, getBlobToken, translateBlobError } from "./blob-storage";
 
 function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "generated";
@@ -56,17 +57,21 @@ export async function importRemoteMediaToBlob(params: {
 
 export async function storeGeneratedAssetBytes(params: { workspaceId:string; userId:string; filename?:string; bytes:Buffer; contentType:string }): Promise<{url:string;storage:"blob"|"local"}> {
   const {bytes,contentType} = params;
-  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  const token = getBlobToken("public");
   const ext = extensionForContentType(contentType, "bin");
   const pathname = `workspaces/${params.workspaceId}/media/${params.userId}/${Date.now()}-${sanitizeFilename(params.filename || "generated")}.${ext}`;
 
   if (token) {
-    const blob = await put(pathname, bytes, {
-      access: "public",
-      contentType,
-      token,
-    });
-    return { url: blob.url, storage: "blob" };
+    try {
+      const blob = await put(pathname, bytes, {
+        access: "public",
+        contentType,
+        token,
+      });
+      return { url: blob.url, storage: "blob" };
+    } catch (error) {
+      throw translateBlobError(error, "public");
+    }
   }
 
   if (process.env.NODE_ENV !== "production") {
@@ -81,6 +86,6 @@ export async function storeGeneratedAssetBytes(params: { workspaceId:string; use
   }
 
   throw new Error(
-    "Media-import vereist Vercel Blob in productie. Stel BLOB_READ_WRITE_TOKEN in.",
+    blobConfigurationMessage("public"),
   );
 }

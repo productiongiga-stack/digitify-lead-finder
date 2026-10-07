@@ -7,6 +7,7 @@ import {
 } from "./social-image-targets";
 import type { FeedAspectFormat } from "./social-placements";
 import { fetchSocialImageInfo, isMetaPublishableImageUrl, parseImageDimensions, type SocialImageInfo } from "./social-image";
+import { blobConfigurationMessage, getBlobToken, translateBlobError } from "./blob-storage";
 
 function extensionForContentType(contentType: string) {
   if (contentType.includes("png")) return "png";
@@ -51,17 +52,21 @@ async function uploadCroppedImage(params: {
   userId: string;
   placement: SocialImageTargetPlacement;
 }) {
-  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  const token = getBlobToken("public");
   const ext = extensionForContentType(params.contentType);
   const pathname = `workspaces/${params.workspaceId}/social/${params.userId}/${Date.now()}-${params.placement.toLowerCase()}-crop.${ext}`;
 
   if (token) {
-    const blob = await put(pathname, params.buffer, {
-      access: "public",
-      contentType: params.contentType,
-      token,
-    });
-    return blob.url;
+    try {
+      const blob = await put(pathname, params.buffer, {
+        access: "public",
+        contentType: params.contentType,
+        token,
+      });
+      return blob.url;
+    } catch (error) {
+      throw translateBlobError(error, "public");
+    }
   }
 
   if (process.env.NODE_ENV !== "production") {
@@ -73,7 +78,7 @@ async function uploadCroppedImage(params: {
     });
   }
 
-  throw new Error("Afbeelding bijknippen vereist Vercel Blob in productie. Stel BLOB_READ_WRITE_TOKEN in.");
+  throw new Error(blobConfigurationMessage("public"));
 }
 
 export async function cropImageBufferToPlacement(input: {
