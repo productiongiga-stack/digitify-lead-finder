@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { probeRedis, probeUpstashRest } from "@digitify/api/src/lib/health-probes";
 import { getUpstashRestConfig } from "@digitify/api/src/lib/rate-limit-upstash";
+import { isBlobConfigured } from "@digitify/api/src/lib/blob-storage";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,11 @@ export async function GET() {
         status: degraded ? "degraded" : "ok",
         db: "ok",
         redis,
+        storage: {
+          privateBlob: isBlobConfigured("private"),
+          publicBlob: isBlobConfigured("public"),
+          localPersistent: process.env.NODE_ENV !== "production" || Boolean(process.env.FILES_LOCAL_ROOT?.trim()),
+        },
         latencyMs: Date.now() - started,
         ts: new Date().toISOString(),
       },
@@ -43,6 +49,11 @@ export async function GET() {
         status: "degraded",
         db: "error",
         redis: "skipped",
+        storage: {
+          privateBlob: isBlobConfigured("private"),
+          publicBlob: isBlobConfigured("public"),
+          localPersistent: process.env.NODE_ENV !== "production" || Boolean(process.env.FILES_LOCAL_ROOT?.trim()),
+        },
         latencyMs: Date.now() - started,
         message: "database unreachable",
       },

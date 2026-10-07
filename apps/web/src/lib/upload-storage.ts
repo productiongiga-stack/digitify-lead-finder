@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { put } from "@vercel/blob";
+import { blobConfigurationMessage, getBlobToken, translateBlobError } from "@digitify/api/src/lib/blob-storage";
 
 const warnedDataUrlFallback = { value: false };
 
@@ -49,7 +50,7 @@ async function storeLocalUpload(params: {
 }
 
 /**
- * Persists uploads to Vercel Blob when BLOB_READ_WRITE_TOKEN is set.
+ * Persists uploads to the configured Vercel Blob store.
  * Falls back to public/uploads locally in development.
  */
 export async function storeUploadedImage(params: {
@@ -58,22 +59,27 @@ export async function storeUploadedImage(params: {
   bytes: Buffer;
   access?: "public" | "private";
 }): Promise<StoredUpload> {
-  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  const access = params.access ?? "public";
+  const token = getBlobToken(access);
   const pathname = `workspaces/${params.userId}/${Date.now()}-${sanitizeFilename(params.file.name)}`;
 
   if (token) {
-    const blob = await put(pathname, params.bytes, {
-      access: params.access ?? "public",
-      contentType: params.file.type,
-      token,
-    });
-    return {
-      url: blob.url,
-      storage: params.access === "private" ? "blob-private" : "blob",
-      name: params.file.name,
-      size: params.file.size,
-      type: params.file.type,
-    };
+    try {
+      const blob = await put(pathname, params.bytes, {
+        access,
+        contentType: params.file.type,
+        token,
+      });
+      return {
+        url: blob.url,
+        storage: access === "private" ? "blob-private" : "blob",
+        name: params.file.name,
+        size: params.file.size,
+        type: params.file.type,
+      };
+    } catch (error) {
+      throw translateBlobError(error, access);
+    }
   }
 
   if (process.env.NODE_ENV !== "production") {
@@ -83,11 +89,9 @@ export async function storeUploadedImage(params: {
   if (!warnedDataUrlFallback.value) {
     warnedDataUrlFallback.value = true;
     console.warn(
-      "[upload] BLOB_READ_WRITE_TOKEN unset in production — refusing data URL fallback.",
+      "[upload] private Blob token unset in production — refusing data URL fallback.",
     );
   }
 
-  throw new Error(
-    "Uploads vereisen Vercel Blob in productie. Stel BLOB_READ_WRITE_TOKEN in.",
-  );
+  throw new Error(blobConfigurationMessage(access));
 }

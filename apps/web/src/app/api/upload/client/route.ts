@@ -8,6 +8,7 @@ import {
   maxUploadBytesForPathname,
 } from "@/lib/upload-constants";
 import { log } from "@digitify/api/src/lib/logger";
+import { blobConfigurationMessage, getBlobToken, translateBlobError } from "@digitify/api/src/lib/blob-storage";
 
 const ALLOWED_TYPES = [...UPLOAD_ALLOWED_IMAGE_TYPES, ...UPLOAD_ALLOWED_VIDEO_TYPES];
 
@@ -18,7 +19,7 @@ export async function GET() {
     return NextResponse.json({ error: "Niet geauthenticeerd." }, { status: 401 });
   }
 
-  if (!process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+  if (!getBlobToken("public")) {
     return NextResponse.json({ configured: false, prefix: null });
   }
 
@@ -43,9 +44,9 @@ export async function POST(request: Request): Promise<NextResponse> {
   });
   if (limiter) return limiter;
 
-  if (!process.env.BLOB_READ_WRITE_TOKEN?.trim()) {
+  if (!getBlobToken("public")) {
     return NextResponse.json(
-      { error: "Client-uploads vereisen Vercel Blob. Stel BLOB_READ_WRITE_TOKEN in." },
+      { error: blobConfigurationMessage("public") },
       { status: 503 },
     );
   }
@@ -54,6 +55,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   try {
     const jsonResponse = await handleUpload({
+      token: getBlobToken("public"),
       body,
       request,
       onBeforeGenerateToken: async (pathname) => {
@@ -80,7 +82,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     return NextResponse.json(jsonResponse);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Upload mislukt";
+    const message = translateBlobError(error, "public").message;
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
