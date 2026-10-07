@@ -7,9 +7,27 @@ export function TwoFactorWarning() {
   useEffect(() => {
     let active = true;
     const check = () => fetch("/api/two-factor/status", { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(); return response.json(); }).then((value) => { if (active) setEnabled(value.enabled === true); }).catch(() => { if (active) setEnabled(null); });
-    void check();
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    let idleHandle: number | undefined;
+    let firstCheckTimer: ReturnType<typeof setTimeout> | undefined;
+    const scheduleFirstCheck = () => {
+      if (typeof idleWindow.requestIdleCallback === "function") {
+        idleHandle = idleWindow.requestIdleCallback(() => void check(), { timeout: 1500 });
+      } else {
+        firstCheckTimer = setTimeout(() => void check(), 750);
+      }
+    };
+    scheduleFirstCheck();
     const timer = setInterval(check, 60000);
-    return () => { active = false; clearInterval(timer); };
+    return () => {
+      active = false;
+      if (idleHandle !== undefined) idleWindow.cancelIdleCallback?.(idleHandle);
+      if (firstCheckTimer) clearTimeout(firstCheckTimer);
+      clearInterval(timer);
+    };
   }, []);
   if (enabled === true) return null;
   const label = enabled === false ? "2FA niet ingesteld" : "2FA-status controleren";

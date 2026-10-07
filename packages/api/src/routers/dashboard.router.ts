@@ -906,6 +906,18 @@ export const dashboardRouter = router({
     const cached = readDashboardCache<{ totalCount: number }>(cacheKey);
     if (cached) return cached;
 
+    // The dashboard already loads and caches the complete overview. Reuse its
+    // computed attention count instead of running the count-only query again
+    // during hydration or when the topbar mounts on the same runtime.
+    const overview = readDashboardCache<DashboardOverviewResult>(
+      `getOverview:${wctx.user.workspaceId}`,
+    );
+    if (overview) {
+      const result = { totalCount: overview.attentionCount };
+      writeDashboardCache(cacheKey, result);
+      return result;
+    }
+
     const queueCache = readDashboardCache<AttentionQueueResult>(`getAttentionQueue:${wctx.user.workspaceId}`);
     const totalCount = queueCache
       ? queueCache.totalCount
