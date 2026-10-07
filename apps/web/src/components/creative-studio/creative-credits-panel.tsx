@@ -12,6 +12,9 @@ export function CreativeCreditsPanel() {
       if (url) window.location.assign(url);
     },
   });
+  const subscription = trpc.media.createCreativeSubscriptionCheckout.useMutation({
+    onSuccess: ({ url }) => { if (url) window.location.assign(url); },
+  });
   return (
     <div className="space-y-4">
       <h2 className="text-xl font-semibold">Mijn credits</h2>
@@ -25,6 +28,13 @@ export function CreativeCreditsPanel() {
       <p className="text-sm text-amber-700">
         ! Testbetalingen: er wordt geen echt geld geïnd.
       </p>
+      {wallet.data?.subscription ? (
+        <p className="text-sm text-emerald-700">Abonnement actief · {wallet.data.subscription.status}</p>
+      ) : wallet.data?.subscriptionReady ? (
+        <Button variant="outline" disabled={subscription.isPending} onClick={() => subscription.mutate({ requestKey: crypto.randomUUID() })}>
+          {subscription.isPending ? "Checkout openen…" : "Activeer abonnement (test)"}
+        </Button>
+      ) : null}
       {!wallet.data?.checkoutReady && (
         <p className="text-sm">
           Digitify moet Stripe-testbetalingen nog instellen.
@@ -60,6 +70,7 @@ export function CreativeCreditsPanel() {
           {checkout.error.message}
         </p>
       )}
+      {subscription.error ? <p role="alert" className="text-destructive">{subscription.error.message}</p> : null}
       <details>
         <summary className="cursor-pointer">Transacties</summary>
         <ul className="mt-3 space-y-2">

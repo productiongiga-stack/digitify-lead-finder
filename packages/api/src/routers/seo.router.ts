@@ -188,7 +188,7 @@ export const seoRouter = router({
     assertNotViewingAs(ctx);
     const ideas = input.keywordIds.length ? await ctx.db.seoKeywordIdea.findMany({ where: { id: { in: input.keywordIds }, workspaceId: ctx.user.workspaceId! }, select: { id: true, keyword: true } }) : [];
     if (ideas.length !== input.keywordIds.length) throw new TRPCError({ code: "NOT_FOUND", message: "Een of meer keywords horen niet bij deze workspace." });
-    const cluster = await ctx.db.seoKeywordCluster.create({ data: { workspaceId: ctx.user.ownerUserId!, createdById: ctx.user.id, name: input.name, intent: input.intent, targetUrl: input.targetUrl, keywords: jsonValue(ideas.map((idea) => idea.keyword)), notes: input.notes || null } });
+    const cluster = await ctx.db.seoKeywordCluster.create({ data: { workspaceId: ctx.user.workspaceId!, createdById: ctx.user.id, name: input.name, intent: input.intent, targetUrl: input.targetUrl, keywords: jsonValue(ideas.map((idea) => idea.keyword)), notes: input.notes || null } });
     if (input.keywordIds.length) await ctx.db.seoKeyword.updateMany({ where: { id: { in: input.keywordIds }, createdById: ctx.user.ownerUserId! }, data: { clusterId: cluster.id } });
     return cluster;
   }),
@@ -201,7 +201,7 @@ export const seoRouter = router({
     const profile = await loadAiBusinessProfile(ctx.db, ctx.user.workspaceId!);
     const keywords = Array.isArray(cluster.keywords) ? cluster.keywords.map(String).slice(0, 50) : [];
     const brief = { summary: `Content rond ${cluster.name}`, primaryKeyword: keywords[0] || cluster.name, secondaryKeywords: keywords.slice(1), suggestedTitle: `${cluster.name} | ${profile.companyName}`, suggestedMetaDescription: `Ontdek ${cluster.name} en hoe ${profile.companyName} kan helpen.`, outline: ["Introductie", "Belangrijkste voordelen", "Praktische aanpak", "Veelgestelde vragen", "Volgende stap"], internalLinkIdeas: [], cta: profile.salesGoal || "Plan een gesprek", generatedBy: "SEO-template-v1" };
-    return ctx.db.seoContentBrief.create({ data: { workspaceId: ctx.user.ownerUserId!, createdById: ctx.user.id, clusterId: cluster.id, domainId: input.domainId, title: cluster.name, targetUrl: input.targetUrl || cluster.targetUrl, brief: jsonValue(brief), profileHash: profile.hash, profileVersion: profile.version } });
+    return ctx.db.seoContentBrief.create({ data: { workspaceId: ctx.user.workspaceId!, createdById: ctx.user.id, clusterId: cluster.id, domainId: input.domainId, title: cluster.name, targetUrl: input.targetUrl || cluster.targetUrl, brief: jsonValue(brief), profileHash: profile.hash, profileVersion: profile.version } });
   }),
 
   handoffToAds: mutationProcedure.input(z.object({ destination: z.enum(["GOOGLE", "META"]), clusterId: z.string(), targetUrl: z.string().url().max(500).optional(), campaignContext: z.string().trim().max(1000).optional() })).mutation(async ({ ctx, input }) => {

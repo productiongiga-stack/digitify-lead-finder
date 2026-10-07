@@ -64,7 +64,7 @@ export const openclawRouter = router({
     .input(z.object({ leadId: z.string(), force: z.boolean().default(false) }))
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
-      const run = await enqueueLeadAnalysis(ctx.db, { workspaceId: ctx.user.ownerUserId!, leadId: input.leadId, createdById: ctx.user.id, force: input.force });
+      const run = await enqueueLeadAnalysis(ctx.db, { workspaceId: ctx.user.workspaceId!, leadId: input.leadId, createdById: ctx.user.id, force: input.force });
       return { runId: run.id, status: run.status };
     }),
   chat: aiRateLimitedProcedure

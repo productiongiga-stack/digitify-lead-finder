@@ -49,6 +49,7 @@ import { TemplatePicker } from "@/components/templates/template-picker";
 import { TemplateScopeHelp } from "@/components/templates/template-scope-help";
 import { OutboundWorkflowHelp } from "@/components/outbound/outbound-workflow-help";
 import { useOutboundEmailSettings } from "@/lib/outbound-email-settings";
+import { userFacingError } from "@/lib/user-facing-error";
 // Inline placeholder data/functions to avoid importing @digitify/email (which pulls in nodemailer/server deps)
 type PlaceholderContext = Record<string, string | number | undefined>;
 
@@ -100,6 +101,7 @@ export function ComposeInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const draftIdempotencyKey = useRef<string | null>(null);
   const leadIdFromQuery = searchParams.get("leadId") || "";
   const templateIdFromQuery = searchParams.get("templateId") || "";
   const campaignIdFromQuery = searchParams.get("campaignId") || "";
@@ -231,6 +233,16 @@ export function ComposeInner() {
     Boolean(subject.trim()) &&
     Boolean(body.trim()) &&
     unknownVariables.length === 0;
+
+  function getDraftIdempotencyKey() {
+    if (!draftIdempotencyKey.current) {
+      draftIdempotencyKey.current =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `compose-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+    return draftIdempotencyKey.current;
+  }
   const suggestedFollowUpDate = useMemo(() => {
     const next = new Date();
     next.setDate(next.getDate() + followupDays);
@@ -364,13 +376,14 @@ export function ComposeInner() {
         subject,
         body: injectEmailTemplateMetadata(body, { ctaText, ctaUrl, layout: emailLayout, bodyFormat }),
         templateId: selectedTemplateId && selectedTemplateId !== "none" ? selectedTemplateId : undefined,
+        idempotencyKey: getDraftIdempotencyKey(),
       });
       setSuccessMessage("Draft opgeslagen.");
       setTimeout(() => {
         router.push("/contacts");
       }, 1000);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Draft opslaan mislukt.");
+      setErrorMessage(userFacingError(error, "Draft opslaan mislukt. Controleer de ontvanger en probeer opnieuw."));
     } finally {
       setIsSaving(false);
     }
@@ -388,6 +401,7 @@ export function ComposeInner() {
         subject,
         body: injectEmailTemplateMetadata(body, { ctaText, ctaUrl, layout: emailLayout, bodyFormat }),
         templateId: selectedTemplateId && selectedTemplateId !== "none" ? selectedTemplateId : undefined,
+        idempotencyKey: getDraftIdempotencyKey(),
       });
       await submitForApproval.mutateAsync({ id: draft.id });
       setSuccessMessage("Ingediend ter goedkeuring.");
@@ -395,7 +409,7 @@ export function ComposeInner() {
         router.push("/contacts");
       }, 1000);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Indienen mislukt.");
+      setErrorMessage(userFacingError(error, "Indienen mislukt. Controleer de inhoud en probeer opnieuw."));
     } finally {
       setIsSaving(false);
     }
@@ -440,7 +454,7 @@ export function ComposeInner() {
         }
       }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "AI-generatie mislukt.");
+      setErrorMessage(userFacingError(error, "AI-generatie mislukt. Controleer je provider en credits."));
     } finally {
       setAiLoading(false);
     }

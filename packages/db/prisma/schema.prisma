@@ -2608,3 +2608,100 @@ model CreativePurchase {
   updatedAt DateTime @updatedAt
   @@map("creative_purchases")
 }
+
+model CreativeSubscription {
+  id                   String   @id @default(cuid())
+  userId               String
+  workspaceId          String
+  stripeSubscriptionId String   @unique
+  stripeCustomerId     String?
+  priceId              String
+  status               String   @default("INCOMPLETE")
+  currentPeriodEnd    DateTime?
+  cancelAtPeriodEnd   Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  @@index([userId, workspaceId, status])
+  @@map("creative_subscriptions")
+}
+
+model CreativeStripeEvent {
+  id          String   @id @default(cuid())
+  eventId     String   @unique
+  type        String
+  processedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  @@map("creative_stripe_events")
+}
+
+model Presentation {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  createdById  String
+  title        String
+  description  String?
+  status       String   @default("DRAFT")
+  sourceFileId String?
+  settings     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  slides       PresentationSlide[]
+  shares       PresentationShare[]
+
+  @@index([workspaceId, updatedAt(sort: Desc)])
+  @@index([workspaceId, status, updatedAt(sort: Desc)])
+  @@map("presentations")
+}
+
+model PresentationSlide {
+  id              String   @id @default(cuid())
+  presentationId  String
+  orderIndex      Int
+  title           String?
+  body            String?  @db.Text
+  backgroundUrl   String?
+  sourcePage      Int?
+  settings        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  presentation    Presentation @relation(fields: [presentationId], references: [id], onDelete: Cascade)
+  hotspots        PresentationHotspot[] @relation("SlideHotspots")
+  targetHotspots  PresentationHotspot[] @relation("TargetHotspots")
+
+  @@unique([presentationId, orderIndex])
+  @@index([presentationId, orderIndex])
+  @@map("presentation_slides")
+}
+
+model PresentationHotspot {
+  id          String   @id @default(cuid())
+  slideId     String
+  targetSlideId String
+  label       String?
+  x           Float
+  y           Float
+  width       Float
+  height      Float
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  slide       PresentationSlide @relation("SlideHotspots", fields: [slideId], references: [id], onDelete: Cascade)
+  targetSlide PresentationSlide @relation("TargetHotspots", fields: [targetSlideId], references: [id], onDelete: Cascade)
+
+  @@index([slideId])
+  @@index([targetSlideId])
+  @@map("presentation_hotspots")
+}
+
+model PresentationShare {
+  id             String   @id @default(cuid())
+  presentationId String
+  tokenHash      String   @unique
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime @default(now())
+  lastOpenedAt   DateTime?
+  presentation  Presentation @relation(fields: [presentationId], references: [id], onDelete: Cascade)
+
+  @@index([presentationId, revokedAt])
+  @@map("presentation_shares")
+}

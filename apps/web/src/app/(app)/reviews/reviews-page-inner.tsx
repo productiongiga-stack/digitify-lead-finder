@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useToast } from "@/components/feedback/toast-provider";
+import { userFacingError } from "@/lib/user-facing-error";
 import { buildUrl } from "@/lib/config";
 import { safeExternalUrl } from "@/lib/utils";
 import { ReviewQrCodeCard } from "@/components/reviews/qr-code-card";
@@ -147,7 +148,7 @@ export function ReviewsPageInner() {
       utils.review.getStats.invalidate();
     },
     onError: (error) =>
-      showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
+      showToast({ title: "Opslaan mislukt", description: userFacingError(error, "De reviewaanvraag kon niet worden opgeslagen."), variant: "error" }),
   });
 
   const sendMutation = trpc.review.send.useMutation({
@@ -160,7 +161,7 @@ export function ReviewsPageInner() {
       });
     },
     onError: (error) =>
-      showToast({ title: "Verzenden mislukt", description: error.message, variant: "error" }),
+      showToast({ title: "Verzenden mislukt", description: userFacingError(error, "Controleer je mailinstellingen en probeer opnieuw."), variant: "error" }),
   });
 
   const deleteMutation = trpc.review.delete.useMutation({
@@ -174,7 +175,7 @@ export function ReviewsPageInner() {
       });
     },
     onError: (error) =>
-      showToast({ title: "Verwijderen mislukt", description: error.message, variant: "error" }),
+      showToast({ title: "Verwijderen mislukt", description: userFacingError(error, "De reviewaanvraag kon niet worden verwijderd."), variant: "error" }),
   });
 
   async function handleCreate(e: React.FormEvent<HTMLFormElement>) {

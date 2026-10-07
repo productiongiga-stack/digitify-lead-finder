@@ -13,11 +13,15 @@ export async function assertWorkspaceFileRelation(
   if (!relatedType && !relatedId) return;
   if (!relatedType || !relatedId) throw new Error("Een bestandrelatie is onvolledig.");
 
+  // Leads, quotes and projects are legacy records keyed by the company
+  // owner's user id. The active workspace id is only the tenant boundary.
+  const ownerUserId = await resolveLeadOwnerId(db, workspaceId);
+
   const found = relatedType === "LEAD" || relatedType === "CUSTOMER"
-    ? await db.lead.findFirst({ where: { id: relatedId, createdById: await resolveLeadOwnerId(db, workspaceId) }, select: { id: true } })
-    : relatedType === "QUOTE"
-      ? await db.quote.findFirst({ where: { id: relatedId, createdById: workspaceId }, select: { id: true } })
-      : await db.project.findFirst({ where: { id: relatedId, createdById: workspaceId }, select: { id: true } });
+    ? await db.lead.findFirst({ where: { id: relatedId, createdById: ownerUserId }, select: { id: true } })
+      : relatedType === "QUOTE"
+      ? await db.quote.findFirst({ where: { id: relatedId, createdById: ownerUserId }, select: { id: true } })
+      : await db.project.findFirst({ where: { id: relatedId, createdById: ownerUserId }, select: { id: true } });
 
   if (!found) throw new Error("Gekoppelde resource niet gevonden.");
 }

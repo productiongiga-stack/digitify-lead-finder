@@ -24,6 +24,7 @@ import {
 } from "./creative-studio-ui";
 import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/components/feedback/toast-provider";
+import { userFacingError } from "@/lib/user-facing-error";
 import { formatModelOptionLabel } from "@/lib/format-model-label";
 import { cn } from "@/lib/utils";
 import { LIBRARY_SAVE_LABEL, MEDIA_MODELS_QUERY_OPTIONS, MUAPI_KEY_QUERY_OPTIONS } from "./constants";
@@ -82,12 +83,12 @@ export function MarketingAdGenerator() {
       requestKey.current = null;
       showToast({ title: "Advertentie-generatie gestart", description: "Dit kan enkele minuten duren." });
     },
-    onError: (error) => showToast({ title: "Generatie mislukt", description: error.message, variant: "error" }),
+    onError: (error) => showToast({ title: "Generatie mislukt", description: userFacingError(error, "Controleer je AI-provider, credits en invoer."), variant: "error" }),
   });
 
   const importToBlob = trpc.media.importToBlob.useMutation({
     onSuccess: () => showToast({ title: "Advertentie opgeslagen in bibliotheek" }),
-    onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
+    onError: (error) => showToast({ title: "Opslaan mislukt", description: userFacingError(error, "Het resultaat blijft beschikbaar. Probeer opnieuw op te slaan."), variant: "error" }),
   });
 
   const job = useMediaJob(jobId, {

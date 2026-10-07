@@ -42,6 +42,7 @@ import { findUnknownMailVariables } from "@/lib/mail-variables";
 import { injectEmailTemplateMetadata, type EmailLayout } from "@/lib/email-content";
 import { applyEmailTemplateSelection } from "@/lib/apply-email-template";
 import { TemplatePicker } from "@/components/templates/template-picker";
+import { userFacingError } from "@/lib/user-facing-error";
 import Link from "next/link";
 
 const MAIL_TYPES = [
@@ -203,18 +204,18 @@ export function InboxPageInner() {
     },
     onError: (err) => {
       setComposeStatus("failed");
-      setComposeError(err.message);
+      setComposeError(userFacingError(err, "Antwoord verzenden mislukt. Controleer SMTP en probeer opnieuw."));
     },
   });
   const suggestReply = trpc.inbox.suggestReply.useMutation({
     onError: (err) => {
-      setComposeError(err.message);
+      setComposeError(userFacingError(err, "AI-antwoord kon niet worden gemaakt. Controleer je provider en credits."));
     },
   });
   const rewriteInboxMessage = trpc.openclaw.rewriteInboxMessage.useMutation({
     onError: (err) => {
       setComposeStatus("failed");
-      setComposeError(err.message);
+      setComposeError(userFacingError(err, "Antwoord voorbereiden mislukt. Probeer opnieuw."));
     },
   });
   const sendEmail = trpc.inbox.send.useMutation({
@@ -233,7 +234,7 @@ export function InboxPageInner() {
     },
     onError: (err) => {
       setComposeStatus("failed");
-      setComposeError(err.message);
+      setComposeError(userFacingError(err, "Bericht kon niet worden opgeslagen. Controleer de e-mailinstellingen."));
     },
   });
 
@@ -1143,7 +1144,7 @@ export function InboxPageInner() {
                         </Button>
                         {sendReply.error && (
                           <p className="text-sm text-destructive ml-2">
-                            {sendReply.error.message}
+                            {userFacingError(sendReply.error, "Antwoord verzenden mislukt. Controleer SMTP en probeer opnieuw.")}
                           </p>
                         )}
                       </div>

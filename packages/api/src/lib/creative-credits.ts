@@ -29,7 +29,8 @@ export function requireCentralCreativeKey() {
   if (!key)
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
-      message: "Digitify moet AI-generatie nog activeren.",
+      message:
+        "Centrale AI is nog niet geconfigureerd. Een beheerder moet de provider activeren via Platformbeheer → AI & media.",
     });
   return key;
 }

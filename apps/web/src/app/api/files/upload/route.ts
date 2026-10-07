@@ -9,6 +9,7 @@ import { commitFileQuota, releaseFileQuota, reserveFileQuota } from "@digitify/a
 import { localStorageIsPersistent, removeLocalWorkspaceFile, sha256, writeLocalWorkspaceFile } from "@digitify/api/src/lib/file-storage";
 import { uploadGoogleDriveFile } from "@digitify/api/src/lib/google-drive";
 import { workspaceScopeFromUser } from "@digitify/api/src/lib/workspace-settings";
+import { resolveLeadOwnerId } from "@digitify/api/src/lib/tenant";
 
 const ALLOWED_TYPES = new Set([
   "image/png", "image/jpeg", "image/webp", "image/x-icon", "image/vnd.microsoft.icon",
@@ -55,10 +56,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const ownerUserId = await resolveLeadOwnerId(prisma, user.workspaceId);
     await assertWorkspaceFileRelation(prisma, user.workspaceId, relatedType as "LEAD" | "QUOTE" | "CUSTOMER" | "PROJECT" | undefined, relatedId || undefined);
     const bytes = Buffer.from(await file.arrayBuffer());
     const checksum = sha256(bytes);
-    const existingFile = await prisma.workspaceFile.findFirst({ where: { createdById: user.workspaceId, uploadedById: user.id, name: file.name.slice(0, 240), checksumSha256: checksum, deletedAt: null }, select: { id: true, name: true, contentType: true, size: true, createdAt: true } });
+    const existingFile = await prisma.workspaceFile.findFirst({ where: { createdById: ownerUserId, uploadedById: user.id, name: file.name.slice(0, 240), checksumSha256: checksum, deletedAt: null }, select: { id: true, name: true, contentType: true, size: true, createdAt: true } });
     if (existingFile) return NextResponse.json({ ...existingFile, outcome: "reused" }, { status: 200 });
     const requestedRemote = requestedProvider === "DRIVE";
     const provider = requestedProvider === "BOTH" ? (process.env.NODE_ENV === "production" && !localStorageIsPersistent() ? "BLOB" : "LOCAL") : requestedProvider || (process.env.NODE_ENV === "production" && !localStorageIsPersistent() ? "BLOB" : "LOCAL");
@@ -68,7 +70,7 @@ export async function POST(req: NextRequest) {
     if (!requestedRemote && !["LOCAL", "BLOB"].includes(provider)) return NextResponse.json({ error: "Ongeldige opslagkeuze." }, { status: 400 });
     const reservation = requestedRemote ? null : await reserveFileQuota(prisma, { userId: user.id, workspaceId: user.workspaceId, bytes: file.size, idempotencyKey });
     if (reservation?.status === "COMMITTED" && reservation.fileId) {
-      const reused = await prisma.workspaceFile.findFirst({ where: { id: reservation.fileId, createdById: user.workspaceId }, select: { id: true, name: true, contentType: true, size: true, createdAt: true } });
+      const reused = await prisma.workspaceFile.findFirst({ where: { id: reservation.fileId, createdById: ownerUserId }, select: { id: true, name: true, contentType: true, size: true, createdAt: true } });
       if (reused) return NextResponse.json({ ...reused, outcome: "reused" }, { status: 200 });
     }
     let stored: { url: string; storage: "blob" | "blob-private" | "local" | "data-url" | "google-drive"; storageKey?: string; driveFileId?: string; driveWebUrl?: string; driveEtag?: string; driveSyncStatus?: string };
@@ -101,7 +103,7 @@ export async function POST(req: NextRequest) {
     try {
       record = await prisma.workspaceFile.create({
         data: {
-        createdById: user.workspaceId,
+        createdById: ownerUserId,
         uploadedById: user.id,
         name: file.name.slice(0, 240),
         storageUrl: stored.url,

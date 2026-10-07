@@ -401,8 +401,9 @@ export const leadRouter = router({
     .input(z.object({ leadId: z.string() }))
     .query(async ({ ctx, input }) => {
       const workspaceId = ctx.user.workspaceId!;
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, workspaceId);
       const lead = await ctx.db.lead.findFirst({
-        where: ownedLeadWhere(workspaceId, { id: input.leadId }),
+        where: ownedLeadWhere(leadOwnerId, { id: input.leadId }),
         select: {
           id: true,
           status: true,
@@ -433,19 +434,19 @@ export const leadRouter = router({
           select: { id: true, type: true, title: true, createdAt: true },
         }),
         ctx.db.quote.findMany({
-          where: { createdById: ctx.user.ownerUserId!, leadId: lead.id },
+          where: { createdById: leadOwnerId, leadId: lead.id },
           orderBy: { updatedAt: "desc" },
           take: 5,
           select: { id: true, quoteNumber: true, status: true, total: true, updatedAt: true },
         }),
         ctx.db.workspaceInvoice.findMany({
-          where: { createdById: ctx.user.ownerUserId!, leadId: lead.id },
+          where: { createdById: leadOwnerId, leadId: lead.id },
           orderBy: { updatedAt: "desc" },
           take: 5,
           select: { id: true, invoiceNumber: true, status: true, total: true, currency: true, dueDate: true, updatedAt: true },
         }),
         ctx.db.workspaceTask.findMany({
-          where: { createdById: ctx.user.ownerUserId!, relatedType: "LEAD", relatedId: lead.id, status: { not: "DONE" } },
+          where: { createdById: leadOwnerId, relatedType: "LEAD", relatedId: lead.id, status: { not: "DONE" } },
           orderBy: [{ dueAt: "asc" }, { updatedAt: "desc" }],
           take: 8,
           select: { id: true, title: true, status: true, priority: true, dueAt: true, updatedAt: true },
@@ -557,7 +558,7 @@ export const leadRouter = router({
         },
       });
 
-      await enqueueLeadAnalysis(ctx.db, { workspaceId: ctx.user.ownerUserId!, leadId: lead.id, createdById: ctx.user.id }).catch(() => null);
+      await enqueueLeadAnalysis(ctx.db, { workspaceId: ctx.user.workspaceId!, leadId: lead.id, createdById: ctx.user.id }).catch(() => null);
 
       return lead;
     }),

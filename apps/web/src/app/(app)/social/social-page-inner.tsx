@@ -56,6 +56,7 @@ import {
   X,
 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
+import { userFacingError } from "@/lib/user-facing-error";
 import {
   isFeedMediaReady,
   isStoryMediaReady,
@@ -966,7 +967,7 @@ export function SocialPageInner({ creative, onSaveConcept }: { creative?: { jobI
       await listQuery.refetch();
       showToast({ title: "Draft bijgewerkt" });
     },
-    onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
+    onError: (error) => showToast({ title: "Opslaan mislukt", description: userFacingError(error, "De social post kon niet worden opgeslagen."), variant: "error" }),
   });
 
   const updateQueuedPost = trpc.social.updateQueuedPost.useMutation({
@@ -974,7 +975,7 @@ export function SocialPageInner({ creative, onSaveConcept }: { creative?: { jobI
       await listQuery.refetch();
       showToast({ title: "Post bijgewerkt", description: "Wijzigingen opgeslagen in de wachtrij." });
     },
-    onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
+    onError: (error) => showToast({ title: "Opslaan mislukt", description: userFacingError(error, "De social post kon niet worden opgeslagen."), variant: "error" }),
   });
 
   const submitApproval = trpc.social.submitForApproval.useMutation({
@@ -1054,7 +1055,7 @@ export function SocialPageInner({ creative, onSaveConcept }: { creative?: { jobI
       setCaption(payload.caption);
       showToast({ title: "Suggestie gegenereerd" });
     },
-    onError: (error) => showToast({ title: "Generatie mislukt", description: error.message, variant: "error" }),
+    onError: (error) => showToast({ title: "Generatie mislukt", description: userFacingError(error, "Controleer je AI-provider, credits en invoer."), variant: "error" }),
   });
 
   function applyBrandKitDefaults(payload: SocialBrandKitApplyPayload) {
@@ -1322,9 +1323,9 @@ export function SocialPageInner({ creative, onSaveConcept }: { creative?: { jobI
               { id: `story_${Date.now()}`, mediaType: "VIDEO", videoUrl },
             ]);
           }
-          if (!placements.includes("REEL") && !carousel.enabled) {
-            setPlacements((current) => (current.includes("REEL") ? current : [...current, "REEL"]));
-          }
+          // Importing a video must not silently switch the publication target
+          // to Reel. Reel is an explicit placement and otherwise forces an
+          // Instagram public MP4 validation on an otherwise valid Feed post.
         }
         setAppliedVideoJobId(pendingVideoJobId);
         setActiveTab("composer");
@@ -1434,7 +1435,7 @@ export function SocialPageInner({ creative, onSaveConcept }: { creative?: { jobI
     if (placements.includes("REEL") && !placementAssets.REEL?.videoUrl?.trim()) {
       showToast({
         title: "Reel-video ontbreekt",
-        description: "Upload een MP4 of plak een publieke video-URL.",
+        description: "Kies alleen Feed of Story als je geen video wilt gebruiken. Voor Reel is een publieke https-MP4 verplicht.",
         variant: "error",
       });
       return false;

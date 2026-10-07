@@ -59,6 +59,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/feedback/toast-provider";
 import { QueryErrorState } from "@/components/feedback/query-error-state";
+import { userFacingError } from "@/lib/user-facing-error";
 
 type SearchResult = {
   placeId: string;
@@ -297,7 +298,7 @@ export function LeadSearchInner() {
     },
     onError: (error, variables) => {
       setSavingIds((prev) => { const next = new Set(prev); next.delete(variables.placeId); return next; });
-      showToast({ title: "Lead opslaan mislukt", description: error.message, variant: "error" });
+      showToast({ title: "Lead opslaan mislukt", description: userFacingError(error, "De lead kon niet worden opgeslagen. Controleer de gegevens en probeer opnieuw."), variant: "error" });
     },
   });
 
@@ -309,7 +310,7 @@ export function LeadSearchInner() {
       showToast({ title: "Lead toegevoegd", description: "De lead is aan de campagne gekoppeld." });
     },
     onError: (error) =>
-      showToast({ title: "Toevoegen mislukt", description: error.message, variant: "error" }),
+      showToast({ title: "Toevoegen mislukt", description: userFacingError(error, "De lead kon niet aan de campagne worden toegevoegd."), variant: "error" }),
   });
 
   const saveSearchMutation = trpc.search.saveSearch.useMutation({
@@ -318,7 +319,7 @@ export function LeadSearchInner() {
       setSavedSearchName("");
       showToast({ title: "Zoekopdracht opgeslagen", description: "Je kan deze nu in 1 klik opnieuw uitvoeren." });
     },
-    onError: (error) => showToast({ title: "Opslaan mislukt", description: error.message, variant: "error" }),
+    onError: (error) => showToast({ title: "Opslaan mislukt", description: userFacingError(error, "De zoekopdracht kon niet worden opgeslagen."), variant: "error" }),
   });
 
   const deleteSavedSearchMutation = trpc.search.deleteSavedSearch.useMutation({
@@ -544,7 +545,7 @@ export function LeadSearchInner() {
         <QueryErrorState
           variant="inline"
           title="Zoekopdracht mislukt"
-          message={formatSearchErrorMessage(searchMutation.error.message)}
+          message={formatSearchErrorMessage(userFacingError(searchMutation.error, "De zoekopdracht kon niet worden uitgevoerd."))}
           onRetry={
             lastSearchParams && !/niet ingelogd/i.test(searchMutation.error.message)
               ? handleRefresh
@@ -1174,7 +1175,7 @@ export function LeadSearchInner() {
           {/* Save error */}
           {saveMutation.error && (
             <div className="mt-3 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-              {saveMutation.error.message}
+              {userFacingError(saveMutation.error, "De lead kon niet worden opgeslagen. Probeer opnieuw.")}
             </div>
           )}
         </CardContent>

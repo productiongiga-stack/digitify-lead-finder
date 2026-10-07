@@ -587,20 +587,34 @@ async function createInboxDraftForApproval(params: {
     if (existing) return { draft: existing, status: existing.status, reused: true };
   }
 
-  const draft = await params.db.emailDraft.create({
-    data: {
-      workspaceId,
-      leadId: linkedLead?.id ?? null,
-      authorId: params.userId,
-      toEmail,
-      subject: params.input.subject.trim(),
-      body: params.input.body.trim(),
-      status: "PENDING_APPROVAL",
-      type: mapInboxTypeToEmailType(params.input.type),
-      idempotencyKey: params.input.idempotencyKey,
-    },
-    include: { lead: { select: { id: true, companyName: true } } },
-  });
+  let draft;
+  try {
+    draft = await params.db.emailDraft.create({
+      data: {
+        workspaceId,
+        leadId: linkedLead?.id ?? null,
+        authorId: params.userId,
+        toEmail,
+        subject: params.input.subject.trim(),
+        body: params.input.body.trim(),
+        status: "PENDING_APPROVAL",
+        type: mapInboxTypeToEmailType(params.input.type),
+        idempotencyKey: params.input.idempotencyKey,
+      },
+      include: { lead: { select: { id: true, companyName: true } } },
+    });
+  } catch (error) {
+    // The unique workspace/idempotency constraint is the final race guard
+    // when two Inbox clicks arrive before either read sees the new draft.
+    if (params.input.idempotencyKey && readPrismaErrorCode(error) === "P2002") {
+      const existing = await params.db.emailDraft.findFirst({
+        where: { workspaceId, idempotencyKey: params.input.idempotencyKey },
+        include: { lead: { select: { id: true, companyName: true } } },
+      });
+      if (existing) return { draft: existing, status: existing.status, reused: true };
+    }
+    throw error;
+  }
 
   await params.db.activity.create({
     data: {
@@ -803,7 +817,7 @@ export const inboxRouter = router({
   send: mutationProcedure
     .input(
       z.object({
-        to: z.string().email(),
+        to: z.string().trim().email(),
         subject: z.string().min(1),
         body: z.string().min(1),
         type: z.enum(["quote", "lead_contact", "reply", "follow_up", "general", "booking_confirmation"]).default("general"),
@@ -833,7 +847,7 @@ export const inboxRouter = router({
     .input(
       z.object({
         uid: z.number(),
-        to: z.string().email(),
+        to: z.string().trim().email(),
         subject: z.string(),
         messageId: z.string(),
         inReplyTo: z.string(),
@@ -862,7 +876,7 @@ export const inboxRouter = router({
     }),
 
   resolveLeadByEmail: protectedProcedure
-    .input(z.object({ email: z.string().email() }))
+    .input(z.object({ email: z.string().trim().email() }))
     .query(async ({ ctx, input }) => {
       const workspaceId = ctx.user.workspaceId!;
       const lead = await findLeadByEmailInWorkspace(ctx.db, workspaceId, input.email);

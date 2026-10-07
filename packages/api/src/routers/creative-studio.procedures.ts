@@ -172,7 +172,7 @@ export const creativeStudioProcedures = {
     }),
   getCreativeCredits: protectedProcedure.query(async ({ ctx }) => {
     await settleTerminalCreativeJobs(ctx.user.id);
-    const [wallet, ledger, bundles] = await Promise.all([
+    const [wallet, ledger, bundles, subscription] = await Promise.all([
       prisma.creativeWallet.findUnique({ where: { userId: ctx.user.id } }),
       prisma.creativeLedger.findMany({
         where: { userId: ctx.user.id },
@@ -183,6 +183,7 @@ export const creativeStudioProcedures = {
         where: { enabled: true },
         orderBy: { priceCents: "asc" },
       }),
+      prisma.creativeSubscription.findFirst({ where: { userId: ctx.user.id, workspaceId: activeWorkspaceId(ctx.user), status: { in: ["ACTIVE", "TRIALING"] } }, orderBy: { createdAt: "desc" } }),
     ]);
     return {
       available: wallet?.available ?? 0,
@@ -191,11 +192,9 @@ export const creativeStudioProcedures = {
       bundles,
       enabled: centralCreativeEnabled(),
       providerReady: Boolean(process.env.CREATIVE_MUAPI_KEY),
-      checkoutReady: Boolean(
-        process.env.CREATIVE_MUAPI_KEY &&
-          process.env.CREATIVE_STRIPE_TEST_SECRET_KEY?.startsWith("sk_test_") &&
-          process.env.CREATIVE_STRIPE_WEBHOOK_SECRET,
-      ),
+      checkoutReady: Boolean(process.env.CREATIVE_STRIPE_TEST_SECRET_KEY?.startsWith("sk_test_") && process.env.CREATIVE_STRIPE_WEBHOOK_SECRET),
+      subscriptionReady: Boolean(process.env.CREATIVE_STRIPE_TEST_SECRET_KEY?.startsWith("sk_test_") && process.env.CREATIVE_STRIPE_WEBHOOK_SECRET && process.env.CREATIVE_STRIPE_SUBSCRIPTION_PRICE_ID),
+      subscription: subscription ? { status: subscription.status, currentPeriodEnd: subscription.currentPeriodEnd, cancelAtPeriodEnd: subscription.cancelAtPeriodEnd } : null,
       testMode: true as const,
     };
   }),
@@ -322,6 +321,19 @@ export const creativeStudioProcedures = {
         where: { id },
         data: { sessionId: session.id },
       });
+      return { url: session.url };
+  }),
+  createCreativeSubscriptionCheckout: mutationProcedure
+    .input(z.object({ requestKey: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const priceId = process.env.CREATIVE_STRIPE_SUBSCRIPTION_PRICE_ID?.trim();
+      if (!priceId || !process.env.CREATIVE_STRIPE_TEST_SECRET_KEY?.startsWith("sk_test_") || !process.env.CREATIVE_STRIPE_WEBHOOK_SECRET) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Abonnementen zijn nog niet geconfigureerd." });
+      }
+      const stripe = creativeStripe();
+      const base = process.env.NEXTAUTH_URL?.replace(/\/$/, "");
+      if (!base) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "App-URL ontbreekt." });
+      const session = await stripe.checkout.sessions.create({ mode: "subscription", line_items: [{ price: priceId, quantity: 1 }], metadata: { userId: ctx.user.id, workspaceId: activeWorkspaceId(ctx.user), requestKey: input.requestKey }, success_url: `${base}/creative-studio?tab=credits&subscription=success`, cancel_url: `${base}/creative-studio?tab=credits&subscription=cancelled` }, { idempotencyKey: `subscription:${ctx.user.id}:${input.requestKey}` });
       return { url: session.url };
     }),
   prepareCreativeHandoff: mutationProcedure

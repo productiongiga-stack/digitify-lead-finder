@@ -12,7 +12,7 @@ describe("marketing bundle pricing", () => {
   it("maps every technical module to exactly one commercial bundle", () => {
     const moduleIds = getMarketingTechnicalModuleIds();
     expect(MARKETING_BUNDLES).toHaveLength(7);
-    expect(moduleIds).toHaveLength(26);
+    expect(moduleIds).toHaveLength(ALL_MODULES.length);
     expect(new Set(moduleIds).size).toBe(moduleIds.length);
     expect(new Set(moduleIds)).toEqual(new Set(ALL_MODULES.map((module) => module.id)));
   });

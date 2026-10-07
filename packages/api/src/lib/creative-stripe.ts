@@ -3,7 +3,7 @@ import { prisma } from "@digitify/db";
 import { TRPCError } from "@trpc/server";
 
 export function creativeStripe() {
-  const key = process.env.CREATIVE_STRIPE_TEST_SECRET_KEY?.trim();
+  const key = (process.env.CREATIVE_STRIPE_TEST_SECRET_KEY || process.env.CREATIVE_STRIPE_SECRET_KEY)?.trim();
   if (!key?.startsWith("sk_test_"))
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
@@ -14,12 +14,21 @@ export function creativeStripe() {
 export async function fulfillCreativeCheckout(
   session: Stripe.Checkout.Session,
 ) {
-  if (
-    session.livemode ||
-    session.payment_status !== "paid" ||
-    session.mode !== "payment"
-  )
+  if (session.livemode || session.payment_status !== "paid") return;
+  if (session.mode === "subscription") {
+    const subscriptionId = typeof session.subscription === "string" ? session.subscription : session.subscription?.id;
+    const priceId = process.env.CREATIVE_STRIPE_SUBSCRIPTION_PRICE_ID?.trim();
+    const userId = session.metadata?.userId;
+    const workspaceId = session.metadata?.workspaceId;
+    if (!subscriptionId || !priceId || !userId || !workspaceId) throw new Error("Abonnement komt niet overeen met de checkout.");
+    await prisma.creativeSubscription.upsert({
+      where: { stripeSubscriptionId: subscriptionId },
+      create: { userId, workspaceId, stripeSubscriptionId: subscriptionId, stripeCustomerId: typeof session.customer === "string" ? session.customer : session.customer?.id, priceId, status: "ACTIVE" },
+      update: { status: "ACTIVE", stripeCustomerId: typeof session.customer === "string" ? session.customer : session.customer?.id },
+    });
     return;
+  }
+  if (session.mode !== "payment") return;
   const purchaseId = session.metadata?.creativePurchaseId;
   if (!purchaseId) return;
   await prisma.$transaction(async (tx) => {
@@ -52,5 +61,17 @@ export async function fulfillCreativeCheckout(
         reference: `purchase:${session.id}`,
       },
     });
+  });
+}
+
+export async function syncCreativeSubscription(subscription: Stripe.Subscription) {
+  const periodEnd = (subscription as unknown as { current_period_end?: number }).current_period_end;
+  return prisma.creativeSubscription.updateMany({
+    where: { stripeSubscriptionId: subscription.id },
+    data: {
+      status: subscription.status.toUpperCase(),
+      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
+    },
   });
 }
