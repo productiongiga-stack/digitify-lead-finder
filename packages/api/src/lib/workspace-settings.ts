@@ -11,11 +11,12 @@ import {
 export type WorkspaceScope = {
   workspaceId: string;
   memberId: string;
+  ownerUserId?: string;
 };
 
-export function workspaceScopeFromUser(user: { id: string; workspaceId?: string }): WorkspaceScope {
+export function workspaceScopeFromUser(user: { id: string; workspaceId?: string; ownerUserId?: string }): WorkspaceScope {
   const workspaceId = user.workspaceId?.trim() || user.id;
-  return { workspaceId, memberId: user.id };
+  return { workspaceId, memberId: user.id, ownerUserId: user.ownerUserId?.trim() || workspaceId };
 }
 
 export function workspaceSettingKey(workspaceId: string, key: string) {

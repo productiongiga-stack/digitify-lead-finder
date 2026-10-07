@@ -40,7 +40,7 @@ export function MarketingHomeHeroTabs() {
             return (
               <button key={bundle.slug} type="button" onClick={() => setActiveSlug(bundle.slug)} aria-pressed={selected} className={`inline-flex min-h-[48px] items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition sm:px-3 ${selected ? "border-transparent text-[#14100b] shadow-sm" : "border-[#e2e8e3] bg-white text-[#344052] hover:border-[#f9ae5a]/40 hover:bg-[#fffdf9]"}`} style={selected ? { backgroundColor: bundleUi.accent } : undefined}>
                 <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${selected ? "bg-white/25" : "bg-[#f4f7f5]"}`}>
-                  <Icon className="h-3.5 w-3.5" style={{ color: selected ? "currentColor" : bundleUi.accent }} />
+                  <Icon className="h-3.5 w-3.5 lg:h-5 lg:w-5" style={{ color: selected ? "currentColor" : bundleUi.accent }} />
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate text-[10px] font-extrabold sm:text-[11px]">{bundle.label}</span>

@@ -8,5 +8,5 @@ export default async function SettingsLayout({ children }: { children: React.Rea
 
   const role = user.workspaceRole ?? user.role;
 
-  return <SettingsPathGuard role={role}>{children}</SettingsPathGuard>;
+  return <SettingsPathGuard role={role} platformRole={user.platformRole} accountClass={user.accountClass}>{children}</SettingsPathGuard>;
 }

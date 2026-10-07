@@ -25,7 +25,7 @@ async function importRows(
   let existing = 0;
   try {
     existing = await db.workspaceSavedSearch.count({
-      where: { createdById: scope.workspaceId },
+      where: { createdById: scope.ownerUserId ?? scope.workspaceId },
     });
   } catch (error) {
     if (isMissingSchemaError(error)) throw error;
@@ -45,7 +45,7 @@ async function importRows(
     .slice(0, 100)
     .map((row) => ({
       id: row.id,
-      createdById: scope.workspaceId,
+      createdById: scope.ownerUserId ?? scope.workspaceId,
       name: row.name.trim(),
       query: row.query || "",
       city: row.city || "",

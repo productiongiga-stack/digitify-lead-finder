@@ -208,7 +208,7 @@ export const searchRouter = router({
     await ensureTenantSchemaCompatibility(ctx.db).catch(() => null);
     try {
       const rows = await ctx.db.workspaceSavedSearch.findMany({
-        where: { createdById: scope.workspaceId },
+        where: { createdById: scope.ownerUserId ?? scope.workspaceId },
         orderBy: { updatedAt: "desc" },
         take: 100,
       });
@@ -250,7 +250,7 @@ export const searchRouter = router({
 
       if (input.id) {
         const existing = await ctx.db.workspaceSavedSearch.findFirst({
-          where: { id: input.id, createdById: scope.workspaceId },
+          where: { id: input.id, createdById: scope.ownerUserId ?? scope.workspaceId },
         });
         if (!existing) {
           throw new TRPCError({ code: "NOT_FOUND", message: "Opgeslagen zoekopdracht niet gevonden." });
@@ -263,7 +263,7 @@ export const searchRouter = router({
       }
 
       const row = await ctx.db.workspaceSavedSearch.create({
-        data: { ...data, createdById: scope.workspaceId },
+        data: { ...data, createdById: scope.ownerUserId ?? scope.workspaceId },
       });
       return serializeSavedSearch(row);
     }),
@@ -273,7 +273,7 @@ export const searchRouter = router({
     .mutation(async ({ ctx, input }) => {
       const scope = workspaceScopeFromUser(ctx.user);
       const result = await ctx.db.workspaceSavedSearch.deleteMany({
-        where: { id: input.id, createdById: scope.workspaceId },
+        where: { id: input.id, createdById: scope.ownerUserId ?? scope.workspaceId },
       });
       if (result.count === 0) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Opgeslagen zoekopdracht niet gevonden." });

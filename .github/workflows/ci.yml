@@ -171,6 +171,10 @@ jobs:
       PLAYWRIGHT_VIEWER_EMAIL: viewer@digitify.ci
       PLAYWRIGHT_VIEWER_PASSWORD: DigitifyCiSeed2026!
       REDIS_URL: redis://localhost:6379
+      # The browser suite intentionally exercises many authenticated routes
+      # with one seeded user. Keep its in-memory/Redis limiter out of the way
+      # so failures represent product behavior rather than test traffic.
+      DIGITIFY_LOCAL_TEST_MODE: "1"
 
     services:
       postgres:

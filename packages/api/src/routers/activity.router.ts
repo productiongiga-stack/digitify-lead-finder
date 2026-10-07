@@ -28,7 +28,7 @@ export const activityRouter = router({
           ...(createdAt ? { createdAt } : {}),
           ...(input.type ? { type: input.type as never } : {}),
           OR: [
-            { lead: { createdById: workspaceId } },
+            { lead: { createdById: ctx.user.ownerUserId! } },
             { userId: { in: memberIds } },
           ],
           ...(input.actorUserId ? { userId: input.actorUserId } : {}),

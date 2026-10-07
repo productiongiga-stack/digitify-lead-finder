@@ -28,7 +28,7 @@ export default function RegisterPage() {
             <CheckCircle2 className="h-6 w-6" />
           </div>
           <CardTitle>Check je inbox</CardTitle>
-          <CardDescription>We hebben een verificatielink gestuurd. Na bevestiging kan een admin je aanvraag goedkeuren.</CardDescription>
+          <CardDescription>We hebben een verificatielink gestuurd. Na bevestiging wordt je persoonlijke bedrijf direct geactiveerd met Lead Engine en basis-CRM.</CardDescription>
         </CardHeader>
         <CardContent className="text-center">
           <Link href="/login" className="text-sm font-semibold text-primary hover:underline">
@@ -45,8 +45,8 @@ export default function RegisterPage() {
         <div className="mx-auto mb-4">
           <AuthLogo size="lg" />
         </div>
-        <CardTitle className="text-2xl font-bold">Toegang aanvragen</CardTitle>
-        <CardDescription>Verifieer je e-mail en wacht op goedkeuring van een admin.</CardDescription>
+        <CardTitle className="text-2xl font-bold">Account aanmaken</CardTitle>
+        <CardDescription>Verifieer je e-mail en start direct met je persoonlijke bedrijf. Je krijgt 14 dagen trial.</CardDescription>
       </CardHeader>
       <CardContent>
         <form
@@ -73,7 +73,7 @@ export default function RegisterPage() {
             <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} required />
           </div>
           <div className="space-y-2">
-            <Label>Waarom wil je toegang?</Label>
+            <Label>Bedrijfsomschrijving (optioneel)</Label>
             <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={3} />
           </div>
           {requestAccess.isError && (
@@ -83,7 +83,7 @@ export default function RegisterPage() {
           )}
           <Button className="w-full rounded-full shadow-sm" disabled={requestAccess.isPending}>
             {requestAccess.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Aanvraag versturen
+            Account aanmaken
           </Button>
           <p className="text-center text-xs text-muted-foreground">
             Al toegang?{" "}

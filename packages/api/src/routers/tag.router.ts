@@ -6,7 +6,7 @@ import { assertLeadAccess } from "../lib/tenant";
 export const tagRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
     return ctx.db.tag.findMany({
-      where: { createdById: ctx.user.workspaceId! },
+      where: { createdById: ctx.user.ownerUserId! },
       orderBy: { name: "asc" },
       take: 100,
       include: { _count: { select: { leads: true } } },
@@ -16,7 +16,7 @@ export const tagRouter = router({
   create: mutationProcedure
     .input(z.object({ name: z.string().min(1), color: z.string().default("#6366f1") }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.db.tag.create({ data: { ...input, createdById: ctx.user.workspaceId! } });
+      return ctx.db.tag.create({ data: { ...input, createdById: ctx.user.ownerUserId! } });
     }),
 
   update: mutationProcedure
@@ -24,7 +24,7 @@ export const tagRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
       const tag = await ctx.db.tag.findFirst({
-        where: { id, createdById: ctx.user.workspaceId! },
+        where: { id, createdById: ctx.user.ownerUserId! },
         select: { id: true },
       });
       if (!tag) throw new TRPCError({ code: "NOT_FOUND", message: "Tag niet gevonden." });
@@ -35,7 +35,7 @@ export const tagRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const tag = await ctx.db.tag.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: ctx.user.ownerUserId! },
         select: { id: true },
       });
       if (!tag) throw new TRPCError({ code: "NOT_FOUND", message: "Tag niet gevonden." });
@@ -48,7 +48,7 @@ export const tagRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       const tag = await ctx.db.tag.findFirst({
-        where: { id: input.tagId, createdById: ctx.user.workspaceId! },
+        where: { id: input.tagId, createdById: ctx.user.ownerUserId! },
         select: { id: true },
       });
       if (!tag) throw new TRPCError({ code: "NOT_FOUND", message: "Tag niet gevonden." });
@@ -61,7 +61,7 @@ export const tagRouter = router({
     .mutation(async ({ ctx, input }) => {
       await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
       const tag = await ctx.db.tag.findFirst({
-        where: { id: input.tagId, createdById: ctx.user.workspaceId! },
+        where: { id: input.tagId, createdById: ctx.user.ownerUserId! },
         select: { id: true },
       });
       if (!tag) throw new TRPCError({ code: "NOT_FOUND", message: "Tag niet gevonden." });

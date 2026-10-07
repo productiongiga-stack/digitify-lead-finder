@@ -50,7 +50,7 @@ test.describe("authenticated smoke", () => {
 
     const leadTrigger = page.getByRole("combobox").first();
     await leadTrigger.click();
-    const firstLead = page.getByRole("option").first();
+    const firstLead = page.getByRole("option").filter({ hasNotText: /Alleen e-mailadres/i }).first();
     await firstLead.click();
 
     await page.getByLabel(/onderwerp/i).fill("E2E test onderwerp");
@@ -68,7 +68,7 @@ test.describe("authenticated smoke", () => {
 
   test("outbound center shows approval flow", async ({ page }) => {
     await page.goto("/contacts");
-    await expect(page.locator("h1.app-page-title", { hasText: "Outbound Center" })).toBeVisible();
+    await expect(page.locator("h1.app-page-title", { hasText: "E-mail & Contacten" })).toBeVisible();
     await expect(page.getByText(/Concept.*goedkeuren.*verzenden/i)).toBeVisible();
     await page.getByRole("tab", { name: /info/i }).click();
     await expect(page.getByText(/klaar om te verzenden/i)).toBeVisible();

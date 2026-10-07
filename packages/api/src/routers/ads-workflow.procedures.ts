@@ -14,7 +14,7 @@ export function adWorkflowProcedures(provider: AdProvider) {
   return {
     workflowCapabilities: protectedProcedure.query(() => AD_CAPABILITIES[provider]),
     workflowOverview: protectedProcedure.query(async ({ ctx }) => {
-      const where = { createdById: ctx.user.workspaceId!, provider };
+      const where = { createdById: ctx.user.ownerUserId!, provider };
       const [versions, changes, runs, operations, settings, jobs] = await Promise.all([
         ctx.db.adVersion.findMany({ where, orderBy: { syncedAt: "desc" }, take: 100 }),
         ctx.db.adChangeSet.findMany({ where, orderBy: { createdAt: "desc" }, take: 50 }),
@@ -67,15 +67,15 @@ export function adWorkflowProcedures(provider: AdProvider) {
     }),
     workflowRetryJob: adminProcedure.input(idInput).mutation(async ({ ctx, input }) => {
       if (ctx.user.isViewingAs) throw new TRPCError({ code: "FORBIDDEN" });
-      const where = { id: input.id, createdById: ctx.user.workspaceId!, provider, status: "FAILED", kind: { not: "OPTIMIZE" } };
+      const where = { id: input.id, createdById: ctx.user.ownerUserId!, provider, status: "FAILED", kind: { not: "OPTIMIZE" } };
       return ctx.db.$transaction(async (tx) => {
         const changed = await tx.adBackgroundJob.updateMany({ where, data: { status: "PENDING", attempts: 0, runAt: new Date(), lastError: null } });
         if (!changed.count) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Alleen mislukte veilige achtergrondtaken kunnen opnieuw worden ingepland." });
-        await tx.adBackgroundJob.updateMany({ where: { createdById: ctx.user.workspaceId!, provider, dependencyId: input.id, status: "BLOCKED" }, data: { status: "PENDING", runAt: new Date(), lastError: null } });
+        await tx.adBackgroundJob.updateMany({ where: { createdById: ctx.user.ownerUserId!, provider, dependencyId: input.id, status: "BLOCKED" }, data: { status: "PENDING", runAt: new Date(), lastError: null } });
         return { scheduled: true };
       });
     }),
     workflowHistory: protectedProcedure.input(z.object({ campaignId: z.string() })).query(({ ctx, input }) =>
-      ctx.db.adVersion.findMany({ where: { createdById: ctx.user.workspaceId!, provider, campaignId: input.campaignId }, orderBy: { syncedAt: "desc" }, take: 30 })),
+      ctx.db.adVersion.findMany({ where: { createdById: ctx.user.ownerUserId!, provider, campaignId: input.campaignId }, orderBy: { syncedAt: "desc" }, take: 30 })),
   };
 }

@@ -39,7 +39,7 @@ import { useToast } from "@/components/feedback/toast-provider";
 
 export default function WorkspacesSettingsPage() {
   const router = useRouter();
-  const { update } = useSession();
+  const { data: session, update } = useSession();
   const { showToast } = useToast();
   const utils = trpc.useUtils();
 
@@ -99,6 +99,8 @@ export default function WorkspacesSettingsPage() {
 
   const activeWorkspace = workspaces?.find((item) => item.isActive);
   const teamWorkspaces = workspaces?.filter((item) => !item.isPersonal && item.status === "ACTIVE") ?? [];
+  const sessionUser = session?.user as { platformRole?: string; accountClass?: string } | undefined;
+  const canCreateWorkspace = sessionUser?.platformRole === "OWNER" || sessionUser?.accountClass === "PLATFORM_OWNER";
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
@@ -111,8 +113,7 @@ export default function WorkspacesSettingsPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Werkruimtes</h1>
           <p className="text-sm text-muted-foreground">
-            Elke gebruiker heeft een persoonlijke werkruimte met eigen data en instellingen. Maak gedeelde
-            werkruimtes aan en nodig teamleden uit.
+            Elke gebruiker heeft een persoonlijke werkruimte. Teamleden nodig je uit binnen je actieve bedrijf; nieuwe bedrijven worden door Platformbeheer aangemaakt.
           </p>
         </div>
       </div>
@@ -179,10 +180,7 @@ export default function WorkspacesSettingsPage() {
               Actief: {activeWorkspace?.name || "—"}
             </CardDescription>
           </div>
-          <Button size="sm" onClick={() => setShowCreate(true)}>
-            <Plus className="mr-1.5 h-4 w-4" />
-            Nieuwe werkruimte
-          </Button>
+          {canCreateWorkspace ? <Button size="sm" onClick={() => setShowCreate(true)}><Plus className="mr-1.5 h-4 w-4" />Nieuwe werkruimte</Button> : null}
         </CardHeader>
         <CardContent className="space-y-3">
           {isLoading ? (

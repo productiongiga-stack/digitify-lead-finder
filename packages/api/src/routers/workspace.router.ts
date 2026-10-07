@@ -17,6 +17,8 @@ import { countWorkspaceOwners } from "../lib/workspace-members";
 import { workspaceMemberUserIds } from "../lib/workspace-members";
 import { passwordPolicySchema } from "../lib/password-policy";
 import { recordSecurityAuditEvent } from "../lib/security-audit";
+import { isPlatformOwner } from "../lib/platform-admin";
+import { ensureDefaultModuleEntitlements } from "../lib/module-entitlements";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -70,7 +72,11 @@ export const workspaceRouter = router({
   create: mutationProcedure
     .input(z.object({ name: z.string().trim().min(2).max(80) }))
     .mutation(async ({ ctx, input }) => {
+      if (!isPlatformOwner(ctx.user)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Alleen platformbeheer kan een nieuw bedrijf aanmaken." });
+      }
       const workspace = await createTeamWorkspace(ctx.db, ctx.user.id, input.name);
+      await ensureDefaultModuleEntitlements(ctx.db, workspace.id);
       await switchActiveWorkspace(ctx.db, ctx.user.id, workspace.id);
       return {
         id: workspace.id,

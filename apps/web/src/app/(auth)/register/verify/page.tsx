@@ -39,7 +39,7 @@ function VerifyRegistrationContent() {
             : verify.isError
             ? verify.error.message
             : verify.isSuccess
-              ? "Je aanvraag staat klaar voor goedkeuring door een admin."
+              ? "Je account is geverifieerd en geactiveerd. Je persoonlijke bedrijf en gratis basismodules staan klaar."
               : "We controleren je verificatielink."}
         </CardDescription>
       </CardHeader>

@@ -47,7 +47,7 @@ export async function migrateLegacyTemplateLibrary(
   }
 
   const existing = await db.emailTemplate.findMany({
-    where: { createdById: scope.workspaceId },
+    where: { createdById: scope.ownerUserId ?? scope.workspaceId },
     select: { name: true },
   });
   const existingNames = new Set(existing.map((item) => item.name));
@@ -62,7 +62,7 @@ export async function migrateLegacyTemplateLibrary(
 
     await db.emailTemplate.create({
       data: {
-        createdById: scope.workspaceId,
+        createdById: scope.ownerUserId ?? scope.workspaceId,
         name,
         subject: item.subject || "Onderwerp",
         isGlobal: false,

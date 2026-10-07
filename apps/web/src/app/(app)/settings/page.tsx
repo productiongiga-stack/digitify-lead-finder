@@ -12,7 +12,7 @@ export default function SettingsPage() {
   const role = effectiveAppRole(
     session?.user as { role?: string; workspaceRole?: string } | undefined,
   );
-  const visibleSections = filterSettingsSections(role);
+  const visibleSections = filterSettingsSections(role, (session?.user as { platformRole?: string } | undefined)?.platformRole, (session?.user as { accountClass?: string } | undefined)?.accountClass);
   const featuredHrefs = [
     "/settings/account",
     "/settings/integrations",
@@ -27,7 +27,7 @@ export default function SettingsPage() {
   ].slice(0, 4);
   const groupedSections = {
     essentials: visibleSections.filter((section) =>
-      ["/settings/account", "/settings/integrations", "/settings/branding", "/settings/seo", "/settings/company", "/settings/display", "/settings/analytics", "/settings/performance"].includes(section.href)
+      ["/settings/account", "/settings/integrations", "/settings/branding", "/settings/seo", "/settings/company", "/settings/display", "/settings/analytics", "/settings/performance", "/settings/platform"].includes(section.href)
     ),
     communication: visibleSections.filter((section) =>
       ["/settings/email", "/settings/ai", "/settings/reviews", "/settings/chatbot", "/settings/feedback"].includes(section.href)

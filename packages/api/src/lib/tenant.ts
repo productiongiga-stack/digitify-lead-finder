@@ -1,15 +1,15 @@
 import { TRPCError } from "@trpc/server";
 import { type PrismaClient } from "@digitify/db";
 
-/** Scope for shared workspace resources (leads, campaigns, templates, …). */
-export function workspaceDataWhere(workspaceId: string) {
+/** Scope for legacy resources whose createdById points to the company owner user. */
+export function workspaceDataWhere(ownerUserId: string) {
   return {
-    createdById: workspaceId,
+    createdById: ownerUserId,
   };
 }
 
-export function ownedLeadWhere(workspaceId: string, extra: Record<string, unknown> = {}) {
-  return { ...extra, ...workspaceDataWhere(workspaceId) };
+export function ownedLeadWhere(ownerUserId: string, extra: Record<string, unknown> = {}) {
+  return { ...extra, ...workspaceDataWhere(ownerUserId) };
 }
 
 /**
@@ -52,10 +52,10 @@ export async function assertOwnedRecord(
   return record;
 }
 
-export function ownedChatSessionWhere(workspaceId: string, memberId?: string) {
+export function ownedChatSessionWhere(workspaceId: string, memberId?: string, leadOwnerId = workspaceId) {
   return {
     OR: [
-      { lead: { createdById: workspaceId } },
+      { lead: { createdById: leadOwnerId } },
       ...(memberId ? [{ assignedToId: memberId }] : []),
       { tags: { has: `tenant:${workspaceId}` } },
     ],

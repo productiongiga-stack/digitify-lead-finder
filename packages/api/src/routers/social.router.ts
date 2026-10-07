@@ -181,7 +181,7 @@ export const socialRouter = router({
     const workspaceId = ctx.user.workspaceId!;
     const page = input?.page ?? 1;
     const pageSize = input?.pageSize ?? 25;
-    const where: Record<string, unknown> = { createdById: workspaceId };
+    const where: Record<string, unknown> = { createdById: ctx.user.ownerUserId! };
     if (input?.status) where.status = input.status;
 
     const [items, total] = await Promise.all([
@@ -224,7 +224,7 @@ export const socialRouter = router({
       const [scheduled, unscheduled] = await Promise.all([
         ctx.db.socialPost.findMany({
           where: {
-            createdById: workspaceId,
+            createdById: ctx.user.ownerUserId!,
             OR: [
               { scheduledFor: { gte: input.from, lte: input.to } },
               { publishedAt: { gte: input.from, lte: input.to } },
@@ -234,7 +234,7 @@ export const socialRouter = router({
         }),
         ctx.db.socialPost.findMany({
           where: {
-            createdById: workspaceId,
+            createdById: ctx.user.ownerUserId!,
             scheduledFor: null,
             status: { in: ["DRAFT", "PENDING_APPROVAL", "FAILED"] },
           },
@@ -323,7 +323,7 @@ export const socialRouter = router({
       const primaryImage = resolvePrimaryImageUrl(metadata, input.imageUrl.trim()) || input.imageUrl.trim();
       const row = await ctx.db.socialPost.create({
         data: {
-          createdById: ctx.user.workspaceId!,
+          createdById: ctx.user.ownerUserId!,
           caption: input.caption.trim(),
           imageUrl: primaryImage,
           targetPlatforms: input.targetPlatforms,
@@ -599,7 +599,7 @@ export const socialRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const workspaceId = ctx.user.workspaceId!;
-      const targetWhere: Record<string, unknown> = { createdById: workspaceId };
+      const targetWhere: Record<string, unknown> = { createdById: ctx.user.ownerUserId! };
       if (input.ids?.length) {
         targetWhere.id = { in: input.ids };
       } else if (input.status) {
@@ -633,7 +633,7 @@ export const socialRouter = router({
 
       const deleted = await ctx.db.socialPost.deleteMany({
         where: {
-          createdById: workspaceId,
+          createdById: ctx.user.ownerUserId!,
           id: { in: deletableIds },
           status: { not: "PUBLISHING" },
         },
@@ -660,7 +660,7 @@ export const socialRouter = router({
       let campaignName = "";
       if (input.campaignId) {
         const row = await ctx.db.campaign.findFirst({
-          where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
+          where: { id: input.campaignId, createdById: ctx.user.ownerUserId! },
           select: { name: true },
         });
         campaignName = row?.name || "";

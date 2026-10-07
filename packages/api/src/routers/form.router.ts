@@ -19,7 +19,7 @@ const defaultFields = [
 export const formRouter = router({
   list: protectedProcedure.query(async ({ ctx }) =>
     ctx.db.leadForm.findMany({
-      where: { createdById: ctx.user.workspaceId! },
+      where: { createdById: ctx.user.ownerUserId! },
       orderBy: { createdAt: "desc" },
       select: { id: true, name: true, publicKey: true, status: true, fields: true, createdAt: true, _count: { select: { submissions: true } } },
     }),
@@ -29,7 +29,7 @@ export const formRouter = router({
     .input(z.object({ name: z.string().trim().min(2).max(120), fields: z.array(formFieldSchema).min(1).max(5).default([...defaultFields]) }))
     .mutation(async ({ ctx, input }) =>
       ctx.db.leadForm.create({
-        data: { createdById: ctx.user.workspaceId!, name: input.name, fields: input.fields },
+        data: { createdById: ctx.user.ownerUserId!, name: input.name, fields: input.fields },
         select: { id: true, name: true, publicKey: true, status: true },
       }),
     ),
@@ -37,7 +37,7 @@ export const formRouter = router({
   setStatus: mutationProcedure
     .input(z.object({ id: z.string(), status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]) }))
     .mutation(async ({ ctx, input }) => {
-      const existing = await ctx.db.leadForm.findFirst({ where: { id: input.id, createdById: ctx.user.workspaceId! }, select: { id: true } });
+      const existing = await ctx.db.leadForm.findFirst({ where: { id: input.id, createdById: ctx.user.ownerUserId! }, select: { id: true } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Formulier niet gevonden" });
       return ctx.db.leadForm.update({ where: { id: input.id }, data: { status: input.status }, select: { id: true, status: true } });
     }),
@@ -45,7 +45,7 @@ export const formRouter = router({
   submissions: protectedProcedure
     .input(z.object({ formId: z.string() }))
     .query(async ({ ctx, input }) => {
-      const form = await ctx.db.leadForm.findFirst({ where: { id: input.formId, createdById: ctx.user.workspaceId! }, select: { id: true } });
+      const form = await ctx.db.leadForm.findFirst({ where: { id: input.formId, createdById: ctx.user.ownerUserId! }, select: { id: true } });
       if (!form) throw new TRPCError({ code: "NOT_FOUND", message: "Formulier niet gevonden" });
       return ctx.db.formSubmission.findMany({ where: { formId: form.id }, orderBy: { createdAt: "desc" }, take: 100, select: { id: true, leadId: true, data: true, createdAt: true } });
     }),

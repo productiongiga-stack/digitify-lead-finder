@@ -19,6 +19,7 @@ export async function POST(request: Request) {
       targetUserId,
       typeof body.workspaceId === "string" ? body.workspaceId : undefined,
       requestId,
+      { mode: body.mode === "ACT_AS" ? "ACT_AS" : "VIEW", reason: typeof body.reason === "string" ? body.reason : undefined, confirmExternalActions: body.confirmExternalActions === true },
     );
     const response = NextResponse.json({ expiresAt: view.expiresAt });
     response.cookies.set(ACCOUNT_VIEW_COOKIE, view.token, { httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 30 * 60 });

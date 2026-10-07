@@ -60,7 +60,7 @@ export const crmRouter = router({
               },
             },
             quotes: {
-              where: { createdById: ctx.user.workspaceId! },
+              where: { createdById: ctx.user.ownerUserId! },
               orderBy: { createdAt: "desc" },
               take: 1,
               select: {
@@ -102,7 +102,7 @@ export const crmRouter = router({
               },
             },
             bookings: {
-              where: { createdById: ctx.user.workspaceId! },
+              where: { createdById: ctx.user.ownerUserId! },
               orderBy: { date: "desc" },
               take: 1,
               select: {
@@ -128,7 +128,7 @@ export const crmRouter = router({
         ctx.db.lead.count({
           where: {
             ...customerWhere,
-            quotes: { some: { createdById: ctx.user.workspaceId! } },
+            quotes: { some: { createdById: ctx.user.ownerUserId! } },
           },
         }),
         ctx.db.lead.count({
@@ -141,7 +141,7 @@ export const crmRouter = router({
           where: {
             ...customerWhere,
             OR: [
-              { quotes: { some: { createdById: ctx.user.workspaceId! } } },
+              { quotes: { some: { createdById: ctx.user.ownerUserId! } } },
               { emailDrafts: { some: {} } },
               { campaignLeads: { some: {} } },
               { reports: { some: {} } },
@@ -156,7 +156,7 @@ export const crmRouter = router({
         ? await ctx.db.quote.groupBy({
             by: ["leadId", "status"],
             where: {
-              createdById: ctx.user.workspaceId!,
+              createdById: ctx.user.ownerUserId!,
               leadId: { in: leadIds },
             },
             _sum: { total: true },

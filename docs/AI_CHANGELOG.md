@@ -1899,3 +1899,19 @@ Tests: `pnpm typecheck`, `git diff --check`.
 - Live naam/status-wijzigingen uit de studio gebruiken de versioned approvalflow waar de providerdata beschikbaar is.
 - AI-prompts gebruiken geen hardcoded Digitify/Belgische KMO-context meer; Google- en Meta-studio’s tonen een gedeelde Copilot-panel.
 - Lokale verificatie: Prisma-client gegenereerd; bestaande Meta/Google/workflow/background tests geslaagd; web-typecheck geslaagd. Database-migratie en live providerwrites zijn lokaal nog afhankelijk van configuratie.
+
+## 2026-10-06 — Account-, bedrijfs- en tenantbeheer
+
+- Technische workspace-ID en legacy eigenaar-ID zijn centraal beschikbaar via `tenant.getContext`; legacy `createdById`-queries gebruiken de bedrijfseigenaar.
+- Accountklassen, accountstatus, platformrol en een expliciete 14-daagse trial zijn toegevoegd. Nieuwe zelfregistraties worden na e-mailverificatie direct geactiveerd met gratis Lead Engine- en CRM-entitlements.
+- Platformbeheer ondersteunt accountoverzicht, supportmodus met reden, accountstatus, accountklasse, module-entitlements, audit-events en beperkte secret-reveal met herauthenticatiebewijs.
+- De tenantmigratie is idempotent en standaard dry-run: `pnpm --filter @digitify/db db:migrate-account-tenancy`.
+- Lokale verificatie: 415 API-tests geslaagd, web-typecheck geslaagd en Prisma-client gegenereerd. De migratie is lokaal niet uitgevoerd omdat `DATABASE_URL` ontbreekt.
+
+## 2026-10-07 — Accountmatrix en releasecontrole
+
+- De CI-blokkerende control-character-regex in de Ads-Copilot vervangen door equivalente veilige filtering; API-typecontrole is nu foutvrij.
+- Nieuwe uitgenodigde gebruikers behouden hun aangevraagde workspace-rol, inclusief `VIEWER`, `TESTER` en `TRIAL`.
+- Tests toegevoegd voor expliciete platform-owner supportmodus en module-entitlements.
+- Lokale verificatie: 419 API-tests geslaagd, 9 integratiesuites overgeslagen zonder databaseflag, API/web-typecheck en monorepo-lint geslaagd met bestaande waarschuwingen.
+- GitHub-integratiecontrole vond een legacy-RLS-randgeval zonder persoonlijke Workspace-row; de owner-resolver valt nu veilig terug op de actieve user-ID en behoudt die accounts tijdens backfill.

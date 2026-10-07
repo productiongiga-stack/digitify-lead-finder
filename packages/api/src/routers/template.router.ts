@@ -67,7 +67,7 @@ export const templateRouter = router({
 
       const rows = await ctx.db.emailTemplate.findMany({
         where: {
-          createdById: workspaceId,
+          createdById: ctx.user.ownerUserId!,
           isSystem: true,
           templateKey: { not: null },
           ...(moduleFilter ? { module: moduleFilter } : {}),
@@ -131,7 +131,7 @@ export const templateRouter = router({
 
       const existing = await ctx.db.emailTemplate.findFirst({
         where: {
-          createdById: workspaceId,
+          createdById: ctx.user.ownerUserId!,
           templateKey: input.templateKey,
           isSystem: true,
         },
@@ -197,7 +197,7 @@ export const templateRouter = router({
 
   get: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
     const row = await ctx.db.emailTemplate.findFirst({
-      where: { id: input.id, createdById: ctx.user.workspaceId! },
+      where: { id: input.id, createdById: ctx.user.ownerUserId! },
       include: { campaign: { select: { id: true, name: true } } },
     });
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
@@ -231,7 +231,7 @@ export const templateRouter = router({
       try {
         if (input.campaignId) {
           const campaign = await ctx.db.campaign.findFirst({
-            where: { id: input.campaignId, createdById: ctx.user.workspaceId! },
+            where: { id: input.campaignId, createdById: ctx.user.ownerUserId! },
             select: { id: true },
           });
           if (!campaign) throw new TRPCError({ code: "NOT_FOUND", message: "Campagne niet gevonden." });
@@ -249,7 +249,7 @@ export const templateRouter = router({
 
         if (input.id) {
           const existing = await ctx.db.emailTemplate.findFirst({
-            where: { id: input.id, createdById: ctx.user.workspaceId! },
+            where: { id: input.id, createdById: ctx.user.ownerUserId! },
             select: { id: true, isSystem: true, name: true, templateKey: true, module: true },
           });
           if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
@@ -270,7 +270,7 @@ export const templateRouter = router({
 
         const row = await ctx.db.emailTemplate.create({
           data: {
-            createdById: ctx.user.workspaceId!,
+            createdById: ctx.user.ownerUserId!,
             name: input.name.trim(),
             subject: input.subject.trim(),
             ...templateData,
@@ -300,13 +300,13 @@ export const templateRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const source = await ctx.db.emailTemplate.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: ctx.user.ownerUserId! },
       });
       if (!source) throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });
 
       const row = await ctx.db.emailTemplate.create({
         data: {
-          createdById: ctx.user.workspaceId!,
+          createdById: ctx.user.ownerUserId!,
           name: `${source.name} (kopie)`,
           subject: source.subject,
           body: source.body,
@@ -328,7 +328,7 @@ export const templateRouter = router({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.emailTemplate.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: ctx.user.ownerUserId! },
         select: { id: true, isSystem: true },
       });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Template niet gevonden." });

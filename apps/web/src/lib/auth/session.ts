@@ -18,6 +18,12 @@ type SessionUser = {
   actorUserId?: string;
   viewAsSessionId?: string;
   viewAsTargetName?: string | null;
+  accountClass?: string;
+  accountStatus?: string;
+  platformRole?: string | null;
+  trialEndsAt?: Date | null;
+  viewAsMode?: "VIEW" | "ACT_AS";
+  viewAsConfirmExternalActions?: boolean;
 };
 
 export type CurrentUser = {
@@ -33,6 +39,12 @@ export type CurrentUser = {
   actorUserId?: string;
   viewAsSessionId?: string;
   viewAsTargetName?: string | null;
+  accountClass?: string;
+  accountStatus?: string;
+  platformRole?: string | null;
+  trialEndsAt?: Date | null;
+  viewAsMode?: "VIEW" | "ACT_AS";
+  viewAsConfirmExternalActions?: boolean;
 };
 
 export const getSession = cache(async () => getServerSession(authOptions));
@@ -47,7 +59,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const viewedUser = viewToken
     ? await resolveAccountView(
         prisma,
-        user as { id: string; email: string; role: string; workspaceId?: string; workspaceRole?: string },
+        user as { id: string; email: string; role: string; workspaceId?: string; workspaceRole?: string; accountClass?: string; platformRole?: string | null },
         viewToken,
       )
     : null;
@@ -56,6 +68,10 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     workspaceId: user.workspaceId, workspaceRole: user.workspaceRole,
     isPersonalWorkspace: user.isPersonalWorkspace ?? false,
     disabledModules: user.disabledModules ?? [],
+    accountClass: user.accountClass,
+    accountStatus: user.accountStatus,
+    platformRole: user.platformRole,
+    trialEndsAt: user.trialEndsAt,
   };
 });
 

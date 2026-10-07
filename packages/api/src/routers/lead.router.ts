@@ -124,13 +124,13 @@ export const leadRouter = router({
       const [ownedPipelineStageIds, ownedTagIds] = await Promise.all([
         filters?.pipelineStageIds?.length
           ? ctx.db.pipelineStage.findMany({
-              where: { id: { in: filters.pipelineStageIds }, createdById: ctx.user.workspaceId! },
+              where: { id: { in: filters.pipelineStageIds }, createdById: ctx.user.ownerUserId! },
               select: { id: true },
             }).then((rows) => rows.map((row) => row.id))
           : Promise.resolve<string[]>([]),
         filters?.tags?.length
           ? ctx.db.tag.findMany({
-              where: { id: { in: filters.tags }, createdById: ctx.user.workspaceId! },
+              where: { id: { in: filters.tags }, createdById: ctx.user.ownerUserId! },
               select: { id: true },
             }).then((rows) => rows.map((row) => row.id))
           : Promise.resolve<string[]>([]),
@@ -167,7 +167,7 @@ export const leadRouter = router({
         where.tags = { some: { tagId: { in: ownedTagIds.length ? ownedTagIds : ["__no_tag__"] } } };
       }
       if (filters?.campaignId) {
-        where.campaignLeads = { some: { campaignId: filters.campaignId, campaign: { createdById: ctx.user.workspaceId! } } };
+        where.campaignLeads = { some: { campaignId: filters.campaignId, campaign: { createdById: ctx.user.ownerUserId! } } };
       }
       if (filters?.excludeDemo) {
         where.NOT = {
@@ -223,7 +223,7 @@ export const leadRouter = router({
         filters?.pipelineStageIds?.length
           ? ctx.db.pipelineStage
               .findMany({
-                where: { id: { in: filters.pipelineStageIds }, createdById: ctx.user.workspaceId! },
+                where: { id: { in: filters.pipelineStageIds }, createdById: ctx.user.ownerUserId! },
                 select: { id: true },
               })
               .then((rows) => rows.map((row) => row.id))
@@ -231,7 +231,7 @@ export const leadRouter = router({
         filters?.tags?.length
           ? ctx.db.tag
               .findMany({
-                where: { id: { in: filters.tags }, createdById: ctx.user.workspaceId! },
+                where: { id: { in: filters.tags }, createdById: ctx.user.ownerUserId! },
                 select: { id: true },
               })
               .then((rows) => rows.map((row) => row.id))
@@ -270,7 +270,7 @@ export const leadRouter = router({
       }
       if (filters?.campaignId) {
         where.campaignLeads = {
-          some: { campaignId: filters.campaignId, campaign: { createdById: ctx.user.workspaceId! } },
+          some: { campaignId: filters.campaignId, campaign: { createdById: ctx.user.ownerUserId! } },
         };
       }
       if (filters?.excludeDemo) {
@@ -433,19 +433,19 @@ export const leadRouter = router({
           select: { id: true, type: true, title: true, createdAt: true },
         }),
         ctx.db.quote.findMany({
-          where: { createdById: workspaceId, leadId: lead.id },
+          where: { createdById: ctx.user.ownerUserId!, leadId: lead.id },
           orderBy: { updatedAt: "desc" },
           take: 5,
           select: { id: true, quoteNumber: true, status: true, total: true, updatedAt: true },
         }),
         ctx.db.workspaceInvoice.findMany({
-          where: { createdById: workspaceId, leadId: lead.id },
+          where: { createdById: ctx.user.ownerUserId!, leadId: lead.id },
           orderBy: { updatedAt: "desc" },
           take: 5,
           select: { id: true, invoiceNumber: true, status: true, total: true, currency: true, dueDate: true, updatedAt: true },
         }),
         ctx.db.workspaceTask.findMany({
-          where: { createdById: workspaceId, relatedType: "LEAD", relatedId: lead.id, status: { not: "DONE" } },
+          where: { createdById: ctx.user.ownerUserId!, relatedType: "LEAD", relatedId: lead.id, status: { not: "DONE" } },
           orderBy: [{ dueAt: "asc" }, { updatedAt: "desc" }],
           take: 8,
           select: { id: true, title: true, status: true, priority: true, dueAt: true, updatedAt: true },
@@ -557,7 +557,7 @@ export const leadRouter = router({
         },
       });
 
-      await enqueueLeadAnalysis(ctx.db, { workspaceId: ctx.user.workspaceId!, leadId: lead.id, createdById: ctx.user.id }).catch(() => null);
+      await enqueueLeadAnalysis(ctx.db, { workspaceId: ctx.user.ownerUserId!, leadId: lead.id, createdById: ctx.user.id }).catch(() => null);
 
       return lead;
     }),
@@ -601,7 +601,7 @@ export const leadRouter = router({
       if (pipelineStageId !== undefined) {
         if (pipelineStageId) {
           const stage = await ctx.db.pipelineStage.findFirst({
-            where: { id: pipelineStageId, createdById: ctx.user.workspaceId! },
+            where: { id: pipelineStageId, createdById: ctx.user.ownerUserId! },
             select: { id: true },
           });
           if (!stage) {
@@ -683,7 +683,7 @@ export const leadRouter = router({
     .mutation(async ({ ctx, input }) => {
       const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const tag = await ctx.db.tag.findFirst({
-        where: { id: input.tagId, createdById: ctx.user.workspaceId! },
+        where: { id: input.tagId, createdById: ctx.user.ownerUserId! },
         select: { id: true },
       });
       if (!tag) {

@@ -3,7 +3,7 @@ import { router, protectedProcedure, mutationProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { loadEmailSettings } from "../lib/email-sender";
 import { sendTemplatedEmail } from "../lib/send-templated-email";
-import { assertLeadAccess } from "../lib/tenant";
+import { assertLeadAccess, resolveLeadOwnerId } from "../lib/tenant";
 
 const REVIEW_STATUSES = ["PENDING", "SENT", "OPENED", "REVIEWED", "FEEDBACK"] as const;
 const reviewStatusEnum = z.enum(REVIEW_STATUSES);
@@ -39,7 +39,8 @@ export const reviewRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const { status, page = 1, pageSize = 25 } = input ?? {};
-      const where: Record<string, unknown> = { createdById: ctx.user.workspaceId! };
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
+      const where: Record<string, unknown> = { createdById: leadOwnerId };
       if (status) where.status = status;
 
       const [reviews, total] = await Promise.all([
@@ -59,16 +60,17 @@ export const reviewRouter = router({
     }),
 
   getStats: protectedProcedure.query(async ({ ctx }) => {
+    const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
     const [total, pending, sent, opened, reviewed, feedback, ratingResult] = await Promise.all([
-      ctx.db.reviewRequest.count({ where: { createdById: ctx.user.workspaceId! } }),
-      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: ctx.user.workspaceId! } }),
-      ctx.db.reviewRequest.count({ where: { status: "SENT", createdById: ctx.user.workspaceId! } }),
-      ctx.db.reviewRequest.count({ where: { status: "OPENED", createdById: ctx.user.workspaceId! } }),
-      ctx.db.reviewRequest.count({ where: { status: "REVIEWED", createdById: ctx.user.workspaceId! } }),
-      ctx.db.reviewRequest.count({ where: { status: "FEEDBACK", createdById: ctx.user.workspaceId! } }),
+      ctx.db.reviewRequest.count({ where: { createdById: leadOwnerId } }),
+      ctx.db.reviewRequest.count({ where: { status: "PENDING", createdById: leadOwnerId } }),
+      ctx.db.reviewRequest.count({ where: { status: "SENT", createdById: leadOwnerId } }),
+      ctx.db.reviewRequest.count({ where: { status: "OPENED", createdById: leadOwnerId } }),
+      ctx.db.reviewRequest.count({ where: { status: "REVIEWED", createdById: leadOwnerId } }),
+      ctx.db.reviewRequest.count({ where: { status: "FEEDBACK", createdById: leadOwnerId } }),
       ctx.db.reviewRequest.aggregate({
         _avg: { rating: true },
-        where: { rating: { not: null }, createdById: ctx.user.workspaceId! },
+        where: { rating: { not: null }, createdById: leadOwnerId },
       }),
     ]);
     return {
@@ -94,6 +96,7 @@ export const reviewRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       if (input.leadId) await assertLeadAccess(ctx.db, ctx.user.workspaceId!, input.leadId);
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       return ctx.db.reviewRequest.create({
         data: {
           clientName: input.clientName,
@@ -101,7 +104,7 @@ export const reviewRouter = router({
           leadId: input.leadId || null,
           platform: input.platform,
           reviewUrl: input.reviewUrl || null,
-          createdById: ctx.user.workspaceId!,
+          createdById: leadOwnerId,
         },
       });
     }),
@@ -118,8 +121,9 @@ export const reviewRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const existing = await ctx.db.reviewRequest.findFirst({
-        where: { id, createdById: ctx.user.workspaceId! },
+        where: { id, createdById: leadOwnerId },
         select: { id: true },
       });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Review request niet gevonden" });
@@ -142,8 +146,9 @@ export const reviewRouter = router({
   send: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const review = await ctx.db.reviewRequest.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: leadOwnerId },
         include: { lead: { select: { id: true, companyName: true } } },
       });
       if (!review) throw new TRPCError({ code: "NOT_FOUND", message: "Review request niet gevonden" });
@@ -178,12 +183,12 @@ export const reviewRouter = router({
         },
         recipientCompany: review.lead?.companyName ?? review.clientName,
         leadId: review.leadId || undefined,
-        userId: ctx.user.id,
+        userId: { workspaceId: ctx.user.workspaceId!, memberId: ctx.user.id },
       });
 
       if (!result.success) {
         throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
+          code: "PRECONDITION_FAILED",
           message: result.error || "Review e-mail verzenden mislukt",
         });
       }
@@ -212,8 +217,9 @@ export const reviewRouter = router({
   bulkSend: mutationProcedure
     .input(z.object({ ids: z.array(z.string()).min(1).max(50) }))
     .mutation(async ({ ctx, input }) => {
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const reviews = await ctx.db.reviewRequest.findMany({
-        where: { id: { in: input.ids }, createdById: ctx.user.workspaceId! },
+        where: { id: { in: input.ids }, createdById: leadOwnerId },
         include: { lead: { select: { id: true, companyName: true } } },
       });
 
@@ -260,7 +266,7 @@ export const reviewRouter = router({
             },
             recipientCompany: review.lead?.companyName ?? review.clientName,
             leadId: review.leadId || undefined,
-            userId: ctx.user.id,
+            userId: { workspaceId: ctx.user.workspaceId!, memberId: ctx.user.id },
           });
 
           if (result.success) {
@@ -305,8 +311,9 @@ export const reviewRouter = router({
   delete: mutationProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const leadOwnerId = await resolveLeadOwnerId(ctx.db, ctx.user.workspaceId!);
       const existing = await ctx.db.reviewRequest.findFirst({
-        where: { id: input.id, createdById: ctx.user.workspaceId! },
+        where: { id: input.id, createdById: leadOwnerId },
         select: { id: true },
       });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Review request niet gevonden" });
