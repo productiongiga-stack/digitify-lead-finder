@@ -344,12 +344,6 @@ async function loadReadableGoogleAdsConfig(db: PrismaClient, scope: ReturnType<t
   if (!config.refreshToken) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Koppel Google Ads eerst via Integraties." });
   }
-  if (!config.developerToken) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "GOOGLE_ADS_DEVELOPER_TOKEN ontbreekt op de server. Zet deze in Vercel of .env.",
-    });
-  }
   if (!config.customerId) {
     throw new TRPCError({
       code: "BAD_REQUEST",
@@ -393,15 +387,17 @@ export const googleAdsRouter = router({
       : null;
 
     const missingOperationalRequirements: string[] = [];
-    if (!resolveGoogleAdsDeveloperToken()) missingOperationalRequirements.push("GOOGLE_DEV_TOKEN_MISSING");
     if (!config.refreshToken) missingOperationalRequirements.push("GOOGLE_OAUTH_MISSING");
     if (!config.customerId) missingOperationalRequirements.push("GOOGLE_CUSTOMER_NOT_SELECTED");
     if (!config.autoadsEnabled) missingOperationalRequirements.push("GOOGLE_AUTOMATION_DISABLED");
 
     return {
       hasOAuthClient: Boolean(config.clientId && config.clientSecret),
+      // Kept for backwards-compatible UI responses. Since September 2026 API
+      // access is managed on the OAuth Cloud project, not by this token.
       hasDeveloperToken: Boolean(resolveGoogleAdsDeveloperToken()),
-      connected: Boolean(config.refreshToken),
+      apiAccessManagedByCloudProject: true,
+      connected: Boolean(config.refreshToken && config.customerId),
       accountEmail: config.accountEmail || null,
       selectedCustomerId: config.customerId || null,
       selectedCustomerName: selected?.name || null,
@@ -417,12 +413,6 @@ export const googleAdsRouter = router({
     const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
     const config = await loadGoogleAdsWorkspaceConfig(ctx.db, scope);
     if (!config.refreshToken) throw new TRPCError({ code: "BAD_REQUEST", message: "Koppel Google Ads eerst via Integraties." });
-    if (!config.developerToken) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "GOOGLE_ADS_DEVELOPER_TOKEN ontbreekt op de server. Zet deze in Vercel of .env.",
-      });
-    }
     try {
       return await listGoogleAdCustomers(config);
     } catch (error) {

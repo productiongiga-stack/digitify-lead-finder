@@ -30,7 +30,7 @@ export function requireCentralCreativeKey() {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
       message:
-        "Centrale AI is nog niet geconfigureerd. Een beheerder moet de provider activeren via Platformbeheer → AI & media.",
+        "Centrale AI is nog niet geconfigureerd. De platform-owner moet CREATIVE_MUAPI_KEY server-side toevoegen in Vercel (Production én Preview) en daarna opnieuw deployen. Controleer daarna Instellingen → Integraties → MuAPI.",
     });
   return key;
 }

@@ -21,7 +21,7 @@
     "@sentry/node": "^10.53.1",
     "@trpc/server": "^11.0.0",
     "@vercel/blob": "^2.4.0",
-    "google-ads-api": "^20.0.0",
+    "google-ads-api": "^25.1.0",
     "imapflow": "^2.0.0",
     "nodemailer": "^9.1.1",
     "otplib": "13.4.0",

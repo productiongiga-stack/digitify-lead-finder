@@ -95,10 +95,11 @@ export async function loadSeoConnectorStatus(db: PrismaClient, input: { workspac
   const hasSearchConsole = Boolean(getSettingString(settings, "seo.google_search_console_refresh_token"));
   return {
     googleAds: {
-      connected: Boolean(googleAds.refreshToken && googleAds.customerId && googleAds.developerToken),
+      connected: Boolean(googleAds.refreshToken && googleAds.customerId),
       hasOAuth: Boolean(googleAds.refreshToken),
       hasCustomer: Boolean(googleAds.customerId),
       hasDeveloperToken: Boolean(googleAds.developerToken),
+      apiAccessManagedByCloudProject: true,
     },
     searchConsole: {
       connected: hasSearchConsole,
@@ -119,7 +120,8 @@ async function getSearchConsoleAccessToken(db: PrismaClient, input: { workspaceI
   const expiresAt = getSettingString(settings, "seo.google_search_console_token_expires_at");
   if (accessToken && (!expiresAt || new Date(expiresAt).getTime() > Date.now() + 60_000)) return accessToken;
   const refreshToken = getSettingString(settings, "seo.google_search_console_refresh_token");
-  if (accessToken) return accessToken;
+  // Do not reuse an expired access token. Refresh it when possible so a
+  // long-lived workspace connection keeps working after the first hour.
   if (!refreshToken) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Koppel Google Search Console eerst." });
   const client = await loadGoogleOAuthClientConfig(db, { userId: input.memberId });
   const response = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: client.clientId, client_secret: client.clientSecret, grant_type: "refresh_token", refresh_token: refreshToken }) });
@@ -139,8 +141,8 @@ export async function listSearchConsoleProperties(db: PrismaClient, input: { wor
 
 export async function fetchGoogleAdsIdeas(db: PrismaClient, input: SeoResearchInput) {
   const config = await loadGoogleAdsWorkspaceConfig(db, workspaceScopeFromUser({ id: input.memberId, workspaceId: input.workspaceId }));
-  if (!config.refreshToken || !config.customerId || !config.developerToken) {
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Koppel Google Ads, selecteer een customer en configureer de developer token voordat je keyworddata ophaalt." });
+  if (!config.refreshToken || !config.customerId) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Koppel Google Ads en selecteer een customer voordat je keyworddata ophaalt." });
   }
   const client = await createAdsClient(config);
   const customer: any = getGoogleAdsCustomer(client as any, config);

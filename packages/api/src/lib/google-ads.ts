@@ -92,7 +92,7 @@ function formatGoogleAdsErrorEntry(error: {
 function googleAdsHintFor(message: string): string {
   const lower = message.toLowerCase();
   if (lower.includes("developer_token") || lower.includes("developer token")) {
-    return "Tip: zet GOOGLE_ADS_DEVELOPER_TOKEN in de server/Vercel env en controleer Google Ads API Center toegang.";
+    return "Tip: Google Ads API-toegang wordt nu beheerd in Google Cloud Console → Google Ads API → API access. Een oude developer token is niet meer de primaire instelling.";
   }
   if (lower.includes("invalid_grant") || lower.includes("refresh_token") || lower.includes("oauth") || lower.includes("authorization")) {
     return "Tip: koppel Google Ads opnieuw via Integraties met de adwords scope en controleer accounttoegang.";
@@ -109,7 +109,10 @@ function googleAdsHintFor(message: string): string {
   if (lower.includes("budget")) {
     return "Tip: verlaag het budget of verhoog de workspace budgetlimiet.";
   }
-  return "Tip: controleer Google OAuth, customer, developer token, billing status en het veldpad in de foutmelding.";
+  if (lower.includes("unimplemented") || lower.includes("grpc") || lower.includes("target method")) {
+    return "Tip: vernieuw de Google Ads API-client en controleer of het gekoppelde Google Cloud-project Google Ads API-toegang heeft; koppel daarna opnieuw.";
+  }
+  return "Tip: controleer Google OAuth, customer, Google Cloud API access, billing status en het veldpad in de foutmelding.";
 }
 
 function withGoogleAdsHint(message: string): string {
@@ -325,12 +328,6 @@ export async function createAdsClient(config: GoogleAdsWorkspaceConfig) {
   if (!config.clientId || !config.clientSecret) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Google OAuth client ontbreekt in Integraties." });
   }
-  if (!config.developerToken) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "GOOGLE_ADS_DEVELOPER_TOKEN ontbreekt op de server.",
-    });
-  }
   if (!config.refreshToken) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Koppel Google Ads eerst via Integraties." });
   }
@@ -338,7 +335,10 @@ export async function createAdsClient(config: GoogleAdsWorkspaceConfig) {
   return new GoogleAdsApi({
     client_id: config.clientId,
     client_secret: config.clientSecret,
-    developer_token: config.developerToken,
+    // Google moved API access from developer tokens to the OAuth Cloud project
+    // in September 2026. The v25 client still exposes this field as required,
+    // but Google ignores it for migrated projects.
+    developer_token: config.developerToken || "",
   });
 }
 
@@ -392,7 +392,9 @@ export async function listGoogleAdCustomers(config: GoogleAdsWorkspaceConfig): P
   const accessible = await client.listAccessibleCustomers(config.refreshToken);
   const resourceNames = Array.isArray(accessible)
     ? accessible
-    : ((accessible as { resource_names?: string[] }).resource_names ?? []);
+    : ((accessible as { resource_names?: string[]; resourceNames?: string[] }).resource_names
+      ?? (accessible as { resourceNames?: string[] }).resourceNames
+      ?? []);
   if (!resourceNames.length) return [];
 
   const customerIds = resourceNames.map((resourceName) => resourceName.replace("customers/", ""));

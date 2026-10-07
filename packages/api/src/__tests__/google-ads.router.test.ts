@@ -195,6 +195,27 @@ describe("googleAds router flow", () => {
     expect(status.missingOperationalRequirements).toContain("GOOGLE_AUTOMATION_DISABLED");
   });
 
+  it("treats Google Cloud project access as sufficient without a legacy developer token", async () => {
+    vi.mocked(googleAdsLib.loadGoogleAdsWorkspaceConfig).mockResolvedValue({
+      ...baseConfig,
+      developerToken: "",
+      refreshToken: "refresh",
+      customerId: "1234567890",
+      autoadsEnabled: true,
+    } as any);
+
+    const caller = googleAdsRouter.createCaller(
+      makeCtx({
+        googleAdAccount: { findFirst: vi.fn().mockResolvedValue(null) },
+      }),
+    );
+
+    const status = await caller.connectionStatus();
+    expect(status.connected).toBe(true);
+    expect(status.apiAccessManagedByCloudProject).toBe(true);
+    expect(status.missingOperationalRequirements).not.toContain("GOOGLE_DEV_TOKEN_MISSING");
+  });
+
   it("fails listCampaigns clearly when no customer is selected", async () => {
     vi.mocked(googleAdsLib.loadGoogleAdsWorkspaceConfig).mockResolvedValue({
       ...baseConfig,

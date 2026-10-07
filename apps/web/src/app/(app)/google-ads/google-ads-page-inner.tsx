@@ -6,7 +6,7 @@ import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import { useMutationGeneration } from "@/lib/use-mutation-generation";
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, EmptyState, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Switch, Tabs, TabsContent, Textarea, TooltipProvider } from "@digitify/ui";
-import { BarChart3, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Eye, Layers, Megaphone, Languages, Image as ImageIcon, KeyRound, Loader2, PauseCircle, PencilLine, Plus, RefreshCcw, Save, Search, Send, Settings2, ShieldCheck, Sparkles, Target, Play, Trash2 } from "lucide-react";
+import { BarChart3, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Eye, Layers, Megaphone, Languages, Image as ImageIcon, Loader2, PauseCircle, PencilLine, Plus, RefreshCcw, Save, Search, Send, Settings2, ShieldCheck, Sparkles, Target, Play, Trash2 } from "lucide-react";
 import { AdsStudioStatsStrip, adsStudioStatIcons } from "@/components/ads/ads-studio-stats-strip";
 import { AdsCopilotPanel } from "@/components/ads/ads-copilot-panel";
 import { AdsStudioTabsNav } from "@/components/ads/ads-studio-tabs-nav";
@@ -872,55 +872,8 @@ export function GoogleAdsPageInner() {
 
       <AdsCopilotPanel provider="GOOGLE" campaignIds={editingLiveCampaignId ? [editingLiveCampaignId] : []} />
 
-      {(!connection.data?.hasDeveloperToken || !connection.data?.autoadsEnabled) ? (
+      {connection.data && !connection.data.autoadsEnabled ? (
         <div className="space-y-2">
-          {!connection.data?.hasDeveloperToken ? (
-            <GoogleAdsSetupNotice
-              tone="amber"
-              icon={KeyRound}
-              title="Developer token ontbreekt"
-              badge="API-setup"
-              summary="Zonder developer token kan de app niet met de Google Ads API praten."
-              headerAction={
-                <Button size="sm" className="h-8 bg-amber-600 hover:bg-amber-700" asChild>
-                  <Link href="/settings/integrations">
-                    <Settings2 className="mr-1.5 h-3.5 w-3.5" />
-                    Integraties
-                  </Link>
-                </Button>
-              }
-            >
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="rounded-xl border border-amber-100/80 bg-amber-50/30 px-3 py-2.5 dark:border-amber-900/30 dark:bg-amber-950/20">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800/80 dark:text-amber-200/80">Variabele</p>
-                  <p className="mt-1 break-all font-mono text-xs font-medium text-foreground">GOOGLE_ADS_DEVELOPER_TOKEN</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    In <span className="font-mono">.env</span> en Vercel project settings
-                  </p>
-                </div>
-                <div className="rounded-xl border bg-muted/20 px-3 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Toegang</p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    Controleer in het Google Ads API Center of je token <span className="font-medium text-foreground">Basic</span> of{" "}
-                    <span className="font-medium text-foreground">Standard</span> access heeft.
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button className="bg-amber-600 hover:bg-amber-700" asChild>
-                  <Link href="/settings/integrations">
-                    <Settings2 className="mr-2 h-4 w-4" />
-                    Naar integraties
-                  </Link>
-                </Button>
-                <Button variant="outline" className="border-amber-200/80 bg-background/80" asChild>
-                  <a href="https://ads.google.com/aw/apicenter" target="_blank" rel="noreferrer">
-                    Google API Center
-                  </a>
-                </Button>
-              </div>
-            </GoogleAdsSetupNotice>
-          ) : null}
           {!connection.data?.autoadsEnabled ? (
             <GoogleAdsSetupNotice
               tone="emerald"
@@ -1866,7 +1819,7 @@ Waar vind je het ID? In Google Ads: Doelen → Conversies → klik op de actie �
                 {!customers.isLoading && !customers.error && !(customers.data || []).length ? (
                   <EmptyState
                     title="Geen customers gevonden"
-                    description="Koppel Google Ads met adwords-scope, zet GOOGLE_ADS_DEVELOPER_TOKEN en controleer API-toegang."
+                    description="Koppel Google Ads met de adwords-scope, selecteer een customer en controleer API-toegang in Google Cloud Console."
                     icon={<Search className="h-8 w-8" />}
                   />
                 ) : null}
