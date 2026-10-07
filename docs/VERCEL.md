@@ -27,7 +27,7 @@ Set these in **Vercel → Project → Settings → Environment Variables**:
 | `ENABLE_WORKSPACE_RLS` | **`true`** — required on `project-ubm6y` / production; without it the app returns 500 on all `/dashboard`, `/social`, etc. |
 | `REDIS_URL` or Upstash | `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` for shared rate limits. The Vercel Upstash integration names (`upstashredis_KV_REST_API_URL` and `upstashredis_KV_REST_API_TOKEN`) are also accepted by the app; never paste token values into source control or support tickets. |
 | `BLOB_PRIVATE_READ_WRITE_TOKEN` | Private Vercel Blob — workspace files, PDFs, presentations and portal uploads |
-| `BLOB_READ_WRITE_TOKEN` | Legacy public Blob token during migration |
+| `BLOB_READ_WRITE_TOKEN` | Legacy public Blob token during migration; never used for private uploads |
 | `BLOB_PUBLIC_READ_WRITE_TOKEN` | Public Vercel Blob — existing social/generated media and client uploads |
 | `SENTRY_DSN` | Sentry project DSN (server errors + tRPC 500s) |
 | `NEXT_PUBLIC_SENTRY_DSN` | Same DSN for client `global-error` boundary |

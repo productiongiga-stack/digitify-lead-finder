@@ -8,7 +8,9 @@ export type BlobAccess = "private" | "public";
  */
 export function getBlobToken(access: BlobAccess): string | undefined {
   const value = access === "private"
-    ? process.env.BLOB_PRIVATE_READ_WRITE_TOKEN || process.env.BLOB_READ_WRITE_TOKEN
+    // Never fall back to the legacy token for private writes: that token may
+    // point at the public store and would recreate Vercel's access mismatch.
+    ? process.env.BLOB_PRIVATE_READ_WRITE_TOKEN
     : process.env.BLOB_PUBLIC_READ_WRITE_TOKEN || process.env.BLOB_READ_WRITE_TOKEN;
   return value?.trim() || undefined;
 }

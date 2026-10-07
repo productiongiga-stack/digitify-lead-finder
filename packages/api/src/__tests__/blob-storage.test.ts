@@ -40,6 +40,13 @@ describe("blob storage configuration", () => {
     expect(error.message).toBe(blobConfigurationMessage("private"));
   });
 
+  it("does not treat the legacy public token as private storage", () => {
+    delete process.env.BLOB_PRIVATE_READ_WRITE_TOKEN;
+    process.env.BLOB_READ_WRITE_TOKEN = "legacy-public-token";
+    expect(getBlobToken("private")).toBeUndefined();
+    expect(isBlobConfigured("private")).toBe(false);
+  });
+
   it("reports missing public storage without exposing a secret", () => {
     delete process.env.BLOB_PUBLIC_READ_WRITE_TOKEN;
     expect(getBlobToken("public")).toBeUndefined();
