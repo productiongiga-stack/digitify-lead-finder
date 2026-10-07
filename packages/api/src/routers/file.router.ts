@@ -115,7 +115,11 @@ export const fileRouter = router({
     await ctx.db.workspaceFile.deleteMany({ where: { id: { in: files.map((file) => file.id) }, createdById: ctx.user.ownerUserId! } });
     for (const file of files) {
       if (file.storageProvider === "LOCAL" && file.storageKey) await removeLocalWorkspaceFile(file.storageKey, ctx.user.workspaceId!);
-      await releaseUsedFileQuota(ctx.db, { userId: file.uploadedById, workspaceId: ctx.user.workspaceId!, bytes: file.size });
+      // Drive-only files never reserve local quota. Releasing them here would
+      // make the user's local usage negative after emptying the trash.
+      if (file.storageProvider === "LOCAL" || file.storageProvider === "BLOB") {
+        await releaseUsedFileQuota(ctx.db, { userId: file.uploadedById, workspaceId: ctx.user.workspaceId!, bytes: file.size });
+      }
     }
     return { deleted: files.length };
   }),
