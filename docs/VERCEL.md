@@ -171,6 +171,15 @@ The release check also runs `db:check-role`; it must pass against the same datab
 6. **Integraties** → Google Ads → koppelen → selecteer customer ID op `/google-ads` → Instellingen.
 7. **Supabase** — if tables are missing after deploy, run `packages/db/prisma/manual/google-ads-only.sql` in SQL Editor (do not rely on `db:migrate` during Vercel build).
 
+## Google Drive bestanden
+
+Use the same Google OAuth client as Calendar and Ads. Add both exact authorized redirect URIs in Google Cloud Console → APIs & Services → Credentials:
+
+- `https://leads.digitify.be/api/integrations/google-drive/callback`
+- `http://localhost:3001/api/integrations/google-drive/callback`
+
+Enable the Google Drive API, then click **Drive koppelen** on `/files`. A `redirect_uri_mismatch` means the URI sent by the app is missing or differs by protocol, hostname, port, path or trailing slash. Production now uses the canonical `NEXTAUTH_URL`/`NEXT_PUBLIC_APP_URL`; local development uses the request origin.
+
 ## Production domain
 
 1. Merge PR #1 to `main` (or promote preview in Vercel).
