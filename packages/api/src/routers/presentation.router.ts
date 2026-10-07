@@ -29,6 +29,10 @@ function tokenHash(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
+export function slidesBelongToSamePresentation(slides: Array<{ presentationId: string }>) {
+  return slides.length === 2 && new Set(slides.map((slide) => slide.presentationId)).size === 1;
+}
+
 async function assertPresentation(db: PrismaClient, workspaceId: string, id: string) {
   const presentation = await db.presentation.findFirst({ where: { id, workspaceId } });
   if (!presentation) throw new TRPCError({ code: "NOT_FOUND", message: "Presentatie niet gevonden." });
@@ -110,8 +114,10 @@ export const presentationRouter = router({
 
   createHotspot: mutationProcedure.input(hotspotInput).mutation(async ({ ctx, input }) => {
     const workspaceId = workspaceIdFor(ctx.user!);
-    const slides = await ctx.db.presentationSlide.findMany({ where: { id: { in: [input.slideId, input.targetSlideId] }, presentation: { workspaceId } }, select: { id: true } });
-    if (slides.length !== 2) throw new TRPCError({ code: "BAD_REQUEST", message: "Beide slides moeten in dezelfde presentatie staan." });
+    const slides = await ctx.db.presentationSlide.findMany({ where: { id: { in: [input.slideId, input.targetSlideId] }, presentation: { workspaceId } }, select: { id: true, presentationId: true } });
+    if (!slidesBelongToSamePresentation(slides)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Beide slides moeten in dezelfde presentatie staan." });
+    }
     return ctx.db.presentationHotspot.create({ data: input });
   }),
 
