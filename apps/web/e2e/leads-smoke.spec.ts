@@ -34,7 +34,17 @@ test.describe("Leads list smoke", () => {
     // table row). This checks the same detail navigation without coupling
     // the smoke test to the table's internal markup.
     const detailButton = page.getByTitle("Lead openen").first();
-    await expect(detailButton).toBeVisible({ timeout: 20_000 });
+    try {
+      await expect(detailButton).toBeVisible({ timeout: 20_000 });
+    } catch (error) {
+      console.log("LEADS_SMOKE_DEBUG", {
+        url: page.url(),
+        body: (await page.locator("body").innerText()).slice(0, 3000),
+        tableRows: await page.locator("table tbody tr").count(),
+        mobileOpenButtons: await page.getByRole("button", { name: /^Open$/ }).count(),
+      });
+      throw error;
+    }
     await detailButton.click();
     // The App Router uses a client-side transition here, so wait for the URL
     // commit instead of a full document load.
