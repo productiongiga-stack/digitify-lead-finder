@@ -20,7 +20,8 @@ De sleutel wordt versleuteld opgeslagen als `user:{userId}:api.muapi_key` en noo
 | Variabele | Vereist | Doel |
 |-----------|---------|------|
 | `SETTINGS_ENCRYPTION_KEY` | Productie | Versleuteling van API-keys |
-| `BLOB_READ_WRITE_TOKEN` | Productie | Permanente opslag van gegenereerde media |
+| `BLOB_PUBLIC_READ_WRITE_TOKEN` | Productie | Publieke opslag van social/generate media |
+| `BLOB_READ_WRITE_TOKEN` | Productie | Private opslag van bestanden en presentaties |
 
 ## Database
 

@@ -1,4 +1,5 @@
 import { put } from "@vercel/blob";
+import { blobConfigurationMessage, getBlobToken, translateBlobError } from "@digitify/api/src/lib/blob-storage";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -63,14 +64,19 @@ export async function storePortalUpload(params: {
 
   const filename = `${Date.now()}-${sanitizeFilename(params.name)}`;
   const blobPath = `portal/${params.workspaceId}/${params.quoteId}/${filename}`;
-  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  const token = getBlobToken("private");
 
   if (token) {
-    const blob = await put(blobPath, parsed.bytes, {
-      access: "private",
-      contentType: mime,
-      token,
-    });
+    let blob;
+    try {
+      blob = await put(blobPath, parsed.bytes, {
+        access: "private",
+        contentType: mime,
+        token,
+      });
+    } catch (error) {
+      throw translateBlobError(error, "private");
+    }
     return {
       id: `file_${Math.random().toString(36).slice(2, 10)}`,
       quoteId: params.quoteId,
@@ -83,7 +89,7 @@ export async function storePortalUpload(params: {
   }
 
   if (process.env.NODE_ENV === "production") {
-    throw new Error("Portal-uploads vereisen Vercel Blob in productie.");
+    throw new Error(blobConfigurationMessage("private"));
   }
 
   const relativeDir = path.posix.join("uploads", "portal", params.workspaceId, params.quoteId);

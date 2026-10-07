@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@digitify/db";
 import { verifyQuotePdfToken } from "@/lib/quote-pdf";
 import { enforceRateLimit } from "@/lib/http-security";
+import { getBlobToken } from "@digitify/api/src/lib/blob-storage";
 
 function parseJson(value: unknown) {
   if (typeof value !== "string") return value;
@@ -73,7 +74,7 @@ export async function GET(
       return new NextResponse(await readFile(absolute), { headers });
     }
     if (storage === "blob-private") {
-      const blobToken = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+      const blobToken = getBlobToken("private");
       if (!blobToken || !parsed.pathname.includes(`/portal/${quote.createdById}/${quote.id}/`)) {
         return NextResponse.json({ error: "Bestand niet gevonden." }, { status: 404 });
       }
