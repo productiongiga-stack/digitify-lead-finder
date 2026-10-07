@@ -3,6 +3,7 @@ import { authStatePath } from "./auth-state";
 
 const password =
   process.env.PLAYWRIGHT_LOGIN_PASSWORD ?? process.env.SEED_ADMIN_PASSWORD ?? "";
+const email = process.env.PLAYWRIGHT_LOGIN_EMAIL ?? process.env.SEED_ADMIN_EMAIL ?? "admin@digitify.local";
 
 test.describe("Leads list smoke", () => {
   test.use({ storageState: authStatePath("admin") });
@@ -17,6 +18,15 @@ test.describe("Leads list smoke", () => {
   });
 
   test("leads list opens detail page", async ({ page }) => {
+    // Re-authenticate this smoke flow instead of relying on a JWT created by
+    // an earlier test. The active workspace is persisted server-side, so this
+    // also verifies the real login-to-tenant resolution path.
+    await page.context().clearCookies();
+    await page.goto("/login");
+    await page.getByLabel("E-mail").fill(email);
+    await page.getByLabel("Wachtwoord").fill(password);
+    await page.getByRole("button", { name: "Inloggen" }).click();
+    await expect(page).not.toHaveURL(/\/login(?:$|\?)/, { timeout: 30_000 });
     await page.goto("/leads");
     // The table keeps the row itself keyboard-focusable, but the action
     // button is the stable affordance across desktop/tablet responsive
