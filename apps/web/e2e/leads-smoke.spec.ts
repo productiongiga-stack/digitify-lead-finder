@@ -27,14 +27,6 @@ test.describe("Leads list smoke", () => {
     await page.getByLabel("Wachtwoord").fill(password);
     await page.getByRole("button", { name: "Inloggen" }).click();
     await expect(page).not.toHaveURL(/\/login(?:$|\?)/, { timeout: 30_000 });
-    page.on("response", async (response) => {
-      if (!response.url().includes("lead.listSummary")) return;
-      try {
-        console.log("LEADS_SMOKE_RESPONSE", response.status(), (await response.text()).slice(0, 2000));
-      } catch {
-        // The response may already have been consumed by Playwright.
-      }
-    });
     await page.goto("/leads");
     // The table keeps the row itself keyboard-focusable, but the action
     // button is the stable affordance across desktop/tablet responsive
@@ -42,17 +34,7 @@ test.describe("Leads list smoke", () => {
     // table row). This checks the same detail navigation without coupling
     // the smoke test to the table's internal markup.
     const detailButton = page.getByTitle("Lead openen").first();
-    try {
-      await expect(detailButton).toBeVisible({ timeout: 20_000 });
-    } catch (error) {
-      console.log("LEADS_SMOKE_DEBUG", {
-        url: page.url(),
-        body: (await page.locator("body").innerText()).slice(0, 3000),
-        tableRows: await page.locator("table tbody tr").count(),
-        mobileOpenButtons: await page.getByRole("button", { name: /^Open$/ }).count(),
-      });
-      throw error;
-    }
+    await expect(detailButton).toBeVisible({ timeout: 20_000 });
     await detailButton.click();
     // The App Router uses a client-side transition here, so wait for the URL
     // commit instead of a full document load.
