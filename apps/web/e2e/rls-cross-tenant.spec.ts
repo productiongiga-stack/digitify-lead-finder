@@ -1,10 +1,5 @@
 import { test, expect } from "@playwright/test";
-
-const adminEmail = process.env.PLAYWRIGHT_LOGIN_EMAIL ?? "admin@digitify.local";
-const adminPassword =
-  process.env.PLAYWRIGHT_LOGIN_PASSWORD ??
-  process.env.SEED_ADMIN_PASSWORD ??
-  "";
+import { authStatePath } from "./auth-state";
 
 const ownerBEmail = process.env.PLAYWRIGHT_OWNER_B_EMAIL ?? "owner-b@digitify.local";
 const ownerBPassword =
@@ -31,33 +26,28 @@ test.describe("RLS cross-tenant (browser)", () => {
     await expect(page.locator(`p[title^="${ownerBMarkerLead}"]:visible`).first()).toBeVisible({ timeout: 15_000 });
   });
 
-  test("OWNER B is safely redirected when opening an OWNER A lead detail by URL", async ({ page, context }) => {
-    test.skip(
-      !adminPassword || !ownerBPassword,
-      "Set admin and OWNER B E2E credentials through PLAYWRIGHT_* or SEED_* variables.",
-    );
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(adminEmail);
-    await page.getByLabel("Wachtwoord").fill(adminPassword);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await expect(page).not.toHaveURL(/\/login(?:$|\?)/, { timeout: 30_000 });
+  test.describe("with OWNER A session", () => {
+    test.use({ storageState: authStatePath("admin") });
 
-    await page.goto("/leads");
-    const leadLink = page.locator('a[href^="/leads/"]').first();
-    await expect(leadLink).toBeVisible({ timeout: 15_000 });
-    const href = await leadLink.getAttribute("href");
-    expect(href).toMatch(/^\/leads\//);
+    test("OWNER B is safely redirected when opening an OWNER A lead detail by URL", async ({ page, context }) => {
+      test.skip(!ownerBPassword, "Set OWNER B E2E credentials through PLAYWRIGHT_* or SEED_* variables.");
+      await page.goto("/leads");
+      const leadLink = page.locator('a[href^="/leads/"]').first();
+      await expect(leadLink).toBeVisible({ timeout: 15_000 });
+      const href = await leadLink.getAttribute("href");
+      expect(href).toMatch(/^\/leads\//);
 
-    await context.clearCookies();
+      await context.clearCookies();
 
-    await page.goto("/login");
-    await page.getByLabel("E-mail").fill(ownerBEmail);
-    await page.getByLabel("Wachtwoord").fill(ownerBPassword);
-    await page.getByRole("button", { name: "Inloggen" }).click();
-    await expect(page).not.toHaveURL(/\/login(?:$|\?)/, { timeout: 30_000 });
+      await page.goto("/login");
+      await page.getByLabel("E-mail").fill(ownerBEmail);
+      await page.getByLabel("Wachtwoord").fill(ownerBPassword);
+      await page.getByRole("button", { name: "Inloggen" }).click();
+      await expect(page).not.toHaveURL(/\/login(?:$|\?)/, { timeout: 30_000 });
 
-    await page.goto(href!);
-    await expect(page).toHaveURL(/\/leads\/search/);
-    await expect(page.getByText(adminMarkerLead)).toHaveCount(0);
+      await page.goto(href!);
+      await expect(page).toHaveURL(/\/leads\/search/);
+      await expect(page.getByText(adminMarkerLead)).toHaveCount(0);
+    });
   });
 });
