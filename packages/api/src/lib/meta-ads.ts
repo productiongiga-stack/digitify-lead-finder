@@ -943,9 +943,13 @@ export async function pushPausedMetaAdPlan(params: {
     if (campaignSpendCap) campaignBody.spend_cap = String(campaignSpendCap);
     campaign = (await metaPost(`${adAccountId}/campaigns`, campaignBody)) as { id?: string };
   } catch (error) {
-    throw new Error(`Meta campagne: ${error instanceof Error ? error.message : String(error)}`);
+    throw new MetaAdsPushPartialError(`Meta campagne: ${error instanceof Error ? error.message : String(error)}`, {
+      partialStage: "CAMPAIGN",
+    });
   }
-  if (!campaign.id) throw new Error("Meta heeft geen campaign ID teruggegeven.");
+  if (!campaign.id) {
+    throw new MetaAdsPushPartialError("Meta heeft geen campaign ID teruggegeven.", { partialStage: "CAMPAIGN" });
+  }
 
   const adsetBudget = plan.dailyBudgetCents
     ? { daily_budget: String(plan.dailyBudgetCents) }
@@ -988,9 +992,11 @@ export async function pushPausedMetaAdPlan(params: {
     try {
       adset = (await metaPost(`${adAccountId}/adsets`, adsetBody)) as { id?: string };
     } catch (error) {
-      throw new Error(`Meta ad set ${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new MetaAdsPushPartialError(`Meta ad set ${index + 1}: ${error instanceof Error ? error.message : String(error)}`, externalIds);
     }
-    if (!adset.id) throw new Error(`Meta heeft geen ad set ID teruggegeven voor adset ${index + 1}.`);
+    if (!adset.id) {
+      throw new MetaAdsPushPartialError(`Meta heeft geen ad set ID teruggegeven voor adset ${index + 1}.`, externalIds);
+    }
     adsetIds.push(adset.id);
     const adsetExternal: Record<string, unknown> = {
       localId: definition.id,

@@ -937,6 +937,7 @@ export function MetaAdsPageInner() {
 
   const pushPaused = trpc.metaAds.pushPausedToMeta.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Push mislukt", description: explainMetaError(e.message)?.message || e.message, variant: "error" }) });
   const retryFailed = trpc.metaAds.retryFailed.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Retry mislukt", description: e.message, variant: "error" }) });
+  const reconcilePush = trpc.metaAds.reconcilePush.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Controle mislukt", description: e.message, variant: "error" }) });
   const rejectDraft = trpc.metaAds.rejectDraft.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Afkeuren mislukt", description: e.message, variant: "error" }) });
   const cancelDraft = trpc.metaAds.cancelDraft.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Annuleren mislukt", description: e.message, variant: "error" }) });
   const duplicateDraft = trpc.metaAds.duplicateDraft.useMutation({ onSuccess: async (row: any) => { setSelectedPlanId(row.id); setLoadedPlanId(null); await invalidate(); showToast({ title: "Draft gedupliceerd" }); }, onError: (e) => showToast({ title: "Dupliceren mislukt", description: e.message, variant: "error" }) });
@@ -2149,6 +2150,7 @@ export function MetaAdsPageInner() {
                   onApprove={(id) => approveDraft.mutate({ id })}
                   onPush={(id) => pushPaused.mutate({ id })}
                   onRetry={(id) => retryFailed.mutate({ id })}
+                  onReconcile={(id) => reconcilePush.mutate({ id })}
                   onReject={(id) => rejectDraft.mutate({ id, reason: "Aanpassing gevraagd" })}
                   onCancel={(id) => cancelDraft.mutate({ id })}
                   autoadsEnabled={Boolean(connection.data?.autoadsEnabled)}

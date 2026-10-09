@@ -141,6 +141,32 @@ describe("metaAds router flow", () => {
     expect(metaAdsLib.pushPausedMetaAdPlan).toHaveBeenCalledWith(expect.objectContaining({ config: baseConfig }));
   });
 
+  it("reconciles an uncertain Meta push from the exact campaign ID", async () => {
+    const row = {
+      id: "plan_reconcile",
+      createdById: TEST_USER_ID,
+      status: "FAILED",
+      lastError: "EXTERNAL_WRITE_UNCERTAIN: timeout",
+      externalIds: { campaignId: "cmp_99", partialStage: "CREATIVE" },
+    };
+    vi.mocked(metaAdsLib.listMetaCampaigns).mockResolvedValueOnce([
+      { id: "cmp_99", name: "Reconciled", status: "PAUSED", effective_status: "PAUSED" },
+    ]);
+    const update = vi.fn().mockImplementation(({ data }) => Promise.resolve({ ...row, ...data }));
+    const caller = metaAdsRouter.createCaller(
+      makeCtx({
+        metaAdPlan: planDb({ findUnique: vi.fn().mockResolvedValue(row), update }),
+        activity: { create: vi.fn().mockResolvedValue({ id: "act_reconcile" }) },
+      }),
+    );
+
+    const result = await caller.reconcilePush({ id: row.id });
+    expect(result.status).toBe("PUSHED_PAUSED");
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ lastError: null, status: "PUSHED_PAUSED" }) }),
+    );
+  });
+
   it("blocks approval when budget exceeds workspace guard", async () => {
     const row = {
       id: "plan_budget",

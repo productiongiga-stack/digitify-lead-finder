@@ -18,7 +18,7 @@ vi.mock("../lib/google-ads", async (importActual) => {
 });
 
 import * as googleAdsLib from "../lib/google-ads";
-import { defaultSearchTargeting } from "../lib/google-ads";
+import { defaultSearchTargeting, GoogleAdsPushPartialError } from "../lib/google-ads";
 import { googleAdsRouter } from "../routers/google-ads.router";
 import { fingerprint } from "../lib/ads-workflow-policy";
 
@@ -154,6 +154,98 @@ describe("googleAds router flow", () => {
     expect(googleAdsLib.pushPausedGoogleAdPlan).toHaveBeenCalled();
   });
 
+  it("persists known Google resources when a provider write becomes uncertain", async () => {
+    const row = {
+      id: "plan_partial",
+      createdById: TEST_USER_ID,
+      name: "Partial campaign",
+      campaignType: "SEARCH",
+      status: "APPROVED",
+      dailyBudgetCents: 2500,
+      retryCount: 0,
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    };
+    const findUnique = vi.fn().mockResolvedValue(row);
+    const update = vi.fn().mockImplementation(({ data }) => Promise.resolve({ ...row, ...data }));
+    vi.mocked(googleAdsLib.pushPausedGoogleAdPlan).mockRejectedValueOnce(
+      new GoogleAdsPushPartialError("Google advertentie: timeout", {
+        campaignResourceName: "customers/123/campaigns/99",
+        adGroupResourceName: "customers/123/adGroups/77",
+        partialStage: "ADVERTISEMENT",
+      }),
+    );
+    const caller = googleAdsRouter.createCaller(
+      makeCtx({
+        googleAdPlan: planDb({ findUnique, update }),
+        activity: { create: vi.fn().mockResolvedValue({ id: "act_partial" }) },
+      }),
+    );
+
+    const result = await caller.pushPausedToGoogle({ id: row.id });
+    expect(result.status).toBe("FAILED");
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          lastError: expect.stringContaining("EXTERNAL_WRITE_UNCERTAIN"),
+          externalIds: expect.objectContaining({ campaignResourceName: "customers/123/campaigns/99" }),
+        }),
+      }),
+    );
+  });
+
+  it("keeps deterministic Google push failures retryable", async () => {
+    const row = {
+      id: "plan_failed",
+      createdById: TEST_USER_ID,
+      name: "Retry campaign",
+      campaignType: "SEARCH",
+      status: "APPROVED",
+      dailyBudgetCents: 2500,
+      retryCount: 0,
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    };
+    const update = vi.fn().mockImplementation(({ data }) => Promise.resolve({ ...row, ...data }));
+    vi.mocked(googleAdsLib.pushPausedGoogleAdPlan).mockRejectedValueOnce(new Error("provider validation"));
+    const caller = googleAdsRouter.createCaller(
+      makeCtx({
+        googleAdPlan: planDb({ findUnique: vi.fn().mockResolvedValue(row), update }),
+        activity: { create: vi.fn().mockResolvedValue({ id: "act_failed" }) },
+      }),
+    );
+
+    const result = await caller.pushPausedToGoogle({ id: row.id });
+    expect(result.status).toBe("FAILED");
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ lastError: "PUSH_FAILED: provider validation" }) }),
+    );
+  });
+
+  it("reconciles an uncertain Google push from the exact campaign resource", async () => {
+    const row = {
+      id: "plan_reconcile",
+      createdById: TEST_USER_ID,
+      status: "FAILED",
+      lastError: "EXTERNAL_WRITE_UNCERTAIN: timeout",
+      externalIds: { campaignResourceName: "customers/1234567890/campaigns/99", partialStage: "ADVERTISEMENT" },
+    };
+    vi.mocked(googleAdsLib.listGoogleCampaigns).mockResolvedValueOnce([
+      { id: "99", name: "Reconciled", status: "PAUSED", channelType: "SEARCH" },
+    ] as any);
+    const update = vi.fn().mockImplementation(({ data }) => Promise.resolve({ ...row, ...data }));
+    const caller = googleAdsRouter.createCaller(
+      makeCtx({
+        googleAdPlan: planDb({ findUnique: vi.fn().mockResolvedValue(row), update }),
+        activity: { create: vi.fn().mockResolvedValue({ id: "act_reconcile" }) },
+      }),
+    );
+
+    const result = await caller.reconcilePush({ id: row.id });
+    expect(result.status).toBe("PUSHED_PAUSED");
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ lastError: null, status: "PUSHED_PAUSED" }) }),
+    );
+  });
+
   it("allows only an owner to change the Google Ads MCC setting", async () => {
     const ownerContext = sensitiveSettingsCtx({ role: "OWNER" });
     const owner = googleAdsRouter.createCaller(ownerContext);
@@ -193,6 +285,27 @@ describe("googleAds router flow", () => {
     expect(status.missingOperationalRequirements).toContain("GOOGLE_OAUTH_MISSING");
     expect(status.missingOperationalRequirements).toContain("GOOGLE_CUSTOMER_NOT_SELECTED");
     expect(status.missingOperationalRequirements).toContain("GOOGLE_AUTOMATION_DISABLED");
+  });
+
+  it("treats Google Cloud project access as sufficient without a legacy developer token", async () => {
+    vi.mocked(googleAdsLib.loadGoogleAdsWorkspaceConfig).mockResolvedValue({
+      ...baseConfig,
+      developerToken: "",
+      refreshToken: "refresh",
+      customerId: "1234567890",
+      autoadsEnabled: true,
+    } as any);
+
+    const caller = googleAdsRouter.createCaller(
+      makeCtx({
+        googleAdAccount: { findFirst: vi.fn().mockResolvedValue(null) },
+      }),
+    );
+
+    const status = await caller.connectionStatus();
+    expect(status.connected).toBe(true);
+    expect(status.apiAccessManagedByCloudProject).toBe(true);
+    expect(status.missingOperationalRequirements).not.toContain("GOOGLE_DEV_TOKEN_MISSING");
   });
 
   it("fails listCampaigns clearly when no customer is selected", async () => {

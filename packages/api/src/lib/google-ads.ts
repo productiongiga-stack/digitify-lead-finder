@@ -14,6 +14,21 @@ import {
 
 export type { GoogleAdsWorkspaceConfig };
 
+/**
+ * Raised after Google has been called and the final provider state is unknown.
+ * Keeping the resource names lets the UI/support flow reconcile the result
+ * without ever retrying a possibly successful mutation blindly.
+ */
+export class GoogleAdsPushPartialError extends Error {
+  externalIds: Record<string, unknown>;
+
+  constructor(message: string, externalIds: Record<string, unknown>) {
+    super(message);
+    this.name = "GoogleAdsPushPartialError";
+    this.externalIds = externalIds;
+  }
+}
+
 type GoogleAdsSdk = typeof import("google-ads-api");
 
 let googleAdsSdkPromise: Promise<GoogleAdsSdk> | null = null;
@@ -92,7 +107,7 @@ function formatGoogleAdsErrorEntry(error: {
 function googleAdsHintFor(message: string): string {
   const lower = message.toLowerCase();
   if (lower.includes("developer_token") || lower.includes("developer token")) {
-    return "Tip: zet GOOGLE_ADS_DEVELOPER_TOKEN in de server/Vercel env en controleer Google Ads API Center toegang.";
+    return "Tip: Google Ads API-toegang wordt nu beheerd in Google Cloud Console → Google Ads API → API access. Een oude developer token is niet meer de primaire instelling.";
   }
   if (lower.includes("invalid_grant") || lower.includes("refresh_token") || lower.includes("oauth") || lower.includes("authorization")) {
     return "Tip: koppel Google Ads opnieuw via Integraties met de adwords scope en controleer accounttoegang.";
@@ -109,7 +124,10 @@ function googleAdsHintFor(message: string): string {
   if (lower.includes("budget")) {
     return "Tip: verlaag het budget of verhoog de workspace budgetlimiet.";
   }
-  return "Tip: controleer Google OAuth, customer, developer token, billing status en het veldpad in de foutmelding.";
+  if (lower.includes("unimplemented") || lower.includes("grpc") || lower.includes("target method")) {
+    return "Tip: vernieuw de Google Ads API-client en controleer of het gekoppelde Google Cloud-project Google Ads API-toegang heeft; koppel daarna opnieuw.";
+  }
+  return "Tip: controleer Google OAuth, customer, Google Cloud API access, billing status en het veldpad in de foutmelding.";
 }
 
 function withGoogleAdsHint(message: string): string {
@@ -163,18 +181,19 @@ export function formatGoogleAdsError(error: unknown): string {
   return withGoogleAdsHint(String(error));
 }
 
-export function defaultSearchTargeting(targeting: unknown) {
+export function defaultSearchTargeting(targeting: unknown, options?: { campaignType?: "SEARCH" | "PERFORMANCE_MAX" }) {
   const custom = asObject(targeting);
   const keywords = asLongStringArray(custom.keywords, 80);
+  const performanceMax = options?.campaignType === "PERFORMANCE_MAX";
   return {
     geoTargetConstants: Array.isArray(custom.geoTargetConstants)
       ? asStringArray(custom.geoTargetConstants)
-      : ["geoTargetConstants/2056"],
-    keywords: Array.isArray(custom.keywords) ? keywords : ["digitify leads", "lead generatie belgie"],
+      : performanceMax ? [] : ["geoTargetConstants/2056"],
+    keywords: Array.isArray(custom.keywords) ? keywords : performanceMax ? [] : ["digitify leads", "lead generatie belgie"],
     negativeKeywords: asLongStringArray(custom.negativeKeywords, 80),
     languageConstants: Array.isArray(custom.languageConstants)
       ? asStringArray(custom.languageConstants)
-      : ["languageConstants/1010"],
+      : performanceMax ? [] : ["languageConstants/1010"],
     matchType: String(custom.matchType || "PHRASE").toUpperCase(),
     adGroupName: String(custom.adGroupName || "").trim(),
     searchPartners: custom.searchPartners !== false,
@@ -229,7 +248,7 @@ function textAsset(text: string, pinnedField?: number) {
   return pinnedField ? { text, pinned_field: pinnedField } : { text };
 }
 
-function validatePerformanceMaxAssets(creative: ReturnType<typeof normalizeSearchCreatives>) {
+export function validatePerformanceMaxAssets(creative: ReturnType<typeof normalizeSearchCreatives>) {
   if (creative.brandGuidelinesEnabled) {
     throw new TRPCError({
       code: "BAD_REQUEST",
@@ -325,12 +344,6 @@ export async function createAdsClient(config: GoogleAdsWorkspaceConfig) {
   if (!config.clientId || !config.clientSecret) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Google OAuth client ontbreekt in Integraties." });
   }
-  if (!config.developerToken) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "GOOGLE_ADS_DEVELOPER_TOKEN ontbreekt op de server.",
-    });
-  }
   if (!config.refreshToken) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Koppel Google Ads eerst via Integraties." });
   }
@@ -338,7 +351,10 @@ export async function createAdsClient(config: GoogleAdsWorkspaceConfig) {
   return new GoogleAdsApi({
     client_id: config.clientId,
     client_secret: config.clientSecret,
-    developer_token: config.developerToken,
+    // Google moved API access from developer tokens to the OAuth Cloud project
+    // in September 2026. The v25 client still exposes this field as required,
+    // but Google ignores it for migrated projects.
+    developer_token: config.developerToken || "",
   });
 }
 
@@ -392,7 +408,9 @@ export async function listGoogleAdCustomers(config: GoogleAdsWorkspaceConfig): P
   const accessible = await client.listAccessibleCustomers(config.refreshToken);
   const resourceNames = Array.isArray(accessible)
     ? accessible
-    : ((accessible as { resource_names?: string[] }).resource_names ?? []);
+    : ((accessible as { resource_names?: string[]; resourceNames?: string[] }).resource_names
+      ?? (accessible as { resourceNames?: string[] }).resourceNames
+      ?? []);
   if (!resourceNames.length) return [];
 
   const customerIds = resourceNames.map((resourceName) => resourceName.replace("customers/", ""));
@@ -1094,7 +1112,7 @@ async function updateGooglePerformanceMaxCampaignLive(params: {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Performance Max vereist minstens 2 beschrijvingen." });
   }
   const dailyCents = Number(plan.dailyBudgetCents || 0);
-  const targeting = defaultSearchTargeting(plan.targeting);
+  const targeting = defaultSearchTargeting(plan.targeting, { campaignType: "PERFORMANCE_MAX" });
   const campaignSettings = asObject(targeting.campaignSettings);
 
   if (changed("dailyBudgetCents") && resources.campaignBudgetResourceName && dailyCents > 0) {
@@ -1294,7 +1312,9 @@ async function pushSearchPaused(params: {
   try {
     budgetResult = (await customer.mutateResources(budgetOps)) as MutateResourcesResult;
   } catch (error) {
-    throw new Error(`Google campagne/budget: ${formatGoogleAdsError(error)}`);
+    throw new GoogleAdsPushPartialError(`Google campagne/budget: ${formatGoogleAdsError(error)}`, {
+      partialStage: "CAMPAIGN_AND_BUDGET",
+    });
   }
 
   const createdCampaignRn =
@@ -1314,7 +1334,10 @@ async function pushSearchPaused(params: {
     ]);
     adGroupRn = String(adGroupResult.results?.[0]?.resource_name || adGroupResourceName);
   } catch (error) {
-    throw new Error(`Google ad group: ${formatGoogleAdsError(error)}`);
+    throw new GoogleAdsPushPartialError(`Google ad group: ${formatGoogleAdsError(error)}`, {
+      campaignResourceName: createdCampaignRn,
+      partialStage: "AD_GROUP",
+    });
   }
 
   try {
@@ -1340,7 +1363,11 @@ async function pushSearchPaused(params: {
       },
     ]);
   } catch (error) {
-    throw new Error(`Google advertentie: ${formatGoogleAdsError(error)}`);
+    throw new GoogleAdsPushPartialError(`Google advertentie: ${formatGoogleAdsError(error)}`, {
+      campaignResourceName: createdCampaignRn,
+      adGroupResourceName: adGroupRn,
+      partialStage: "ADVERTISEMENT",
+    });
   }
 
   try {
@@ -1355,7 +1382,11 @@ async function pushSearchPaused(params: {
       })),
     );
   } catch (error) {
-    throw new Error(`Google keywords: ${formatGoogleAdsError(error)}`);
+    throw new GoogleAdsPushPartialError(`Google keywords: ${formatGoogleAdsError(error)}`, {
+      campaignResourceName: createdCampaignRn,
+      adGroupResourceName: adGroupRn,
+      partialStage: "KEYWORDS",
+    });
   }
 
   if (targeting.negativeKeywords.length) {
@@ -1371,7 +1402,11 @@ async function pushSearchPaused(params: {
         })),
       );
     } catch (error) {
-      throw new Error(`Google negatieve keywords: ${formatGoogleAdsError(error)}`);
+      throw new GoogleAdsPushPartialError(`Google negatieve keywords: ${formatGoogleAdsError(error)}`, {
+        campaignResourceName: createdCampaignRn,
+        adGroupResourceName: adGroupRn,
+        partialStage: "NEGATIVE_KEYWORDS",
+      });
     }
   }
 
@@ -1397,7 +1432,7 @@ async function pushPerformanceMaxPaused(params: {
   const { enums, ResourceNames } = await loadGoogleAdsSdk();
   const creative = normalizeSearchCreatives(plan.creatives);
   validatePerformanceMaxAssets(creative);
-  const targeting = defaultSearchTargeting(plan.targeting);
+  const targeting = defaultSearchTargeting(plan.targeting, { campaignType: "PERFORMANCE_MAX" });
   const dailyCents = Number(plan.dailyBudgetCents || plan.lifetimeBudgetCents || 0);
   const amountMicros = centsToBudgetMicros(dailyCents);
   const campaignSettings = asObject(targeting.campaignSettings);
@@ -1539,21 +1574,25 @@ async function pushPerformanceMaxPaused(params: {
     }
   }
 
+  let createdCampaignRn: string | undefined;
   try {
     const result = (await customer.mutateResources(operations)) as MutateResourcesResult;
+    createdCampaignRn =
+      result.results?.find((r: { resource_name?: string }) => r.resource_name?.includes("/campaigns/"))?.resource_name ||
+      campaignResourceName;
     if (geoOps.length) {
       await customer.mutateResources(geoOps);
     }
-    const campaignRn =
-      result.results?.find((r: { resource_name?: string }) => r.resource_name?.includes("/campaigns/"))?.resource_name ||
-      campaignResourceName;
     return {
-      campaignResourceName: campaignRn,
+      campaignResourceName: createdCampaignRn,
       assetGroupResourceName,
       status: "PAUSED" as const,
     };
   } catch (error) {
-    throw new Error(`Google Performance Max: ${formatGoogleAdsError(error)}`);
+    throw new GoogleAdsPushPartialError(`Google Performance Max: ${formatGoogleAdsError(error)}`, {
+      ...(createdCampaignRn ? { campaignResourceName: createdCampaignRn } : {}),
+      partialStage: createdCampaignRn ? "GEO_TARGETING" : "CAMPAIGN_ASSET_MUTATE",
+    });
   }
 }
 

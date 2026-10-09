@@ -6,7 +6,7 @@ import { retryAdRead } from "../lib/ads-workflow-read";
 import { z } from "zod";
 import { adminProcedure, aiRateLimitedProcedure, mutationProcedure, protectedProcedure } from "../trpc";
 import { AD_CAPABILITIES, changePatchSchema, optimizationSettingsSchema, type AdProvider } from "../lib/ads-workflow-policy";
-import { applyAdChange, captureAdVersion, createAdChange, decideAdChange, loadOptimizationSettings, optimizeAds, prepareMetaReplacementSwitch, reconcileAdChange, saveOptimizationSettings, syncAdAccount } from "../lib/ads-workflow";
+import { applyAdChange, captureAdVersion, createAdChange, decideAdChange, loadOptimizationSettings, optimizeAds, prepareMetaReplacementSwitch, reconcileAdChange, saveOptimizationSettings, summarizeAdPerformance, syncAdAccount } from "../lib/ads-workflow";
 
 // Mounted under the original provider routers so existing module guards apply.
 export function adWorkflowProcedures(provider: AdProvider) {
@@ -24,7 +24,8 @@ export function adWorkflowProcedures(provider: AdProvider) {
         ctx.db.adBackgroundJob.findMany({ where, orderBy: { createdAt: "desc" }, take: 30 }),
       ]);
       const seen = new Set<string>();
-      return { versions: versions.filter((v) => !seen.has(adVersionTargetKey(v)) && Boolean(seen.add(adVersionTargetKey(v)))), changes, runs, operations, settings, jobs };
+      const uniqueVersions = versions.filter((v) => !seen.has(adVersionTargetKey(v)) && Boolean(seen.add(adVersionTargetKey(v))));
+      return { versions: uniqueVersions, performance: summarizeAdPerformance(uniqueVersions), changes, runs, operations, settings, jobs };
     }),
     workflowSync: adminProcedure.mutation(async ({ ctx }) => {
       if (ctx.user.isViewingAs) throw new TRPCError({ code: "FORBIDDEN" });
@@ -57,9 +58,9 @@ export function adWorkflowProcedures(provider: AdProvider) {
       if (ctx.user.isViewingAs || provider !== "META") throw new TRPCError({ code: "FORBIDDEN" });
       return prepareMetaReplacementSwitch(ctx.db, ctx.user.workspaceId!, ctx.user.id, input.id);
     }),
-    workflowOptimize: aiRateLimitedProcedure.mutation(({ ctx }) => {
+    workflowOptimize: aiRateLimitedProcedure.input(z.object({ runKey: z.string().trim().min(8).max(160) }).optional()).mutation(({ ctx, input }) => {
       if (ctx.user.isViewingAs) throw new TRPCError({ code: "FORBIDDEN" });
-      return optimizeAds(ctx.db, ctx.user.workspaceId!, ctx.user.id, provider);
+      return optimizeAds(ctx.db, ctx.user.workspaceId!, ctx.user.id, provider, input?.runKey);
     }),
     workflowSettings: adminProcedure.input(optimizationSettingsSchema).mutation(({ ctx, input }) => {
       if (ctx.user.isViewingAs) throw new TRPCError({ code: "FORBIDDEN" });

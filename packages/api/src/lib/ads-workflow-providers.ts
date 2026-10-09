@@ -10,7 +10,7 @@ export async function adProviderConfig(db: PrismaClient, workspaceId: string, pr
   const scope = { workspaceId, memberId: workspaceId };
   if (provider === "GOOGLE") {
     const config = await loadGoogleAdsWorkspaceConfig(db, scope);
-    if (!config.customerId || !config.refreshToken || !config.developerToken) throw new Error("Koppel Google Ads en kies een klantaccount via Integraties.");
+    if (!config.customerId || !config.refreshToken) throw new Error("Koppel Google Ads en kies een klantaccount via Integraties.");
     return { accountId: config.customerId, enabled: config.autoadsEnabled, google: config };
   }
   const config = await loadMetaAdsWorkspaceConfig(db, scope);

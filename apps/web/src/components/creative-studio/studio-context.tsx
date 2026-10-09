@@ -199,7 +199,7 @@ export function CreditQuote({
   if (!pricing.wallet.data.providerReady)
     return (
       <p role="alert" className="text-sm">
-        ! Centrale AI is nog niet geconfigureerd. Je concept blijft bewaard; een beheerder moet de provider activeren via Platformbeheer → AI & media.
+        ! Centrale AI is nog niet geconfigureerd. Je concept blijft bewaard; de platform-owner moet <code>CREATIVE_MUAPI_KEY</code> server-side toevoegen in Vercel en daarna opnieuw deployen. <a className="underline" href="/settings/integrations?tab=muapi">MuAPI-integratie openen</a>
       </p>
     );
   return (

@@ -7,7 +7,7 @@ export function creativeStripe() {
   if (!key?.startsWith("sk_test_"))
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
-      message: "Stripe-testbetalingen zijn nog niet ingesteld.",
+      message: "Stripe-testbetalingen zijn nog niet ingesteld. Voeg CREATIVE_STRIPE_TEST_SECRET_KEY en CREATIVE_STRIPE_WEBHOOK_SECRET server-side toe in Vercel.",
     });
   return new Stripe(key);
 }

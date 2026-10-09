@@ -260,7 +260,7 @@ export const creativeStudioProcedures = {
       )
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: "Creditbetalingen zijn nog niet geactiveerd.",
+          message: "Creditbetalingen zijn nog niet geactiveerd. Configureer CREATIVE_MUAPI_KEY, CREATIVE_STRIPE_TEST_SECRET_KEY en CREATIVE_STRIPE_WEBHOOK_SECRET in Vercel.",
         });
       const bundle = await prisma.creativeBundle.findFirst({
         where: { id: input.bundleId, enabled: true },
@@ -328,7 +328,7 @@ export const creativeStudioProcedures = {
     .mutation(async ({ ctx, input }) => {
       const priceId = process.env.CREATIVE_STRIPE_SUBSCRIPTION_PRICE_ID?.trim();
       if (!priceId || !process.env.CREATIVE_STRIPE_TEST_SECRET_KEY?.startsWith("sk_test_") || !process.env.CREATIVE_STRIPE_WEBHOOK_SECRET) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Abonnementen zijn nog niet geconfigureerd." });
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Abonnementen zijn nog niet geconfigureerd. Voeg CREATIVE_STRIPE_TEST_SECRET_KEY, CREATIVE_STRIPE_WEBHOOK_SECRET en CREATIVE_STRIPE_SUBSCRIPTION_PRICE_ID toe in Vercel." });
       }
       const stripe = creativeStripe();
       const base = process.env.NEXTAUTH_URL?.replace(/\/$/, "");

@@ -26,7 +26,9 @@ Set these in **Vercel → Project → Settings → Environment Variables**:
 | `CRON_SECRET` | Min. 16 characters; Vercel Cron sends `Authorization: Bearer …` |
 | `ENABLE_WORKSPACE_RLS` | **`true`** — required on `project-ubm6y` / production; without it the app returns 500 on all `/dashboard`, `/social`, etc. |
 | `REDIS_URL` or Upstash | `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` for shared rate limits. The Vercel Upstash integration names (`upstashredis_KV_REST_API_URL` and `upstashredis_KV_REST_API_TOKEN`) are also accepted by the app; never paste token values into source control or support tickets. |
-| `BLOB_READ_WRITE_TOKEN` | Vercel Blob — logo/branding + **social video uploads** (required for videos >4MB on Vercel) |
+| `BLOB_PRIVATE_READ_WRITE_TOKEN` | Private Vercel Blob — workspace files, PDFs, presentations and portal uploads |
+| `BLOB_READ_WRITE_TOKEN` | Legacy public Blob token during migration; never used for private uploads |
+| `BLOB_PUBLIC_READ_WRITE_TOKEN` | Public Vercel Blob — existing social/generated media and client uploads |
 | `SENTRY_DSN` | Sentry project DSN (server errors + tRPC 500s) |
 | `NEXT_PUBLIC_SENTRY_DSN` | Same DSN for client `global-error` boundary |
 
@@ -164,10 +166,19 @@ The release check also runs `db:check-role`; it must pass against the same datab
 3. **Authorized redirect URI** (Production + local):
    - `https://leads.digitify.be/api/integrations/google-ads/callback`
    - `http://localhost:3000/api/integrations/google-ads/callback`
-4. **Google Ads API Center** — create a **developer token** (Test for dev; Basic/Standard for production).
-5. **Vercel env** — `GOOGLE_ADS_DEVELOPER_TOKEN` (required). Optional `GOOGLE_ADS_LOGIN_CUSTOMER_ID` if using an MCC.
+4. **Google Ads API access** — grant API access to the Google Cloud project behind the OAuth client in Google Cloud Console → Google Ads API → API access. The legacy developer-token env is retained only for compatibility and is no longer required for new projects. Optional `GOOGLE_ADS_LOGIN_CUSTOMER_ID` is used when working through an MCC.
+5. **Vercel env** — keep `GOOGLE_ADS_DEVELOPER_TOKEN` only when an older provider account still exposes one; it is not the primary access gate for the current client.
 6. **Integraties** → Google Ads → koppelen → selecteer customer ID op `/google-ads` → Instellingen.
 7. **Supabase** — if tables are missing after deploy, run `packages/db/prisma/manual/google-ads-only.sql` in SQL Editor (do not rely on `db:migrate` during Vercel build).
+
+## Google Drive bestanden
+
+Use the same Google OAuth client as Calendar and Ads. Add both exact authorized redirect URIs in Google Cloud Console → APIs & Services → Credentials:
+
+- `https://leads.digitify.be/api/integrations/google-drive/callback`
+- `http://localhost:3001/api/integrations/google-drive/callback`
+
+Enable the Google Drive API, then click **Drive koppelen** on `/files`. A `redirect_uri_mismatch` means the URI sent by the app is missing or differs by protocol, hostname, port, path or trailing slash. Production now uses the canonical `NEXTAUTH_URL`/`NEXT_PUBLIC_APP_URL`; local development uses the request origin.
 
 ## Production domain
 

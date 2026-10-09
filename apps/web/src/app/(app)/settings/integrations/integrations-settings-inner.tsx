@@ -1676,7 +1676,7 @@ export function IntegrationsSettingsInner() {
                 </p>
                 <span className="block text-muted-foreground">
                   Voeg scope <span className="font-mono">https://www.googleapis.com/auth/adwords</span> toe aan de consent screen.
-                  Zet <span className="font-mono">GOOGLE_ADS_DEVELOPER_TOKEN</span> in Vercel.
+                  Google Ads API-toegang wordt beheerd via het gekoppelde Google Cloud-project. Controleer daar de API access; een oude developer token is optioneel.
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-3 text-sm">

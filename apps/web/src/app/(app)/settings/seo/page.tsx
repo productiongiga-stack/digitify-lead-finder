@@ -256,7 +256,7 @@ export default function SeoSettingsPage() {
       <Card className="app-surface border-primary/20">
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Keyword research</CardTitle>
-          <CardDescription>Verbind Google Search Console voor echte zoekopdrachten en posities.</CardDescription>
+          <CardDescription>Verbind Google Search Console voor echte zoekopdrachten, klikken en posities. Deze koppeling staat los van Google Ads.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">
           <Button variant="outline" asChild>
@@ -266,9 +266,21 @@ export default function SeoSettingsPage() {
             <option value="">Kies property</option>
             {(searchConsoleProperties.data || []).map((property) => <option key={property.siteUrl} value={property.siteUrl}>{property.siteUrl}</option>)}
           </select> : null}
+          {seoConnectors?.searchConsole.connected && searchConsoleProperties.error ? <p className="basis-full rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">Properties laden mislukt. Controleer of het gekoppelde Google-account toegang heeft tot Search Console en koppel opnieuw.</p> : null}
+          {seoConnectors?.searchConsole.connected && !seoConnectors.searchConsole.property ? <p className="basis-full rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">Koppeling gelukt. Kies nog één Search Console-property voordat je research start.</p> : null}
           <Button variant="ghost" asChild>
             <Link href="/seo?tab=research">Naar SEO research</Link>
           </Button>
+          <details className="basis-full rounded-lg border bg-muted/20 p-3 text-sm">
+            <summary className="cursor-pointer font-medium">Hoe maak ik deze koppeling?</summary>
+            <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted-foreground">
+              <li>Open Google Cloud Console en kies het project dat ook je Google OAuth-client gebruikt.</li>
+              <li>Activeer <strong className="text-foreground">Google Search Console API</strong> en voeg in het OAuth-consentscherm de scope <code className="rounded bg-muted px-1">webmasters.readonly</code> toe.</li>
+              <li>Controleer bij Google OAuth de redirect-URL <code className="rounded bg-muted px-1">/api/integrations/google-search-console/callback</code>.</li>
+              <li>Klik hierboven op koppelen, geef toegang en selecteer daarna de juiste property.</li>
+            </ol>
+            <a className="mt-2 inline-flex items-center text-primary hover:underline" href="https://console.cloud.google.com/apis/library/webmasters.googleapis.com" target="_blank" rel="noreferrer">Search Console API openen <ExternalLink className="ml-1 h-3.5 w-3.5" /></a>
+          </details>
         </CardContent>
       </Card>
 

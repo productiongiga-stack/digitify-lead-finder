@@ -233,7 +233,7 @@ Workflow: **Draft → indienen → goedkeuring → verzending**. Geen auto-send.
 |---------|---------|--------------|
 | Google Places | Lead search | API key in settings |
 | Meta | Social publish, Ads | OAuth (`/api/integrations/meta/*`) |
-| Google Ads | Ads studio | OAuth + developer token |
+| Google Ads | Ads studio | OAuth + Google Cloud project API access (legacy developer token optional) |
 | Google Calendar | Bookings sync | OAuth |
 | MuAPI | Creative Studio | Per-user key (`api.muapi_key`) |
 | SMTP/IMAP | Outbound + inbox (één SMTP per workspace) | Workspace settings `email.smtp_*` / `email.imap_*` |

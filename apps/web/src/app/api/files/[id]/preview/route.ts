@@ -6,6 +6,7 @@ import { prisma } from "@digitify/db";
 import { getCurrentUser } from "@/lib/auth/session";
 import { readLocalWorkspaceFile } from "@digitify/api/src/lib/file-storage";
 import { resolveLeadOwnerId } from "@digitify/api/src/lib/tenant";
+import { getBlobToken } from "@digitify/api/src/lib/blob-storage";
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
@@ -18,7 +19,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   try {
     if (file.storageProvider === "LOCAL" && file.storageKey) return new NextResponse(await readLocalWorkspaceFile(file.storageKey, user.workspaceId), { headers });
     if (file.storage === "blob-private") {
-      const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+      const token = getBlobToken("private");
       if (!token) return NextResponse.json({ error: "PDF kan niet worden geladen." }, { status: 503 });
       const blob = await getBlob(file.storageUrl, { access: "private", token, useCache: false });
       if (!blob?.stream) return NextResponse.json({ error: "PDF kan niet worden geladen." }, { status: 404 });

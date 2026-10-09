@@ -3,6 +3,29 @@
 Chronologisch logboek van significante wijzigingen (mens + AI).  
 **Formaat:** nieuwste entries bovenaan.
 
+## 2026-10-09 — Ads Editor & AI Phase 2: platformspecifiek plan en approval-diff
+
+- Een opgeslagen wizardstrategie kan nu een gecontroleerd AI-voorstel maken voor een geïmporteerde Meta- of Google-campagneversie.
+- Providerpaden, statusvelden en accountinstellingen blijven server-side geblokkeerd; het voorstel gebruikt de bestaande `createAdChange`- en approval-flow.
+- De wizard toont de gekozen campagneversie, voorstelstatus en verwijst naar de bestaande before/after-diff onder Goedkeuring.
+- Meta-invalshoeken, doelgroepen en calls-to-action en Google-keywordthema’s, advertentiegroepen en uitsluitingsthema’s kunnen vóór opslaan per regel worden aangepast; de wijzigingen blijven onderdeel van het wizardconcept.
+- Dubbele klikken worden per wizardrevision geblokkeerd en alle wijzigingen blijven lokaal; er wordt niets rechtstreeks gepubliceerd.
+
+## 2026-10-09 — Ads Editor & AI 3.0 Phase 2-start: evidencegebonden strategievoorstel
+
+- De gedeelde wizard kan nu op de controle-stap een AI-strategievoorstel maken met het workspace-profiel, de bevestigde briefing en optioneel een gesynchroniseerde campagneversie uit dezelfde workspace.
+- Output wordt strikt gevalideerd op confidence `0–100`, aannames, onbekende data, bewijsreferenties en afzonderlijke Meta-/Google-richtingen. Providerpayloads, externe IDs en publicatievelden worden geweigerd als directe strategie-output.
+- Het voorstel wordt revision-locked opgeslagen in het bestaande wizardconcept; geen Meta-/Google-write of automatische publicatie wordt uitgevoerd. De AI-mutation gebruikt de bestaande rate limit en geeft een concrete configuratiefout wanneer geen providerkey actief is.
+- Nieuwe contracttests: confidencebereik, evidencegebonden output en blokkering van providerpayloadvelden.
+
+## 2026-10-09 — Ads Editor & AI 3.0 Phase 0/1: hervatbare campagnebriefing
+
+- Read-only architectuuraudit toegevoegd in `docs/ADS_EDITOR_AUDIT.md`, inclusief capabilitymatrix, risico’s, PMax-beperkingen en Arcads-licentie-/researchnotities. De Arcads-repository is alleen onderzocht; er wordt geen externe code uitgevoerd of als runtime-dependency gebruikt.
+- Nieuwe tenant-gescheiden `AdsWizardProject`-opslag met RLS, idempotente creatie, revision-based optimistic locking, archiveren/hervatten en server-side briefingvalidatie.
+- Nieuwe `adsWizard`-tRPC-router en gedeelde Editor & AI-briefingwizard toegevoegd aan Meta Ads en Google Ads. Phase 1 maakt uitsluitend lokale concepten; er zijn geen providerwrites, betaalde AI-generaties of publicaties.
+- Bestaande Meta-/Google-drafts, approvals, snapshots, reconciliation, Copilot en deeplinks blijven behouden. Creative Studio is niet gewijzigd.
+- Lokale validatie: Prisma client generatie, 57 gerichte Ads API-tests, 48 webtests, typecheck, lint (0 fouten; bestaande waarschuwingen blijven), en production build (geslaagd met bestaande dependency/lintwaarschuwingen).
+
 ## 2026-10-06 — Lokale migratie en bruikbare serverfouten
 
 - De openstaande Ads-Copilot-migratie `20261006120000_ads_copilot` is lokaal toegepast; de database rapporteert weer een volledig bijgewerkt schema.
@@ -1915,3 +1938,109 @@ Tests: `pnpm typecheck`, `git diff --check`.
 - Tests toegevoegd voor expliciete platform-owner supportmodus en module-entitlements.
 - Lokale verificatie: 419 API-tests geslaagd, 9 integratiesuites overgeslagen zonder databaseflag, API/web-typecheck en monorepo-lint geslaagd met bestaande waarschuwingen.
 - GitHub-integratiecontrole vond een legacy-RLS-randgeval zonder persoonlijke Workspace-row; de owner-resolver valt nu veilig terug op de actieve user-ID en behoudt die accounts tijdens backfill.
+
+## 2026-10-09 — Phase 2 native advertentiedrafts
+
+- Een opgeslagen Meta- of Google-plan kan nu via `adsWizard.createNativeDraft` worden omgezet naar het bestaande lokale `MetaAdPlan`- of `GoogleAdPlan`-model.
+- De omzetting gebruikt een atomische optimistic-lock-transaction en bewaart de wizard/profielherkomst in de draftmetadata. Dubbelklikken hergebruikt de bestaande draft.
+- Budget, advertentieaccount, doel-URL en ontbrekende creatives blijven expliciete readiness-acties. Er worden geen provider-API’s aangeroepen en niets wordt gepubliceerd.
+- De gedeelde wizard toont per geselecteerd platform de lokale draftstatus en resterende acties. De bestaande provider-editors en approvalflows blijven de vervolgstap.
+- Lokale verificatie: API-wizardtests (15 geslaagd), API-typecheck, web-typecheck, gerichte lint en production build geslaagd. De build toont alleen bestaande dependency- en lintwaarschuwingen.
+
+## 2026-10-09 — Phase 2 AI-copy voor native drafts
+
+- `adsWizard.generateDraftContent` genereert gecontroleerde Meta- of Google-copy voor een bestaande lokale wizarddraft.
+- Google Search-output wordt server-side begrensd op headline- en description-limieten; Meta-copy krijgt veilige lengte- en CTA-validatie.
+- De provider- en workspacecontext, strategie, confidence en bewijsreferenties worden bewaard in de draftmetadata. Metrics, budgetten, account-ID’s en claims worden niet door de AI ingevuld.
+- De generatie gebruikt een revision-claim en een expliciete `RUNNING`/`READY`/`FAILED`-status. Een mislukte generatie maakt geen tweede draft en kan opnieuw worden geprobeerd.
+
+## 2026-10-09 — Phase 2 draftcontrole
+
+- `adsWizard.reviewNativeDraft` controleert lokale Meta- en Google-drafts vóór approval op naam, budget, account, URL, copy, keywords en assets.
+- De controle bewaart een score, blokkades, waarschuwingen en timestamp in de wizardreadiness. Een ontbrekend advertentieaccount blijft altijd een expliciete actie.
+- De controle is deterministisch en doet geen providerwrite; bestaande approval, reconciliation en publicatie blijven ongewijzigd.
+
+## 2026-10-09 — Phase 2 editor-handoff
+
+- De wizardlink opent nu rechtstreeks de bestaande Meta- of Google-editor met `planId` en `tab=builder`.
+- De providerpagina hergebruikt de bestaande draftselectie, laadlogica en approvalcontroles; er is geen nieuwe parallelle editflow toegevoegd.
+
+## 2026-10-09 — Phase 2 approval-handoff
+
+- Een gecontroleerde native Meta- of Google-draft kan nu vanuit de wizard expliciet ter goedkeuring worden ingediend via `adsWizard.submitNativeDraftForApproval`.
+- Een geblokkeerde controle wordt geweigerd; waarschuwingen vereisen een bewuste bevestiging. Als de draft na de controle is gewijzigd, moet de gebruiker opnieuw controleren.
+- De handoff bewaart de goedkeuringsstatus in het wizardconcept, zet de bestaande lokale draft op `PENDING_APPROVAL` en registreert de activiteit.
+- Bestaande provider-approval, reconcile en publicatie blijven de enige externe uitvoeringsflow. Deze stap voert zelf geen Meta- of Google-write uit.
+
+## 2026-10-09 — Phase 2 provider-status handoff
+
+- `adsWizard.syncNativeDraftStatus` mirrors the current local Meta/Google draft status into the resumable wizard.
+- Approval states now distinguish pending, approved, published/paused, failed and rejected; the wizard shows an explicit refresh action.
+- The sync is owner-scoped and optimistic-lock protected. It reads local provider records only and never performs an external provider write.
+
+## 2026-10-09 — Phase 3 Meta Campaign Generator
+
+- Meta AI-copy vult nu een volledig lokaal campagneplan in: meerdere adsets op basis van bevestigde doelgroepen, placements, creatieve varianten, CTA en bestaande trackingcontext.
+- Bestaande assets, pixel- en accountgegevens worden nooit door AI verzonnen of overschreven; ontbrekende tracking blijft een expliciete controleactie.
+- De Meta-editor krijgt een gerichte actie voor “Meta-campagneplan maken”. Het resultaat blijft een lokale draft en gaat uitsluitend via de bestaande review-, approval- en paused-publication-flow verder.
+- De uitbreiding behoudt de bestaande contentstatus, optimistic locking, retrygedrag en workspace-scope.
+
+## 2026-10-09 — Phase 4 Google Search Generator
+
+- De Ads Wizard kan nu een Google Search-plan maken met maximaal drie thematische advertentiegroepen, RSA-copy, doel-URL, keywords en uitsluitingen.
+- Keywords krijgen een expliciete bron: AI-suggestie, SEO, Search Console of handmatig. AI-suggesties bevatten nooit zoekvolume, CPC, concurrentie of andere verzonnen metrics.
+- Workspace-scoped SEO-keywordideeën en clusters worden server-side gelezen en als evidence aan het plan gekoppeld. Zonder connector blijft het plan bruikbaar met een duidelijke actie om echte keyworddata te koppelen.
+- De Google Search-planactie gebruikt optimistic locking, bewaart het plan in het bestaande `AdsWizardProject` en doet geen Google-providerwrite. Bestaande handmatige keywords worden bij hergeneratie behouden.
+- De lokale Google-draftflow gebruikt het opgeslagen Search-plan voor ad groups, keywords, RSA-copy en doel-URL; budget, customer, regio, taal en tracking blijven expliciete acties.
+
+## 2026-10-09 — Phase 5 Ads media handoff
+
+- De Ads Wizard toont nu workspace-scoped, voltooide en duurzaam opgeslagen Creative Studio-media als selecteerbare assets.
+- Assetselectie controleert server-side workspace, status en `blobUrl`; tijdelijke output-URL’s of media uit een andere workspace worden geweigerd.
+- Meta-drafts krijgen geselecteerde beeld- en videomedia als lokale creativecontext. Google Search bewaart dezelfde selectie voor verdere PMax-/providerbewerking zonder Search-velden verkeerd met media te vullen.
+- De wizard start geen betaalde MuAPI-generatie automatisch. De gebruiker opent Creative Studio expliciet voor nieuwe generatie; credits blijven daardoor controleerbaar.
+## Phase 6 — Performance Max-planlaag
+
+- Added a workspace-scoped Performance Max plan contract under `adsWizard`, separate from Google Search.
+- PMax copy is bounded to Google text limits; budget, customer, conversion, geo and language values remain explicit editor actions.
+- Existing durable media can be assigned explicit roles (landscape, square, portrait, logo, landscape logo or video); unselected or temporary assets are rejected server-side.
+- The plan is stored in `googlePlan.performanceMaxPlan`, reviewed locally and materialised as a paused-ready local Google draft only. No provider write or media generation is triggered.
+- PMax review now checks required copy, public final URL, business name, landscape/square/logo assets and unsupported brand-guidelines mode.
+- PMax provider targeting no longer fills missing geo/language/keyword values with Belgian defaults; existing Search compatibility defaults remain unchanged.
+
+## Phase 7 — Veilige providerpublicatie en herstel
+
+- Google Search- en Performance Max-pushes bewaren nu bekende externe resource-ID's wanneer een providerfout optreedt nadat een write is gestart. De fout blijft expliciet onzeker en kan niet blind opnieuw worden gepubliceerd.
+- Deterministische pushfouten krijgen de status `PUSH_FAILED` en blijven veilig opnieuw probeerbaar; onzekere providerwrites blijven `EXTERNAL_WRITE_UNCERTAIN`.
+- Meta gebruikt dezelfde retry-classificatie. Partial IDs blijven behouden voor support en reconcile.
+- `googleAds.reconcilePush` en `metaAds.reconcilePush` controleren een exact bewaard campaign-ID in het gekoppelde account en herstellen daarna alleen de lokale status. De endpoints voeren geen nieuwe providerwrite uit.
+- Nieuwe campagnes blijven gepauzeerd. Activeren blijft een afzonderlijke bestaande approval/change-set actie.
+
+## Phase 8 — Meta en Google samen
+
+- `adsWizard.reviewProject` voert een gedeelde, lokale controle uit voor campagnes met Meta, Google of beide platformen.
+- Meta en Google behouden afzonderlijke blockers, draftstatussen, assetsignalen en waarschuwingen. Een geslaagde voorbereiding op één platform verbergt geen ontbrekende gegevens op het andere.
+- Geselecteerde bibliotheekassets blijven workspace-scoped en worden alleen als gedeelde input geteld; budgetten, accounts, tracking en publicatiestatus blijven platform-specifiek.
+- De controle gebruikt optimistic locking, bewaart `sharedReview` in het wizardconcept en voert geen AI-, Meta- of Google-write uit.
+- De wizard toont nu één centrale controlekaart met de afzonderlijke platformstatussen en approval/publicatie-waarschuwingen.
+
+## 2026-10-09 — Phase 9 bestaande campagnes en optimalisatie
+
+- Het workflowoverzicht bevat nu een deterministisch prestatie-overzicht op basis van werkelijk gesynchroniseerde metrics. Ontbrekende vertoningen, kosten, conversies en afgeleide KPI's blijven expliciet leeg.
+- Spend wordt veilig gelezen uit spend/cost of cost-micros; CTR, CPC, CPA en ROAS worden alleen berekend wanneer de benodigde teller en noemer aanwezig zijn.
+- De AI-tab toont per opgeslagen voorstel de reden, het risico, de verwachte impact en het aantal gecontroleerde patches. Elk voorstel blijft gekoppeld aan de bestaande approval- en diff-flow.
+- Handmatige AI-optimalisatie gebruikt een idempotency key, zodat een dubbelklik of retry tijdens dezelfde actie geen dubbele analyse-run oplevert. De prompt benoemt de gekozen provider expliciet.
+- Deze fase voert geen Meta- of Google-write uit. Publicatie blijft geblokkeerd tot de bestaande expliciete goedkeuring en reconcile-controles zijn doorlopen.
+
+## 2026-10-09 — Phase 10 productiekwaliteit
+
+- De Ads Editor laadt overview- en historiegegevens met beperkte client-cache en zonder onnodige refetch bij window-focus of reconnect.
+- Een responsive Playwright-regressietest controleert Meta en Google op mobiel en desktop, inclusief overflow, kernnavigatie en ontbrekende Application Error-pagina's.
+- De security-audit en release-checklist documenteren tenantisolatie, AI-patchvalidatie, secretmaskering, provider-write gates, reconcile en deploymentvoorwaarden.
+- Deze fase blijft lokaal: er zijn geen commits, deployments, productiedatabasemigraties of externe advertentiewrites uitgevoerd.
+
+## 2026-10-09 — Acceptance closure
+
+- Scenario's A–D (Meta, Google Search, Google Performance Max en Meta+Google) zijn lokaal afgedekt door Wizard-, workflow-, security- en regressietests.
+- De acceptatie-audit maakt expliciet onderscheid tussen lokaal bewezen gedrag en provideracties die pas met testconnectors en afzonderlijke toestemming uitgevoerd mogen worden.
+- De gegenereerde `next-env.d.ts`-wijziging van de lokale devserver is teruggezet; alleen bedoelde Ads Editor-wijzigingen blijven over.

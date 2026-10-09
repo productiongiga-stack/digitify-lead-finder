@@ -20,7 +20,27 @@ De sleutel wordt versleuteld opgeslagen als `user:{userId}:api.muapi_key` en noo
 | Variabele | Vereist | Doel |
 |-----------|---------|------|
 | `SETTINGS_ENCRYPTION_KEY` | Productie | Versleuteling van API-keys |
-| `BLOB_READ_WRITE_TOKEN` | Productie | Permanente opslag van gegenereerde media |
+| `BLOB_PUBLIC_READ_WRITE_TOKEN` | Productie | Publieke opslag van social/generate media |
+| `BLOB_PRIVATE_READ_WRITE_TOKEN` | Productie | Private opslag van bestanden en presentaties |
+| `BLOB_READ_WRITE_TOKEN` | Productie | Legacy publieke Blob-token tijdens migratie |
+| `CREATIVE_MUAPI_KEY` | Server/Vercel | Centrale Digitify-provider voor betaalde generatie |
+| `CREATIVE_STRIPE_TEST_SECRET_KEY` | Server/Vercel | Stripe Checkout in testmodus (`sk_test_...`) |
+| `CREATIVE_STRIPE_WEBHOOK_SECRET` | Server/Vercel | Ondertekende webhook voor creditboekingen |
+| `CREATIVE_STRIPE_SUBSCRIPTION_PRICE_ID` | Server/Vercel | Optionele Stripe-testprijs voor abonnement |
+
+### Platform-owner en bedrijfseigenaar
+
+De **platform-owner** beheert de centrale MuAPI-provider, Stripe-testaccount, creditprijzen en module-entitlements. Een **bedrijfseigenaar** beheert alleen het eigen bedrijf en gebruikt de centrale provider via het eigen credittegoed. Een bedrijf kan optioneel een eigen providerkey gebruiken; die key blijft workspace-gescheiden en wordt nooit naar de platform-owner of browser teruggestuurd.
+
+### Stripe-testflow
+
+1. Maak in het Digitify Stripe-account een testproduct voor credits en optioneel een terugkerend testproduct voor het abonnement.
+2. Zet in Vercel bij **Preview** en **Production** de vier servervariabelen hierboven. Gebruik nooit een `sk_live_`-key in deze fase.
+3. Maak in Stripe een webhook aan naar `https://leads.digitify.be/api/webhooks/creative-stripe` met `checkout.session.completed`, `customer.subscription.updated` en `customer.subscription.deleted`.
+4. Plaats het webhook signing secret in `CREATIVE_STRIPE_WEBHOOK_SECRET`, configureer de bundels via **Creative Studio → Credits → Prijzen beheren** en test met Stripe test cards.
+5. Live verkoop blijft uit tot btw, prijzen, terugbetalingen en de live-webhook afzonderlijk zijn gecontroleerd.
+
+API-keys en Stripe-secrets horen uitsluitend in Vercel Environment Variables of in de versleutelde workspace-instellingen. Zet ze niet in GitHub, browservelden, screenshots of chat.
 
 ## Database
 

@@ -3,7 +3,7 @@ vi.mock("../lib/ads-workflow-providers", () => ({
   readAdCampaign: vi.fn(), adProviderConfig: vi.fn(), publishAdChanges: vi.fn(), readAdAccount: vi.fn(),
 }));
 import * as providers from "../lib/ads-workflow-providers";
-import { applyAdChange, createAdChange, decideAdChange, prepareMetaReplacementSwitch, safeAdError } from "../lib/ads-workflow";
+import { applyAdChange, createAdChange, decideAdChange, prepareMetaReplacementSwitch, safeAdError, summarizeAdPerformance } from "../lib/ads-workflow";
 import { applyPatches, checkBudgetChange, editablePath, fingerprint, validateSnapshot } from "../lib/ads-workflow-policy";
 
 const before = { campaignId: "123", name: "Campagne", campaignType: "SEARCH", dailyBudgetCents: 1000,
@@ -31,6 +31,31 @@ function dbMock(status = "APPROVED") {
 }
 
 describe("advertentie-wijzigingsbeleid", () => {
+  it("aggregeert alleen aanwezige metrics en laat afgeleide KPI's leeg bij ontbrekende data", () => {
+    const summary = summarizeAdPerformance([
+      { campaignId: "one", syncedAt: "2026-10-01T00:00:00.000Z", metrics: [{ impressions: 1000, clicks: 50, costMicros: 12500000, conversions: 5, conversionValue: 100 }] },
+      { campaignId: "two", syncedAt: "2026-10-02T00:00:00.000Z", metrics: [{ impressions: 200, clicks: 0 }] },
+      { campaignId: "three", syncedAt: "2026-10-03T00:00:00.000Z", metrics: null },
+    ]);
+    expect(summary.campaignCount).toBe(3);
+    expect(summary.withMetrics).toBe(2);
+    expect(summary.measured.impressions).toBe(1200);
+    expect(summary.measured.spend).toBe(12.5);
+    expect(summary.derived.ctr).toBeCloseTo(50 / 1200 * 100);
+    expect(summary.derived.cpc).toBeCloseTo(12.5 / 50);
+    expect(summary.derived.cpa).toBeCloseTo(12.5 / 5);
+    expect(summary.derived.roas).toBeCloseTo(100 / 12.5);
+    expect(summary.latestAt).toBe("2026-10-03T00:00:00.000Z");
+  });
+  it("rapporteert null voor ontbrekende spend en conversiemetrics", () => {
+    const summary = summarizeAdPerformance([{ campaignId: "one", metrics: { impressions: 10, clicks: 2 } }]);
+    expect(summary.measured.spend).toBeNull();
+    expect(summary.measured.conversions).toBeNull();
+    expect(summary.derived.cpc).toBeNull();
+    expect(summary.derived.cpa).toBeNull();
+    expect(summary.derived.roas).toBeNull();
+  });
+
   it("maakt een afzonderlijk versiegebonden goedkeuringsvoorstel voor Meta-overstap", async () => {
     const snapshot = { campaign: { id: "123", name: "Meta campagne" }, adsets: [{ id: "set", name: "Set", ads: [
       { id: "old", name: "Oud", status: "ACTIVE" }, { id: "new", name: "Nieuw", status: "PAUSED" },

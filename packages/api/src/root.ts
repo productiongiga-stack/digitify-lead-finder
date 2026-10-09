@@ -45,6 +45,7 @@ import { adsCopilotRouter } from "./routers/ads-copilot.router";
 import { platformRouter } from "./routers/platform.router";
 import { tenantRouter } from "./routers/tenant.router";
 import { presentationRouter } from "./routers/presentation.router";
+import { adsWizardRouter } from "./routers/ads-wizard.router";
 
 export const appRouter = router({
   dashboard: dashboardRouter,
@@ -93,6 +94,7 @@ export const appRouter = router({
   platform: platformRouter,
   tenant: tenantRouter,
   presentation: presentationRouter,
+  adsWizard: adsWizardRouter,
 });
 
 export type AppRouter = typeof appRouter;

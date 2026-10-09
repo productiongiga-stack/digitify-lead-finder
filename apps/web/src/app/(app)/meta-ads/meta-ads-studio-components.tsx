@@ -3314,6 +3314,7 @@ export function ApprovalQueue(props: {
   onApprove: (id: string) => void;
   onPush: (id: string) => void;
   onRetry: (id: string) => void;
+  onReconcile?: (id: string) => void;
   onReject: (id: string) => void;
   onCancel: (id: string) => void;
   autoadsEnabled: boolean;
@@ -3366,7 +3367,13 @@ export function ApprovalQueue(props: {
                 Push paused
               </Button>
             ) : null}
-            {row.status === "FAILED" ? (
+            {row.status === "FAILED" && row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN") && props.onReconcile ? (
+              <Button size="sm" variant="outline" onClick={() => props.onReconcile?.(row.id)}>
+                <RefreshCcw className="mr-2 h-3 w-3" />
+                Controleer Meta
+              </Button>
+            ) : null}
+            {row.status === "FAILED" && !row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN") ? (
               <Button size="sm" variant="outline" onClick={() => props.onRetry(row.id)}>
                 <RefreshCcw className="mr-2 h-3 w-3" />
                 Retry

@@ -341,10 +341,10 @@ export function explainGoogleError(raw?: string | null): ErrorExplanation | null
 
   if (lower.includes("developer_token") || lower.includes("developer token")) {
     return {
-      label: "Developer token ontbreekt of is niet actief",
+      label: "Google Ads API-toegang controleren",
       code,
       message,
-      actions: ["Zet GOOGLE_ADS_DEVELOPER_TOKEN in Vercel en lokaal in .env.", "Controleer in Google Ads API Center of de token Basic/Standard access heeft."],
+      actions: ["Open Google Cloud Console → Google Ads API → API access.", "Controleer of het Cloud-project achter je OAuth-client toegang heeft tot productieaccounts."],
     };
   }
   if (lower.includes("refresh_token") || lower.includes("invalid_grant") || lower.includes("oauth") || lower.includes("permission") || lower.includes("authorization")) {
@@ -399,7 +399,7 @@ export function explainGoogleError(raw?: string | null): ErrorExplanation | null
     label: "Google Ads API fout",
     code,
     message,
-    actions: ["Controleer customer, OAuth, developer token en billing status.", "Als de fout een veldpad bevat, pas dat veld in de builder of advanced JSON aan."],
+    actions: ["Controleer customer, OAuth, Google Cloud API access en billing status.", "Als de fout een veldpad bevat, pas dat veld in de builder of advanced JSON aan."],
   };
 }
 
@@ -509,9 +509,9 @@ export function describeOperationalRequirement(code: string): OperationalRequire
   if (code === "GOOGLE_DEV_TOKEN_MISSING") {
     return {
       code,
-      title: "Developer token ontbreekt",
-      description: "De server heeft nog geen actieve Google Ads developer token om API-calls te mogen doen.",
-      nextStep: "Zet GOOGLE_ADS_DEVELOPER_TOKEN lokaal en in Vercel, en controleer API Center toegang.",
+      title: "Google Ads API-toegang controleren",
+      description: "Nieuwe Google Ads API-projecten beheren hun toegang via het gekoppelde Google Cloud-project.",
+      nextStep: "Open Google Cloud Console → Google Ads API → API access en controleer de toegang van het OAuth-project.",
     };
   }
   if (code === "GOOGLE_OAUTH_MISSING") {

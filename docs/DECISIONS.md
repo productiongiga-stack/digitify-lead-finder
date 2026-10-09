@@ -84,7 +84,7 @@ Authenticators behoren aan personen, niet aan workspaces. Ook workspacebeheerder
 
 **Status:** Actief  
 **Context:** Serverless limieten; social video >4MB.  
-**Beslissing:** `BLOB_READ_WRITE_TOKEN` voor productie; lokaal data-URL/blob fallback.  
+**Beslissing:** een private `BLOB_PRIVATE_READ_WRITE_TOKEN` voor bestanden en presentaties, met `BLOB_PUBLIC_READ_WRITE_TOKEN` of de legacy `BLOB_READ_WRITE_TOKEN` voor bestaande publieke media; lokaal blijft data-URL/blob fallback beschikbaar.
 **Gevolgen:** `import-media-to-blob.ts`, `upload-storage.ts`, Creative Studio + Social Planner.
 
 ---
