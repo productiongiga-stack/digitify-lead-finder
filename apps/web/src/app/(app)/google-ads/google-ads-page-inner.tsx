@@ -408,6 +408,7 @@ export function GoogleAdsPageInner() {
   const approveDraft = trpc.googleAds.approveDraft.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Goedkeuren mislukt", description: e.message, variant: "error" }) });
   const pushPaused = trpc.googleAds.pushPausedToGoogle.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Push mislukt", description: explainGoogleError(e.message)?.message || e.message, variant: "error" }) });
   const retryFailed = trpc.googleAds.retryFailed.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Retry mislukt", description: e.message, variant: "error" }) });
+  const reconcilePush = trpc.googleAds.reconcilePush.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Controle mislukt", description: e.message, variant: "error" }) });
   const rejectDraft = trpc.googleAds.rejectDraft.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Afkeuren mislukt", description: e.message, variant: "error" }) });
   const cancelDraft = trpc.googleAds.cancelDraft.useMutation({ onSuccess: invalidate, onError: (e) => showToast({ title: "Annuleren mislukt", description: e.message, variant: "error" }) });
   const selectCustomer = trpc.googleAds.selectCustomer.useMutation({
@@ -800,7 +801,8 @@ export function GoogleAdsPageInner() {
                 </Button>
               ) : null}
               {row.status === "APPROVED" ? <Button size="sm" disabled={!connection.data?.autoadsEnabled || pushPaused.isPending} onClick={() => pushPaused.mutate({ id: row.id })}><Send className="mr-2 h-3 w-3" /> Push paused</Button> : null}
-              {row.status === "FAILED" ? <Button size="sm" variant="outline" onClick={() => retryFailed.mutate({ id: row.id })}><RefreshCcw className="mr-2 h-3 w-3" /> Retry</Button> : null}
+              {row.status === "FAILED" && row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN") ? <Button size="sm" variant="outline" disabled={reconcilePush.isPending} onClick={() => reconcilePush.mutate({ id: row.id })}><RefreshCcw className="mr-2 h-3 w-3" /> Controleer Google</Button> : null}
+              {row.status === "FAILED" && !row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN") ? <Button size="sm" variant="outline" disabled={retryFailed.isPending} onClick={() => retryFailed.mutate({ id: row.id })}><RefreshCcw className="mr-2 h-3 w-3" /> Retry</Button> : null}
               {!["PUSHING", "PUSHED_PAUSED", "CANCELLED"].includes(row.status) ? <Button size="sm" variant="outline" onClick={() => rejectDraft.mutate({ id: row.id, reason: "Aanpassing gevraagd" })}>Afkeuren</Button> : null}
               {!["PUSHING", "PUSHED_PAUSED", "CANCELLED"].includes(row.status) ? <Button size="sm" variant="outline" onClick={() => cancelDraft.mutate({ id: row.id })}>Annuleren</Button> : null}
             </div>

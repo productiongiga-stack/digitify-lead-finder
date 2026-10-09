@@ -12,6 +12,7 @@ import {
   listGoogleAdCustomers,
   listGoogleCampaigns,
   loadGoogleAdsWorkspaceConfig,
+  GoogleAdsPushPartialError,
   pushPausedGoogleAdPlan,
   removeGoogleCampaign,
   suggestBeneluxGeoTargets,
@@ -326,17 +327,29 @@ async function pushPlanToGoogle(
     return updated;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Onbekende Google Ads fout";
+    const partialExternalIds = error instanceof GoogleAdsPushPartialError ? error.externalIds : undefined;
     await createGoogleAdsActivity(ctx.db, {
       userId: ctx.user.id,
       type: "GOOGLE_AD_FAILED",
       title: "Google Ads push mislukt",
-      metadata: { googleAdPlanId: id, error: message },
+      metadata: { googleAdPlanId: id, error: message, partialExternalIds: partialExternalIds || null },
     });
     return ctx.db.googleAdPlan.update({
       where: { id },
-      data: { status: "FAILED", retryCount: Number(plan.retryCount || 0) + 1, lastError: "EXTERNAL_WRITE_UNCERTAIN: " + message },
+      data: {
+        status: "FAILED",
+        retryCount: Number(plan.retryCount || 0) + 1,
+        lastError: `${partialExternalIds ? "EXTERNAL_WRITE_UNCERTAIN" : "PUSH_FAILED"}: ${message}`,
+        ...(partialExternalIds ? { externalIds: partialExternalIds as Prisma.InputJsonValue } : {}),
+      },
     });
   }
+}
+
+function googleCampaignIdFromExternalIds(value: unknown) {
+  const record = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const resourceName = String(record.campaignResourceName || "");
+  return resourceName.match(/\/campaigns\/(\d+)$/)?.[1] || "";
 }
 
 async function loadReadableGoogleAdsConfig(db: PrismaClient, scope: ReturnType<typeof workspaceScopeFromAuthenticatedUser>) {
@@ -764,6 +777,42 @@ export const googleAdsRouter = router({
     }),
 
   pushPausedToGoogle: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToGoogle(ctx, input.id)),
+
+  reconcilePush: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+    const row = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, input.id, "Google Ads draft");
+    if (!row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen een onzekere Google-publicatie kan worden gecontroleerd." });
+    }
+    const campaignId = googleCampaignIdFromExternalIds(row.externalIds);
+    if (!campaignId) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Er is geen Google-campaign-ID bewaard. Controleer het account en maak daarna een nieuw concept." });
+    }
+    const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+    const config = await loadReadableGoogleAdsConfig(ctx.db, scope);
+    const campaigns = await listGoogleCampaigns(config);
+    const campaign = campaigns.find((item) => item.id === campaignId);
+    if (!campaign) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Google vond deze campagne niet. Er is niets automatisch opnieuw gepubliceerd." });
+    }
+    const previous = row.externalIds && typeof row.externalIds === "object" && !Array.isArray(row.externalIds) ? row.externalIds : {};
+    const externalIds = {
+      ...(previous as Record<string, unknown>),
+      campaignResourceName: `customers/${normalizeGoogleCustomerId(config.customerId)}/campaigns/${campaignId}`,
+      providerStatus: campaign.status,
+      reconciledAt: new Date().toISOString(),
+    };
+    const updated = await ctx.db.googleAdPlan.update({
+      where: { id: input.id },
+      data: { status: "PUSHED_PAUSED", externalIds: externalIds as Prisma.InputJsonValue, pushedAt: new Date(), lastError: null },
+    });
+    await createGoogleAdsActivity(ctx.db, {
+      userId: ctx.user.id,
+      type: "GOOGLE_AD_PUSHED_PAUSED",
+      title: "Google Ads push gecontroleerd",
+      metadata: { googleAdPlanId: input.id, externalIds, reconcile: true },
+    });
+    return updated;
+  }),
 
   cancelDraft: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const row = await findWorkspaceRecord(ctx.db.googleAdPlan, ctx.user.workspaceId!, input.id, "Google Ads draft");

@@ -13,6 +13,8 @@ DAL: `packages/api/src/lib/two-factor{,-crypto,-notifications}.ts`. Login: `apps
 
 Beide bestaande advertentierouters gebruiken `packages/api/src/routers/ads-workflow.procedures.ts`, de `ads-workflow*.ts` libraries en `apps/web/src/components/ads/`. Google-doelselectie: `google-editor-selection.ts` en `google-editor-target-picker.tsx`. Duurzame taken: `ads-background-jobs.ts`; uitvoerder: `apps/web/src/app/api/cron/ads-optimize/route.ts`. Opslag: AdVersion, AdChangeSet, AdApprovalRequest, AdSyncOperation, AiOptimizationRun en AdBackgroundJob. Tests: `ads-workflow{,-providers,-read,.integration}.test.ts`, `google-editor-selection.test.ts` en `ads-background-jobs.test.ts`. Functionele grenzen en configuratie: `docs/ADS_AUTOMATION.md`.
 
+De gedeelde Phase-1 briefingwizard gebruikt `packages/api/src/routers/ads-wizard.router.ts`, `packages/api/src/lib/ads-wizard.ts`, model `AdsWizardProject` en `apps/web/src/components/ads/ads-campaign-wizard.tsx`. De wizard bewaart lokale concepten met idempotency en revision-locking. Phase 2 gebruikt `packages/api/src/lib/ads-wizard-ai.ts` voor evidencegebonden strategievoorstellen en gecontroleerde Meta-/Google-copy, en `packages/api/src/lib/ads-wizard-drafts.ts` om plannen veilig naar bestaande draftmodellen te materialiseren en vóór approval te controleren; Meta Phase 3 vult vanuit de AI-strategie adsets, varianten en gecontroleerde placements in; providerwrites blijven geblokkeerd. Tests: `packages/api/src/__tests__/ads-wizard.test.ts` en `ads-wizard-ai.test.ts`. Audit en capabilitymatrix: `docs/ADS_EDITOR_AUDIT.md`.
+
 ---
 
 ## Kern (altijd beschikbaar)
@@ -163,10 +165,12 @@ Beide bestaande advertentierouters gebruiken `packages/api/src/routers/ads-workf
 | Router | `packages/api/src/routers/meta-ads.router.ts` |
 | Meta API | `packages/api/src/lib/meta-ads.ts`, `meta-ads-ai.ts` |
 | Shared Copilot | `packages/api/src/routers/ads-copilot.router.ts`, `packages/api/src/lib/ads-copilot.ts`, `ads-workflow.ts` |
+| Editor & AI wizard | `packages/api/src/routers/ads-wizard.router.ts`, `packages/api/src/lib/ads-wizard.ts`, `ads-wizard-ai.ts`, `apps/web/src/components/ads/ads-campaign-wizard.tsx` (strategie naar approval-diff) |
 | OAuth | `apps/web/src/app/api/integrations/meta/` |
 | UI | `apps/web/src/app/(app)/meta-ads/meta-ads-page-inner.tsx` |
 | Components | `apps/web/src/components/ads/meta-ads-*.tsx` |
 | Tests | `packages/api/src/__tests__/meta-ads.router.test.ts`, `meta-ads-push.test.ts` |
+| Safe push recovery | `metaAds.reconcilePush` checks the exact saved campaign ID without retrying a provider write |
 
 ### Google Ads 🔒 `googleAds`
 
@@ -175,10 +179,12 @@ Beide bestaande advertentierouters gebruiken `packages/api/src/routers/ads-workf
 | Router | `packages/api/src/routers/google-ads.router.ts` |
 | Google API | `packages/api/src/lib/google-ads.ts`, `google-ads-ai.ts`, `google-ads-oauth.ts` |
 | Shared Copilot | `packages/api/src/routers/ads-copilot.router.ts`, `packages/api/src/lib/ads-copilot.ts`, `ads-workflow.ts` |
+| Editor & AI wizard | `packages/api/src/routers/ads-wizard.router.ts`, `packages/api/src/lib/ads-wizard.ts`, `ads-wizard-ai.ts`, `apps/web/src/components/ads/ads-campaign-wizard.tsx` (strategie naar approval-diff) |
 | OAuth | `apps/web/src/app/api/integrations/google-ads/` |
 | UI | `apps/web/src/app/(app)/google-ads/google-ads-page-inner.tsx` |
 | Components | `apps/web/src/components/ads/google-ads-page-fallback.tsx`, `ads-studio-*` |
 | Tests | `packages/api/src/__tests__/google-ads.router.test.ts`, `google-ads-push.test.ts` |
+| Safe push recovery | `googleAds.reconcilePush` checks the exact saved campaign resource without retrying a provider write |
 
 ---
 
@@ -348,8 +354,8 @@ Beide bestaande advertentierouters gebruiken `packages/api/src/routers/ads-workf
 | Invoices | `WorkspaceInvoice`, `WorkspaceInvoiceItem` |
 | Tasks | `WorkspaceTask` |
 | Social | `SocialPost` |
-| Meta Ads | `MetaAdAccount`, `MetaAdPlan`, `AdResearchRun`, `AdResearchEvidence` |
-| Google Ads | `GoogleAdAccount`, `GoogleAdPlan`, `AdChangeSet` |
+| Meta Ads | `MetaAdAccount`, `MetaAdPlan`, `AdResearchRun`, `AdResearchEvidence`, `AdsWizardProject` |
+| Google Ads | `GoogleAdAccount`, `GoogleAdPlan`, `AdChangeSet`, `AdsWizardProject` |
 | Media | `MediaGeneration` |
 | Bookings | `Booking`, `BookingEventType`, `BookingAvailabilityRule`, … |
 | Domains | `Domain` |
@@ -365,3 +371,21 @@ Beide bestaande advertentierouters gebruiken `packages/api/src/routers/ads-workf
 ### Creative Studio: wizards en credits
 
 Doelgerichte wizards en bibliotheek via Creative Studio; concept-, pricing-, checkout- en handoffprocedures worden in mediaRouter geregistreerd vanuit creative-studio.procedures.ts. Gedeelde merkkits: Social Planner. Financiële opslag: CreativeWallet/CreativeLedger/CreativeReservation/CreativePurchase. Setup en verificatie: [CREATIVE_STUDIO.md](CREATIVE_STUDIO.md).
+
+### Ads Wizard — Google Search Generator
+
+`adsWizard.generateGoogleSearchPlan` bouwt een lokaal, workspace-scoped Search-plan met maximaal drie ad groups. De generator combineert de centrale AI-strategie met SEO/Search Console-bronnen, bewaart bronlabels en evidence in `AdsWizardProject.googlePlan.searchPlan` en materialiseert daarna via `createNativeDraft` naar `GoogleAdPlan`. Er worden geen providerwrites uitgevoerd.
+
+`adsWizard.listAssets` toont voltooide Creative Studio-media met een duurzame Blob-URL. De wizard bewaart maximaal twaalf geselecteerde media-ID’s en valideert die opnieuw bij opslaan en bij materialisatie naar een Meta- of Google-draft. Tijdelijke media en cross-workspace assets worden geweigerd.
+
+`adsWizard.generatePerformanceMaxPlan` bouwt een afzonderlijk lokaal PMax-plan met begrensde copy, expliciete assetrollen en een readiness-overzicht. Het plan wordt opgeslagen in `googlePlan.performanceMaxPlan`, maar blijft provider-neutraal tot de gebruiker het in de bestaande Google-editor controleert. Ontbrekende landscape-, square- of logo-assets, budget, customer en conversieactie worden zichtbaar gemarkeerd.
+
+`adsWizard.reviewProject` controleert een gedeelde Meta/Google-briefing centraal, maar bewaart blockers en draftstatus per platform. De controle is lokaal, optimistic-lock beschermd en voert geen providerwrite uit.
+
+### Ads workflow — Phase 9 optimalisatie
+
+`workflowOverview` levert naast versies, voorstellen en runs ook `performance`: een deterministische samenvatting van gemeten metrics met expliciete nullwaarden voor ontbrekende data. `workflowOptimize` accepteert een optionele idempotency key voor handmatige AI-runs; aanbevelingen worden als bestaande `AdChangeSet`-voorstellen opgeslagen en volgen dezelfde approval-, publish- en reconcile-flow.
+
+Phase 10-verificatie en releasevoorwaarden staan in [ADS_EDITOR_SECURITY.md](ADS_EDITOR_SECURITY.md) en [ADS_EDITOR_RELEASE_CHECKLIST.md](ADS_EDITOR_RELEASE_CHECKLIST.md). De responsive browsercontrole staat in `apps/web/e2e/ads-editor-responsive.spec.ts`.
+
+De lokale acceptatie-audit voor de vier hoofdscenario's staat in [ADS_EDITOR_ACCEPTANCE.md](ADS_EDITOR_ACCEPTANCE.md).

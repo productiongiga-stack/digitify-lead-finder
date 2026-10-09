@@ -1,19 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { trpc } from "@/lib/trpc/client";
 import { AdsCampaignEditor } from "./ads-campaign-editor";
+import { AdsCampaignWizard } from "./ads-campaign-wizard";
 import { GoogleEditorTargetPicker } from "./google-editor-target-picker";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label, Tabs, TabsContent, TabsList, TabsTrigger } from "@digitify/ui";
+import { BarChart3, RefreshCw, Sparkles } from "lucide-react";
 
 const statusLabel: Record<string, string> = { PENDING_APPROVAL: "Wacht op goedkeuring", APPROVED: "Goedgekeurd", APPLIED: "Gepubliceerd",
   REJECTED: "Afgekeurd", APPLYING: "Wordt gepubliceerd", CONFLICT: "Extern gewijzigd", RECONCILE_REQUIRED: "Controle vereist" };
 const jobStatusLabel: Record<string, string> = { PENDING: "Ingepland", RUNNING: "Bezig", SUCCEEDED: "Geslaagd", FAILED: "Mislukt", CANCELLED: "Geannuleerd", BLOCKED: "Geblokkeerd", NEEDS_REVIEW: "Controle vereist" };
+const formatMetric = (value: unknown, digits = 2) => typeof value === "number" && Number.isFinite(value)
+  ? new Intl.NumberFormat("nl-BE", { maximumFractionDigits: digits }).format(value) : "—";
 
 export default function AdsWorkflowPanel({ provider }: { provider: "GOOGLE" | "META" }) {
   const api = provider === "GOOGLE" ? trpc.googleAds : trpc.metaAds;
-  const overview = api.workflowOverview.useQuery(undefined, { staleTime: 15000, retry: false });
+  const overview = api.workflowOverview.useQuery(undefined, { staleTime: 15000, gcTime: 60000, refetchOnWindowFocus: false, refetchOnReconnect: false, retry: false });
   const capabilities = api.workflowCapabilities.useQuery(undefined, { staleTime: 300000 });
   const { data: session } = useSession();
   const user = session?.user as { workspaceRole?: string; role?: string; isViewingAs?: boolean } | undefined;
@@ -25,6 +29,7 @@ export default function AdsWorkflowPanel({ provider }: { provider: "GOOGLE" | "M
   const [cpl, setCpl] = useState<string | null>(null);
   const [roas, setRoas] = useState<string | null>(null);
   const [daily, setDaily] = useState<boolean | null>(null);
+  const optimizeRunKey = useRef<string | null>(null);
   const onError = (error: { message: string }) => setMessage(error.message);
   const refresh = async () => { await overview.refetch(); };
   const sync = api.workflowSync.useMutation({ onSuccess: async (result) => {
@@ -38,26 +43,49 @@ export default function AdsWorkflowPanel({ provider }: { provider: "GOOGLE" | "M
   const publish = api.workflowPublish.useMutation({ onSuccess: async () => { setMessage("Wijziging doorgestuurd. Vervangende creatives blijven gepauzeerd."); await refresh(); }, onError });
   const reconcile = api.workflowReconcile.useMutation({ onSuccess: async (v) => { setSelected(v.id); setMessage("Controle afgerond. De actuele externe versie is opgehaald; maak indien nodig een nieuw voorstel."); await refresh(); }, onError });
   const replacementSwitch = api.workflowReplacementSwitch.useMutation({ onSuccess: async () => { setMessage("Overstapvoorstel opgeslagen. Keur deze afzonderlijke versie goed voordat je activeert."); await refresh(); }, onError });
-  const optimize = api.workflowOptimize.useMutation({ onSuccess: async () => { setMessage("AI-analyse opgeslagen. Bekijk de voorstellen en de analyse."); await refresh(); }, onError });
+  const optimize = api.workflowOptimize.useMutation({
+    onSuccess: async () => { optimizeRunKey.current = null; setMessage("AI-analyse opgeslagen. Bekijk de voorstellen en de analyse."); await refresh(); },
+    onError: (error) => { optimizeRunKey.current = null; onError(error); },
+  });
   const settings = api.workflowSettings.useMutation({ onSuccess: async () => { setMessage("Automatiseringsinstellingen opgeslagen."); await refresh(); }, onError });
   const retryJob = api.workflowRetryJob.useMutation({ onSuccess: async () => { setMessage("Veilige achtergrondtaak opnieuw ingepland voor de volgende worker-run."); await refresh(); }, onError });
   const version = overview.data?.versions.find((v) => v.id === selected);
-  const history = api.workflowHistory.useQuery({ campaignId: version?.campaignId || "" }, { enabled: Boolean(version) });
-  const busy = sync.isPending || imported.isPending || optimize.isPending || publish.isPending;
-  return <Card className="border-primary/20">
-    <CardHeader><CardTitle>Advertentiebeheer & AI-optimalisatie</CardTitle>
-      <CardDescription>Bewerk bestaande campagnes, vergelijk versies en keur wijzigingen goed voordat ze worden doorgestuurd.</CardDescription></CardHeader>
+  const history = api.workflowHistory.useQuery({ campaignId: version?.campaignId || "" }, { enabled: Boolean(version), staleTime: 30000, refetchOnWindowFocus: false });
+  const busy = sync.isPending || imported.isPending || optimize.isPending || publish.isPending || propose.isPending || approve.isPending || reconcile.isPending || replacementSwitch.isPending || settings.isPending || retryJob.isPending;
+  const startOptimization = () => {
+    const runKey = optimizeRunKey.current ?? (globalThis.crypto?.randomUUID?.() || `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    optimizeRunKey.current = runKey;
+    optimize.mutate({ runKey });
+  };
+  return <Card className="overflow-hidden border-border/60 bg-card shadow-sm">
+    <CardHeader className="border-b border-border/60 bg-gradient-to-br from-primary/[0.08] via-card to-card pb-5">
+      <div className="flex flex-wrap items-start justify-between gap-4"><div><div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-primary"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10"><BarChart3 className="h-3.5 w-3.5" /></span>Editor & AI</div><CardTitle className="text-xl tracking-tight">Advertentiebeheer & AI-optimalisatie</CardTitle>
+      <CardDescription className="mt-1 max-w-2xl">Bewerk campagnes, vergelijk versies en keur elke wijziging goed voordat ze wordt doorgestuurd.</CardDescription></div><span className="rounded-full border border-emerald-200/70 bg-emerald-50/80 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">Veilige conceptflow</span></div></CardHeader>
     <CardContent className="space-y-5">
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" disabled={busy || !canApprove} onClick={() => sync.mutate()}>Campagnes synchroniseren</Button>
-        <Button disabled={busy || !overview.data?.versions.length} onClick={() => optimize.mutate()}>{optimize.isPending ? "AI analyseert…" : "AI-voorstellen maken"}</Button>
+        <Button variant="outline" className="rounded-xl" disabled={busy || !canApprove} onClick={() => sync.mutate()}><RefreshCw className={sync.isPending ? "mr-2 h-4 w-4 animate-spin" : "mr-2 h-4 w-4"} />{sync.isPending ? "Synchroniseren…" : "Campagnes synchroniseren"}</Button>
+        <Button className="rounded-xl shadow-sm" disabled={busy || !overview.data?.versions.length} onClick={startOptimization}><Sparkles className={optimize.isPending ? "mr-2 h-4 w-4 animate-pulse" : "mr-2 h-4 w-4"} />{optimize.isPending ? "AI analyseert…" : "AI-voorstellen maken"}</Button>
       </div>
       {overview.error ? <p role="alert" className="text-sm text-destructive">{overview.error.message}</p> : null}
       {overview.isLoading ? <p role="status">Advertentiebeheer laden…</p> : null}
-      {message ? <p role="status" className="rounded-lg border bg-muted/30 p-3 text-sm">{message}</p> : null}
-      <Tabs defaultValue="editor">
-        <TabsList className="flex h-auto flex-wrap justify-start"><TabsTrigger value="editor">Editor</TabsTrigger><TabsTrigger value="approval">Goedkeuring</TabsTrigger>
-          <TabsTrigger value="ai">AI-analyse</TabsTrigger><TabsTrigger value="history">Historiek</TabsTrigger><TabsTrigger value="settings">Automatisering</TabsTrigger></TabsList>
+      {message ? <p role="status" aria-live="polite" className="rounded-xl border border-border/60 bg-muted/30 p-3 text-sm">{message}</p> : null}
+      {overview.data?.performance ? <div className="rounded-xl border bg-muted/20 p-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div><h3 className="font-semibold">Prestatie-overzicht</h3><p className="text-xs text-muted-foreground">Alleen gemeten gegevens uit de laatst gesynchroniseerde campagnes.</p></div>
+          <span className="text-xs text-muted-foreground">{overview.data.performance.withMetrics}/{overview.data.performance.campaignCount} campagnes met metrics{overview.data.performance.latestAt ? ` · ${new Date(overview.data.performance.latestAt).toLocaleDateString("nl-BE")}` : ""}</span>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+          <div><p className="text-xs text-muted-foreground">Vertoningen</p><p className="font-medium">{formatMetric(overview.data.performance.measured.impressions, 0)}</p></div>
+          <div><p className="text-xs text-muted-foreground">Klikken</p><p className="font-medium">{formatMetric(overview.data.performance.measured.clicks, 0)}</p></div>
+          <div><p className="text-xs text-muted-foreground">CTR</p><p className="font-medium">{formatMetric(overview.data.performance.derived.ctr)}{overview.data.performance.derived.ctr == null ? "" : "%"}</p></div>
+          <div><p className="text-xs text-muted-foreground">Kosten</p><p className="font-medium">{formatMetric(overview.data.performance.measured.spend)}{overview.data.performance.measured.spend == null ? "" : " €"}</p></div>
+          <div><p className="text-xs text-muted-foreground">Conversies</p><p className="font-medium">{formatMetric(overview.data.performance.measured.conversions, 0)}</p></div>
+        </div>
+      </div> : null}
+      <Tabs defaultValue="new">
+        <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl bg-muted/50 p-1"><TabsTrigger className="rounded-lg px-3 py-2 text-xs sm:text-sm" value="new">Nieuwe campagne</TabsTrigger><TabsTrigger className="rounded-lg px-3 py-2 text-xs sm:text-sm" value="editor">Bestaande campagne</TabsTrigger><TabsTrigger className="rounded-lg px-3 py-2 text-xs sm:text-sm" value="approval">Goedkeuring</TabsTrigger>
+          <TabsTrigger className="rounded-lg px-3 py-2 text-xs sm:text-sm" value="ai">AI-analyse</TabsTrigger><TabsTrigger className="rounded-lg px-3 py-2 text-xs sm:text-sm" value="history">Historiek</TabsTrigger><TabsTrigger className="rounded-lg px-3 py-2 text-xs sm:text-sm" value="settings">Automatisering</TabsTrigger></TabsList>
+        <TabsContent value="new"><AdsCampaignWizard provider={provider === "GOOGLE" ? "GOOGLE" : "META"} /></TabsContent>
         <TabsContent value="editor" className="space-y-4">
           <Label htmlFor={"campaign-id-" + provider}>Externe campagne-ID</Label>
           <div className="flex flex-wrap gap-2"><Input id={"campaign-id-" + provider} className="max-w-xs" value={campaignId} onChange={(e) => setCampaignId(e.target.value)} placeholder="Campagne-ID uit Google of Meta" />
@@ -82,6 +110,7 @@ export default function AdsWorkflowPanel({ provider }: { provider: "GOOGLE" | "M
           {overview.data?.changes.map((change) => <div key={change.id} className="space-y-3 rounded-xl border p-4">
             <div className="flex flex-wrap justify-between gap-2"><span className="font-semibold">Campagne {change.campaignId}</span><span className="text-sm">{statusLabel[change.status] || change.status} · {change.source}</span></div>
             <p className="text-sm">{change.reason}</p>
+            {change.source === "AI" || change.source === "RESEARCH" ? <p className="text-xs text-muted-foreground">AI-confidence {change.confidence == null ? "onbekend" : `${Math.round(change.confidence)}/100`} · bewijs {Array.isArray(change.evidenceRefs) ? change.evidenceRefs.length : 0}</p> : null}
             <p className="text-xs text-muted-foreground">Risico: {change.risk} · Provider controleert advertentiebeleid bij publicatie.</p>
             <details><summary className="cursor-pointer text-sm font-medium">Wijzigingen bekijken</summary>
               <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs">{JSON.stringify((change.checks as any).patches, null, 2)}</pre>
@@ -101,9 +130,15 @@ export default function AdsWorkflowPanel({ provider }: { provider: "GOOGLE" | "M
         </TabsContent>
         <TabsContent value="ai" className="space-y-3">
           {!overview.data?.runs.length ? <p className="text-sm text-muted-foreground">Nog geen AI-analyses. De AI gebruikt gesynchroniseerde prestaties van de laatste 30 dagen.</p> : null}
-          {overview.data?.runs.map((run) => <div key={run.id} className="rounded-xl border p-4"><p className="font-medium">{run.status} · {new Date(run.createdAt).toLocaleString("nl-BE")}</p>
-            <p className="mt-2 whitespace-pre-wrap text-sm">{String((run.result as any)?.summary || run.lastError || "Analyse wordt verwerkt…")}</p>
-            {(run.result as any)?.rejected?.length ? <p className="mt-2 text-sm text-amber-700">Niet opgeslagen: {(run.result as any).rejected.join(" · ")}</p> : null}</div>)}
+          {overview.data?.runs.map((run) => { const result = run.result as any; const recommendations = Array.isArray(result?.recommendations) ? result.recommendations : [];
+            return <div key={run.id} className="rounded-xl border p-4"><p className="font-medium">{run.status} · {new Date(run.createdAt).toLocaleString("nl-BE")}</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm">{String(result?.summary || run.lastError || "Analyse wordt verwerkt…")}</p>
+              {recommendations.length ? <div className="mt-3 space-y-2"><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Voorstellen voor controle</p>{recommendations.map((recommendation: any, index: number) => <div key={`${run.id}-${index}`} className="rounded-lg bg-muted/30 p-3 text-sm">
+                <p className="font-medium">{recommendation.reason}</p><p className="mt-1 text-xs text-muted-foreground">Risico: {recommendation.risk} · Verwachte impact: {recommendation.expectedImpact || "niet aangegeven"} · {Array.isArray(recommendation.patches) ? recommendation.patches.length : 0} wijziging(en)</p>
+              </div>)}</div> : null}
+              {(result?.proposals?.length) ? <p className="mt-2 text-xs text-muted-foreground">{result.proposals.length} voorstel(len) aangemaakt in Goedkeuring.</p> : null}
+              {(result?.rejected?.length) ? <p className="mt-2 text-sm text-amber-700">Niet opgeslagen: {result.rejected.join(" · ")}</p> : null}</div>;
+          })}
         </TabsContent>
         <TabsContent value="history" className="space-y-3">
           <p className="text-sm text-muted-foreground">Kies een campagne in de editor om opgeslagen versies te bekijken.</p>

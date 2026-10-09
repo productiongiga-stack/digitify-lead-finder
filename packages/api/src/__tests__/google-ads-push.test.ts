@@ -4,6 +4,7 @@ import {
   defaultSearchTargeting,
   formatGoogleAdsError,
   normalizeSearchCreatives,
+  validatePerformanceMaxAssets,
 } from "../lib/google-ads";
 
 describe("google ads push helpers", () => {
@@ -46,5 +47,24 @@ describe("google ads push helpers", () => {
     });
     expect(creative.headlines.length).toBeGreaterThanOrEqual(3);
     expect(creative.descriptions.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps PMax targeting open when no account settings were supplied", () => {
+    const targeting = defaultSearchTargeting(undefined, { campaignType: "PERFORMANCE_MAX" });
+    expect(targeting.geoTargetConstants).toEqual([]);
+    expect(targeting.languageConstants).toEqual([]);
+    expect(targeting.keywords).toEqual([]);
+  });
+
+  it("blocks PMax until all required copy and asset roles are present", () => {
+    expect(() => validatePerformanceMaxAssets(normalizeSearchCreatives({
+      finalUrl: "https://example.com",
+      headlines: ["Een", "Twee", "Drie"],
+      longHeadlines: ["Lange headline"],
+      descriptions: ["Een beschrijving", "Nog een beschrijving"],
+      businessName: "Workspace BV",
+      imageUrl: "https://cdn.example/landscape.jpg",
+      squareImageUrl: "https://cdn.example/square.jpg",
+    }))).toThrow(/logo/i);
   });
 });

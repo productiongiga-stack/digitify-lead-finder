@@ -403,8 +403,8 @@ async function pushPlanToMeta(ctx: Pick<Context, "db" | "user"> & { user: NonNul
       data: {
         status: "FAILED",
         retryCount: Number(plan.retryCount || 0) + 1,
-        lastError: "EXTERNAL_WRITE_UNCERTAIN: " + message,
-        externalIds: (partialExternalIds ?? undefined) as Prisma.InputJsonValue | undefined,
+        lastError: `${partialExternalIds ? "EXTERNAL_WRITE_UNCERTAIN" : "PUSH_FAILED"}: ${message}`,
+        ...(partialExternalIds ? { externalIds: partialExternalIds as Prisma.InputJsonValue } : {}),
       },
     });
     return updated;
@@ -843,6 +843,42 @@ export const metaAdsRouter = router({
   }),
 
   pushPausedToMeta: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => pushPlanToMeta(ctx, input.id)),
+
+  reconcilePush: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
+    const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
+    if (!row.lastError?.startsWith("EXTERNAL_WRITE_UNCERTAIN")) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Alleen een onzekere Meta-publicatie kan worden gecontroleerd." });
+    }
+    const previous = asRecord(row.externalIds);
+    const campaignId = String(previous.campaignId || "").trim();
+    if (!campaignId) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Er is geen Meta-campaign-ID bewaard. Controleer het account en maak daarna een nieuw concept." });
+    }
+    const scope = workspaceScopeFromAuthenticatedUser({ id: ctx.user.id, workspaceId: ctx.user.workspaceId });
+    const config = await loadMetaAdsWorkspaceConfig(ctx.db, scope);
+    const campaigns = await listMetaCampaigns({ adAccountId: config.adAccountId, accessToken: config.accessToken });
+    const campaign = campaigns.find((item) => String(item.id || "") === campaignId);
+    if (!campaign) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Meta vond deze campagne niet. Er is niets automatisch opnieuw gepubliceerd." });
+    }
+    const externalIds = {
+      ...previous,
+      campaignId,
+      providerStatus: campaign.effective_status || campaign.configured_status || campaign.status || "UNKNOWN",
+      reconciledAt: new Date().toISOString(),
+    };
+    const updated = await ctx.db.metaAdPlan.update({
+      where: { id: input.id },
+      data: { status: "PUSHED_PAUSED", externalIds: externalIds as Prisma.InputJsonValue, pushedAt: new Date(), lastError: null },
+    });
+    await createMetaAdsActivity(ctx.db, {
+      userId: ctx.user.id,
+      type: "META_AD_PUSHED_PAUSED",
+      title: "Meta Ads push gecontroleerd",
+      metadata: { metaAdPlanId: input.id, externalIds, reconcile: true },
+    });
+    return updated;
+  }),
 
   cancelDraft: adsAdminProcedure.input(z.object({ id: z.string() })).mutation(async ({ ctx, input }) => {
     const row = await findWorkspaceRecord(ctx.db.metaAdPlan, ctx.user.workspaceId!, input.id, "Meta Ads draft");
